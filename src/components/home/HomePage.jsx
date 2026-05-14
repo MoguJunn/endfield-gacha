@@ -48,7 +48,7 @@ import { useAppStore, useAuthStore } from '../../stores';
 import { useI18n } from '../../i18n/index.js';
 import { localizeEntityName } from '../../utils/gameDataI18n.js';
 import { getLocalizedAnnouncementContent, getLocalizedAnnouncementTitle } from '../../utils/announcementLocale.js';
-import { findGameAnnouncementCalendarImage } from '../../utils/gameAnnouncementCalendar.js';
+import { resolveGameAnnouncementCalendarImage } from '../../utils/gameAnnouncementCalendar.js';
 import { resolveGameAnnouncementDigest } from '../../utils/gameAnnouncementDigest.js';
 import {
   getAnnouncementSeverityMeta,
@@ -155,7 +155,7 @@ const HomePage = React.memo(() => {
     [gameAnnouncements, storedGameAnnouncementDigest, t]
   );
   const gameAnnouncementCalendar = useMemo(
-    () => findGameAnnouncementCalendarImage(gameAnnouncements),
+    () => resolveGameAnnouncementCalendarImage(gameAnnouncements),
     [gameAnnouncements]
   );
   const hasAnnouncementUpdate = latestSiteAnnouncement

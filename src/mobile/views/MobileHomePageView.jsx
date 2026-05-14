@@ -10,7 +10,7 @@ import { getLimitedPoolCountdownState, getLimitedPoolSchedule } from '../../util
 import { localizeEntityName, localizePoolName } from '../../utils/gameDataI18n.js';
 import { getLocalizedAnnouncementTitle } from '../../utils/announcementLocale.js';
 import { resolveGameAnnouncementDigest } from '../../utils/gameAnnouncementDigest.js';
-import { findGameAnnouncementCalendarImage } from '../../utils/gameAnnouncementCalendar.js';
+import { resolveGameAnnouncementCalendarImage } from '../../utils/gameAnnouncementCalendar.js';
 import { getAnnouncementTypeLabel, splitSiteAnnouncements } from '../../utils/announcementMeta.js';
 
 
@@ -124,7 +124,7 @@ export default function MobileHomePageView() {
     [gameAnnouncements, storedGameAnnouncementDigest, t]
   );
   const gameAnnouncementCalendar = useMemo(
-    () => findGameAnnouncementCalendarImage(gameAnnouncements),
+    () => resolveGameAnnouncementCalendarImage(gameAnnouncements),
     [gameAnnouncements]
   );
   

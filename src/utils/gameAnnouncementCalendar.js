@@ -8,6 +8,13 @@ const IMAGE_MARKDOWN_RE = /!\[[^\]]*\]\(([^)\s]+)\)/giu;
 const IMAGE_TAG_RE = /<img\b[^>]*\ssrc=(["'])(.*?)\1/giu;
 const ALT_ATTRIBUTE_RE = /\salt=(["'])(.*?)\1/iu;
 
+export const STATIC_GAME_CALENDAR_IMAGE = Object.freeze({
+  sourceId: 'game-bulletin:1381',
+  imageUrl: '/game-calendar/spring-2026-version-calendar.png',
+  title: '「春晓时」版本日历',
+  sourceUrl: 'https://ef-webview.hypergryph.com/page/game_bulletin?platform=Windows&channel=1&lang=zh-cn&server=1&subChannel=1&tab=events#1381',
+});
+
 function getAnnouncementSourceGroup(announcement = {}) {
   const sourceKind = String(announcement?.source_kind || '').toLowerCase();
   const sourceGroup = String(announcement?.source_group || '').toLowerCase();
@@ -216,5 +223,31 @@ export function findGameAnnouncementCalendarImage(announcements = []) {
     announcement: best.announcement,
     title: sanitizeAnnouncementTitle(best.announcement?.title || best.announcement?.title_en || ''),
     sourceUrl: best.announcement?.source_url || '',
+  };
+}
+
+export function resolveGameAnnouncementCalendarImage(announcements = []) {
+  const detectedCalendar = findGameAnnouncementCalendarImage(announcements);
+
+  if (!detectedCalendar) {
+    return {
+      ...STATIC_GAME_CALENDAR_IMAGE,
+      imageUrls: [STATIC_GAME_CALENDAR_IMAGE.imageUrl],
+      announcement: null,
+      originalImageUrl: null,
+    };
+  }
+
+  if (detectedCalendar.announcement?.source_id !== STATIC_GAME_CALENDAR_IMAGE.sourceId) {
+    return detectedCalendar;
+  }
+
+  return {
+    ...detectedCalendar,
+    imageUrl: STATIC_GAME_CALENDAR_IMAGE.imageUrl,
+    imageUrls: [STATIC_GAME_CALENDAR_IMAGE.imageUrl],
+    title: detectedCalendar.title || STATIC_GAME_CALENDAR_IMAGE.title,
+    sourceUrl: detectedCalendar.sourceUrl || STATIC_GAME_CALENDAR_IMAGE.sourceUrl,
+    originalImageUrl: detectedCalendar.imageUrl,
   };
 }
