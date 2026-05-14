@@ -562,7 +562,8 @@ const HomePage = React.memo(() => {
               subTitle={countdowns.secondary.subTitle}
               link={null}
               characterName={countdowns.secondary.poolType === 'limited' ? countdowns.secondary.name : null}
-              bgImage={countdowns.secondary.backgroundImage}
+              featuredCharacterNames={countdowns.secondary.poolType === 'extra' ? countdowns.secondary.featuredNames : []}
+              bgImage={countdowns.secondary.poolType === 'extra' ? null : countdowns.secondary.backgroundImage}
             />
           </div>
         )}

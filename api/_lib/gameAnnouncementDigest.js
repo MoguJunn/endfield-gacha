@@ -355,6 +355,21 @@ function normalizeStoredDigestValue(value) {
   };
 }
 
+function isReusableCachedDigest(cachedDigest, fingerprint) {
+  if (
+    !cachedDigest?.title
+    || !cachedDigest?.subtitle
+    || cachedDigest?.fingerprint !== fingerprint
+  ) {
+    return false;
+  }
+
+  // Fallback digests are degradation output after an LLM failure or missing
+  // config. Do not let the same fingerprint freeze that degraded title forever;
+  // incremental refreshes should retry and replace it once the LLM path works.
+  return cachedDigest.mode !== 'fallback';
+}
+
 export async function getStoredGameAnnouncementDigest(supabase) {
   if (!supabase) {
     return null;
@@ -412,7 +427,7 @@ export async function refreshGameAnnouncementDigest(supabase, records = [], {
     };
   }
 
-  if (!forceRefresh && cachedDigest?.fingerprint === fingerprint && cachedDigest?.title && cachedDigest?.subtitle) {
+  if (!forceRefresh && isReusableCachedDigest(cachedDigest, fingerprint)) {
     return {
       digest: cachedDigest,
       updated: false,
@@ -459,6 +474,7 @@ export const __internal = {
   buildFallbackGameAnnouncementDigest,
   buildPromptRecords,
   getDigestWindowRecords,
+  isReusableCachedDigest,
   parseDigestJson,
   summarizeDigestWithLlm,
 };
