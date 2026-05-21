@@ -27,7 +27,7 @@ import useSiteConfigStore, {
   HOME_NEXT_VERSION_TARGET_CONFIG_KEY
 } from '../../stores/useSiteConfigStore';
 import CountdownTimer from './CountdownTimer';
-import SpringPreviewCard from './SpringPreviewCard';
+import HeirloomsPreviewCard from './HeirloomsPreviewCard';
 import HomeAnnouncementContent from './AnnouncementContent';
 import CollapsibleContent from './CollapsibleContent';
 import HomeFriendlyLinksCard from './FriendlyLinksCard';
@@ -574,7 +574,7 @@ const HomePage = React.memo(() => {
           <HomeFriendlyLinksCard />
 
           <div className="flex flex-col gap-6">
-            <SpringPreviewCard />
+            <HeirloomsPreviewCard />
             <div className="shrink-0 min-h-32">
               <CountdownTimer
                 targetDate={nextVersionTargetDate}

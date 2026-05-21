@@ -73,3 +73,5 @@ src/generated/fonts/judou/
 bots/*
 !bots/official/
 !bots/official/**
+backend/lib/canonicalEntityUtils.js
+backend/lib/idAliasService.js
