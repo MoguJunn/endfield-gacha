@@ -74,6 +74,7 @@
     "@sparticuz/chromium": "^148.0.0",
     "@supabase/supabase-js": "^2.86.0",
     "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
     "canvas-confetti": "^1.9.4",
     "dompurify": "^3.3.1",
     "fflate": "^0.8.2",
