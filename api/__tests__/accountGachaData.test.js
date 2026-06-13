@@ -484,6 +484,57 @@ describe('/api/account-gacha-data', () => {
     expect(adminClient.__state.upsertCalls.some(call => call.table === 'history')).toBe(false);
   });
 
+  it('keeps same-batch duplicate items when their seq ids differ', async () => {
+    const adminClient = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const req = createRequest({
+      method: 'POST',
+      body: {
+        history: [
+          {
+            id: '3001',
+            poolId: 'official_pool_alias',
+            character_id: 'char_alias',
+            name: '弭弗',
+            rarity: 5,
+            seqId: '4201',
+            gameUid: 'game-1',
+            timestamp: '2026-06-05T12:00:00.000Z',
+          },
+          {
+            id: '3002',
+            poolId: 'official_pool_alias',
+            character_id: 'char_alias',
+            name: '弭弗',
+            rarity: 5,
+            seqId: '4202',
+            gameUid: 'game-1',
+            timestamp: '2026-06-05T12:00:00.000Z',
+          },
+        ],
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      saved: {
+        pools: 0,
+        history: 2,
+      },
+      skipped: {
+        pools: 0,
+        history: 0,
+      },
+    });
+    const historyUpsert = adminClient.__state.upsertCalls.find(call => call.table === 'history');
+    expect(historyUpsert.rows).toHaveLength(2);
+    expect(historyUpsert.rows.map(row => row.seq_id)).toEqual(['4201', '4202']);
+  });
+
   it('resolves pool and character aliases through the authenticated endpoint', async () => {
     const adminClient = createAdminClient();
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);

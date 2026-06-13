@@ -292,11 +292,11 @@ function buildHistoryDedupeKeys(row) {
       keys.push(`game-seq-time-item:${gameUid}:${seqId}:${timestamp}:${itemIdentity}:${rarity}`);
     }
 
-    if (isServerScoped && poolId && timestamp && rarity) {
+    if (!seqId && isServerScoped && poolId && timestamp && rarity) {
       keys.push(`account-pool-time-item:${accountKey}:${poolId}:${timestamp}:${itemIdentity}:${rarity}:${isFree}`);
     }
 
-    if (!isServerScoped && gameUid && poolId && timestamp && rarity) {
+    if (!seqId && !isServerScoped && gameUid && poolId && timestamp && rarity) {
       keys.push(`game-pool-time-item:${gameUid}:${poolId}:${timestamp}:${itemIdentity}:${rarity}:${isFree}`);
     }
 
