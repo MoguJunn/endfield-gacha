@@ -22,7 +22,7 @@ const sourceRecord = {
 const serializedRow = serializeHistoryForUpsert(sourceRecord, 'user_test');
 assert.equal(serializedRow.character_id, 'char_test_001', '序列化时应保留 canonical character_id');
 assert.equal(serializedRow.server_id, '2', '序列化时应保留 server_id');
-assert.equal(serializedRow.region, 'asia', '序列化时应保留 region');
+assert.equal(serializedRow.region, 'intl', '序列化时应按大区归一化 region');
 
 const historyCalls = [];
 let historyAttempt = 0;
@@ -61,7 +61,7 @@ await upsertHistoryRowsWithOptionalColumnFallback([serializedRow], async (rows, 
 assert.equal(historyCalls.length, 4, 'history upsert 应在缺少多个 optional 列时逐步重试');
 assert.equal(historyCalls[0].rows[0].character_id, 'char_test_001', '首次写入应保留 canonical character_id');
 assert.equal(historyCalls[0].rows[0].server_id, '2', '首次写入应保留 server_id');
-assert.equal(historyCalls[0].rows[0].region, 'asia', '首次写入应保留 region');
+assert.equal(historyCalls[0].rows[0].region, 'intl', '首次写入应保留归一化后的 region');
 assert.equal('server_id' in historyCalls[1].rows[0], false, 'server_id 缺列后应先去掉 server_id');
 assert.equal('region' in historyCalls[1].rows[0], true, 'region 在下一轮前仍应保留');
 assert.equal('region' in historyCalls[2].rows[0], false, 'region 缺列后应继续去掉 region');
@@ -100,6 +100,6 @@ assert.equal(requestBody.history.length, 1, '请求体应包含一条 history');
 assert.equal(requestBody.history[0].user_id, 'user_test', '同源接口载荷应补齐 user_id');
 assert.equal(requestBody.history[0].character_id, 'char_test_001', '同源接口载荷应保留 character_id');
 assert.equal(requestBody.history[0].serverId, '2', '同源接口载荷应保留 serverId');
-assert.equal(requestBody.history[0].region, 'asia', '同源接口载荷应保留 region');
+assert.equal(requestBody.history[0].region, 'asia', '同源接口载荷应保留原始 region，由同源接口序列化入库');
 
 console.log('DATA-NEW-008 history optional-column fallback verification passed');
