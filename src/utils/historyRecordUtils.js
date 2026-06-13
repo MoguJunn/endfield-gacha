@@ -23,17 +23,24 @@ export function hasCompositeHistoryKey(record) {
   );
 }
 
+export function hasServerScopedCompositeHistoryKey(record) {
+  return Boolean(hasCompositeHistoryKey(record) && record.server_id);
+}
+
 export function splitHistoryUpsertGroups(records) {
+  const serverScopedCompositeKeyRecords = [];
   const compositeKeyRecords = [];
   const legacyRecords = [];
 
   records.forEach((record) => {
-    if (hasCompositeHistoryKey(record)) {
+    if (hasServerScopedCompositeHistoryKey(record)) {
+      serverScopedCompositeKeyRecords.push(record);
+    } else if (hasCompositeHistoryKey(record)) {
       compositeKeyRecords.push(record);
     } else {
       legacyRecords.push(record);
     }
   });
 
-  return { compositeKeyRecords, legacyRecords };
+  return { serverScopedCompositeKeyRecords, compositeKeyRecords, legacyRecords };
 }

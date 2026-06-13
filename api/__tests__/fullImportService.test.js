@@ -19,6 +19,14 @@ function createCompatAccessToken(payload, secret = 'test-jwt-secret') {
   return `${unsigned}.${signature}`;
 }
 
+function createHistoryRangeQuery(rangeHandler) {
+  const query = {
+    eq: vi.fn(() => query),
+    range: rangeHandler,
+  };
+  return query;
+}
+
 describe('verifySupabaseAccessToken', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -369,17 +377,7 @@ describe('executeFullImport import mode metadata', () => {
         if (tableName === 'history') {
           return {
             select() {
-              return {
-                eq() {
-                  return {
-                    eq() {
-                      return {
-                        range: async () => ({ data: [], error: null }),
-                      };
-                    },
-                  };
-                },
-              };
+              return createHistoryRangeQuery(async () => ({ data: [], error: null }));
             },
             async upsert(rows) {
               savedHistoryRows = rows;
@@ -590,17 +588,7 @@ describe('executeFullImport import mode metadata', () => {
         if (tableName === 'history') {
           return {
             select() {
-              return {
-                eq() {
-                  return {
-                    eq() {
-                      return {
-                        range: async () => ({ data: [], error: null }),
-                      };
-                    },
-                  };
-                },
-              };
+              return createHistoryRangeQuery(async () => ({ data: [], error: null }));
             },
             async upsert(rows) {
               historyUpsertAttempts += 1;
@@ -809,23 +797,13 @@ describe('executeFullImport import mode metadata', () => {
         if (tableName === 'history') {
           return {
             select() {
-              return {
-                eq() {
-                  return {
-                    eq() {
-                      return {
-                        range: async () => {
-                          historySelectCalls++;
-                          return {
-                            data: [{ pool_id: 'special_1_2_1', seq_id: '1' }],
-                            error: null,
-                          };
-                        },
-                      };
-                    },
-                  };
-                },
-              };
+              return createHistoryRangeQuery(async () => {
+                historySelectCalls++;
+                return {
+                  data: [{ pool_id: 'special_1_2_1', seq_id: '1', server_id: '1' }],
+                  error: null,
+                };
+              });
             },
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });
@@ -960,7 +938,7 @@ describe('executeFullImport import mode metadata', () => {
       importMode: 'incremental',
     });
     expect([...fetchCall[4].existingRecordKeys]).toEqual([
-      '10000001:special_1_2_1:1',
+      '10000001:server:1:special_1_2_1:1',
     ]);
     expect(historySelectCalls).toBe(2);
     expect(result.success).toBe(true);
@@ -1041,20 +1019,10 @@ describe('executeFullImport import mode metadata', () => {
         if (tableName === 'history') {
           return {
             select() {
-              return {
-                eq() {
-                  return {
-                    eq() {
-                      return {
-                        range: async () => ({
-                          data: [{ pool_id: 'special_1_2_1', seq_id: '1' }],
-                          error: null,
-                        }),
-                      };
-                    },
-                  };
-                },
-              };
+              return createHistoryRangeQuery(async () => ({
+                data: [{ pool_id: 'special_1_2_1', seq_id: '1', server_id: '1' }],
+                error: null,
+              }));
             },
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });
@@ -1218,17 +1186,7 @@ describe('executeFullImport import mode metadata', () => {
         if (tableName === 'history') {
           return {
             select() {
-              return {
-                eq() {
-                  return {
-                    eq() {
-                      return {
-                        range: async () => ({ data: [], error: null }),
-                      };
-                    },
-                  };
-                },
-              };
+              return createHistoryRangeQuery(async () => ({ data: [], error: null }));
             },
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });
@@ -1342,8 +1300,8 @@ describe('official import incremental guards', () => {
     } = await import('../../backend/lib/officialImportIncremental.js');
 
     const existingRecordKeys = new Set([
-      '10000001:special_1_2_1:10',
-      '10000001:special_1_2_1:9',
+      '10000001:server:1:special_1_2_1:10',
+      '10000001:server:1:special_1_2_1:9',
     ]);
     const existingSixStarPage = [{
       poolId: 'special_1_2_1',
@@ -1360,6 +1318,7 @@ describe('official import incremental guards', () => {
     expect(analyzeIncrementalPage({
       records: existingSixStarPage,
       gameUid: '10000001',
+      serverId: '1',
       existingRecordKeys,
       getPoolId: (record) => record.poolId,
     })).toMatchObject({
@@ -1367,6 +1326,18 @@ describe('official import incremental guards', () => {
       existing: 2,
       missingKey: 0,
       allExisting: true,
+    });
+    expect(analyzeIncrementalPage({
+      records: existingSixStarPage,
+      gameUid: '10000001',
+      serverId: '2',
+      existingRecordKeys,
+      getPoolId: (record) => record.poolId,
+    })).toMatchObject({
+      checked: 2,
+      existing: 0,
+      missingKey: 0,
+      allExisting: false,
     });
     expect(hasSufficientIncrementalPityContext(existingSixStarPage)).toBe(true);
   });

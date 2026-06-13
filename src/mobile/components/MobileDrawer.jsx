@@ -6,7 +6,10 @@ import usePoolStore from '../../stores/usePoolStore';
 import useHistoryStore from '../../stores/useHistoryStore';
 import { useI18n } from '../../i18n/index.js';
 import { buildUsernameHandle, getPreferredUsername } from '../../utils/usernameValidation.js';
-import { localizeGameAccountServerTag } from '../../utils/gameAccountMetadata.js';
+import {
+  isGameAccountSelectionMatch,
+  localizeGameAccountServerTag,
+} from '../../utils/gameAccountMetadata.js';
 
 // eslint-disable-next-line no-unused-vars
 function DrawerNavButton({ icon: Icon, label, active = false, tone = 'default', onClick, trailing = null }) {
@@ -42,7 +45,7 @@ function MobileDrawer({ isOpen, onClose, activeTab, setActiveTab }) {
   const accounts = getGameAccountsFromHistory();
   const currentAccount = useMemo(() => {
     if (currentGameUid) {
-      return accounts.find((account) => account.gameUid === currentGameUid) || null;
+      return accounts.find((account) => isGameAccountSelectionMatch(account, currentGameUid)) || null;
     }
     return accounts[0] || null;
   }, [accounts, currentGameUid]);

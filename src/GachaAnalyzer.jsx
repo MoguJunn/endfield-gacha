@@ -17,6 +17,10 @@ import { subscribePublicCacheWarnings } from './services/admin/publicCacheServic
 import { buildPublicCacheWarningNotification } from './utils/notificationModel.js';
 import { useI18n } from './i18n/index.js';
 import { useOAuthCallbackNotice } from './hooks/auth/useOAuthCallbackNotice.js';
+import {
+  getGameAccountSelectionValue,
+  isGameAccountSelectionMatch,
+} from './utils/gameAccountMetadata.js';
 
 export default function GachaAnalyzer() {
   // --- 从 Zustand Stores 获取状态 ---
@@ -126,17 +130,17 @@ export default function GachaAnalyzer() {
   const lastSwitchTimeRef = useRef(0);
 
   useEffect(() => {
-    const preferredGameUid = gameAccounts[0]?.gameUid || null;
-    if (!preferredGameUid) {
+    const preferredAccountValue = getGameAccountSelectionValue(gameAccounts[0]);
+    if (!preferredAccountValue) {
       return;
     }
 
     const hasValidCurrentAccount = currentGameUid
-      ? gameAccounts.some((account) => account.gameUid === currentGameUid)
+      ? gameAccounts.some((account) => isGameAccountSelectionMatch(account, currentGameUid))
       : false;
 
     if (!hasValidCurrentAccount) {
-      switchGameAccount(preferredGameUid);
+      switchGameAccount(preferredAccountValue);
     }
   }, [currentGameUid, gameAccounts, switchGameAccount]);
 
@@ -285,9 +289,9 @@ export default function GachaAnalyzer() {
     const requestedPoolId = String(searchParams.get('poolId') || '').trim();
 
     if (requestedGameUid && requestedGameUid !== currentGameUid) {
-      const requestedAccountExists = gameAccounts.some((account) => account.gameUid === requestedGameUid);
-      if (requestedAccountExists) {
-        switchGameAccount(requestedGameUid);
+      const requestedAccount = gameAccounts.find((account) => isGameAccountSelectionMatch(account, requestedGameUid));
+      if (requestedAccount) {
+        switchGameAccount(getGameAccountSelectionValue(requestedAccount) || requestedGameUid);
       }
     }
 

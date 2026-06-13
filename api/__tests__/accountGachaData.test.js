@@ -66,6 +66,7 @@ function createQuery(table, state) {
     selection: '',
     filters: [],
     operation: 'select',
+    updatePayload: null,
     select: vi.fn((selection = '*') => {
       query.selection = selection;
       return query;
@@ -76,6 +77,11 @@ function createQuery(table, state) {
         table,
         filters: query.filters,
       });
+      return query;
+    }),
+    update: vi.fn((payload) => {
+      query.operation = 'update';
+      query.updatePayload = payload;
       return query;
     }),
     eq: vi.fn((column, value) => {
@@ -102,6 +108,14 @@ function createQuery(table, state) {
     in: vi.fn(async (column, values) => {
       query.filters.push({ op: 'in', column, values });
       if (query.operation === 'delete') {
+        return { data: null, error: null };
+      }
+      if (query.operation === 'update') {
+        state.updateCalls.push({
+          table,
+          payload: query.updatePayload,
+          filters: query.filters,
+        });
         return { data: null, error: null };
       }
       if (table === 'pool_id_aliases') {
@@ -170,12 +184,14 @@ function createAdminClient() {
     ],
     upsertCalls: [],
     deleteCalls: [],
+    updateCalls: [],
   };
 
   const client = {
     from: vi.fn((table) => ({
       select: (...args) => createQuery(table, state).select(...args),
       delete: () => createQuery(table, state).delete(),
+      update: (...args) => createQuery(table, state).update(...args),
       upsert: vi.fn(async (rows, options) => {
         state.upsertCalls.push({
           table,
@@ -354,7 +370,7 @@ describe('/api/account-gacha-data', () => {
       pool_id: 'special_official_001',
     });
     expect(historyUpsert).toMatchObject({
-      options: { onConflict: 'user_id,game_uid,pool_id,seq_id' },
+      options: { onConflict: 'user_id,game_uid,server_scope,pool_id,seq_id' },
     });
     expect(historyUpsert.rows[0]).toMatchObject({
       user_id: 'user-1',
@@ -492,6 +508,62 @@ describe('/api/account-gacha-data', () => {
       characterAliases: {
         char_alias: 'char_official_001',
       },
+    });
+  });
+
+  it('updates current user history server labels for a selected account', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.historyRows = [
+      {
+        record_id: 'record-1',
+        user_id: 'user-1',
+        game_uid: 'game-1',
+        server_id: '1',
+        region: 'cn',
+      },
+      {
+        record_id: 'record-2',
+        user_id: 'user-1',
+        game_uid: 'other-game',
+        server_id: '1',
+        region: 'cn',
+      },
+    ];
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const req = createRequest({
+      method: 'POST',
+      body: {
+        action: 'updateServerLabel',
+        gameUid: 'game-1',
+        accountKey: 'game-1::server:1',
+        currentServerId: '1',
+        currentRegion: 'cn',
+        serverId: '2',
+        region: 'intl',
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      updated: 1,
+      serverId: '2',
+      region: 'intl',
+    });
+    expect(adminClient.__state.updateCalls).toHaveLength(1);
+    expect(adminClient.__state.updateCalls[0]).toMatchObject({
+      table: 'history',
+      payload: {
+        server_id: '2',
+        region: 'intl',
+      },
+      filters: [
+        { op: 'eq', column: 'user_id', value: 'user-1' },
+        { op: 'in', column: 'record_id', values: ['record-1'] },
+      ],
     });
   });
 

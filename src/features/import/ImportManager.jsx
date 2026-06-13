@@ -4,8 +4,10 @@ import { useNavigate } from 'react-router-dom';
 import { Save, RefreshCw, HelpCircle, X, AlertCircle, CheckCircle, User, Cloud, CloudOff, Layers, Clock } from 'lucide-react';
 import { useAuthStore, useHistoryStore, usePoolStore } from '../../stores';
 import {
+  buildGameAccountKey,
   buildImportedGameAccountMetadataEntries,
-  getHistoryRecordGameUid,
+  buildHistorySeqDedupeKeys,
+  isGameAccountSelectionMatch,
   saveGameAccountMetadata
 } from '../../utils/gameAccountMetadata.js';
 import { applyCloudDataToStores } from '../../utils/cloudDataSync.js';
@@ -268,12 +270,16 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
    * 使用 game_uid + pool_id + seq_id 组合作为唯一标识
    * 注意：seqId 是每个卡池独立的序列号，不同卡池可能有相同的 seqId
    */
-  const getExistingSeqIds = useCallback(async (gameUid) => {
+  const getExistingSeqIds = useCallback(async ({ gameUid, accountKey, serverId, region } = {}) => {
     if (!user) return new Set();
 
     try {
-      const { keys } = await loadAccountGachaSeqKeys({ gameUid });
-      return new Set(keys.map(r => `${r.gameUid || 'unknown'}:${r.poolId || 'unknown'}:${r.seqId}`));
+      const { keys } = await loadAccountGachaSeqKeys({ gameUid, accountKey, serverId, region });
+      const dedupeKeys = new Set();
+      keys.forEach((row) => {
+        buildHistorySeqDedupeKeys(row).forEach(key => dedupeKeys.add(key));
+      });
+      return dedupeKeys;
     } catch (error) {
       appLogger.error('[ImportManager] 查询已有记录失败:', error);
       return new Set();
@@ -293,6 +299,7 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
     if (result.backendImported) {
       const importedAt = new Date().toISOString();
       const importedGameUid = result.userInfo?.gameUid || result.userInfo?.hgUid || null;
+      const importedAccountKey = buildGameAccountKey(result.userInfo) || importedGameUid;
 
       if (result.userInfo) {
         saveGameAccountMetadata(result.userInfo);
@@ -305,18 +312,18 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
           switchPool,
           setHistory,
           preferredPoolId: currentPoolId,
-          preferredGameUid: importedGameUid
+          preferredGameUid: importedAccountKey || importedGameUid
         });
 
-        if (importedGameUid) {
-          switchGameAccount(importedGameUid);
+        if (importedAccountKey || importedGameUid) {
+          switchGameAccount(importedAccountKey || importedGameUid);
         }
 
         const refreshedHistory = Array.isArray(refreshedCloudData?.history)
           ? refreshedCloudData.history
           : [];
-        const importedHistoryRecords = importedGameUid
-          ? refreshedHistory.filter((record) => getHistoryRecordGameUid(record) === importedGameUid)
+        const importedHistoryRecords = importedAccountKey || importedGameUid
+          ? refreshedHistory.filter((record) => isGameAccountSelectionMatch(record, importedAccountKey || importedGameUid))
           : refreshedHistory;
 
         persistImportedAccountMetadata({
@@ -370,6 +377,7 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
 
       const {
         currentGameUid,
+        currentAccountKey,
         poolEntries,
         historyRecords,
       } = await prepareOfficialImportPersistenceData({
@@ -389,7 +397,13 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
       await savePoolsToServer(poolEntries);
 
       // 2. 从服务器获取已存在的记录进行去重（基于 game_uid + pool_id + seq_id）
-      const existingSeqIds = await getExistingSeqIds(currentGameUid);
+      const firstHistoryRecord = historyRecords[0] || null;
+      const existingSeqIds = await getExistingSeqIds({
+        gameUid: currentGameUid,
+        accountKey: currentAccountKey,
+        serverId: firstHistoryRecord?.serverId || firstHistoryRecord?.server_id || null,
+        region: firstHistoryRecord?.region || null,
+      });
       const { newRecords, duplicateCount } = filterImportedHistoryRecords(historyRecords, existingSeqIds);
 
       // 3. 保存新记录到服务器
@@ -424,11 +438,11 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
         switchPool,
         setHistory,
         preferredPoolId: currentPoolId,
-        preferredGameUid: currentGameUid
+        preferredGameUid: currentAccountKey || currentGameUid
       });
 
-      if (currentGameUid) {
-        switchGameAccount(currentGameUid);
+      if (currentAccountKey || currentGameUid) {
+        switchGameAccount(currentAccountKey || currentGameUid);
       }
 
       persistImportedAccountMetadata({
@@ -472,7 +486,7 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
 
   const handleViewImportedData = useCallback(() => {
     if (importResult?.userInfo?.gameUid || importResult?.userInfo?.hgUid) {
-      switchGameAccount(importResult.userInfo.gameUid || importResult.userInfo.hgUid);
+      switchGameAccount(buildGameAccountKey(importResult.userInfo) || importResult.userInfo.gameUid || importResult.userInfo.hgUid);
     }
 
     if (typeof onImportComplete === 'function') {

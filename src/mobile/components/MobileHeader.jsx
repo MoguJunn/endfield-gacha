@@ -6,7 +6,11 @@ import { usePoolStore, useHistoryStore } from '../../stores';
 import LocaleSwitcher from '../../components/common/LocaleSwitcher.jsx';
 import { formatFreshnessRelative, getFreshnessTone } from '../../utils/dataFreshness.js';
 import { getAccountLastImportTimestamp } from '../../utils/accountFreshness.js';
-import { localizeGameAccountServerTag } from '../../utils/gameAccountMetadata.js';
+import {
+  getGameAccountSelectionValue,
+  isGameAccountSelectionMatch,
+  localizeGameAccountServerTag,
+} from '../../utils/gameAccountMetadata.js';
 
 function cx(...classes) {
   return classes.filter(Boolean).join(' ');
@@ -42,16 +46,17 @@ export default function MobileHeader({ onMenuClick, activeTab }) {
   }, [getGameAccountsFromHistory, history]);
 
   const effectiveGameUid = useMemo(() => {
-    if (gameAccounts.some((account) => account.gameUid === currentGameUid)) {
-      return currentGameUid;
+    const matchedAccount = gameAccounts.find((account) => isGameAccountSelectionMatch(account, currentGameUid));
+    if (matchedAccount) {
+      return getGameAccountSelectionValue(matchedAccount);
     }
 
-    return gameAccounts[0]?.gameUid || null;
+    return getGameAccountSelectionValue(gameAccounts[0]);
   }, [currentGameUid, gameAccounts]);
 
   const currentAccount = useMemo(() => {
     if (effectiveGameUid) {
-      return gameAccounts.find((account) => account.gameUid === effectiveGameUid) || null;
+      return gameAccounts.find((account) => isGameAccountSelectionMatch(account, effectiveGameUid)) || null;
     }
     if (gameAccounts.length === 1) {
       return gameAccounts[0];
@@ -154,17 +159,21 @@ export default function MobileHeader({ onMenuClick, activeTab }) {
             </div>
           </div>
           <div className="max-h-[50vh] overflow-y-auto p-3">
-            {gameAccounts.map((account) => (
+            {gameAccounts.map((account) => {
+              const accountValue = getGameAccountSelectionValue(account);
+              const isSelectedAccount = isGameAccountSelectionMatch(account, currentGameUid);
+
+              return (
               <button
-                key={account.gameUid}
+                key={accountValue || account.gameUid}
                 type="button"
                 onClick={() => {
-                  switchGameAccount(account.gameUid);
+                  switchGameAccount(accountValue || account.gameUid);
                   setShowAccountMenu(false);
                 }}
                 className={cx(
                   'mb-2 flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left last:mb-0',
-                  currentGameUid === account.gameUid
+                  isSelectedAccount
                     ? 'border-endfield-yellow/30 bg-endfield-yellow/10 text-slate-900 dark:text-endfield-yellow'
                     : 'border-zinc-200 bg-white text-slate-700 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-300'
                 )}
@@ -184,7 +193,8 @@ export default function MobileHeader({ onMenuClick, activeTab }) {
                   {formatFreshnessRelative(getAccountLastImportTimestamp(account), t('common.importTimeUnknown'), locale)}
                 </span>
               </button>
-            ))}
+              );
+            })}
           </div>
         </div>
       ) : null}

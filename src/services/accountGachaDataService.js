@@ -48,11 +48,20 @@ export async function loadAccountGachaData() {
   };
 }
 
-export async function loadAccountGachaSeqKeys({ gameUid = '' } = {}) {
+export async function loadAccountGachaSeqKeys({ gameUid = '', accountKey = '', serverId = '', region = '' } = {}) {
   const headers = await buildAccountGachaHeaders();
   const params = new URLSearchParams({ mode: 'seq-keys' });
   if (gameUid) {
     params.set('gameUid', gameUid);
+  }
+  if (accountKey) {
+    params.set('accountKey', accountKey);
+  }
+  if (serverId) {
+    params.set('serverId', serverId);
+  }
+  if (region) {
+    params.set('region', region);
   }
 
   const { response, data } = await fetchJsonWithTimeout(`/api/account-gacha-data?${params.toString()}`, {
@@ -97,6 +106,46 @@ export async function saveAccountGachaData({ pools = [], history = [] } = {}) {
   return {
     saved: data?.saved || { pools: 0, history: 0 },
     skipped: data?.skipped || { pools: 0, history: 0 },
+  };
+}
+
+export async function updateAccountGachaServerLabel({
+  gameUid = '',
+  accountKey = '',
+  currentServerId = '',
+  currentRegion = '',
+  serverId = '',
+  region = '',
+} = {}) {
+  const headers = await buildAccountGachaHeaders();
+  headers['Content-Type'] = 'application/json';
+
+  const { response, data } = await fetchJsonWithTimeout('/api/account-gacha-data', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers,
+    body: JSON.stringify({
+      action: 'updateServerLabel',
+      gameUid,
+      accountKey,
+      currentServerId,
+      currentRegion,
+      serverId,
+      region,
+    }),
+  }, {
+    label: 'account-gacha-data-update-server-label',
+    retries: 1,
+  });
+
+  if (!response.ok || data?.success === false) {
+    createAccountGachaDataError(data, response, '账号区服标签更新失败', 'account_gacha_data_server_label_failed');
+  }
+
+  return {
+    updated: Number(data?.updated || 0),
+    serverId: data?.serverId || null,
+    region: data?.region || null,
   };
 }
 
@@ -188,4 +237,5 @@ export default {
   loadAccountGachaSeqKeys,
   resolveAccountGachaAliases,
   saveAccountGachaData,
+  updateAccountGachaServerLabel,
 };

@@ -11,6 +11,11 @@ import {
   serializePoolForUpsert,
   upsertHistoryRowsWithOptionalColumnFallback,
 } from '../../../src/utils/cloudDataWriteRows.js';
+import {
+  buildGameAccountKey,
+  normalizeGameAccountRegion,
+  normalizeGameAccountServerId,
+} from '../../../src/utils/gameAccountMetadata.js';
 import { clampHistoryPity } from '../../../src/utils/historyRecordUtils.js';
 import {
   reconcileOfficialCharacterIds,
@@ -65,6 +70,10 @@ function normalizePoolId(value) {
   return String(value || '').trim().slice(0, 160);
 }
 
+function normalizeAccountText(value, maxLength = 160) {
+  return String(value || '').trim().slice(0, maxLength);
+}
+
 async function loadAllHistoryForUser(adminClient, userId) {
   const allHistory = [];
 
@@ -98,21 +107,33 @@ async function loadAllHistoryForUser(adminClient, userId) {
   };
 }
 
-async function loadHistorySeqKeysForUser(adminClient, userId, gameUid = '') {
+async function loadHistorySeqKeysForUser(adminClient, userId, {
+  gameUid = '',
+  serverId = '',
+  region = '',
+} = {}) {
   const keys = [];
   const normalizedGameUid = String(gameUid || '').trim();
+  const normalizedServerId = String(serverId || '').trim();
+  const normalizedRegion = String(region || '').trim();
 
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const from = page * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
     let query = adminClient
       .from('history')
-      .select('seq_id, game_uid, pool_id')
+      .select('seq_id, game_uid, pool_id, server_id, region')
       .eq('user_id', userId)
       .not('seq_id', 'is', null);
 
     if (normalizedGameUid) {
       query = query.eq('game_uid', normalizedGameUid);
+    }
+    if (normalizedServerId) {
+      query = query.eq('server_id', normalizedServerId);
+    }
+    if (normalizedRegion) {
+      query = query.eq('region', normalizedRegion);
     }
 
     const { data, error } = await query
@@ -121,11 +142,25 @@ async function loadHistorySeqKeysForUser(adminClient, userId, gameUid = '') {
     if (error) throw error;
 
     const rows = Array.isArray(data) ? data : [];
-    keys.push(...rows.map(row => ({
-      seqId: row.seq_id,
-      gameUid: row.game_uid,
-      poolId: row.pool_id,
-    })));
+    keys.push(...rows.map((row) => {
+      const keyRow = {
+        seqId: row.seq_id,
+        seq_id: row.seq_id,
+        gameUid: row.game_uid,
+        game_uid: row.game_uid,
+        poolId: row.pool_id,
+        pool_id: row.pool_id,
+        serverId: row.server_id,
+        server_id: row.server_id,
+        region: row.region,
+      };
+
+      return {
+        ...keyRow,
+        accountKey: buildGameAccountKey(keyRow),
+        account_key: buildGameAccountKey(keyRow),
+      };
+    }));
 
     if (rows.length < PAGE_SIZE) {
       return {
@@ -149,7 +184,7 @@ async function loadHistoryDedupeRowsForUser(adminClient, userId) {
     const to = from + PAGE_SIZE - 1;
     const { data, error } = await adminClient
       .from('history')
-      .select('seq_id, game_uid, pool_id, timestamp, character_name, item_name, character_id, rarity, is_free')
+      .select('seq_id, game_uid, pool_id, server_id, region, timestamp, character_name, item_name, character_id, rarity, is_free')
       .eq('user_id', userId)
       .order('record_id', { ascending: true })
       .range(from, to);
@@ -190,6 +225,27 @@ function getDedupePoolId(row) {
   return normalizeDedupeValue(row?.pool_id || row?.poolId);
 }
 
+function getDedupeServerId(row) {
+  return normalizeDedupeValue(row?.server_id || row?.serverId);
+}
+
+function getDedupeRegion(row) {
+  return normalizeDedupeValue(row?.region || row?.serverRegion);
+}
+
+function getDedupeAccountKey(row) {
+  const gameUid = getDedupeGameUid(row);
+  if (!gameUid) {
+    return '';
+  }
+
+  return buildGameAccountKey({
+    gameUid,
+    serverId: getDedupeServerId(row),
+    region: getDedupeRegion(row),
+  }) || gameUid;
+}
+
 function getDedupeItemIdentities(row) {
   return [...new Set([
     row?.character_id,
@@ -205,6 +261,8 @@ function getDedupeItemIdentities(row) {
 
 function buildHistoryDedupeKeys(row) {
   const gameUid = getDedupeGameUid(row);
+  const accountKey = getDedupeAccountKey(row);
+  const isServerScoped = Boolean(accountKey && accountKey !== gameUid);
   const poolId = getDedupePoolId(row);
   const seqId = getDedupeSeqId(row);
   const timestamp = normalizeDedupeTimestamp(row?.timestamp);
@@ -215,7 +273,8 @@ function buildHistoryDedupeKeys(row) {
 
   if (seqId) {
     if (!gameUid && poolId) keys.push(`pool-seq:${poolId}:${seqId}`);
-    if (gameUid && poolId) keys.push(`game-pool-seq:${gameUid}:${poolId}:${seqId}`);
+    if (isServerScoped && poolId) keys.push(`account-pool-seq:${accountKey}:${poolId}:${seqId}`);
+    if (!isServerScoped && gameUid && poolId) keys.push(`game-pool-seq:${gameUid}:${poolId}:${seqId}`);
   }
 
   itemIdentities.forEach((itemIdentity) => {
@@ -224,16 +283,28 @@ function buildHistoryDedupeKeys(row) {
       keys.push(`seq-time-item:${seqId}:${timestamp}:${itemIdentity}:${rarity}`);
     }
 
-    if (gameUid && seqId && timestamp && rarity) {
+    if (isServerScoped && seqId && timestamp && rarity) {
+      keys.push(`account-seq-time-item:${accountKey}:${seqId}:${timestamp}:${itemIdentity}:${rarity}`);
+    }
+
+    if (!isServerScoped && gameUid && seqId && timestamp && rarity) {
       // 跨来源导入时旧 JSON 可能缺少可映射池 ID，但 seq + 时间 + 物品身份仍能稳定指向同一抽卡记录。
       keys.push(`game-seq-time-item:${gameUid}:${seqId}:${timestamp}:${itemIdentity}:${rarity}`);
     }
 
-    if (gameUid && poolId && timestamp && rarity) {
+    if (isServerScoped && poolId && timestamp && rarity) {
+      keys.push(`account-pool-time-item:${accountKey}:${poolId}:${timestamp}:${itemIdentity}:${rarity}:${isFree}`);
+    }
+
+    if (!isServerScoped && gameUid && poolId && timestamp && rarity) {
       keys.push(`game-pool-time-item:${gameUid}:${poolId}:${timestamp}:${itemIdentity}:${rarity}:${isFree}`);
     }
 
-    if (!seqId && gameUid && timestamp && rarity) {
+    if (!seqId && isServerScoped && timestamp && rarity) {
+      keys.push(`account-time-item:${accountKey}:${timestamp}:${itemIdentity}:${rarity}:${isFree}`);
+    }
+
+    if (!seqId && !isServerScoped && gameUid && timestamp && rarity) {
       keys.push(`game-time-item:${gameUid}:${timestamp}:${itemIdentity}:${rarity}:${isFree}`);
     }
   });
@@ -338,6 +409,128 @@ async function handleResolveAccountGachaAliases(body, res, adminClient, { option
     success: true,
     poolAliases: Object.fromEntries(poolAliasMap),
     characterAliases: Object.fromEntries(characterAliasMap),
+  });
+}
+
+function buildHistoryAccountKeyFromRow(row) {
+  const gameUid = normalizeAccountText(row?.game_uid || row?.gameUid);
+  if (!gameUid) {
+    return '';
+  }
+
+  return buildGameAccountKey({
+    gameUid,
+    serverId: row?.server_id || row?.serverId,
+    region: row?.region || row?.serverRegion,
+  }) || gameUid;
+}
+
+function matchesServerLabelUpdateTarget(row, {
+  accountKey = '',
+  currentServerId = '',
+  currentRegion = '',
+} = {}) {
+  const rowServerId = normalizeAccountText(row?.server_id || row?.serverId);
+  const rowRegion = normalizeAccountText(row?.region || row?.serverRegion, 80);
+
+  if (accountKey) {
+    return buildHistoryAccountKeyFromRow(row) === accountKey || (!rowServerId && !rowRegion);
+  }
+
+  if (currentServerId) {
+    return rowServerId === currentServerId;
+  }
+
+  if (currentRegion) {
+    return rowRegion === currentRegion;
+  }
+
+  return !rowServerId && !rowRegion;
+}
+
+async function loadHistoryRowsForServerLabelUpdate(adminClient, userId, gameUid) {
+  const rows = [];
+
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+    const { data, error } = await adminClient
+      .from('history')
+      .select('record_id, game_uid, server_id, region')
+      .eq('user_id', userId)
+      .eq('game_uid', gameUid)
+      .order('record_id', { ascending: true })
+      .range(from, to);
+
+    if (error) throw error;
+
+    const pageRows = Array.isArray(data) ? data : [];
+    rows.push(...pageRows);
+    if (pageRows.length < PAGE_SIZE) {
+      return rows;
+    }
+  }
+
+  return rows;
+}
+
+async function handleUpdateAccountServerLabel(body, res, adminClient, userId) {
+  const gameUid = normalizeAccountText(body.gameUid || body.game_uid);
+  const accountKey = normalizeAccountText(body.accountKey || body.account_key, 240);
+  const currentServerId = normalizeAccountText(body.currentServerId || body.current_server_id, 80);
+  const currentRegion = normalizeAccountText(body.currentRegion || body.current_region, 80);
+  const serverId = normalizeGameAccountServerId({
+    serverId: body.serverId || body.server_id,
+    region: body.region,
+  });
+  const region = normalizeGameAccountRegion({
+    serverId,
+    region: body.region,
+  });
+
+  if (!gameUid) {
+    return sendError(res, 400, 'Missing game uid', 'game_uid_required');
+  }
+
+  if (!serverId || !region) {
+    return sendError(res, 400, 'Missing server label', 'server_label_required');
+  }
+
+  const rows = await loadHistoryRowsForServerLabelUpdate(adminClient, userId, gameUid);
+  const targetIds = rows
+    .filter(row => matchesServerLabelUpdateTarget(row, { accountKey, currentServerId, currentRegion }))
+    .map(row => row.record_id)
+    .filter(value => value !== null && value !== undefined);
+
+  if (targetIds.length === 0) {
+    return res.status(200).json({
+      success: true,
+      updated: 0,
+      serverId,
+      region,
+    });
+  }
+
+  for (let index = 0; index < targetIds.length; index += MAX_WRITE_HISTORY) {
+    const chunk = targetIds.slice(index, index + MAX_WRITE_HISTORY);
+    const { error } = await adminClient
+      .from('history')
+      .update({
+        server_id: serverId,
+        region,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId)
+      .in('record_id', chunk);
+
+    if (error) throw error;
+  }
+
+  return res.status(200).json({
+    success: true,
+    updated: targetIds.length,
+    serverId,
+    region,
   });
 }
 
@@ -622,6 +815,10 @@ export default async function accountGachaDataHandler(req, res) {
         });
         return;
       }
+      if (body.action === 'updateServerLabel') {
+        await handleUpdateAccountServerLabel(body, res, dbClient, authResult.user.id);
+        return;
+      }
       await handleSaveAccountGachaData(body, res, dbClient, authResult.user.id, {
         reconcile: useAdminFeatures,
         optionalAliases: !useAdminFeatures,
@@ -639,7 +836,11 @@ export default async function accountGachaDataHandler(req, res) {
       const { keys, truncated } = await loadHistorySeqKeysForUser(
         dbClient,
         authResult.user.id,
-        url.searchParams.get('gameUid') || ''
+        {
+          gameUid: url.searchParams.get('gameUid') || '',
+          serverId: url.searchParams.get('serverId') || '',
+          region: url.searchParams.get('region') || '',
+        }
       );
       res.status(200).json({
         success: true,

@@ -63,6 +63,10 @@ import useShareActionFeedback from '../../hooks/useShareActionFeedback';
 import { useI18n } from '../../i18n/index.js';
 import { POOL_GROUP_PREFIX } from '../../utils/poolGroupUtils.js';
 import { getPoolFeaturedLead } from '../../utils/poolFeaturedResolver.js';
+import {
+  getGameAccountSelectionValue,
+  isGameAccountSelectionMatch,
+} from '../../utils/gameAccountMetadata.js';
 
 function dedupeRosterEntries(items = []) {
   const seen = new Set();
@@ -1032,24 +1036,25 @@ export function useGachaSimulatorController() {
       const availableAccounts = getGameAccountsFromHistory();
       const resolvedAccount =
         selectedAccount ||
-        (currentGameUid ? availableAccounts.find((account) => account.gameUid === currentGameUid) : null) ||
+        (currentGameUid ? availableAccounts.find((account) => isGameAccountSelectionMatch(account, currentGameUid)) : null) ||
         (availableAccounts.length === 1 ? availableAccounts[0] : null);
+      const selectedAccountValue = getGameAccountSelectionValue(resolvedAccount);
       const selectedGameUid = resolvedAccount?.gameUid || resolvedAccount?.game_uid || null;
       const selectedAccountName = resolvedAccount?.nickName || resolvedAccount?.nick_name || selectedGameUid;
 
-      if (!selectedGameUid) {
+      if (!selectedAccountValue) {
         showToastMessage(t('simulator.toast.selectAccount'));
         return;
       }
 
       const targetStorageScope = buildSimulatorStorageScope({
         currentUserId,
-        currentGameUid: selectedGameUid,
+        currentGameUid: selectedAccountValue,
       });
       const inheritedSnapshot = buildInheritedSimulatorSnapshot({
         history,
         realPools,
-        currentGameUid: selectedGameUid,
+        currentGameUid: selectedAccountValue,
         currentUserId,
         currentSimPoolId,
       });
@@ -1078,7 +1083,7 @@ export function useGachaSimulatorController() {
       }
 
       const targetResourceSettings =
-        selectedGameUid === currentGameUid ? resourceSettings : loadSimulatorResourceSettings(targetStorageScope);
+        selectedAccountValue === currentGameUid ? resourceSettings : loadSimulatorResourceSettings(targetStorageScope);
       const inheritedLedger = buildSimulatorResourceLedger(
         Object.values(inheritedSnapshot.statesByPoolId),
         targetResourceSettings
@@ -1094,15 +1099,15 @@ export function useGachaSimulatorController() {
 
         saveSimulatorResourceSettings(nextResourceSettings, targetStorageScope);
 
-        if (selectedGameUid === currentGameUid) {
+        if (selectedAccountValue === currentGameUid) {
           setResourceSettings(nextResourceSettings);
         }
       }
 
       saveSimulatorCurrentPoolId(currentSimPoolId, targetStorageScope);
 
-      if (selectedGameUid !== currentGameUid) {
-        switchGameAccount(selectedGameUid);
+      if (selectedAccountValue !== currentGameUid) {
+        switchGameAccount(selectedAccountValue);
         showToastMessage(t('simulator.toast.inheritAllSuccess', { name: selectedAccountName }));
         return;
       }
