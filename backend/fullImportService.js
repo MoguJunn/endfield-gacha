@@ -508,13 +508,16 @@ async function upsertHistoryGroupsWithOptionalColumnFallback(supabase, upsertGro
         break;
       }
 
-      if (
-        group.serverScopeKey
-        && onConflict !== 'user_id,game_uid,pool_id,seq_id'
-        && isMissingHistoryConflictTargetError(result.error)
-      ) {
-        onConflict = 'user_id,game_uid,pool_id,seq_id';
-        continue;
+      if (group.serverScopeKey && isMissingHistoryConflictTargetError(result.error)) {
+        if (onConflict === 'user_id,game_uid,server_scope,pool_id,seq_id') {
+          onConflict = 'user_id,game_uid,pool_id,seq_id';
+          continue;
+        }
+
+        if (onConflict === 'user_id,game_uid,pool_id,seq_id') {
+          onConflict = 'user_id,record_id';
+          continue;
+        }
       }
 
       const missingColumn = detectMissingHistoryOptionalColumn(result.error);

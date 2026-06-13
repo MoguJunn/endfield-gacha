@@ -172,9 +172,16 @@ export async function upsertHistoryRowsWithOptionalColumnFallback(rows, executeU
       }
 
       const missingColumn = detectMissingHistoryOptionalColumn(error);
-      if (!missingColumn && group.serverScopeKey && onConflict !== 'user_id,game_uid,pool_id,seq_id' && isMissingConflictTargetError(error)) {
-        onConflict = 'user_id,game_uid,pool_id,seq_id';
-        continue;
+      if (!missingColumn && group.serverScopeKey && isMissingConflictTargetError(error)) {
+        if (onConflict === 'user_id,game_uid,server_scope,pool_id,seq_id') {
+          onConflict = 'user_id,game_uid,pool_id,seq_id';
+          continue;
+        }
+
+        if (onConflict === 'user_id,game_uid,pool_id,seq_id') {
+          onConflict = 'user_id,record_id';
+          continue;
+        }
       }
 
       if (!missingColumn || !supportedOptionalColumns.has(missingColumn)) {
