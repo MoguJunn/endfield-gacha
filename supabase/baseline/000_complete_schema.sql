@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-06-12T08:29:24.099Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/139_add_status_heartbeat_history.sql
+--   4. 生成时间: 2026-06-13T18:00:20.748Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/147_scope_history_unique_key_by_server.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -1816,7 +1816,7 @@ GROUP BY p.pool_id, p.type;
 
 -- 1. 查看每个6星的出货位置和垫刀数
 WITH ordered_pulls AS (
-  SELECT 
+  SELECT
     h.record_id,
     h.rarity,
     h.is_standard,
@@ -1827,7 +1827,7 @@ WITH ordered_pulls AS (
   WHERE p.type = 'limited'
 ),
 six_stars_with_pity AS (
-  SELECT 
+  SELECT
     record_id,
     is_standard,
     special_type,
@@ -1836,7 +1836,7 @@ six_stars_with_pity AS (
   FROM ordered_pulls
   WHERE rarity = 6
 )
-SELECT 
+SELECT
   ROW_NUMBER() OVER (ORDER BY pull_number) as "第几个6星",
   record_id as "记录ID",
   CASE WHEN is_standard THEN '常驻(歪)' ELSE '限定UP' END as "类型",
@@ -1847,7 +1847,7 @@ FROM six_stars_with_pity
 ORDER BY pull_number;
 
 -- 2. 统计总览
-SELECT 
+SELECT
   '总抽数' as "指标",
   COUNT(*)::text as "数值"
 FROM history h
@@ -1856,7 +1856,7 @@ WHERE p.type = 'limited'
 
 UNION ALL
 
-SELECT 
+SELECT
   '6星总数',
   COUNT(*)::text
 FROM history h
@@ -1865,7 +1865,7 @@ WHERE p.type = 'limited' AND h.rarity = 6
 
 UNION ALL
 
-SELECT 
+SELECT
   '限定UP数',
   COUNT(*)::text
 FROM history h
@@ -1874,7 +1874,7 @@ WHERE p.type = 'limited' AND h.rarity = 6 AND h.is_standard = false
 
 UNION ALL
 
-SELECT 
+SELECT
   '常驻歪数',
   COUNT(*)::text
 FROM history h
@@ -1883,7 +1883,7 @@ WHERE p.type = 'limited' AND h.rarity = 6 AND h.is_standard = true
 
 UNION ALL
 
-SELECT 
+SELECT
   '计算平均出货',
   ROUND(480.0 / NULLIF((SELECT COUNT(*) FROM history h JOIN pools p ON h.pool_id = p.pool_id AND h.user_id = p.user_id WHERE p.type = 'limited' AND h.rarity = 6), 0), 1)::text
 
@@ -2049,13 +2049,13 @@ DECLARE
 BEGIN
   -- 提取域名
   email_domain := split_part(check_email, '@', 2);
-  
+
   -- 检查完整邮箱或域名是否在黑名单中
   RETURN EXISTS (
     SELECT 1 FROM public.blacklist
-    WHERE 
+    WHERE
       (type = 'email' AND LOWER(email) = LOWER(check_email))
-      OR 
+      OR
       (type = 'domain' AND LOWER(email) = LOWER(email_domain))
   );
 END;
@@ -2172,7 +2172,7 @@ BEGIN
     email_domain := LOWER(SPLIT_PART(check_email, '@', 2));
 
     -- 1. 检查是否在黑名单中
-    IF EXISTS (SELECT 1 FROM email_blacklist WHERE 
+    IF EXISTS (SELECT 1 FROM email_blacklist WHERE
         (type = 'email' AND LOWER(email) = LOWER(check_email)) OR
         (type = 'domain' AND LOWER(email) = email_domain)
     ) THEN
@@ -2189,7 +2189,7 @@ BEGIN
         RETURN jsonb_build_object('valid', true);
     ELSE
         RETURN jsonb_build_object(
-            'valid', false, 
+            'valid', false,
             'reason', '请使用主流邮箱服务商（如 Gmail、Outlook、QQ邮箱、163邮箱等）、知名论坛/社区邮箱或企业邮箱注册'
         );
     END IF;
@@ -2222,7 +2222,7 @@ CREATE TABLE IF NOT EXISTS rate_limit_logs (
 );
 
 -- 创建索引加速查询
-CREATE INDEX IF NOT EXISTS idx_rate_limit_logs_lookup 
+CREATE INDEX IF NOT EXISTS idx_rate_limit_logs_lookup
 ON rate_limit_logs (identifier, action, created_at DESC);
 
 -- 自动清理过期记录（保留24小时）
@@ -2268,7 +2268,7 @@ DECLARE
 BEGIN
     -- 获取配置
     SELECT * INTO config_row FROM rate_limit_config WHERE action = p_action;
-    
+
     IF config_row IS NULL THEN
         -- 如果没有配置，默认允许
         RETURN jsonb_build_object('allowed', true);
@@ -2285,7 +2285,7 @@ BEGIN
     -- 检查是否超过限制
     IF attempt_count >= config_row.max_attempts THEN
         lockout_until := oldest_attempt + (config_row.window_minutes + config_row.lockout_minutes || ' minutes')::INTERVAL;
-        
+
         IF lockout_until > NOW() THEN
             RETURN jsonb_build_object(
                 'allowed', false,
@@ -2332,12 +2332,12 @@ DECLARE
 BEGIN
     -- 先检查
     check_result := check_rate_limit(p_identifier, p_action);
-    
+
     -- 如果允许，记录这次请求
     IF (check_result->>'allowed')::BOOLEAN THEN
         PERFORM log_rate_limit(p_identifier, p_action);
     END IF;
-    
+
     RETURN check_result;
 END;
 $$;
@@ -2464,13 +2464,13 @@ CREATE POLICY "rate_limit_config_admin_delete" ON public.rate_limit_config
 -- ============================================
 -- 注释
 -- ============================================
-COMMENT ON POLICY "email_whitelist_select_all" ON public.email_whitelist 
+COMMENT ON POLICY "email_whitelist_select_all" ON public.email_whitelist
   IS '允许所有用户读取邮箱白名单，用于注册验证';
 
-COMMENT ON POLICY "rate_limit_logs_no_direct_access" ON public.rate_limit_logs 
+COMMENT ON POLICY "rate_limit_logs_no_direct_access" ON public.rate_limit_logs
   IS '禁止直接访问频率限制日志，只能通过 SECURITY DEFINER 函数访问';
 
-COMMENT ON POLICY "rate_limit_config_select_all" ON public.rate_limit_config 
+COMMENT ON POLICY "rate_limit_config_select_all" ON public.rate_limit_config
   IS '允许所有用户读取频率限制配置';
 -- <<< END MIGRATION: archive/019_enable_rls_security_fix.sql
 
@@ -2502,7 +2502,7 @@ BEGIN
     email_domain := LOWER(SPLIT_PART(check_email, '@', 2));
 
     -- 1. 检查是否在黑名单中
-    IF EXISTS (SELECT 1 FROM public.email_blacklist WHERE 
+    IF EXISTS (SELECT 1 FROM public.email_blacklist WHERE
         (type = 'email' AND LOWER(email) = LOWER(check_email)) OR
         (type = 'domain' AND LOWER(email) = email_domain)
     ) THEN
@@ -2519,7 +2519,7 @@ BEGIN
         RETURN jsonb_build_object('valid', true);
     ELSE
         RETURN jsonb_build_object(
-            'valid', false, 
+            'valid', false,
             'reason', '请使用主流邮箱服务商（如 Gmail、Outlook、QQ邮箱、163邮箱等）、知名论坛/社区邮箱或企业邮箱注册'
         );
     END IF;
@@ -2541,11 +2541,11 @@ BEGIN
     IF check_email IS NULL THEN
         RETURN FALSE;
     END IF;
-    
+
     email_domain := LOWER(SPLIT_PART(check_email, '@', 2));
-    
+
     RETURN EXISTS (
-        SELECT 1 FROM public.email_blacklist 
+        SELECT 1 FROM public.email_blacklist
         WHERE (type = 'email' AND LOWER(email) = LOWER(check_email))
            OR (type = 'domain' AND LOWER(email) = email_domain)
     );
@@ -2586,7 +2586,7 @@ DECLARE
 BEGIN
     -- 获取配置
     SELECT * INTO config_row FROM public.rate_limit_config WHERE action = p_action;
-    
+
     IF config_row IS NULL THEN
         RETURN jsonb_build_object('allowed', true);
     END IF;
@@ -2602,7 +2602,7 @@ BEGIN
     -- 检查是否超过限制
     IF attempt_count >= config_row.max_attempts THEN
         lockout_until := oldest_attempt + (config_row.window_minutes + config_row.lockout_minutes || ' minutes')::INTERVAL;
-        
+
         IF lockout_until > NOW() THEN
             RETURN jsonb_build_object(
                 'allowed', false,
@@ -2654,11 +2654,11 @@ DECLARE
     check_result JSONB;
 BEGIN
     check_result := public.check_rate_limit(p_identifier, p_action);
-    
+
     IF (check_result->>'allowed')::BOOLEAN THEN
         PERFORM public.log_rate_limit(p_identifier, p_action);
     END IF;
-    
+
     RETURN check_result;
 END;
 $$;
@@ -2674,7 +2674,7 @@ SET search_path = public
 AS $$
 BEGIN
     RETURN EXISTS (
-        SELECT 1 FROM public.profiles 
+        SELECT 1 FROM public.profiles
         WHERE id = auth.uid() AND role = 'super_admin'
     );
 END;
@@ -4287,7 +4287,7 @@ WHERE rotation_processed = FALSE AND end_time IS NOT NULL;
 -- 这样现有角色会出现在所有池子中
 UPDATE characters
 SET pool_config = pool_config || jsonb_build_object('introduced_at', '2026-01-22T11:00:00+08:00')
-WHERE pool_config IS NOT NULL 
+WHERE pool_config IS NOT NULL
   AND pool_config->>'introduced_at' IS NULL;
 
 -- 添加注释说明
@@ -4310,8 +4310,8 @@ DO $$
 BEGIN
   -- 检查是否已存在唯一约束
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint 
-    WHERE conname = 'pools_pool_id_key' 
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'pools_pool_id_key'
     AND conrelid = 'pools'::regclass
   ) THEN
     -- 添加唯一约束
@@ -4326,7 +4326,7 @@ CREATE TABLE IF NOT EXISTS pool_characters (
   character_id TEXT NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
   is_up BOOLEAN DEFAULT FALSE,  -- 是否为该池子的UP角色
   created_at TIMESTAMPTZ DEFAULT NOW(),
-  
+
   -- 确保同一个池子不会重复添加同一个角色
   UNIQUE(pool_id, character_id)
 );
@@ -21707,4 +21707,720 @@ begin
 end;
 $$;
 -- <<< END MIGRATION: active/139_add_status_heartbeat_history.sql
+
+-- >>> BEGIN MIGRATION: active/144_add_account_region_and_contributor_activity_stats.sql
+-- 144: normalize account region metadata and expose contributor activity stats.
+-- ACCOUNT-SERVER-001 first phase: keep history.server_id/region available and normalize region buckets.
+-- STATS-006 first phase: add 90-day active/new contributor counts to cached global stats.
+
+ALTER TABLE public.history
+  ADD COLUMN IF NOT EXISTS server_id TEXT,
+  ADD COLUMN IF NOT EXISTS region TEXT,
+  ADD COLUMN IF NOT EXISTS is_free BOOLEAN,
+  ADD COLUMN IF NOT EXISTS timestamp TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
+
+-- Keep this migration lightweight for production: do not full-table backfill
+-- history.region here. Readers below normalize server_id / region dynamically,
+-- and new imports write normalized values at source.
+
+CREATE INDEX IF NOT EXISTS idx_profiles_created_at
+  ON public.profiles (created_at);
+
+CREATE TABLE IF NOT EXISTS public.stats_cache (
+  cache_key       TEXT PRIMARY KEY,
+  cached_data     JSONB NOT NULL,
+  row_fingerprint BIGINT NOT NULL DEFAULT 0,
+  computed_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.stats_cache
+  ADD COLUMN IF NOT EXISTS row_fingerprint BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS computed_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+DROP FUNCTION IF EXISTS public.get_contributor_activity_stats(INT);
+
+CREATE OR REPLACE FUNCTION public.get_contributor_activity_stats(
+  p_window_days INT DEFAULT 90
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_window_days INT := GREATEST(COALESCE(p_window_days, 90), 1);
+  v_active_users BIGINT := 0;
+  v_new_users BIGINT := 0;
+BEGIN
+  SELECT COUNT(*)
+    INTO v_active_users
+    FROM (
+      SELECT h.user_id
+        FROM public.history AS h
+       WHERE h.user_id IS NOT NULL
+         AND h.pool_id IS NOT NULL
+         AND h.special_type IS DISTINCT FROM 'gift'
+         AND (h.is_free IS NOT TRUE)
+         AND COALESCE(h.created_at, h.updated_at, h.timestamp) >= now() - make_interval(days => v_window_days)
+       GROUP BY h.user_id
+      HAVING COUNT(DISTINCT COALESCE(
+        CASE
+          WHEN h.pool_id::TEXT ~ '^(special|joint|extra|weponbox|weaponbox)_[0-9]+_[0-9]+'
+          THEN regexp_replace(h.pool_id::TEXT, '^(special|joint|extra|weponbox|weaponbox)_([0-9]+)_([0-9]+).*$', 'v\2_\3')
+          ELSE NULL
+        END,
+        h.pool_id::TEXT
+      )) >= 2
+    ) AS active_users;
+
+  SELECT COUNT(*)
+    INTO v_new_users
+    FROM public.profiles AS p
+   WHERE p.created_at >= now() - make_interval(days => v_window_days);
+
+  RETURN jsonb_build_object(
+    'windowDays', v_window_days,
+    'activeUsers', COALESCE(v_active_users, 0),
+    'newUsers', COALESCE(v_new_users, 0),
+    'activeDefinition', '90日内至少两个版本有有效导入记录的用户',
+    'newDefinition', '90日内首次使用站点的用户',
+    'updatedAt', now()
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_contributor_activity_stats(INT) TO anon, authenticated;
+
+DELETE FROM public.stats_cache
+WHERE cache_key IN ('global_stats', 'global_stats:v2', 'global_stats:v3', 'global_stats:v4');
+
+CREATE OR REPLACE FUNCTION public.get_global_stats_cached(
+  p_buffer_seconds INT DEFAULT 300
+)
+RETURNS JSON
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_current_count BIGINT;
+  v_cached_data   JSONB;
+  v_cached_fp     BIGINT;
+  v_cached_at     TIMESTAMPTZ;
+  v_result        JSON;
+  v_result_data   JSONB;
+  v_quota_data    JSONB;
+  v_activity_data JSONB;
+  v_region_data   JSONB;
+  v_total_contributors BIGINT;
+  v_max_ttl       INTERVAL := INTERVAL '24 hours';
+  v_cache_key     TEXT := 'global_stats:v4';
+BEGIN
+  SELECT
+    (SELECT count(*) FROM public.history)
+    + ((SELECT count(*) FROM public.profiles) * 1000000000)
+    INTO v_current_count;
+
+  SELECT cached_data, row_fingerprint, computed_at
+    INTO v_cached_data, v_cached_fp, v_cached_at
+    FROM public.stats_cache
+   WHERE cache_key = v_cache_key;
+
+  IF v_cached_data IS NOT NULL THEN
+    IF v_cached_fp = v_current_count
+       AND v_cached_at + v_max_ttl > now() THEN
+      RETURN v_cached_data::JSON;
+    END IF;
+
+    IF v_cached_fp <> v_current_count
+       AND v_cached_at + (p_buffer_seconds || ' seconds')::INTERVAL > now() THEN
+      RETURN v_cached_data::JSON;
+    END IF;
+  END IF;
+
+  SELECT public.get_global_stats() INTO v_result;
+  SELECT COALESCE(public.get_pool_type_quota_stats()::JSONB, '{}'::JSONB) INTO v_quota_data;
+  SELECT COALESCE(public.get_contributor_activity_stats(90), '{}'::JSONB) INTO v_activity_data;
+  SELECT
+    COUNT(DISTINCT h.user_id),
+    jsonb_build_object(
+      'cn', COUNT(DISTINCT h.user_id) FILTER (
+        WHERE h.server_id::TEXT = '1'
+           OR lower(coalesce(h.region::TEXT, '')) IN ('cn', 'china', 'mainland')
+           OR h.region::TEXT IN ('国服', '官服', 'B服', '大陆')
+      ),
+      'intl', COUNT(DISTINCT h.user_id) FILTER (
+        WHERE h.server_id::TEXT IN ('2', '3')
+           OR lower(coalesce(h.region::TEXT, '')) IN ('intl', 'international', 'global', 'asia', 'sea', 'eu', 'na', 'us', 'america')
+           OR h.region::TEXT IN ('国际服', '亚服', '亚洲', '欧服', '美服', '欧美', '欧/美')
+      ),
+      'unknown', COUNT(DISTINCT h.user_id) FILTER (
+        WHERE NOT (
+          h.server_id::TEXT = '1'
+          OR lower(coalesce(h.region::TEXT, '')) IN ('cn', 'china', 'mainland')
+          OR h.region::TEXT IN ('国服', '官服', 'B服', '大陆')
+          OR h.server_id::TEXT IN ('2', '3')
+          OR lower(coalesce(h.region::TEXT, '')) IN ('intl', 'international', 'global', 'asia', 'sea', 'eu', 'na', 'us', 'america')
+          OR h.region::TEXT IN ('国际服', '亚服', '亚洲', '欧服', '美服', '欧美', '欧/美')
+        )
+      )
+    )
+    INTO v_total_contributors, v_region_data
+    FROM public.history AS h
+   WHERE h.user_id IS NOT NULL
+     AND h.special_type IS DISTINCT FROM 'gift'
+     AND (h.is_free IS NOT TRUE);
+
+  v_result_data := COALESCE(v_result::JSONB, '{}'::JSONB);
+  v_result_data := jsonb_set(v_result_data, '{byType,extra,quotaSummary}', COALESCE(v_quota_data -> 'extra', '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{byType,limited,quotaSummary}', COALESCE(v_quota_data -> 'limited', '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{byType,standard,quotaSummary}', COALESCE(v_quota_data -> 'standard', '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{byType,weapon,quotaSummary}', COALESCE(v_quota_data -> 'weapon', '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{totalContributors}', to_jsonb(COALESCE(v_total_contributors, 0)), true);
+  v_result_data := jsonb_set(v_result_data, '{contributorsByRegion}', COALESCE(v_region_data, '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{activeUsers90d}', to_jsonb(COALESCE((v_activity_data ->> 'activeUsers')::BIGINT, 0)), true);
+  v_result_data := jsonb_set(v_result_data, '{newUsers90d}', to_jsonb(COALESCE((v_activity_data ->> 'newUsers')::BIGINT, 0)), true);
+  v_result_data := jsonb_set(v_result_data, '{contributorActivity}', v_activity_data, true);
+  v_result := v_result_data::JSON;
+
+  INSERT INTO public.stats_cache (cache_key, cached_data, row_fingerprint, computed_at)
+  VALUES (v_cache_key, v_result::JSONB, v_current_count, now())
+  ON CONFLICT (cache_key) DO UPDATE SET
+    cached_data     = EXCLUDED.cached_data,
+    row_fingerprint = EXCLUDED.row_fingerprint,
+    computed_at     = EXCLUDED.computed_at;
+
+  RETURN v_result;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_global_stats_cached(INT) TO anon, authenticated;
+-- <<< END MIGRATION: active/144_add_account_region_and_contributor_activity_stats.sql
+
+-- >>> BEGIN MIGRATION: active/145_fix_global_stats_cache_timeout.sql
+-- 145: restore global stats cache availability after contributor activity rollout.
+--
+-- Migration 144 added contributor activity fields but also changed the global
+-- cache key and removed older global cache rows. On production-sized history
+-- tables, the first uncached recomputation can hit statement_timeout and make
+-- the Summary page unavailable. Keep the new fields, but make the cached RPC
+-- resilient: reuse any recent global stats cache first, restore the longer
+-- statement timeout, and degrade optional contributor fields instead of failing
+-- the whole response.
+
+CREATE INDEX IF NOT EXISTS idx_history_recent_contributor_activity
+  ON public.history (user_id, pool_id, created_at, updated_at, timestamp)
+  WHERE user_id IS NOT NULL
+    AND pool_id IS NOT NULL
+    AND special_type IS DISTINCT FROM 'gift'
+    AND is_free IS NOT TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_history_contributor_region_bucket
+  ON public.history (user_id, server_id, region)
+  WHERE user_id IS NOT NULL
+    AND special_type IS DISTINCT FROM 'gift'
+    AND is_free IS NOT TRUE;
+
+DROP FUNCTION IF EXISTS public.get_contributor_activity_stats(INT);
+
+CREATE OR REPLACE FUNCTION public.get_contributor_activity_stats(
+  p_window_days INT DEFAULT 90
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_window_days INT := GREATEST(COALESCE(p_window_days, 90), 1);
+  v_active_users BIGINT := 0;
+  v_new_users BIGINT := 0;
+BEGIN
+  SELECT COUNT(*)
+    INTO v_active_users
+    FROM (
+      SELECT h.user_id
+        FROM public.history AS h
+       WHERE h.user_id IS NOT NULL
+         AND h.pool_id IS NOT NULL
+         AND h.special_type IS DISTINCT FROM 'gift'
+         AND h.is_free IS NOT TRUE
+         AND GREATEST(
+           COALESCE(h.created_at, '-infinity'::TIMESTAMPTZ),
+           COALESCE(h.updated_at, '-infinity'::TIMESTAMPTZ),
+           COALESCE(h.timestamp, '-infinity'::TIMESTAMPTZ)
+         ) >= now() - make_interval(days => v_window_days)
+       GROUP BY h.user_id
+      HAVING COUNT(DISTINCT COALESCE(
+        CASE
+          WHEN h.pool_id::TEXT ~ '^(special|joint|extra|weponbox|weaponbox)_[0-9]+_[0-9]+'
+          THEN regexp_replace(h.pool_id::TEXT, '^(special|joint|extra|weponbox|weaponbox)_([0-9]+)_([0-9]+).*$', 'v\2_\3')
+          ELSE NULL
+        END,
+        h.pool_id::TEXT
+      )) >= 2
+    ) AS active_users;
+
+  SELECT COUNT(*)
+    INTO v_new_users
+    FROM public.profiles AS p
+   WHERE p.created_at >= now() - make_interval(days => v_window_days);
+
+  RETURN jsonb_build_object(
+    'windowDays', v_window_days,
+    'activeUsers', COALESCE(v_active_users, 0),
+    'newUsers', COALESCE(v_new_users, 0),
+    'activeDefinition', '90日内至少两个版本有有效导入记录的用户',
+    'newDefinition', '90日内首次使用站点的用户',
+    'updatedAt', now()
+  );
+EXCEPTION WHEN query_canceled THEN
+  RETURN jsonb_build_object(
+    'windowDays', v_window_days,
+    'activeUsers', 0,
+    'newUsers', 0,
+    'degraded', TRUE,
+    'degradedReason', 'statement_timeout',
+    'updatedAt', now()
+  );
+END;
+$$;
+
+ALTER FUNCTION public.get_contributor_activity_stats(INT)
+  SET statement_timeout = '30s';
+
+GRANT EXECUTE ON FUNCTION public.get_contributor_activity_stats(INT) TO anon, authenticated;
+
+ALTER FUNCTION public.get_global_stats()
+  SET statement_timeout = '120s';
+
+CREATE OR REPLACE FUNCTION public.get_global_stats_cached(
+  p_buffer_seconds INT DEFAULT 300
+)
+RETURNS JSON
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_current_count BIGINT;
+  v_cached_data   JSONB;
+  v_cached_fp     BIGINT;
+  v_cached_at     TIMESTAMPTZ;
+  v_result        JSON;
+  v_result_data   JSONB;
+  v_quota_data    JSONB := '{}'::JSONB;
+  v_activity_data JSONB := '{}'::JSONB;
+  v_region_data   JSONB := '{}'::JSONB;
+  v_total_contributors BIGINT := 0;
+  v_max_ttl       INTERVAL := INTERVAL '24 hours';
+  v_cache_key     TEXT := 'global_stats:v4';
+BEGIN
+  SELECT COUNT(*) INTO v_current_count FROM public.history;
+
+  SELECT cached_data, row_fingerprint, computed_at
+    INTO v_cached_data, v_cached_fp, v_cached_at
+    FROM public.stats_cache
+   WHERE cache_key = v_cache_key;
+
+  IF v_cached_data IS NULL THEN
+    SELECT cached_data, row_fingerprint, computed_at
+      INTO v_cached_data, v_cached_fp, v_cached_at
+      FROM public.stats_cache
+     WHERE cache_key IN ('global_stats:v3', 'global_stats:v2', 'global_stats')
+     ORDER BY computed_at DESC
+     LIMIT 1;
+  END IF;
+
+  IF v_cached_data IS NOT NULL THEN
+    IF v_cached_fp = v_current_count
+       AND v_cached_at + v_max_ttl > now() THEN
+      RETURN v_cached_data::JSON;
+    END IF;
+
+    IF v_cached_at + (p_buffer_seconds || ' seconds')::INTERVAL > now() THEN
+      RETURN v_cached_data::JSON;
+    END IF;
+  END IF;
+
+  BEGIN
+    SELECT public.get_global_stats() INTO v_result;
+  EXCEPTION WHEN query_canceled THEN
+    IF v_cached_data IS NOT NULL THEN
+      RETURN v_cached_data::JSON;
+    END IF;
+
+    RAISE;
+  END;
+
+  BEGIN
+    SELECT COALESCE(public.get_pool_type_quota_stats()::JSONB, '{}'::JSONB) INTO v_quota_data;
+  EXCEPTION WHEN query_canceled THEN
+    v_quota_data := '{}'::JSONB;
+  END;
+
+  SELECT COALESCE(public.get_contributor_activity_stats(90), '{}'::JSONB) INTO v_activity_data;
+
+  BEGIN
+    SELECT
+      COUNT(DISTINCT h.user_id),
+      jsonb_build_object(
+        'cn', COUNT(DISTINCT h.user_id) FILTER (
+          WHERE h.server_id::TEXT = '1'
+             OR lower(coalesce(h.region::TEXT, '')) IN ('cn', 'china', 'mainland')
+             OR h.region::TEXT IN ('国服', '官服', 'B服', '大陆')
+        ),
+        'intl', COUNT(DISTINCT h.user_id) FILTER (
+          WHERE h.server_id::TEXT IN ('2', '3')
+             OR lower(coalesce(h.region::TEXT, '')) IN ('intl', 'international', 'global', 'asia', 'sea', 'eu', 'na', 'us', 'america')
+             OR h.region::TEXT IN ('国际服', '亚服', '亚洲', '欧服', '美服', '欧美', '欧/美')
+        ),
+        'unknown', COUNT(DISTINCT h.user_id) FILTER (
+          WHERE NOT (
+            h.server_id::TEXT = '1'
+            OR lower(coalesce(h.region::TEXT, '')) IN ('cn', 'china', 'mainland')
+            OR h.region::TEXT IN ('国服', '官服', 'B服', '大陆')
+            OR h.server_id::TEXT IN ('2', '3')
+            OR lower(coalesce(h.region::TEXT, '')) IN ('intl', 'international', 'global', 'asia', 'sea', 'eu', 'na', 'us', 'america')
+            OR h.region::TEXT IN ('国际服', '亚服', '亚洲', '欧服', '美服', '欧美', '欧/美')
+          )
+        )
+      )
+      INTO v_total_contributors, v_region_data
+      FROM public.history AS h
+     WHERE h.user_id IS NOT NULL
+       AND h.special_type IS DISTINCT FROM 'gift'
+       AND h.is_free IS NOT TRUE;
+  EXCEPTION WHEN query_canceled THEN
+    v_total_contributors := COALESCE((v_result::JSONB ->> 'totalUsers')::BIGINT, 0);
+    v_region_data := '{}'::JSONB;
+  END;
+
+  v_result_data := COALESCE(v_result::JSONB, '{}'::JSONB);
+  v_result_data := jsonb_set(v_result_data, '{byType,extra,quotaSummary}', COALESCE(v_quota_data -> 'extra', '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{byType,limited,quotaSummary}', COALESCE(v_quota_data -> 'limited', '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{byType,standard,quotaSummary}', COALESCE(v_quota_data -> 'standard', '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{byType,weapon,quotaSummary}', COALESCE(v_quota_data -> 'weapon', '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{totalContributors}', to_jsonb(COALESCE(v_total_contributors, 0)), true);
+  v_result_data := jsonb_set(v_result_data, '{contributorsByRegion}', COALESCE(v_region_data, '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{activeUsers90d}', to_jsonb(COALESCE((v_activity_data ->> 'activeUsers')::BIGINT, 0)), true);
+  v_result_data := jsonb_set(v_result_data, '{newUsers90d}', to_jsonb(COALESCE((v_activity_data ->> 'newUsers')::BIGINT, 0)), true);
+  v_result_data := jsonb_set(v_result_data, '{contributorActivity}', v_activity_data, true);
+  v_result := v_result_data::JSON;
+
+  INSERT INTO public.stats_cache (cache_key, cached_data, row_fingerprint, computed_at)
+  VALUES (v_cache_key, v_result::JSONB, v_current_count, now())
+  ON CONFLICT (cache_key) DO UPDATE SET
+    cached_data     = EXCLUDED.cached_data,
+    row_fingerprint = EXCLUDED.row_fingerprint,
+    computed_at     = EXCLUDED.computed_at;
+
+  RETURN v_result;
+END;
+$$;
+
+ALTER FUNCTION public.get_global_stats_cached(INT)
+  SET statement_timeout = '120s';
+
+GRANT EXECUTE ON FUNCTION public.get_global_stats_cached(INT) TO anon, authenticated;
+-- <<< END MIGRATION: active/145_fix_global_stats_cache_timeout.sql
+
+-- >>> BEGIN MIGRATION: active/146_switch_contributor_activity_to_30d.sql
+-- 146: switch contributor activity stats from 90 days to 30 days.
+-- STATS-006 follow-up: keep the same contributor activity definition, but use
+-- a shorter activity window so the Summary page reflects recent usage better.
+
+DROP FUNCTION IF EXISTS public.get_contributor_activity_stats(INT);
+
+CREATE OR REPLACE FUNCTION public.get_contributor_activity_stats(
+  p_window_days INT DEFAULT 30
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_window_days INT := GREATEST(COALESCE(p_window_days, 30), 1);
+  v_active_users BIGINT := 0;
+  v_new_users BIGINT := 0;
+BEGIN
+  SELECT COUNT(*)
+    INTO v_active_users
+    FROM (
+      SELECT h.user_id
+        FROM public.history AS h
+       WHERE h.user_id IS NOT NULL
+         AND h.pool_id IS NOT NULL
+         AND h.special_type IS DISTINCT FROM 'gift'
+         AND h.is_free IS NOT TRUE
+         AND GREATEST(
+           COALESCE(h.created_at, '-infinity'::TIMESTAMPTZ),
+           COALESCE(h.updated_at, '-infinity'::TIMESTAMPTZ),
+           COALESCE(h.timestamp, '-infinity'::TIMESTAMPTZ)
+         ) >= now() - make_interval(days => v_window_days)
+       GROUP BY h.user_id
+      HAVING COUNT(DISTINCT COALESCE(
+        CASE
+          WHEN h.pool_id::TEXT ~ '^(special|joint|extra|weponbox|weaponbox)_[0-9]+_[0-9]+'
+          THEN regexp_replace(h.pool_id::TEXT, '^(special|joint|extra|weponbox|weaponbox)_([0-9]+)_([0-9]+).*$', 'v\2_\3')
+          ELSE NULL
+        END,
+        h.pool_id::TEXT
+      )) >= 2
+    ) AS active_users;
+
+  SELECT COUNT(*)
+    INTO v_new_users
+    FROM public.profiles AS p
+   WHERE p.created_at >= now() - make_interval(days => v_window_days);
+
+  RETURN jsonb_build_object(
+    'windowDays', v_window_days,
+    'activeUsers', COALESCE(v_active_users, 0),
+    'newUsers', COALESCE(v_new_users, 0),
+    'activeDefinition', '30日内至少两个版本有有效导入记录的用户',
+    'newDefinition', '30日内首次使用站点的用户',
+    'updatedAt', now()
+  );
+EXCEPTION WHEN query_canceled THEN
+  RETURN jsonb_build_object(
+    'windowDays', v_window_days,
+    'activeUsers', 0,
+    'newUsers', 0,
+    'degraded', TRUE,
+    'degradedReason', 'statement_timeout',
+    'updatedAt', now()
+  );
+END;
+$$;
+
+ALTER FUNCTION public.get_contributor_activity_stats(INT)
+  SET statement_timeout = '30s';
+
+GRANT EXECUTE ON FUNCTION public.get_contributor_activity_stats(INT) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.get_global_stats_cached(
+  p_buffer_seconds INT DEFAULT 300
+)
+RETURNS JSON
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_current_count BIGINT;
+  v_cached_data   JSONB;
+  v_cached_fp     BIGINT;
+  v_cached_at     TIMESTAMPTZ;
+  v_result        JSON;
+  v_result_data   JSONB;
+  v_quota_data    JSONB := '{}'::JSONB;
+  v_activity_data JSONB := '{}'::JSONB;
+  v_region_data   JSONB := '{}'::JSONB;
+  v_total_contributors BIGINT := 0;
+  v_max_ttl       INTERVAL := INTERVAL '24 hours';
+  v_cache_key     TEXT := 'global_stats:v5';
+  v_cached_has_activity_30d BOOLEAN := FALSE;
+BEGIN
+  SELECT COUNT(*) INTO v_current_count FROM public.history;
+
+  SELECT cached_data, row_fingerprint, computed_at
+    INTO v_cached_data, v_cached_fp, v_cached_at
+    FROM public.stats_cache
+   WHERE cache_key = v_cache_key;
+
+  IF v_cached_data IS NULL THEN
+    SELECT cached_data, row_fingerprint, computed_at
+      INTO v_cached_data, v_cached_fp, v_cached_at
+      FROM public.stats_cache
+     WHERE cache_key IN ('global_stats:v4', 'global_stats:v3', 'global_stats:v2', 'global_stats')
+     ORDER BY computed_at DESC
+     LIMIT 1;
+  END IF;
+
+  v_cached_has_activity_30d := v_cached_data ? 'activeUsers30d'
+    AND v_cached_data ? 'newUsers30d';
+
+  IF v_cached_data IS NOT NULL AND v_cached_has_activity_30d THEN
+    IF v_cached_fp = v_current_count
+       AND v_cached_at + v_max_ttl > now() THEN
+      RETURN v_cached_data::JSON;
+    END IF;
+
+    IF v_cached_at + (p_buffer_seconds || ' seconds')::INTERVAL > now() THEN
+      RETURN v_cached_data::JSON;
+    END IF;
+  END IF;
+
+  BEGIN
+    SELECT public.get_global_stats() INTO v_result;
+  EXCEPTION WHEN query_canceled THEN
+    IF v_cached_data IS NOT NULL THEN
+      RETURN v_cached_data::JSON;
+    END IF;
+
+    RAISE;
+  END;
+
+  BEGIN
+    SELECT COALESCE(public.get_pool_type_quota_stats()::JSONB, '{}'::JSONB) INTO v_quota_data;
+  EXCEPTION WHEN query_canceled THEN
+    v_quota_data := '{}'::JSONB;
+  END;
+
+  SELECT COALESCE(public.get_contributor_activity_stats(30), '{}'::JSONB) INTO v_activity_data;
+
+  BEGIN
+    SELECT
+      COUNT(DISTINCT h.user_id),
+      jsonb_build_object(
+        'cn', COUNT(DISTINCT h.user_id) FILTER (
+          WHERE h.server_id::TEXT = '1'
+             OR lower(coalesce(h.region::TEXT, '')) IN ('cn', 'china', 'mainland')
+             OR h.region::TEXT IN ('国服', '官服', 'B服', '大陆')
+        ),
+        'intl', COUNT(DISTINCT h.user_id) FILTER (
+          WHERE h.server_id::TEXT IN ('2', '3')
+             OR lower(coalesce(h.region::TEXT, '')) IN ('intl', 'international', 'global', 'asia', 'sea', 'eu', 'na', 'us', 'america')
+             OR h.region::TEXT IN ('国际服', '亚服', '亚洲', '欧服', '美服', '欧美', '欧/美')
+        ),
+        'unknown', COUNT(DISTINCT h.user_id) FILTER (
+          WHERE NOT (
+            h.server_id::TEXT = '1'
+            OR lower(coalesce(h.region::TEXT, '')) IN ('cn', 'china', 'mainland')
+            OR h.region::TEXT IN ('国服', '官服', 'B服', '大陆')
+            OR h.server_id::TEXT IN ('2', '3')
+            OR lower(coalesce(h.region::TEXT, '')) IN ('intl', 'international', 'global', 'asia', 'sea', 'eu', 'na', 'us', 'america')
+            OR h.region::TEXT IN ('国际服', '亚服', '亚洲', '欧服', '美服', '欧美', '欧/美')
+          )
+        )
+      )
+      INTO v_total_contributors, v_region_data
+      FROM public.history AS h
+     WHERE h.user_id IS NOT NULL
+       AND h.special_type IS DISTINCT FROM 'gift'
+       AND h.is_free IS NOT TRUE;
+  EXCEPTION WHEN query_canceled THEN
+    v_total_contributors := COALESCE((v_result::JSONB ->> 'totalUsers')::BIGINT, 0);
+    v_region_data := '{}'::JSONB;
+  END;
+
+  v_result_data := COALESCE(v_result::JSONB, '{}'::JSONB);
+  v_result_data := jsonb_set(v_result_data, '{byType,extra,quotaSummary}', COALESCE(v_quota_data -> 'extra', '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{byType,limited,quotaSummary}', COALESCE(v_quota_data -> 'limited', '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{byType,standard,quotaSummary}', COALESCE(v_quota_data -> 'standard', '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{byType,weapon,quotaSummary}', COALESCE(v_quota_data -> 'weapon', '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{totalContributors}', to_jsonb(COALESCE(v_total_contributors, 0)), true);
+  v_result_data := jsonb_set(v_result_data, '{contributorsByRegion}', COALESCE(v_region_data, '{}'::JSONB), true);
+  v_result_data := jsonb_set(v_result_data, '{activeUsers30d}', to_jsonb(COALESCE((v_activity_data ->> 'activeUsers')::BIGINT, 0)), true);
+  v_result_data := jsonb_set(v_result_data, '{newUsers30d}', to_jsonb(COALESCE((v_activity_data ->> 'newUsers')::BIGINT, 0)), true);
+  v_result_data := jsonb_set(v_result_data, '{contributorActivity}', v_activity_data, true);
+  v_result := v_result_data::JSON;
+
+  INSERT INTO public.stats_cache (cache_key, cached_data, row_fingerprint, computed_at)
+  VALUES (v_cache_key, v_result::JSONB, v_current_count, now())
+  ON CONFLICT (cache_key) DO UPDATE SET
+    cached_data     = EXCLUDED.cached_data,
+    row_fingerprint = EXCLUDED.row_fingerprint,
+    computed_at     = EXCLUDED.computed_at;
+
+  RETURN v_result;
+END;
+$$;
+
+ALTER FUNCTION public.get_global_stats_cached(INT)
+  SET statement_timeout = '120s';
+
+GRANT EXECUTE ON FUNCTION public.get_global_stats_cached(INT) TO anon, authenticated;
+-- <<< END MIGRATION: active/146_switch_contributor_activity_to_30d.sql
+
+-- >>> BEGIN MIGRATION: active/147_scope_history_unique_key_by_server.sql
+-- 147: scope account history uniqueness by server.
+-- ACCOUNT-SERVER-001: allow the same game UID / pool / seq to exist separately per server.
+
+ALTER TABLE public.history
+  ADD COLUMN IF NOT EXISTS server_scope TEXT
+  GENERATED ALWAYS AS (COALESCE(NULLIF(btrim(server_id), ''), 'legacy')) STORED;
+
+-- Defensive cleanup for environments that may have lost the older unique constraint.
+DELETE FROM public.history AS h
+WHERE h.id IN (
+  SELECT id
+  FROM (
+    SELECT
+      id,
+      ROW_NUMBER() OVER (
+        PARTITION BY user_id, game_uid, server_scope, pool_id, seq_id
+        ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
+      ) AS rn
+    FROM public.history
+    WHERE user_id IS NOT NULL
+      AND game_uid IS NOT NULL
+      AND pool_id IS NOT NULL
+      AND seq_id IS NOT NULL
+  ) AS ranked
+  WHERE ranked.rn > 1
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.history'::regclass
+      AND conname = 'history_user_game_server_scope_pool_seq_unique'
+  ) THEN
+    ALTER TABLE public.history
+      ADD CONSTRAINT history_user_game_server_scope_pool_seq_unique
+      UNIQUE (user_id, game_uid, server_scope, pool_id, seq_id);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.history'::regclass
+      AND conname = 'history_user_game_pool_seq_unique'
+  ) THEN
+    ALTER TABLE public.history
+      DROP CONSTRAINT history_user_game_pool_seq_unique;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.history'::regclass
+      AND conname = 'history_user_game_seq_unique'
+  ) THEN
+    ALTER TABLE public.history
+      DROP CONSTRAINT history_user_game_seq_unique;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.history'::regclass
+      AND conname = 'history_user_id_game_uid_seq_id_key'
+  ) THEN
+    ALTER TABLE public.history
+      DROP CONSTRAINT history_user_id_game_uid_seq_id_key;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_history_user_game_server_scope
+  ON public.history (user_id, game_uid, server_scope);
+
+COMMENT ON COLUMN public.history.server_scope IS
+  '账号区服唯一性范围；server_id 为空的旧记录使用 legacy。';
+
+COMMENT ON CONSTRAINT history_user_game_server_scope_pool_seq_unique ON public.history IS
+  '同一用户、同一游戏账号、同一区服、同一卡池、同一 seq_id 不重复。';
+
+NOTIFY pgrst, 'reload schema';
+-- <<< END MIGRATION: active/147_scope_history_unique_key_by_server.sql
 
