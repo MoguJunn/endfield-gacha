@@ -43,6 +43,124 @@ export function getHistoryRecordGameUid(record) {
   return normalizeString(record?.game_uid || record?.gameUid || record?.hg_uid || record?.hgUid);
 }
 
+export function normalizeGameAccountServerId(metadata = {}) {
+  const serverId = normalizeString(metadata.serverId || metadata.server_id);
+  if (serverId) {
+    return serverId;
+  }
+
+  const source = normalizeString(metadata.source || metadata.importSource || metadata.lastImportSource);
+  const region = normalizeString(metadata.region || metadata.serverRegion || metadata.serverName);
+  const signal = `${source || ''} ${region || ''}`.toLowerCase();
+
+  if (/intl|international|global|asia|sea|eu|na|us|america|国际|亚服|欧服|美服|欧美|欧\/美/.test(signal)) {
+    return '2';
+  }
+
+  if (/(^|[^a-z])(cn|china|mainland)([^a-z]|$)|国服|官服|b服|大陆|官方/.test(signal)) {
+    return '1';
+  }
+
+  return null;
+}
+
+export function normalizeGameAccountRegion(metadata = {}) {
+  const rawRegion = normalizeString(metadata.region || metadata.serverRegion || metadata.serverName);
+  const serverId = normalizeGameAccountServerId(metadata);
+  const channelName = normalizeString(metadata.channelName || metadata.channel_name);
+  const source = normalizeString(metadata.source || metadata.importSource || metadata.lastImportSource);
+  const signal = `${rawRegion || ''} ${serverId || ''} ${channelName || ''} ${source || ''}`.toLowerCase();
+
+  if (
+    serverId === '1'
+    || /(^|[^a-z])(cn|china|mainland)([^a-z]|$)|国服|官服|b服|大陆|官方/.test(signal)
+  ) {
+    return 'cn';
+  }
+
+  if (
+    serverId === '2'
+    || serverId === '3'
+    || /intl|international|global|asia|sea|jp|kr|tw|hk|mo|sg|亚服|亚洲|(^|[^a-z])(eu|na|us)([^a-z]|$)|america|欧\/美|欧美|欧服|美服|国际/.test(signal)
+  ) {
+    return 'intl';
+  }
+
+  return rawRegion || null;
+}
+
+function buildAccountDiscriminator(metadata = {}) {
+  const channelMasterId = normalizeString(metadata.channelMasterId || metadata.channel_master_id);
+  const serverId = normalizeGameAccountServerId(metadata);
+  const region = normalizeGameAccountRegion(metadata);
+
+  if (channelMasterId === '2') {
+    return 'channel:2';
+  }
+
+  if (serverId) {
+    return `server:${serverId}`;
+  }
+
+  if (region === 'cn' || region === 'intl') {
+    return `region:${region}`;
+  }
+
+  return null;
+}
+
+export function buildGameAccountKey(metadata = {}) {
+  const gameUid = getHistoryRecordGameUid(metadata) || normalizeString(metadata.uid);
+  if (!gameUid) {
+    return null;
+  }
+
+  const discriminator = buildAccountDiscriminator(metadata);
+  return discriminator ? `${gameUid}::${discriminator}` : gameUid;
+}
+
+export function getHistoryRecordAccountKey(record) {
+  return buildGameAccountKey(record);
+}
+
+export function getGameAccountSelectionValue(account = {}) {
+  return normalizeString(account.accountKey || account.account_key)
+    || buildGameAccountKey(account)
+    || getHistoryRecordGameUid(account)
+    || normalizeString(account.uid);
+}
+
+export function isGameAccountSelectionMatch(target = {}, selectedValue = null) {
+  const selected = normalizeString(selectedValue);
+  if (!selected) {
+    return false;
+  }
+
+  const accountKey = getGameAccountSelectionValue(target);
+  const gameUid = getHistoryRecordGameUid(target) || normalizeString(target.uid);
+  return selected === accountKey || selected === gameUid;
+}
+
+export function buildHistorySeqDedupeKey(record = {}) {
+  return buildHistorySeqDedupeKeys(record)[0] || null;
+}
+
+export function buildHistorySeqDedupeKeys(record = {}) {
+  const seqId = normalizeString(record.seqId || record.seq_id);
+  if (!seqId) {
+    return [];
+  }
+
+  const accountValue = getGameAccountSelectionValue(record) || 'unknown';
+  const poolId = normalizeString(record.poolId || record.pool_id) || 'unknown';
+  const legacyGameUid = getHistoryRecordGameUid(record) || normalizeString(record.uid) || 'unknown';
+  if (accountValue && accountValue !== legacyGameUid) {
+    return [`${accountValue}:${poolId}:${seqId}`];
+  }
+
+  return [`${legacyGameUid}:${poolId}:${seqId}`];
+}
+
 export function getHistoryRecordTimestampMs(record) {
   const raw = record?.timestamp ?? record?.gacha_time ?? record?.created_at;
   if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
@@ -68,8 +186,8 @@ export function normalizeGameAccountMetadata(metadata = {}) {
   const hgUid = rawHgUid && rawHgUid !== gameUid ? rawHgUid : null;
   const channelMasterId = normalizeString(metadata.channelMasterId || metadata.channel_master_id);
   const channelName = normalizeString(metadata.channelName || metadata.channel_name);
-  const serverId = normalizeString(metadata.serverId || metadata.server_id);
-  const region = normalizeString(metadata.region || metadata.serverRegion);
+  const serverId = normalizeGameAccountServerId({ ...metadata, channelMasterId, channelName });
+  const region = normalizeGameAccountRegion({ ...metadata, serverId, channelMasterId, channelName });
   const nickName = normalizeString(metadata.nickName || metadata.nick_name) || gameUid;
   const lastImportedAt = normalizeMetadataTimestamp(
     metadata.lastImportedAt
@@ -95,6 +213,7 @@ export function normalizeGameAccountMetadata(metadata = {}) {
       : null;
 
   return {
+    accountKey: buildGameAccountKey({ ...metadata, gameUid, serverId, region, channelMasterId, channelName }),
     gameUid,
     nickName,
     hgUid,
@@ -128,10 +247,30 @@ export function saveGameAccountMetadata(metadata) {
   }
 
   const currentMap = loadGameAccountMetadataMap();
-  currentMap[normalized.gameUid] = {
+  const accountKey = normalized.accountKey || normalized.gameUid;
+  currentMap[accountKey] = {
     ...(currentMap[normalized.gameUid] || {}),
+    ...(currentMap[accountKey] || {}),
     ...normalized
   };
+  if (accountKey === normalized.gameUid) {
+    currentMap[normalized.gameUid] = {
+      ...(currentMap[normalized.gameUid] || {}),
+      ...normalized
+    };
+  } else if (!currentMap[normalized.gameUid]) {
+    currentMap[normalized.gameUid] = {
+      ...normalized,
+      accountKey
+    };
+  } else {
+    currentMap[normalized.gameUid] = {
+      ...(currentMap[normalized.gameUid] || {}),
+      lastImportedAt: normalized.lastImportedAt || currentMap[normalized.gameUid]?.lastImportedAt || null,
+      lastImportedRecordAt: normalized.lastImportedRecordAt || currentMap[normalized.gameUid]?.lastImportedRecordAt || null,
+      lastImportSource: normalized.lastImportSource || currentMap[normalized.gameUid]?.lastImportSource || null
+    };
+  }
   writeStorageValue(STORAGE_KEYS.ACCOUNT_METADATA, JSON.stringify(currentMap), { raw: true });
   return true;
 }
@@ -174,7 +313,8 @@ export function buildImportedGameAccountMetadataEntries({
       return null;
     }
 
-    const existing = accountMap.get(normalized.gameUid);
+    const accountKey = normalized.accountKey || normalized.gameUid;
+    const existing = accountMap.get(accountKey) || accountMap.get(normalized.gameUid);
     const merged = normalizeGameAccountMetadata({
       ...(existing || {}),
       ...normalized,
@@ -183,7 +323,7 @@ export function buildImportedGameAccountMetadataEntries({
       lastImportSource: normalized.lastImportSource || existing?.lastImportSource || normalizedImportSource
     });
 
-    accountMap.set(merged.gameUid, merged);
+    accountMap.set(merged.accountKey || merged.gameUid, merged);
     return merged;
   };
 
@@ -198,7 +338,7 @@ export function buildImportedGameAccountMetadataEntries({
     }
 
     const merged = upsertAccount({
-      ...(accountMap.get(gameUid) || {}),
+      ...(accountMap.get(buildGameAccountKey(record) || gameUid) || accountMap.get(gameUid) || {}),
       ...(buildAccountMetadataFromHistoryRecord(record) || {}),
       gameUid
     });
@@ -214,7 +354,7 @@ export function buildImportedGameAccountMetadataEntries({
 
     const currentLatestMs = getMetadataTimestampMs(merged.lastImportedRecordAt);
     if (!currentLatestMs || recordTimestampMs > currentLatestMs) {
-      accountMap.set(merged.gameUid, {
+      accountMap.set(merged.accountKey || merged.gameUid, {
         ...merged,
         lastImportedRecordAt: new Date(recordTimestampMs).toISOString()
       });

@@ -53,7 +53,15 @@ import {
   validateAccountPassword,
 } from '../../utils/authSecurity.js';
 import { useI18n } from '../../i18n/index.js';
-import { localizeGameAccountServerTag } from '../../utils/gameAccountMetadata.js';
+import {
+  getGameAccountSelectionValue,
+  isGameAccountSelectionMatch,
+  localizeGameAccountServerTag,
+} from '../../utils/gameAccountMetadata.js';
+import {
+  ACCOUNT_SERVER_LABEL_OPTIONS,
+  updateAccountServerLabel,
+} from '../../utils/accountServerLabelCorrection.js';
 
 function getFreshnessToneClasses(tone) {
   switch (tone) {
@@ -182,6 +190,8 @@ function MobileSettingsView() {
   const [emailVerificationDeferred, setEmailVerificationDeferred] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [emailSuccess, setEmailSuccess] = useState('');
+  const [serverLabelUpdatingAccount, setServerLabelUpdatingAccount] = useState(null);
+  const [serverLabelError, setServerLabelError] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [emailCurrentPassword, setEmailCurrentPassword] = useState('');
   const [accountSecurityState, setAccountSecurityState] = useState(null);
@@ -313,6 +323,26 @@ function MobileSettingsView() {
   const handleManualSync = async () => {
     if (syncToCloud) {
       await syncToCloud();
+    }
+  };
+
+  const handleAccountServerLabelChange = async (account, nextServerId) => {
+    const accountValue = getGameAccountSelectionValue(account) || account?.gameUid || account?.game_uid;
+    setServerLabelError('');
+    setServerLabelUpdatingAccount(accountValue);
+    try {
+      await updateAccountServerLabel({
+        account,
+        nextServerId,
+        history,
+        setHistory,
+        currentGameUid,
+        switchGameAccount,
+      });
+    } catch (error) {
+      setServerLabelError(t('settings.serverLabelUpdateFailed', { message: error?.message || t('common.unknown') }));
+    } finally {
+      setServerLabelUpdatingAccount(null);
     }
   };
 
@@ -930,15 +960,29 @@ function MobileSettingsView() {
                 <p className="text-[10px] text-zinc-500 mt-0.5 font-mono">
                   {t('settings.importFreshnessDesc')}
                 </p>
+                <p className="mt-1 text-[10px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                  {t('settings.serverLabelHint')}
+                </p>
               </div>
+
+              {serverLabelError && (
+                <div className="mt-3 rounded-[0.9rem] border border-red-400/30 bg-red-500/10 px-3 py-2 text-[10px] text-red-300">
+                  {serverLabelError}
+                </div>
+              )}
 
               {gameAccounts.length > 0 ? (
                 <div className="mt-3 space-y-2">
-                  {gameAccounts.map((account) => (
+                  {gameAccounts.map((account) => {
+                    const accountValue = getGameAccountSelectionValue(account);
+                    const isCurrentAccount = isGameAccountSelectionMatch(account, currentGameUid);
+                    const isUpdatingServerLabel = serverLabelUpdatingAccount === accountValue;
+
+                    return (
                     <div
-                      key={account.gameUid}
+                      key={accountValue || account.gameUid}
                       className={`border px-3 py-3 ${
-                        currentGameUid === account.gameUid
+                        isCurrentAccount
                           ? 'mobile-ux-soft-card rounded-[1.05rem] border-endfield-yellow bg-endfield-yellow/5'
                           : 'mobile-ux-soft-card mobile-ux-soft-card--muted'
                       }`}
@@ -952,7 +996,7 @@ function MobileSettingsView() {
                                 {localizeGameAccountServerTag(account.serverTag, locale)}
                               </span>
                             )}
-                            {currentGameUid === account.gameUid && (
+                            {isCurrentAccount && (
                               <span className="rounded-full bg-endfield-yellow/15 px-1.5 py-0.5 text-[10px] font-bold text-endfield-yellow">
                                 {t('settings.currentAccount')}
                               </span>
@@ -961,6 +1005,21 @@ function MobileSettingsView() {
                           <div className="mt-1 text-[10px] font-mono text-zinc-500 dark:text-zinc-500">
                             {t('settings.uidRecordCount', { uid: account.gameUid, count: account.recordCount })}
                           </div>
+                          <label className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                            <span>{t('settings.serverLabel')}</span>
+                            <select
+                              value={account.serverId || account.server_id || ''}
+                              disabled={isUpdatingServerLabel}
+                              onChange={(event) => handleAccountServerLabelChange(account, event.target.value)}
+                              className="rounded-[0.65rem] border border-zinc-200 bg-zinc-50 px-2 py-1 text-[10px] font-bold text-zinc-700 outline-none disabled:opacity-60 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-200"
+                            >
+                              <option value="" disabled>{t('settings.serverLabelUnknown')}</option>
+                              {ACCOUNT_SERVER_LABEL_OPTIONS.map((option) => (
+                                <option key={option.serverId} value={option.serverId}>{t(option.labelKey)}</option>
+                              ))}
+                            </select>
+                            {isUpdatingServerLabel && <span>{t('settings.serverLabelUpdating')}</span>}
+                          </label>
                         </div>
                         <span className={`px-2 py-1 text-[10px] font-bold border whitespace-nowrap ${getFreshnessToneClasses(getFreshnessTone(getAccountLastImportTimestamp(account)))}`}>
                           {formatFreshnessRelative(getAccountLastImportTimestamp(account), t('common.importTimeUnknown'), locale)}
@@ -971,7 +1030,8 @@ function MobileSettingsView() {
                         <div>{t('settings.latestRecord', { value: formatFreshnessAbsolute(account.latestRecordAt, t('common.unknown'), locale) })}</div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="mt-3 rounded-[1.05rem] border border-dashed border-zinc-200 bg-zinc-50/75 px-3 py-3 text-[10px] font-mono text-zinc-500 dark:border-white/10 dark:bg-white/[0.03]">

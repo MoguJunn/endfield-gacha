@@ -36,6 +36,23 @@ describe('accountScopeUtils', () => {
     expect(buildGameUidOptionsFromHistory(history).map((account) => account.gameUid)).toEqual(['1002', '1001']);
   });
 
+  it('splits same uid records by server account key', () => {
+    const multiServerHistory = [
+      { id: 'cn-1', gameUid: '1001', serverId: '1', poolId: 'pool_a', seqId: '1' },
+      { id: 'intl-1', gameUid: '1001', serverId: '2', poolId: 'pool_a', seqId: '1' },
+      { id: 'cn-2', gameUid: '1001', serverId: '1', poolId: 'pool_a', seqId: '2' },
+    ];
+
+    const options = buildGameUidOptionsFromHistory(multiServerHistory);
+
+    expect(options.map((account) => account.accountKey)).toEqual([
+      '1001::server:1',
+      '1001::server:2',
+    ]);
+    expect(filterHistoryForEffectiveGameUid(multiServerHistory, '1001::server:1').map((record) => record.id)).toEqual(['cn-1', 'cn-2']);
+    expect(filterHistoryForEffectiveGameUid(multiServerHistory, '1001::server:2').map((record) => record.id)).toEqual(['intl-1']);
+  });
+
   it('ignores empty null-like UID values', () => {
     expect(buildGameUidOptionsFromHistory(history).some((account) => (
       account.gameUid === 'null' || account.gameUid === 'undefined' || account.gameUid === ''

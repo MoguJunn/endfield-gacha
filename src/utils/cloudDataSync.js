@@ -1,12 +1,9 @@
 import { getPreferredPoolId } from './poolSelectionUtils';
 import { STORAGE_KEYS, writeStorageValue } from './storageUtils.js';
+import { isGameAccountSelectionMatch } from './gameAccountMetadata.js';
 
 function getHistoryPoolId(record) {
   return record?.poolId || record?.pool_id || null;
-}
-
-function getHistoryGameUid(record) {
-  return record?.gameUid || record?.game_uid || null;
 }
 
 function resolvePreferredPoolIdFromHistory(pools, history, { preferredPoolId = null, preferredGameUid = null } = {}) {
@@ -17,7 +14,7 @@ function resolvePreferredPoolIdFromHistory(pools, history, { preferredPoolId = n
   }
 
   const scopedHistory = preferredGameUid
-    ? historyArray.filter((record) => getHistoryGameUid(record) === preferredGameUid)
+    ? historyArray.filter((record) => isGameAccountSelectionMatch(record, preferredGameUid))
     : historyArray;
 
   const candidateHistory = scopedHistory.length > 0 ? scopedHistory : historyArray;

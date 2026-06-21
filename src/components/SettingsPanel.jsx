@@ -44,7 +44,15 @@ import {
   validateAccountPassword,
 } from '../utils/authSecurity.js';
 import { useI18n } from '../i18n/index.js';
-import { localizeGameAccountServerTag } from '../utils/gameAccountMetadata.js';
+import {
+  getGameAccountSelectionValue,
+  isGameAccountSelectionMatch,
+  localizeGameAccountServerTag,
+} from '../utils/gameAccountMetadata.js';
+import {
+  ACCOUNT_SERVER_LABEL_OPTIONS,
+  updateAccountServerLabel,
+} from '../utils/accountServerLabelCorrection.js';
 
 function getFreshnessToneClasses(tone) {
   switch (tone) {
@@ -167,6 +175,8 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
   const [emailSuccess, setEmailSuccess] = useState('');
   const [emailStatusMessage, setEmailStatusMessage] = useState('');
   const [emailStatusTone, setEmailStatusTone] = useState('success');
+  const [serverLabelUpdatingAccount, setServerLabelUpdatingAccount] = useState(null);
+  const [serverLabelError, setServerLabelError] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [emailCurrentPassword, setEmailCurrentPassword] = useState('');
   const [accountSecurityState, setAccountSecurityState] = useState(null);
@@ -294,6 +304,26 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
       setDeleteConfirmText('');
     } finally {
       setDeleteLoading(false);
+    }
+  };
+
+  const handleAccountServerLabelChange = async (account, nextServerId) => {
+    const accountValue = getGameAccountSelectionValue(account) || account?.gameUid || account?.game_uid;
+    setServerLabelError('');
+    setServerLabelUpdatingAccount(accountValue);
+    try {
+      await updateAccountServerLabel({
+        account,
+        nextServerId,
+        history,
+        setHistory,
+        currentGameUid,
+        switchGameAccount,
+      });
+    } catch (error) {
+      setServerLabelError(t('settings.serverLabelUpdateFailed', { message: error?.message || t('common.unknown') }));
+    } finally {
+      setServerLabelUpdatingAccount(null);
     }
   };
 
@@ -570,7 +600,7 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
 
       {/* Grid: 账户信息 & 偏好设置 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        
+
         {/* 账户信息 */}
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 relative flex flex-col rounded-sm">
           <div className="px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-2 bg-zinc-50/50 dark:bg-zinc-950/50">
@@ -826,7 +856,7 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
             <h3 className="font-bold text-xs text-zinc-600 dark:text-zinc-300 uppercase tracking-widest">{t('settings.appearanceSection')} / PREFERENCES</h3>
           </div>
           <div className="p-4 flex-1 flex flex-col justify-between gap-4">
-            
+
             {/* Theme */}
             <div>
               <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2 flex items-center gap-1"><Sun size={12}/> {t('settings.appearanceSection')}</div>
@@ -859,7 +889,7 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
                 <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2 flex items-center gap-1"><Globe size={12}/> {t('settings.languageSection')}</div>
                 <LocaleSwitcher />
               </div>
-              
+
               {/* Platform */}
               <div>
                 <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2 flex items-center gap-1"><Smartphone size={12}/> {t('settings.platformSection')}</div>
@@ -916,7 +946,7 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
             <Database size={14} className="text-zinc-500" />
             <h3 className="font-bold text-xs text-zinc-600 dark:text-zinc-300 uppercase tracking-widest">{t('settings.dataSection')}</h3>
           </div>
-          
+
           <div className="p-4 lg:p-5">
             {/* Quick Stats Grid */}
             <div className="grid grid-cols-2 gap-3 mb-5">
@@ -939,13 +969,26 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
             {/* Imported Accounts Freshness */}
             <div className="mb-6">
               <div className="text-xs font-bold text-slate-700 dark:text-zinc-300 mb-3">{t('settings.importFreshnessTitle')}</div>
+              <div className="mb-3 text-[10px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                {t('settings.serverLabelHint')}
+              </div>
+              {serverLabelError && (
+                <div className="mb-3 rounded-sm border border-red-200 bg-red-50 px-3 py-2 text-[10px] text-red-600 dark:border-red-900/40 dark:bg-red-950/20 dark:text-red-300">
+                  {serverLabelError}
+                </div>
+              )}
               {gameAccounts.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {gameAccounts.map((account) => (
+                  {gameAccounts.map((account) => {
+                    const accountValue = getGameAccountSelectionValue(account);
+                    const isCurrentAccount = isGameAccountSelectionMatch(account, currentGameUid);
+                    const isUpdatingServerLabel = serverLabelUpdatingAccount === accountValue;
+
+                    return (
                     <div
-                      key={account.gameUid}
+                      key={accountValue || account.gameUid}
                       className={`border p-3 rounded-sm flex flex-col justify-between ${
-                        currentGameUid === account.gameUid
+                        isCurrentAccount
                           ? 'border-endfield-yellow bg-endfield-yellow/5'
                           : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/30'
                       }`}
@@ -959,25 +1002,41 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
                                 {localizeGameAccountServerTag(account.serverTag, locale)}
                               </span>
                             )}
-                            {currentGameUid === account.gameUid && (
+                            {isCurrentAccount && (
                               <span className="px-1 py-0.5 text-[9px] font-bold bg-endfield-yellow/15 text-amber-700 dark:text-endfield-yellow rounded-sm border border-endfield-yellow/30">
                                 CURRENT
                               </span>
                             )}
                           </div>
                           <div className="text-[10px] font-mono text-zinc-500 mt-0.5">UID: {account.gameUid}</div>
+                          <label className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                            <span>{t('settings.serverLabel')}</span>
+                            <select
+                              value={account.serverId || account.server_id || ''}
+                              disabled={isUpdatingServerLabel}
+                              onChange={(event) => handleAccountServerLabelChange(account, event.target.value)}
+                              className="rounded-sm border border-zinc-200 bg-white px-2 py-1 text-[10px] font-bold text-zinc-700 outline-none disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+                            >
+                              <option value="" disabled>{t('settings.serverLabelUnknown')}</option>
+                              {ACCOUNT_SERVER_LABEL_OPTIONS.map((option) => (
+                                <option key={option.serverId} value={option.serverId}>{t(option.labelKey)}</option>
+                              ))}
+                            </select>
+                            {isUpdatingServerLabel && <span>{t('settings.serverLabelUpdating')}</span>}
+                          </label>
                         </div>
                         <div className={`px-1.5 py-0.5 text-[9px] font-bold border rounded-sm whitespace-nowrap shrink-0 ${getFreshnessToneClasses(getFreshnessTone(getAccountLastImportTimestamp(account)))}`}>
                           {formatFreshnessRelative(getAccountLastImportTimestamp(account), t('common.importTimeUnknown'), locale)}
                         </div>
                       </div>
-                      
+
                       <div className="flex items-center gap-4 text-[10px] font-mono text-zinc-500 border-t border-zinc-100 dark:border-zinc-800/50 pt-2">
                          <div className="truncate"><span className="text-zinc-400">PULLS:</span> {account.recordCount}</div>
                          <div className="truncate"><span className="text-zinc-400">LATEST:</span> {formatFreshnessAbsolute(account.latestRecordAt, t('common.unknown'), locale, { includeYear: false })}</div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="border border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/30 px-4 py-6 text-center text-xs font-mono text-zinc-500 rounded-sm">
@@ -989,7 +1048,7 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
             {/* Danger Zone */}
             <div className="border border-red-200 dark:border-red-900/30 bg-red-50/30 dark:bg-red-950/10 rounded-sm p-4">
               <h4 className="text-[10px] font-bold text-red-500 uppercase tracking-widest mb-3 flex items-center gap-1"><AlertTriangle size={12}/> DANGER ZONE</h4>
-              
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Delete Data */}
                 <div className="bg-white dark:bg-zinc-900 border border-red-100 dark:border-red-900/50 p-3 flex flex-col justify-between rounded-sm">

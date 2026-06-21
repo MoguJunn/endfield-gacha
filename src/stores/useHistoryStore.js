@@ -2,8 +2,10 @@ import { create } from 'zustand';
 import { DEFAULT_DISPLAY_PITY } from '../constants/index.js';
 import {
   buildGameAccountServerTag,
+  getHistoryRecordAccountKey,
   getHistoryRecordGameUid,
   getHistoryRecordTimestampMs,
+  isGameAccountSelectionMatch,
   loadGameAccountMetadataMap,
   normalizeGameAccountMetadata
 } from '../utils/gameAccountMetadata.js';
@@ -96,7 +98,7 @@ const useHistoryStore = create((set, get) => ({
 
     return history.filter(h => {
       if (h.poolId !== poolId) return false;
-      if (gameUid && getHistoryGameUid(h) !== gameUid) return false;
+      if (gameUid && !isGameAccountSelectionMatch(h, gameUid)) return false;
       return true;
     });
   },
@@ -267,13 +269,15 @@ const useHistoryStore = create((set, get) => ({
     history.forEach(h => {
       const gameUid = getHistoryGameUid(h);
       if (gameUid) {
+        const accountKey = getHistoryRecordAccountKey(h) || gameUid;
         const recordTimestamp = getHistoryRecordTimestampMs(h);
-        const metadata = getHistoryAccountMetadata(h, storedMetadataMap[gameUid]);
+        const metadata = getHistoryAccountMetadata(h, storedMetadataMap[accountKey] || storedMetadataMap[gameUid]);
         const derivedImportTimestamp = metadata?.lastImportedAt
           || metadata?.lastImportedRecordAt
           || (recordTimestamp ? new Date(recordTimestamp).toISOString() : null);
-        if (!accountMap.has(gameUid)) {
-          accountMap.set(gameUid, {
+        if (!accountMap.has(accountKey)) {
+          accountMap.set(accountKey, {
+            accountKey,
             gameUid,
             nickName: metadata?.nickName || getHistoryNickName(h), // 优先使用昵称，否则使用 UID
             channelName: metadata?.channelName || null,
@@ -290,22 +294,24 @@ const useHistoryStore = create((set, get) => ({
             recordCount: 0
           });
         } else if (metadata) {
-          accountMap.set(gameUid, {
-            ...accountMap.get(gameUid),
-            nickName: metadata.nickName || accountMap.get(gameUid).nickName,
-            channelName: metadata.channelName || accountMap.get(gameUid).channelName,
-            hgUid: metadata.hgUid || accountMap.get(gameUid).hgUid,
-            channelMasterId: metadata.channelMasterId || accountMap.get(gameUid).channelMasterId,
-            serverId: metadata.serverId || accountMap.get(gameUid).serverId,
-            region: metadata.region || accountMap.get(gameUid).region,
-            isOfficial: metadata.isOfficial ?? accountMap.get(gameUid).isOfficial,
-            serverTag: metadata.serverTag || accountMap.get(gameUid).serverTag,
-            lastImportedAt: metadata.lastImportedAt || metadata.lastImportedRecordAt || accountMap.get(gameUid).lastImportedAt,
-            lastImportedRecordAt: metadata.lastImportedRecordAt || accountMap.get(gameUid).lastImportedRecordAt,
-            lastImportSource: metadata.lastImportSource || accountMap.get(gameUid).lastImportSource
+          const existing = accountMap.get(accountKey);
+          accountMap.set(accountKey, {
+            ...existing,
+            accountKey,
+            nickName: metadata.nickName || existing.nickName,
+            channelName: metadata.channelName || existing.channelName,
+            hgUid: metadata.hgUid || existing.hgUid,
+            channelMasterId: metadata.channelMasterId || existing.channelMasterId,
+            serverId: metadata.serverId || existing.serverId,
+            region: metadata.region || existing.region,
+            isOfficial: metadata.isOfficial ?? existing.isOfficial,
+            serverTag: metadata.serverTag || existing.serverTag,
+            lastImportedAt: metadata.lastImportedAt || metadata.lastImportedRecordAt || existing.lastImportedAt,
+            lastImportedRecordAt: metadata.lastImportedRecordAt || existing.lastImportedRecordAt,
+            lastImportSource: metadata.lastImportSource || existing.lastImportSource
           });
         }
-        const accountEntry = accountMap.get(gameUid);
+        const accountEntry = accountMap.get(accountKey);
         accountEntry.recordCount++;
 
         const latestRecordTimestamp = getHistoryRecordTimestampMs(h);
@@ -331,7 +337,7 @@ const useHistoryStore = create((set, get) => ({
   getHistoryByGameAccount: (gameUid) => {
     const { history } = get();
     if (!gameUid) return history;
-    return history.filter(h => getHistoryGameUid(h) === gameUid);
+    return history.filter(h => isGameAccountSelectionMatch(h, gameUid));
   },
 
   /**
@@ -343,16 +349,18 @@ const useHistoryStore = create((set, get) => ({
     const statsMap = new Map();
 
     history.forEach(h => {
-      const uid = getHistoryGameUid(h) || 'unknown';
-      if (!statsMap.has(uid)) {
-        statsMap.set(uid, {
-          gameUid: uid,
+      const gameUid = getHistoryGameUid(h) || 'unknown';
+      const accountKey = getHistoryRecordAccountKey(h) || gameUid;
+      if (!statsMap.has(accountKey)) {
+        statsMap.set(accountKey, {
+          accountKey,
+          gameUid,
           total: 0,
           sixStars: 0,
           fiveStars: 0
         });
       }
-      const stats = statsMap.get(uid);
+      const stats = statsMap.get(accountKey);
       stats.total++;
       if (h.rarity === 6) stats.sixStars++;
       if (h.rarity === 5) stats.fiveStars++;

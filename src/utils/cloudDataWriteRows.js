@@ -1,5 +1,9 @@
 import { clampHistoryPity, splitHistoryUpsertGroups } from './historyRecordUtils.js';
 import { classifyCharacterIdSource } from './canonicalEntityUtils.js';
+import {
+  normalizeGameAccountRegion,
+  normalizeGameAccountServerId,
+} from './gameAccountMetadata.js';
 
 function resolveOwnerId(explicitUserId, currentUserId) {
   return explicitUserId || currentUserId || null;
@@ -32,29 +36,6 @@ function normalizeRecordId(record) {
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : String(value || '').trim();
-}
-
-function normalizeRegionForStorage(record) {
-  const rawRegion = normalizeText(record.region || record.serverRegion);
-  const serverId = normalizeText(record.serverId || record.server_id);
-  const signal = `${rawRegion} ${serverId}`.toLowerCase();
-
-  if (
-    serverId === '1'
-    || /(^|[^a-z])(cn|china|mainland)([^a-z]|$)|国服|官服|b服|大陆/.test(signal)
-  ) {
-    return 'cn';
-  }
-
-  if (
-    serverId === '2'
-    || serverId === '3'
-    || /intl|international|global|asia|sea|jp|kr|tw|hk|mo|sg|亚服|亚洲|(^|[^a-z])(eu|na|us)([^a-z]|$)|america|欧\/美|欧美|欧服|美服|国际/.test(signal)
-  ) {
-    return 'intl';
-  }
-
-  return rawRegion || null;
 }
 
 function normalizeCharacterIdForStorage(record, resolvedCharacterId) {
@@ -99,6 +80,8 @@ export function serializeHistoryForUpsert(
   resolvedPoolId = null,
   resolvedCharacterId = null
 ) {
+  const serverId = normalizeGameAccountServerId(record);
+
   return {
     user_id: resolveOwnerId(record.user_id, currentUserId),
     record_id: normalizeRecordId(record),
@@ -116,8 +99,8 @@ export function serializeHistoryForUpsert(
     is_free: Boolean(record.isFree || record.is_free),
     game_uid: record.gameUid || record.game_uid || null,
     nick_name: record.nickName || record.nick_name || null,
-    server_id: record.serverId || record.server_id || null,
-    region: normalizeRegionForStorage(record),
+    server_id: serverId,
+    region: normalizeGameAccountRegion({ ...record, serverId }),
     timestamp: normalizeTimestamp(record.timestamp),
     updated_at: new Date().toISOString(),
   };
@@ -126,7 +109,7 @@ export function serializeHistoryForUpsert(
 export function detectMissingHistoryOptionalColumn(error) {
   const message = String(error?.message || '');
 
-  for (const column of ['character_id', 'server_id', 'region']) {
+  for (const column of ['character_id', 'server_id', 'server_scope', 'region']) {
     if (
       message.includes(`history.${column} does not exist`)
       || message.includes(`Could not find the '${column}' column`)
@@ -148,17 +131,33 @@ export function omitHistoryColumns(rows, omittedColumns) {
   });
 }
 
+function isMissingConflictTargetError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return error?.code === '42P10'
+    || message.includes('no unique or exclusion constraint matching the on conflict specification')
+    || message.includes('there is no unique or exclusion constraint matching the on conflict specification');
+}
+
 export async function upsertHistoryRowsWithOptionalColumnFallback(rows, executeUpsert) {
-  const { compositeKeyRecords, legacyRecords } = splitHistoryUpsertGroups(rows);
+  const { serverScopedCompositeKeyRecords, compositeKeyRecords, legacyRecords } = splitHistoryUpsertGroups(rows);
+  const unifiedCompositeKeyRecords = [
+    ...serverScopedCompositeKeyRecords,
+    ...compositeKeyRecords,
+  ];
   const upsertGroups = [
-    { rows: compositeKeyRecords, onConflict: 'user_id,game_uid,pool_id,seq_id' },
+    {
+      rows: unifiedCompositeKeyRecords,
+      onConflict: 'user_id,game_uid,server_scope,pool_id,seq_id',
+      serverScopeKey: true,
+    },
     { rows: legacyRecords, onConflict: 'user_id,record_id' },
   ];
-  const supportedOptionalColumns = new Set(['character_id', 'server_id', 'region']);
+  const supportedOptionalColumns = new Set(['character_id', 'server_id', 'server_scope', 'region']);
 
   for (const group of upsertGroups) {
     if (group.rows.length === 0) continue;
 
+    let onConflict = group.onConflict;
     let pendingRows = omitHistoryColumns(
       group.rows,
       ['character_id', 'server_id', 'region'].filter(column => !supportedOptionalColumns.has(column))
@@ -166,18 +165,34 @@ export async function upsertHistoryRowsWithOptionalColumnFallback(rows, executeU
 
     while (true) {
       // eslint-disable-next-line no-await-in-loop -- optional-column fallback mutates rows between sequential retries
-      const { error } = await executeUpsert(pendingRows, group.onConflict);
+      const { error } = await executeUpsert(pendingRows, onConflict);
 
       if (!error) {
         break;
       }
 
       const missingColumn = detectMissingHistoryOptionalColumn(error);
+      if (!missingColumn && group.serverScopeKey && isMissingConflictTargetError(error)) {
+        if (onConflict === 'user_id,game_uid,server_scope,pool_id,seq_id') {
+          onConflict = 'user_id,game_uid,pool_id,seq_id';
+          continue;
+        }
+
+        if (onConflict === 'user_id,game_uid,pool_id,seq_id') {
+          onConflict = 'user_id,record_id';
+          continue;
+        }
+      }
+
       if (!missingColumn || !supportedOptionalColumns.has(missingColumn)) {
         throw error;
       }
 
       supportedOptionalColumns.delete(missingColumn);
+      if (group.serverScopeKey && (missingColumn === 'server_id' || missingColumn === 'server_scope')) {
+        onConflict = 'user_id,game_uid,pool_id,seq_id';
+      }
+
       pendingRows = omitHistoryColumns(group.rows, ['character_id', 'server_id', 'region'].filter(
         column => !supportedOptionalColumns.has(column)
       ));

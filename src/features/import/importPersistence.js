@@ -1,6 +1,12 @@
 import { normalizeIsStandard } from '../../utils/poolUtils.js';
 import { clampHistoryPity } from '../../utils/historyRecordUtils.js';
 import { classifyCharacterIdSource } from '../../utils/canonicalEntityUtils.js';
+import {
+  buildGameAccountKey,
+  buildHistorySeqDedupeKeys,
+  normalizeGameAccountRegion,
+  normalizeGameAccountServerId,
+} from '../../utils/gameAccountMetadata.js';
 
 function resolveAliasValue(aliasMap, inputValue) {
   const normalized = typeof inputValue === 'string' ? inputValue.trim() : String(inputValue || '').trim();
@@ -100,6 +106,16 @@ function buildImportedHistoryRecords({
   poolUpCharacterMap,
   poolTypeMap,
 }) {
+  const gameUid = userInfo?.gameUid || userInfo?.hgUid || null;
+  const resolvedServerId = normalizeGameAccountServerId(userInfo) || null;
+  const resolvedRegion = normalizeGameAccountRegion({ ...userInfo, serverId: resolvedServerId }) || null;
+  const accountKey = buildGameAccountKey({
+    ...userInfo,
+    gameUid,
+    serverId: resolvedServerId,
+    region: resolvedRegion,
+  });
+
   return records.map((record, index) => {
     const rawPoolId = record.pool_id || record.poolId;
     const rawCharacterId = record.character_id || record.item_id || record.charId || record.weaponId;
@@ -118,9 +134,6 @@ function buildImportedHistoryRecords({
     const upCharacter = poolUpCharacterMap.get(rawPoolId) || poolUpCharacterMap.get(canonicalPoolId);
     const isStandard = normalizeIsStandard(record, poolType, upCharacter);
 
-    const resolvedServerId = String(userInfo?.serverId || '1');
-    const resolvedRegion = resolvedServerId === '1' ? 'cn' : 'intl';
-
     return {
       id: numericId,
       poolId: canonicalPoolId,
@@ -135,7 +148,9 @@ function buildImportedHistoryRecords({
       pity: clampHistoryPity(record.pity),
       isNew: record.isNew || false,
       isFree: record.isFree || false,
-      gameUid: userInfo?.gameUid || userInfo?.hgUid || null,
+      accountKey,
+      account_key: accountKey,
+      gameUid,
       hgUid: userInfo?.hgUid || null,
       hg_uid: userInfo?.hgUid || null,
       nickName: userInfo?.nickName || null,
@@ -163,10 +178,20 @@ export async function prepareOfficialImportPersistenceData({
 }) {
   const resolvedPoolAliasMap = poolAliasMap || poolAliases || {};
   const resolvedCharacterAliasMap = characterAliasMap || characterAliases || {};
+  const currentGameUid = userInfo?.gameUid || userInfo?.hgUid || null;
+  const currentServerId = normalizeGameAccountServerId(userInfo) || null;
+  const currentRegion = normalizeGameAccountRegion({ ...userInfo, serverId: currentServerId }) || null;
+  const currentAccountKey = buildGameAccountKey({
+    ...userInfo,
+    gameUid: currentGameUid,
+    serverId: currentServerId,
+    region: currentRegion,
+  });
 
   if (!Array.isArray(records) || records.length === 0) {
     return {
-      currentGameUid: userInfo?.gameUid || userInfo?.hgUid || null,
+      currentGameUid,
+      currentAccountKey,
       poolEntries: [],
       historyRecords: [],
     };
@@ -175,7 +200,8 @@ export async function prepareOfficialImportPersistenceData({
   const { poolUpCharacterMap, poolTypeMap } = buildPoolLookups(pools);
 
   return {
-    currentGameUid: userInfo?.gameUid || userInfo?.hgUid || null,
+    currentGameUid,
+    currentAccountKey,
     poolEntries: buildCanonicalPoolEntries(records, resolvedPoolAliasMap),
     historyRecords: buildImportedHistoryRecords({
       records,
@@ -194,8 +220,8 @@ export function filterImportedHistoryRecords(historyRecords, existingSeqIds) {
       return true;
     }
 
-    const compositeKey = `${record.gameUid || 'unknown'}:${record.poolId || 'unknown'}:${record.seqId}`;
-    return !existingSeqIds.has(compositeKey);
+    const compositeKeys = buildHistorySeqDedupeKeys(record);
+    return !compositeKeys.some(key => existingSeqIds.has(key));
   });
 
   return {

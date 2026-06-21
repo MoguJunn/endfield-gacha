@@ -17,7 +17,10 @@ import { getMobilePathForTab } from '../../constants/appRoutes.js';
 import { useI18n } from '../../i18n/index.js';
 import MobileAuthRequiredView from '../components/MobileAuthRequiredView.jsx';
 import { localizeHistoryItemName, localizePoolName } from '../../utils/gameDataI18n.js';
-import { localizeGameAccountServerTag } from '../../utils/gameAccountMetadata.js';
+import {
+  isGameAccountSelectionMatch,
+  localizeGameAccountServerTag,
+} from '../../utils/gameAccountMetadata.js';
 import {
   filterHistoryForEffectiveGameUid,
   resolveEffectiveGameUid
@@ -135,7 +138,7 @@ function MobileOverviewView() {
 
   const currentAccount = useMemo(() => {
     if (effectiveGameUid) {
-      return accounts.find((account) => account.gameUid === effectiveGameUid) || null;
+      return accounts.find((account) => isGameAccountSelectionMatch(account, effectiveGameUid)) || null;
     }
 
     return accounts[0] || null;

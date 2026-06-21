@@ -4,13 +4,10 @@ import {
   STANDARD_POOL_RULES,
   WEAPON_POOL_RULES
 } from '../../constants/index.js';
+import { isGameAccountSelectionMatch } from '../../utils/gameAccountMetadata.js';
 
 function getHistoryPoolId(item) {
   return item?.poolId || item?.pool_id || null;
-}
-
-function getHistoryGameUid(item) {
-  return item?.game_uid || item?.gameUid || null;
 }
 
 function getHistorySeqId(item) {
@@ -102,7 +99,7 @@ function matchesSelectedGameAccount(item, currentGameUid) {
     return true;
   }
 
-  return getHistoryGameUid(item) === currentGameUid;
+  return isGameAccountSelectionMatch(item, currentGameUid);
 }
 
 function matchesCurrentUser(item, currentUserId) {

@@ -17,7 +17,11 @@ import { isPoolGroupId } from '../../stores/usePoolStore';
 import { getDesktopPathForTab } from '../../constants/appRoutes';
 import { useI18n } from '../../i18n/index.js';
 import { localizePoolName } from '../../utils/gameDataI18n.js';
-import { localizeGameAccountServerTag } from '../../utils/gameAccountMetadata.js';
+import {
+  getGameAccountSelectionValue,
+  isGameAccountSelectionMatch,
+  localizeGameAccountServerTag,
+} from '../../utils/gameAccountMetadata.js';
 import { filterHistoryForEffectiveGameUid, resolveEffectiveGameUid } from '../../utils/accountScopeUtils.js';
 
 function getFreshnessToneClasses(tone) {
@@ -155,7 +159,7 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
 
   const currentAccount = useMemo(() => {
     if (effectiveGameUid) {
-      return gameAccounts.find((account) => account.gameUid === effectiveGameUid) || null;
+      return gameAccounts.find((account) => isGameAccountSelectionMatch(account, effectiveGameUid)) || null;
     }
 
     if (gameAccounts.length === 1) {
@@ -325,15 +329,19 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
                   className="absolute top-full left-0 mt-1 w-72 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-xl z-20"
                   style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%)' }}
                 >
-                  {gameAccounts.map(account => (
+                  {gameAccounts.map(account => {
+                    const accountValue = getGameAccountSelectionValue(account);
+                    const isSelectedAccount = isGameAccountSelectionMatch(account, effectiveGameUid);
+
+                    return (
                     <button
-                      key={account.gameUid}
+                      key={accountValue || account.gameUid}
                       onClick={() => {
-                        switchGameAccount(account.gameUid);
+                        switchGameAccount(accountValue || account.gameUid);
                         setShowAccountDropdown(false);
                       }}
                       className={`w-full px-3 py-2 text-left text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors ${
-                        effectiveGameUid === account.gameUid ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400' : 'text-slate-600 dark:text-zinc-400'
+                        isSelectedAccount ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400' : 'text-slate-600 dark:text-zinc-400'
                       }`}
                     >
                       <div className="flex min-w-0 items-center gap-2">
@@ -356,7 +364,8 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
                         })}
                       </div>
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

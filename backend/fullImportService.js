@@ -27,6 +27,7 @@ import {
   reconcileOfficialPoolIds,
 } from './lib/officialIdReconciliation.js';
 import { classifyCharacterIdSource } from './lib/canonicalEntityUtils.js';
+import { buildOfficialImportRecordKey } from './lib/officialImportIncremental.js';
 
 // Supabase Admin 客户端（需要 SUPABASE_SECRET_KEY；旧 service_role_key 仍兼容）
 let supabaseAdmin = null;
@@ -429,18 +430,23 @@ function assignBatchIds(records) {
 }
 
 function splitHistoryUpsertGroups(records) {
+  const serverScopedCompositeKeyRecords = [];
   const compositeKeyRecords = [];
   const legacyRecords = [];
 
   records.forEach(record => {
     if (record.game_uid && record.pool_id && record.seq_id) {
-      compositeKeyRecords.push(record);
+      if (record.server_id) {
+        serverScopedCompositeKeyRecords.push(record);
+      } else {
+        compositeKeyRecords.push(record);
+      }
     } else {
       legacyRecords.push(record);
     }
   });
 
-  return { compositeKeyRecords, legacyRecords };
+  return { serverScopedCompositeKeyRecords, compositeKeyRecords, legacyRecords };
 }
 
 const HISTORY_OPTIONAL_COLUMNS = ['character_id', 'server_id', 'region'];
@@ -458,6 +464,13 @@ function detectMissingHistoryOptionalColumn(error) {
   }
 
   return null;
+}
+
+function isMissingHistoryConflictTargetError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return error?.code === '42P10'
+    || message.includes('no unique or exclusion constraint matching the on conflict specification')
+    || message.includes('there is no unique or exclusion constraint matching the on conflict specification');
 }
 
 function omitHistoryColumns(rows, omittedColumns) {
@@ -484,14 +497,27 @@ async function upsertHistoryGroupsWithOptionalColumnFallback(supabase, upsertGro
       group.rows,
       HISTORY_OPTIONAL_COLUMNS.filter(column => !supportedOptionalColumns.has(column))
     );
+    let onConflict = group.onConflict;
 
     while (true) {
       const result = await supabase
         .from('history')
-        .upsert(pendingRows, { onConflict: group.onConflict });
+        .upsert(pendingRows, { onConflict });
 
       if (!result.error) {
         break;
+      }
+
+      if (group.serverScopeKey && isMissingHistoryConflictTargetError(result.error)) {
+        if (onConflict === 'user_id,game_uid,server_scope,pool_id,seq_id') {
+          onConflict = 'user_id,game_uid,pool_id,seq_id';
+          continue;
+        }
+
+        if (onConflict === 'user_id,game_uid,pool_id,seq_id') {
+          onConflict = 'user_id,record_id';
+          continue;
+        }
       }
 
       const missingColumn = detectMissingHistoryOptionalColumn(result.error);
@@ -603,19 +629,25 @@ function calculatePity(records) {
 /**
  * 获取已存在的 seq_id（用于去重，带分页以突破 Supabase 1000 行限制）
  */
-async function getExistingSeqIds(userId, gameUid) {
+async function getExistingSeqIds(userId, gameUid, serverId = '') {
   const supabase = getSupabaseAdmin();
   const PAGE_SIZE = 1000;
   const allData = [];
   let from = 0;
+  const normalizedServerId = normalizeString(serverId, 80);
 
   while (true) {
-    const { data, error } = await supabase
+    let query = supabase
       .from('history')
-      .select('seq_id, pool_id')
+      .select('seq_id, pool_id, server_id')
       .eq('user_id', userId)
-      .eq('game_uid', gameUid)
-      .range(from, from + PAGE_SIZE - 1);
+      .eq('game_uid', gameUid);
+
+    if (normalizedServerId) {
+      query = query.eq('server_id', normalizedServerId);
+    }
+
+    const { data, error } = await query.range(from, from + PAGE_SIZE - 1);
 
     if (error) {
       console.error('[FullImportService] Error fetching existing seq_ids:', error);
@@ -630,8 +662,13 @@ async function getExistingSeqIds(userId, gameUid) {
 
   console.log(`[FullImportService] 已有记录: ${allData.length} 条`);
 
-  // 使用 game_uid:pool_id:seq_id 组合作为唯一标识
-  return new Set(allData.map(r => `${gameUid}:${r.pool_id}:${r.seq_id}`));
+  // 使用 game_uid:server_id:pool_id:seq_id 组合作为唯一标识，避免不同区服互相跳过。
+  return new Set(allData.map(r => buildOfficialImportRecordKey({
+    gameUid,
+    serverId: r.server_id || normalizedServerId,
+    poolId: r.pool_id,
+    seqId: r.seq_id,
+  })).filter(Boolean));
 }
 
 /**
@@ -731,9 +768,13 @@ async function saveHistoryToServer(records, userId) {
           user_id: userId
         }));
 
-        const { compositeKeyRecords, legacyRecords } = splitHistoryUpsertGroups(batchWithUser);
+        const { serverScopedCompositeKeyRecords, compositeKeyRecords, legacyRecords } = splitHistoryUpsertGroups(batchWithUser);
         const upsertGroups = [
-          { rows: compositeKeyRecords, onConflict: 'user_id,game_uid,pool_id,seq_id' },
+          {
+            rows: [...serverScopedCompositeKeyRecords, ...compositeKeyRecords],
+            onConflict: 'user_id,game_uid,server_scope,pool_id,seq_id',
+            serverScopeKey: true,
+          },
           { rows: legacyRecords, onConflict: 'user_id,record_id' }
         ];
 
@@ -754,7 +795,11 @@ async function saveHistoryToServer(records, userId) {
 
             const fixedGroups = splitHistoryUpsertGroups(fixedBatch);
             const retryGroups = [
-              { rows: fixedGroups.compositeKeyRecords, onConflict: 'user_id,game_uid,pool_id,seq_id' },
+              {
+                rows: [...fixedGroups.serverScopedCompositeKeyRecords, ...fixedGroups.compositeKeyRecords],
+                onConflict: 'user_id,game_uid,server_scope,pool_id,seq_id',
+                serverScopeKey: true,
+              },
               { rows: fixedGroups.legacyRecords, onConflict: 'user_id,record_id' }
             ];
 
@@ -990,7 +1035,12 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
       const poolId = resolveAliasValue(poolAliasMap, rawPoolId);
       const poolHash = simpleStringHash(poolId || 'unknown');
       const normalizedPoolType = getPoolTypeFromId(poolId, type, poolType);
-      const uniqueKey = seqId ? `${gameUid}:${poolId}:${seqId}` : null;
+      const uniqueKey = buildOfficialImportRecordKey({
+        gameUid,
+        serverId: resolvedServerId,
+        poolId,
+        seqId,
+      });
       const rawCharacterId = record.charId || record.weaponId || record.character_id || record.item_id || null;
       const characterId = normalizeResolvedCharacterIdForStorage(
         rawCharacterId,
@@ -1173,7 +1223,7 @@ export async function executeFullImport({
     let existingSeqIds = null;
     if (normalizedImportMode === FULL_IMPORT_MODES.INCREMENTAL) {
       updateProgress({ progress: 35, message: '正在准备增量导入游标...' });
-      existingSeqIds = await getExistingSeqIds(userId, account.gameUid);
+      existingSeqIds = await getExistingSeqIds(userId, account.gameUid, account.serverId || (source === 'intl' ? '2' : '1'));
     }
 
     // 5. 获取抽卡记录
@@ -1223,7 +1273,7 @@ export async function executeFullImport({
 
     // 7. 获取已存在的记录（用于去重）
     updateProgress({ progress: 75, message: '正在检查重复记录...' });
-    existingSeqIds = await getExistingSeqIds(userId, account.gameUid);
+    existingSeqIds = await getExistingSeqIds(userId, account.gameUid, account.serverId || (source === 'intl' ? '2' : '1'));
 
     // 8. 处理记录
     updateProgress({ progress: 80, message: '正在处理数据...' });

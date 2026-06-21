@@ -19,6 +19,14 @@ function createCompatAccessToken(payload, secret = 'test-jwt-secret') {
   return `${unsigned}.${signature}`;
 }
 
+function createHistoryRangeQuery(rangeHandler) {
+  const query = {
+    eq: vi.fn(() => query),
+    range: rangeHandler,
+  };
+  return query;
+}
+
 describe('verifySupabaseAccessToken', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -369,17 +377,7 @@ describe('executeFullImport import mode metadata', () => {
         if (tableName === 'history') {
           return {
             select() {
-              return {
-                eq() {
-                  return {
-                    eq() {
-                      return {
-                        range: async () => ({ data: [], error: null }),
-                      };
-                    },
-                  };
-                },
-              };
+              return createHistoryRangeQuery(async () => ({ data: [], error: null }));
             },
             async upsert(rows) {
               savedHistoryRows = rows;
@@ -590,17 +588,7 @@ describe('executeFullImport import mode metadata', () => {
         if (tableName === 'history') {
           return {
             select() {
-              return {
-                eq() {
-                  return {
-                    eq() {
-                      return {
-                        range: async () => ({ data: [], error: null }),
-                      };
-                    },
-                  };
-                },
-              };
+              return createHistoryRangeQuery(async () => ({ data: [], error: null }));
             },
             async upsert(rows) {
               historyUpsertAttempts += 1;
@@ -747,6 +735,211 @@ describe('executeFullImport import mode metadata', () => {
     ]);
   });
 
+  it('falls back to record id when history conflict constraints are missing', async () => {
+    const operations = [];
+    const insertedPoolIds = new Set();
+    let historyUpsertAttempts = 0;
+    const rpc = vi.fn(async () => ({
+      data: {
+        refreshedPools: 1,
+        refreshedTrendRows: 3,
+        updatedAt: '2026-06-05T12:00:00.000Z',
+      },
+      error: null,
+    }));
+    const missingConflictTarget = {
+      code: '42P10',
+      message: 'there is no unique or exclusion constraint matching the ON CONFLICT specification',
+    };
+
+    mockSupabaseClient = {
+      auth: {
+        admin: {
+          getUserById: vi.fn(async () => ({
+            data: { user: { id: '00000000-0000-0000-0000-000000000001' } },
+            error: null,
+          })),
+        },
+      },
+      rpc,
+      __operations: operations,
+      from(tableName) {
+        if (tableName === 'pool_id_aliases' || tableName === 'character_id_aliases') {
+          return {
+            select() {
+              return {
+                in: async () => ({ data: [], error: null }),
+              };
+            },
+            async upsert(rows) {
+              operations.push({ tableName, action: 'upsert', count: rows.length });
+              return { error: null };
+            },
+          };
+        }
+
+        if (tableName === 'pools') {
+          return {
+            select() {
+              return {
+                in: async (_column, values) => ({
+                  data: (values || [])
+                    .filter((poolId) => insertedPoolIds.has(String(poolId)))
+                    .map((poolId) => ({ pool_id: String(poolId) })),
+                  error: null,
+                }),
+              };
+            },
+            async upsert(rows) {
+              operations.push({ tableName, action: 'upsert', count: rows.length });
+              (rows || []).forEach((row) => insertedPoolIds.add(String(row.pool_id)));
+              return { error: null };
+            },
+          };
+        }
+
+        if (tableName === 'history') {
+          return {
+            select() {
+              return createHistoryRangeQuery(async () => ({ data: [], error: null }));
+            },
+            async upsert(rows, options = {}) {
+              historyUpsertAttempts += 1;
+              operations.push({
+                tableName,
+                action: 'upsert',
+                count: rows.length,
+                onConflict: options.onConflict,
+              });
+              if (historyUpsertAttempts <= 2) {
+                return { error: missingConflictTarget };
+              }
+              return { error: null };
+            },
+          };
+        }
+
+        if (tableName === 'characters') {
+          return {
+            select() {
+              return {
+                limit: async () => ({ data: [], error: null }),
+              };
+            },
+            async upsert(rows) {
+              operations.push({ tableName, action: 'upsert', count: rows.length });
+              return { error: null };
+            },
+          };
+        }
+
+        if (tableName === 'profiles') {
+          return {
+            select() {
+              return {
+                eq() {
+                  return {
+                    maybeSingle: async () => ({
+                      data: { id: '00000000-0000-0000-0000-000000000001' },
+                      error: null,
+                    }),
+                  };
+                },
+              };
+            },
+          };
+        }
+
+        throw new Error(`Unexpected table access: ${tableName}`);
+      },
+    };
+
+    const { executeFullImport, initSupabaseAdmin } = await import('../../backend/fullImportService.js');
+
+    initSupabaseAdmin('https://example.supabase.co', 'service-role-key');
+
+    const result = await executeFullImport({
+      token: 'AbCdEfGhIjKlMnOpQrStUvWx',
+      accountIndex: 0,
+      userId: '00000000-0000-0000-0000-000000000001',
+      updateProgress: vi.fn(),
+      authChainFunctions: {
+        grantAppToken: vi.fn(async () => ({
+          success: true,
+          data: { token: 'app-token' },
+        })),
+        fetchBindingList: vi.fn(async () => ({
+          success: true,
+          data: {
+            accounts: [{
+              uid: 'hg-uid',
+              gameUid: '10000001',
+              nickName: '测试账号',
+              serverId: '1',
+            }],
+          },
+        })),
+        fetchU8TokenByUid: vi.fn(async () => ({
+          success: true,
+          data: { token: 'u8-token' },
+        })),
+        fetchAllRecordsConcurrent: vi.fn(async () => ({
+          success: true,
+          data: {
+            totalRecords: 1,
+            partial: [],
+            failed: [],
+            results: [{
+              type: 'char',
+              poolType: 'E_CharacterGachaPoolType_Special',
+              currentUpCharacter: '测试角色',
+              records: [{
+                poolId: 'special_1_2_1',
+                poolName: '测试限定池',
+                seqId: '1',
+                charId: 'char_test',
+                charName: '测试角色',
+                rarity: 6,
+                gachaTs: '1767225600000',
+                isFree: false,
+                isNew: true,
+              }],
+            }],
+          },
+        })),
+      },
+      source: 'cn',
+      importMode: 'full',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      newRecords: 1,
+      savedRecords: 1,
+    });
+    expect(historyUpsertAttempts).toBe(3);
+    expect(operations.filter(operation => operation.tableName === 'history')).toEqual([
+      {
+        tableName: 'history',
+        action: 'upsert',
+        count: 1,
+        onConflict: 'user_id,game_uid,server_scope,pool_id,seq_id',
+      },
+      {
+        tableName: 'history',
+        action: 'upsert',
+        count: 1,
+        onConflict: 'user_id,game_uid,pool_id,seq_id',
+      },
+      {
+        tableName: 'history',
+        action: 'upsert',
+        count: 1,
+        onConflict: 'user_id,record_id',
+      },
+    ]);
+  });
+
   it('passes existing official record keys to incremental fetch and reuses them for dedupe', async () => {
     const operations = [];
     const insertedPoolIds = new Set();
@@ -809,23 +1002,13 @@ describe('executeFullImport import mode metadata', () => {
         if (tableName === 'history') {
           return {
             select() {
-              return {
-                eq() {
-                  return {
-                    eq() {
-                      return {
-                        range: async () => {
-                          historySelectCalls++;
-                          return {
-                            data: [{ pool_id: 'special_1_2_1', seq_id: '1' }],
-                            error: null,
-                          };
-                        },
-                      };
-                    },
-                  };
-                },
-              };
+              return createHistoryRangeQuery(async () => {
+                historySelectCalls++;
+                return {
+                  data: [{ pool_id: 'special_1_2_1', seq_id: '1', server_id: '1' }],
+                  error: null,
+                };
+              });
             },
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });
@@ -960,7 +1143,7 @@ describe('executeFullImport import mode metadata', () => {
       importMode: 'incremental',
     });
     expect([...fetchCall[4].existingRecordKeys]).toEqual([
-      '10000001:special_1_2_1:1',
+      '10000001:server:1:special_1_2_1:1',
     ]);
     expect(historySelectCalls).toBe(2);
     expect(result.success).toBe(true);
@@ -1041,20 +1224,10 @@ describe('executeFullImport import mode metadata', () => {
         if (tableName === 'history') {
           return {
             select() {
-              return {
-                eq() {
-                  return {
-                    eq() {
-                      return {
-                        range: async () => ({
-                          data: [{ pool_id: 'special_1_2_1', seq_id: '1' }],
-                          error: null,
-                        }),
-                      };
-                    },
-                  };
-                },
-              };
+              return createHistoryRangeQuery(async () => ({
+                data: [{ pool_id: 'special_1_2_1', seq_id: '1', server_id: '1' }],
+                error: null,
+              }));
             },
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });
@@ -1218,17 +1391,7 @@ describe('executeFullImport import mode metadata', () => {
         if (tableName === 'history') {
           return {
             select() {
-              return {
-                eq() {
-                  return {
-                    eq() {
-                      return {
-                        range: async () => ({ data: [], error: null }),
-                      };
-                    },
-                  };
-                },
-              };
+              return createHistoryRangeQuery(async () => ({ data: [], error: null }));
             },
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });
@@ -1342,8 +1505,8 @@ describe('official import incremental guards', () => {
     } = await import('../../backend/lib/officialImportIncremental.js');
 
     const existingRecordKeys = new Set([
-      '10000001:special_1_2_1:10',
-      '10000001:special_1_2_1:9',
+      '10000001:server:1:special_1_2_1:10',
+      '10000001:server:1:special_1_2_1:9',
     ]);
     const existingSixStarPage = [{
       poolId: 'special_1_2_1',
@@ -1360,6 +1523,7 @@ describe('official import incremental guards', () => {
     expect(analyzeIncrementalPage({
       records: existingSixStarPage,
       gameUid: '10000001',
+      serverId: '1',
       existingRecordKeys,
       getPoolId: (record) => record.poolId,
     })).toMatchObject({
@@ -1367,6 +1531,18 @@ describe('official import incremental guards', () => {
       existing: 2,
       missingKey: 0,
       allExisting: true,
+    });
+    expect(analyzeIncrementalPage({
+      records: existingSixStarPage,
+      gameUid: '10000001',
+      serverId: '2',
+      existingRecordKeys,
+      getPoolId: (record) => record.poolId,
+    })).toMatchObject({
+      checked: 2,
+      existing: 0,
+      missingKey: 0,
+      allExisting: false,
     });
     expect(hasSufficientIncrementalPityContext(existingSixStarPage)).toBe(true);
   });

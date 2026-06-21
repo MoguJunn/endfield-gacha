@@ -82,4 +82,42 @@ describe('cloudDataWriteRows', () => {
     expect(executeUpsert.mock.calls[2][0][0]).not.toHaveProperty('region');
     expect(executeUpsert.mock.calls[2][1]).toBe('user_id,game_uid,pool_id,seq_id');
   });
+
+  it('falls back to record id when server-scoped conflict targets are unavailable', async () => {
+    const rows = [{
+      user_id: 'user-1',
+      record_id: 1001,
+      pool_id: 'special_1_2_1',
+      rarity: 6,
+      character_id: 'char_1',
+      server_id: '2',
+      region: 'intl',
+      game_uid: '20000001',
+      seq_id: '1',
+    }];
+    const missingConflictTarget = {
+      code: '42P10',
+      message: 'there is no unique or exclusion constraint matching the ON CONFLICT specification',
+    };
+    const executeUpsert = vi.fn(async (pendingRows) => {
+      if (executeUpsert.mock.calls.length <= 2) {
+        return { error: missingConflictTarget };
+      }
+      return { data: pendingRows, error: null };
+    });
+
+    await upsertHistoryRowsWithOptionalColumnFallback(rows, executeUpsert);
+
+    expect(executeUpsert).toHaveBeenCalledTimes(3);
+    expect(executeUpsert.mock.calls[0][1]).toBe('user_id,game_uid,server_scope,pool_id,seq_id');
+    expect(executeUpsert.mock.calls[1][1]).toBe('user_id,game_uid,pool_id,seq_id');
+    expect(executeUpsert.mock.calls[2][1]).toBe('user_id,record_id');
+    expect(executeUpsert.mock.calls[2][0][0]).toMatchObject({
+      record_id: 1001,
+      server_id: '2',
+      region: 'intl',
+      game_uid: '20000001',
+      seq_id: '1',
+    });
+  });
 });

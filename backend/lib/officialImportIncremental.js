@@ -8,13 +8,18 @@ export function normalizeRecordSeqId(record) {
   return String(value);
 }
 
-export function buildOfficialImportRecordKey({ gameUid, poolId, seqId }) {
+export function buildOfficialImportRecordKey({ gameUid, serverId, poolId, seqId }) {
   const normalizedGameUid = String(gameUid || '').trim();
+  const normalizedServerId = String(serverId || '').trim();
   const normalizedPoolId = String(poolId || '').trim();
   const normalizedSeqId = seqId === null || seqId === undefined ? '' : String(seqId).trim();
 
   if (!normalizedGameUid || !normalizedPoolId || !normalizedSeqId) {
     return null;
+  }
+
+  if (normalizedServerId) {
+    return `${normalizedGameUid}:server:${normalizedServerId}:${normalizedPoolId}:${normalizedSeqId}`;
   }
 
   return `${normalizedGameUid}:${normalizedPoolId}:${normalizedSeqId}`;
@@ -23,6 +28,7 @@ export function buildOfficialImportRecordKey({ gameUid, poolId, seqId }) {
 export function analyzeIncrementalPage({
   records,
   gameUid,
+  serverId,
   existingRecordKeys,
   getPoolId
 } = {}) {
@@ -38,6 +44,7 @@ export function analyzeIncrementalPage({
       : (record?.poolId || record?.pool_id);
     const key = buildOfficialImportRecordKey({
       gameUid,
+      serverId,
       poolId,
       seqId: normalizeRecordSeqId(record)
     });
@@ -89,6 +96,7 @@ export function hasSufficientIncrementalPityContext(records, {
 
 export function createIncrementalImportStopGuard({
   gameUid,
+  serverId,
   existingRecordKeys,
   getPoolId,
   paidLimit = INCREMENTAL_PITY_CONTEXT_PAID_LIMIT
@@ -128,6 +136,7 @@ export function createIncrementalImportStopGuard({
     const page = analyzeIncrementalPage({
       records,
       gameUid,
+      serverId,
       existingRecordKeys,
       getPoolId
     });
