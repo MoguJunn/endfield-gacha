@@ -31,6 +31,7 @@ import { buildOfficialImportRecordKey } from './lib/officialImportIncremental.js
 
 // Supabase Admin 客户端（需要 SUPABASE_SECRET_KEY；旧 service_role_key 仍兼容）
 let supabaseAdmin = null;
+const HISTORY_PAGE_SIZE = 1000;
 
 export class AuthTokenVerificationError extends Error {
   constructor(code, message = 'Invalid or expired session', details = {}) {
@@ -83,6 +84,107 @@ function normalizeString(value, maxLength = 4096) {
     return '';
   }
   return text;
+}
+
+function inferImportServerIdFromSignals(account = {}, source = 'cn') {
+  const signal = [
+    account.serverTag,
+    account.server_tag,
+    account.serverLabel,
+    account.server_label,
+    account.region,
+    account.serverRegion,
+    account.serverName,
+    account.channelName,
+    account.channel_name,
+    source,
+  ].map(value => normalizeString(value, 160)).filter(Boolean).join(' ').toLowerCase();
+
+  if (/(^|[^a-z])(cn|china|mainland)([^a-z]|$)|国服|官服|b服|大陆|官方/.test(signal)) {
+    return '1';
+  }
+
+  if (/(^|[^a-z])(eu|na|us)([^a-z]|$)|america|europe|global|欧\/美|欧美|欧服|美服/.test(signal)) {
+    return '3';
+  }
+
+  if (/(^|[^a-z])(asia|sea|jp|kr|tw|hk|mo|sg)([^a-z]|$)|亚服|亚洲/.test(signal)) {
+    return '2';
+  }
+
+  return null;
+}
+
+function normalizeImportRegion(serverId, account = {}, source = 'cn') {
+  if (serverId === '1') {
+    return 'cn';
+  }
+
+  if (serverId === '2' || serverId === '3' || source === 'intl') {
+    return 'intl';
+  }
+
+  const rawRegion = normalizeString(account.region || account.serverRegion || account.serverName, 80);
+  return rawRegion || null;
+}
+
+function pickExistingServerIdFromRows(rows, source = 'cn') {
+  const counts = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const serverId = normalizeString(row?.server_id || row?.serverId, 80);
+    if (!serverId) {
+      return;
+    }
+    if (source === 'intl' && serverId === '1') {
+      return;
+    }
+    if (source === 'cn' && serverId !== '1') {
+      return;
+    }
+    counts.set(serverId, (counts.get(serverId) || 0) + 1);
+  });
+
+  if (counts.size !== 1) {
+    return null;
+  }
+
+  return Array.from(counts.keys())[0];
+}
+
+async function resolveExistingAccountServerId(supabase, userId, gameUid, source = 'cn') {
+  if (!supabase || !userId || !gameUid) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('history')
+    .select('server_id')
+    .eq('user_id', userId)
+    .eq('game_uid', gameUid)
+    .range(0, HISTORY_PAGE_SIZE - 1);
+
+  if (error) {
+    console.warn('[FullImportService] 查询既有账号区服失败，将使用本次导入返回的区服信息:', error.message || error);
+    return null;
+  }
+
+  return pickExistingServerIdFromRows(data, source);
+}
+
+async function resolveImportAccountServerContext(supabase, userId, account = {}, source = 'cn') {
+  const explicitServerId = normalizeString(account.serverId || account.server_id, 80);
+  const inferredServerId = inferImportServerIdFromSignals(account, source);
+  const serverId = inferredServerId
+    || await resolveExistingAccountServerId(supabase, userId, account.gameUid || account.game_uid, source)
+    || explicitServerId
+    || (source === 'cn' ? '1' : null);
+  const region = normalizeImportRegion(serverId, account, source);
+
+  return {
+    serverId,
+    region,
+    requestServerId: serverId || (source === 'intl' ? '2' : '1'),
+  };
 }
 
 function normalizeResolvedCharacterIdForStorage(rawCharacterId, resolvedCharacterId) {
@@ -984,10 +1086,14 @@ async function refreshPublicAnalyticsAfterImport(supabase, {
  *   isFree -> is_free
  *   isNew -> is_new
  */
-async function processRecords(rawRecords, account, _userId, existingSeqIds, source = 'cn') {
-  const { gameUid, nickName, serverId } = account;
-  const resolvedServerId = String(serverId || (source === 'intl' ? '2' : '1'));
-  const resolvedRegion = resolvedServerId === '1' ? 'cn' : 'intl';
+async function processRecords(rawRecords, account, _userId, existingSeqIds, source = 'cn', accountServerContext = null) {
+  const { gameUid, nickName } = account;
+  const fallbackContext = accountServerContext || {
+    serverId: inferImportServerIdFromSignals(account, source),
+    region: null,
+  };
+  const resolvedServerId = fallbackContext.serverId ? String(fallbackContext.serverId) : null;
+  const resolvedRegion = fallbackContext.region || normalizeImportRegion(resolvedServerId, account, source);
   const processedRecords = [];
   const supabase = getSupabaseAdmin();
   const sourcePoolIds = [];
@@ -1210,6 +1316,7 @@ export async function executeFullImport({
     }
 
     const account = accounts[accountIndex];
+    const accountServerContext = await resolveImportAccountServerContext(supabase, userId, account, source);
 
     // 4. 执行认证链 - u8token
     updateProgress({ progress: 30, message: '正在获取访问凭证...' });
@@ -1223,7 +1330,7 @@ export async function executeFullImport({
     let existingSeqIds = null;
     if (normalizedImportMode === FULL_IMPORT_MODES.INCREMENTAL) {
       updateProgress({ progress: 35, message: '正在准备增量导入游标...' });
-      existingSeqIds = await getExistingSeqIds(userId, account.gameUid, account.serverId || (source === 'intl' ? '2' : '1'));
+      existingSeqIds = await getExistingSeqIds(userId, account.gameUid, accountServerContext.serverId);
     }
 
     // 5. 获取抽卡记录
@@ -1231,7 +1338,7 @@ export async function executeFullImport({
     const { fetchAllRecordsConcurrent } = authChainFunctions;
     const recordsResult = await fetchAllRecordsConcurrent(
       u8Token,
-      account.serverId || '1',
+      accountServerContext.requestServerId,
       account.gameUid,
       account.nickName,
       {
@@ -1273,7 +1380,7 @@ export async function executeFullImport({
 
     // 7. 获取已存在的记录（用于去重）
     updateProgress({ progress: 75, message: '正在检查重复记录...' });
-    existingSeqIds = await getExistingSeqIds(userId, account.gameUid, account.serverId || (source === 'intl' ? '2' : '1'));
+    existingSeqIds = await getExistingSeqIds(userId, account.gameUid, accountServerContext.serverId);
 
     // 8. 处理记录
     updateProgress({ progress: 80, message: '正在处理数据...' });
@@ -1282,7 +1389,8 @@ export async function executeFullImport({
       account,
       userId,
       existingSeqIds,
-      source
+      source,
+      accountServerContext
     );
 
     // 9. 保存记录
@@ -1331,7 +1439,8 @@ export async function executeFullImport({
         account: {
           gameUid: account.gameUid,
           nickName: account.nickName,
-          serverId: String(account.serverId || (source === 'intl' ? '2' : '1'))
+          serverId: accountServerContext.serverId || null,
+          region: accountServerContext.region || null
         }
       }
     };

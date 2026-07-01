@@ -45,20 +45,42 @@ export function getHistoryRecordGameUid(record) {
 
 export function normalizeGameAccountServerId(metadata = {}) {
   const serverId = normalizeString(metadata.serverId || metadata.server_id);
-  if (serverId) {
-    return serverId;
-  }
-
+  const normalizedServerId = (serverId || '').toLowerCase();
+  const channelMasterId = normalizeString(metadata.channelMasterId || metadata.channel_master_id);
   const source = normalizeString(metadata.source || metadata.importSource || metadata.lastImportSource);
   const region = normalizeString(metadata.region || metadata.serverRegion || metadata.serverName);
-  const signal = `${source || ''} ${region || ''}`.toLowerCase();
+  const serverTag = normalizeString(
+    metadata.serverTag
+      || metadata.server_tag
+      || metadata.serverLabel
+      || metadata.server_label
+  );
+  const signal = `${source || ''} ${region || ''} ${serverTag || ''}`.toLowerCase();
 
-  if (/intl|international|global|asia|sea|eu|na|us|america|国际|亚服|欧服|美服|欧美|欧\/美/.test(signal)) {
-    return '2';
+  if (
+    normalizedServerId === 'bilibili'
+    || normalizedServerId === 'bili'
+    || normalizedServerId === 'cn-b'
+    || ((normalizedServerId === '1' || !normalizedServerId) && channelMasterId === '2')
+    || /b服|bilibili|bili/.test(signal)
+  ) {
+    return 'bilibili';
   }
 
   if (/(^|[^a-z])(cn|china|mainland)([^a-z]|$)|国服|官服|b服|大陆|官方/.test(signal)) {
     return '1';
+  }
+
+  if (/(^|[^a-z])(eu|na|us)([^a-z]|$)|america|europe|global|欧\/美|欧美|欧服|美服/.test(signal)) {
+    return '3';
+  }
+
+  if (/(^|[^a-z])(asia|sea|jp|kr|tw|hk|mo|sg)([^a-z]|$)|亚服|亚洲/.test(signal)) {
+    return '2';
+  }
+
+  if (serverId) {
+    return serverId;
   }
 
   return null;
@@ -73,6 +95,7 @@ export function normalizeGameAccountRegion(metadata = {}) {
 
   if (
     serverId === '1'
+    || serverId === 'bilibili'
     || /(^|[^a-z])(cn|china|mainland)([^a-z]|$)|国服|官服|b服|大陆|官方/.test(signal)
   ) {
     return 'cn';
@@ -94,7 +117,11 @@ function buildAccountDiscriminator(metadata = {}) {
   const serverId = normalizeGameAccountServerId(metadata);
   const region = normalizeGameAccountRegion(metadata);
 
-  if (channelMasterId === '2') {
+  if (serverId === '2' || serverId === '3') {
+    return `server:${serverId}`;
+  }
+
+  if (channelMasterId === '2' || serverId === 'bilibili') {
     return 'channel:2';
   }
 
@@ -248,6 +275,10 @@ export function saveGameAccountMetadata(metadata) {
 
   const currentMap = loadGameAccountMetadataMap();
   const accountKey = normalized.accountKey || normalized.gameUid;
+  const previousAccountKey = normalizeString(metadata.accountKey || metadata.account_key);
+  if (previousAccountKey && previousAccountKey !== accountKey && previousAccountKey !== normalized.gameUid) {
+    delete currentMap[previousAccountKey];
+  }
   currentMap[accountKey] = {
     ...(currentMap[normalized.gameUid] || {}),
     ...(currentMap[accountKey] || {}),
@@ -375,16 +406,16 @@ export function buildGameAccountServerTag(metadata = {}) {
   const region = (normalized.region || '').toLowerCase();
   const signal = `${channelName} ${serverId} ${region}`;
 
-  if (normalized.channelMasterId === '2' || /b服|bilibili|bilibili/.test(signal)) {
-    return 'B服';
-  }
-
   if (serverId === '2') {
     return '国际服·亚服';
   }
 
   if (serverId === '3') {
     return '国际服·欧/美服';
+  }
+
+  if (normalized.channelMasterId === '2' || serverId === 'bilibili' || /b服|bilibili|bili/.test(signal)) {
+    return 'B服';
   }
 
   if (
@@ -394,9 +425,13 @@ export function buildGameAccountServerTag(metadata = {}) {
   }
 
   if (
-    /(^|[^a-z])(eu|na|us)([^a-z]|$)|america|global|欧\/美|欧美|欧服|美服/.test(signal)
+    /(^|[^a-z])(eu|na|us)([^a-z]|$)|america|europe|global|欧\/美|欧美|欧服|美服/.test(signal)
   ) {
     return '国际服·欧/美服';
+  }
+
+  if (region === 'intl' || /intl|international|global|国际|海外/.test(signal)) {
+    return '国际服';
   }
 
   if (
@@ -411,7 +446,7 @@ export function buildGameAccountServerTag(metadata = {}) {
     return '国际服';
   }
 
-  if (/intl|international|global|海外/.test(signal)) {
+  if (/intl|international|global|国际|海外/.test(signal)) {
     return '国际服';
   }
 

@@ -116,6 +116,7 @@ export async function updateAccountGachaServerLabel({
   currentRegion = '',
   serverId = '',
   region = '',
+  mergeGameUid = false,
 } = {}) {
   const headers = await buildAccountGachaHeaders();
   headers['Content-Type'] = 'application/json';
@@ -132,6 +133,7 @@ export async function updateAccountGachaServerLabel({
       currentRegion,
       serverId,
       region,
+      mergeGameUid,
     }),
   }, {
     label: 'account-gacha-data-update-server-label',

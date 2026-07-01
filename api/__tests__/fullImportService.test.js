@@ -526,6 +526,199 @@ describe('executeFullImport import mode metadata', () => {
     expect(updateProgress).toHaveBeenCalledWith({ progress: 100, message: '导入完成' });
   });
 
+  it('preserves existing international EU/NA server when bindings omit sub-server', async () => {
+    const operations = [];
+    const insertedPoolIds = new Set();
+    let savedHistoryRows = [];
+    const rpc = vi.fn(async () => ({
+      data: {
+        refreshedPools: 1,
+        refreshedTrendRows: 3,
+        updatedAt: '2026-06-05T12:00:00.000Z',
+      },
+      error: null,
+    }));
+
+    mockSupabaseClient = {
+      auth: {
+        admin: {
+          getUserById: vi.fn(async () => ({
+            data: { user: { id: '00000000-0000-0000-0000-000000000001' } },
+            error: null,
+          })),
+        },
+      },
+      rpc,
+      from(tableName) {
+        if (tableName === 'pool_id_aliases' || tableName === 'character_id_aliases') {
+          return {
+            select() {
+              return {
+                in: async () => ({ data: [], error: null }),
+              };
+            },
+            async upsert(rows) {
+              operations.push({ tableName, action: 'upsert', count: rows.length });
+              return { error: null };
+            },
+          };
+        }
+
+        if (tableName === 'pools') {
+          return {
+            select() {
+              return {
+                in: async (_column, values) => ({
+                  data: (values || [])
+                    .filter((poolId) => insertedPoolIds.has(String(poolId)))
+                    .map((poolId) => ({ pool_id: String(poolId) })),
+                  error: null,
+                }),
+              };
+            },
+            async upsert(rows) {
+              operations.push({ tableName, action: 'upsert', count: rows.length });
+              (rows || []).forEach((row) => insertedPoolIds.add(String(row.pool_id)));
+              return { error: null };
+            },
+          };
+        }
+
+        if (tableName === 'history') {
+          return {
+            select() {
+              return createHistoryRangeQuery(async () => ({
+                data: [{ server_id: '3' }],
+                error: null,
+              }));
+            },
+            async upsert(rows) {
+              savedHistoryRows = rows;
+              operations.push({ tableName, action: 'upsert', count: rows.length });
+              return { error: null };
+            },
+          };
+        }
+
+        if (tableName === 'characters') {
+          return {
+            select() {
+              return {
+                limit: async () => ({ data: [], error: null }),
+              };
+            },
+            async upsert(rows) {
+              operations.push({ tableName, action: 'upsert', count: rows.length });
+              return { error: null };
+            },
+          };
+        }
+
+        if (tableName === 'profiles') {
+          return {
+            select() {
+              return {
+                eq() {
+                  return {
+                    maybeSingle: async () => ({
+                      data: { id: '00000000-0000-0000-0000-000000000001' },
+                      error: null,
+                    }),
+                  };
+                },
+              };
+            },
+          };
+        }
+
+        throw new Error(`Unexpected table access: ${tableName}`);
+      },
+    };
+
+    const { executeFullImport, initSupabaseAdmin } = await import('../../backend/fullImportService.js');
+
+    initSupabaseAdmin('https://example.supabase.co', 'service-role-key');
+
+    const authChainFunctions = {
+      grantAppToken: vi.fn(async () => ({
+        success: true,
+        data: { token: 'app-token' },
+      })),
+      fetchBindingList: vi.fn(async () => ({
+        success: true,
+        data: {
+          accounts: [{
+            uid: 'hg-uid',
+            gameUid: '20000001',
+            nickName: 'EU/NA账号',
+            channelName: 'Gryphline',
+          }],
+        },
+      })),
+      fetchU8TokenByUid: vi.fn(async () => ({
+        success: true,
+        data: { token: 'u8-token' },
+      })),
+      fetchAllRecordsConcurrent: vi.fn(async () => ({
+        success: true,
+        data: {
+          totalRecords: 1,
+          partial: [],
+          failed: [],
+          results: [{
+            type: 'char',
+            poolType: 'E_CharacterGachaPoolType_Special',
+            currentUpCharacter: '测试角色',
+            records: [{
+              poolId: 'special_1_2_1',
+              poolName: '测试限定池',
+              seqId: '1',
+              charId: 'char_test',
+              charName: '测试角色',
+              rarity: 6,
+              gachaTs: '1767225600000',
+              isFree: false,
+              isNew: true,
+            }],
+          }],
+        },
+      })),
+    };
+
+    const result = await executeFullImport({
+      token: 'AbCdEfGhIjKlMnOpQrStUvWx',
+      accountIndex: 0,
+      userId: '00000000-0000-0000-0000-000000000001',
+      updateProgress: vi.fn(),
+      authChainFunctions,
+      source: 'intl',
+      importMode: 'full',
+    });
+
+    expect(result.success).toBe(true);
+    expect(authChainFunctions.fetchAllRecordsConcurrent).toHaveBeenCalledWith(
+      'u8-token',
+      '3',
+      '20000001',
+      'EU/NA账号',
+      {
+        importMode: 'full',
+        existingRecordKeys: null,
+      }
+    );
+    expect(result.data.account).toMatchObject({
+      gameUid: '20000001',
+      serverId: '3',
+      region: 'intl',
+    });
+    expect(savedHistoryRows[0]).toMatchObject({
+      game_uid: '20000001',
+      nick_name: 'EU/NA账号',
+      server_id: '3',
+      region: 'intl',
+    });
+  });
+
   it('falls back to legacy history schema when character_id is absent', async () => {
     const operations = [];
     const insertedPoolIds = new Set();

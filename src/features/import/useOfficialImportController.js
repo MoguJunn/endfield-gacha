@@ -11,7 +11,11 @@ import {
   importAllRecordsFullyOnBackend
 } from '../../utils/endfieldAuthChain';
 import { assignBatchIds, calculatePity, generateImportSummary } from '../../utils/endfieldImportAdapter';
-import { buildGameAccountServerTag } from '../../utils/gameAccountMetadata';
+import {
+  buildGameAccountServerTag,
+  normalizeGameAccountRegion,
+  normalizeGameAccountServerId,
+} from '../../utils/gameAccountMetadata';
 import { getGlobalQueue } from '../../utils/requestQueue';
 import { ImportStatus } from './importShared';
 import {
@@ -334,16 +338,26 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
       setProgress(30);
       cancelRef.current = false;
 
+      const accountServerId = normalizeGameAccountServerId({ ...account, source: targetSource }) || null;
+      const accountRegion = normalizeGameAccountRegion({
+        ...account,
+        serverId: accountServerId,
+        source: targetSource,
+      }) || null;
+      const requestServerId = accountServerId || (targetSource === 'intl' ? '2' : '1');
+
       const resolvedUserInfo = {
         hgUid: account.uid,
         gameUid: account.gameUid,
         nickName: account.nickName,
         channelName: account.channelName,
         channelMasterId: account.channelMasterId,
-        serverId: account.serverId,
+        serverId: accountServerId,
+        serverName: account.serverName || account.server_name || null,
+        region: accountRegion,
         isOfficial: account.isOfficial,
         source: targetSource,
-        serverTag: account.serverTag || buildGameAccountServerTag(account)
+        serverTag: account.serverTag || buildGameAccountServerTag({ ...account, serverId: accountServerId, region: accountRegion })
       };
 
       setUserInfo(resolvedUserInfo);
@@ -372,11 +386,23 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
 
         if (cancelRef.current) return;
 
+        const backendAccount = backendResult?.account || {};
+        const hasBackendServerId = Object.prototype.hasOwnProperty.call(backendAccount, 'serverId');
+        const finalServerId = hasBackendServerId ? backendAccount.serverId : resolvedUserInfo.serverId;
+        const finalRegion = backendAccount.region || resolvedUserInfo.region || null;
         const finalUserInfo = {
           ...resolvedUserInfo,
-          gameUid: backendResult?.account?.gameUid || resolvedUserInfo.gameUid,
-          nickName: backendResult?.account?.nickName || resolvedUserInfo.nickName,
-          serverId: backendResult?.account?.serverId || resolvedUserInfo.serverId
+          gameUid: backendAccount.gameUid || resolvedUserInfo.gameUid,
+          nickName: backendAccount.nickName || resolvedUserInfo.nickName,
+          serverId: finalServerId,
+          region: finalRegion,
+          serverTag: buildGameAccountServerTag({
+            ...resolvedUserInfo,
+            gameUid: backendAccount.gameUid || resolvedUserInfo.gameUid,
+            nickName: backendAccount.nickName || resolvedUserInfo.nickName,
+            serverId: finalServerId,
+            region: finalRegion,
+          }) || resolvedUserInfo.serverTag
         };
 
         if (onImportComplete) {
@@ -433,7 +459,7 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
       try {
         records = await fetchAllGachaRecordsConcurrent(
           u8Token,
-          account.serverId || '1',
+          requestServerId,
           (message) => {
             if (cancelRef.current) return;
             setStatusMessage(message);
@@ -458,7 +484,7 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
           if (!cancelRef.current) {
             setStatusMessage(message);
           }
-        }, targetSource, account.serverId || '1');
+        }, targetSource, requestServerId);
       }
 
       if (cancelRef.current) return;
@@ -467,7 +493,7 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
       setProgress(95);
       setStatusMessage(t('import.official.processingData'));
 
-      const processedRecords = buildPreviewRecords(records, account.serverId, t);
+      const processedRecords = buildPreviewRecords(records, accountServerId || requestServerId, t);
       const summary = generateImportSummary(processedRecords);
 
       setFetchedRecords(processedRecords);

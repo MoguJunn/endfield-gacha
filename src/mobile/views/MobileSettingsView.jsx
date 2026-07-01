@@ -60,6 +60,7 @@ import {
 } from '../../utils/gameAccountMetadata.js';
 import {
   ACCOUNT_SERVER_LABEL_OPTIONS,
+  buildDuplicateGameUidServerGroups,
   updateAccountServerLabel,
 } from '../../utils/accountServerLabelCorrection.js';
 
@@ -192,6 +193,7 @@ function MobileSettingsView() {
   const [emailSuccess, setEmailSuccess] = useState('');
   const [serverLabelUpdatingAccount, setServerLabelUpdatingAccount] = useState(null);
   const [serverLabelError, setServerLabelError] = useState('');
+  const [serverMergeSelections, setServerMergeSelections] = useState({});
   const [newEmail, setNewEmail] = useState('');
   const [emailCurrentPassword, setEmailCurrentPassword] = useState('');
   const [accountSecurityState, setAccountSecurityState] = useState(null);
@@ -217,6 +219,10 @@ function MobileSettingsView() {
     void history;
     return getGameAccountsFromHistory();
   }, [getGameAccountsFromHistory, history]);
+  const duplicateGameUidServerGroups = useMemo(
+    () => buildDuplicateGameUidServerGroups(gameAccounts),
+    [gameAccounts]
+  );
   const currentUsername = useMemo(() => getPreferredUsername(user), [user]);
   const currentUsernameHandle = useMemo(() => buildUsernameHandle(user), [user]);
   const emailVerificationRequired = userRole !== 'super_admin' && Boolean(accountSecurityState?.emailVerificationRequired);
@@ -341,6 +347,39 @@ function MobileSettingsView() {
       });
     } catch (error) {
       setServerLabelError(t('settings.serverLabelUpdateFailed', { message: error?.message || t('common.unknown') }));
+    } finally {
+      setServerLabelUpdatingAccount(null);
+    }
+  };
+
+  const handleMergeDuplicateGameUidServers = async (group) => {
+    const nextServerId = serverMergeSelections[group.gameUid] || group.defaultServerId || '';
+    const anchorAccount = group.accounts[0];
+    if (!anchorAccount || !nextServerId) {
+      return;
+    }
+
+    const loadingKey = `merge:${group.gameUid}`;
+    setServerLabelError('');
+    setServerLabelUpdatingAccount(loadingKey);
+    try {
+      await updateAccountServerLabel({
+        account: anchorAccount,
+        nextServerId,
+        history,
+        setHistory,
+        currentGameUid,
+        switchGameAccount,
+        mergeGameUid: true,
+        mergeAccounts: group.accounts,
+      });
+      setServerMergeSelections((prev) => {
+        const next = { ...prev };
+        delete next[group.gameUid];
+        return next;
+      });
+    } catch (error) {
+      setServerLabelError(t('settings.serverMergeFailed', { message: error?.message || t('common.unknown') }));
     } finally {
       setServerLabelUpdatingAccount(null);
     }
@@ -968,6 +1007,64 @@ function MobileSettingsView() {
               {serverLabelError && (
                 <div className="mt-3 rounded-[0.9rem] border border-red-400/30 bg-red-500/10 px-3 py-2 text-[10px] text-red-300">
                   {serverLabelError}
+                </div>
+              )}
+
+              {duplicateGameUidServerGroups.length > 0 && (
+                <div className="mt-3 rounded-[1.05rem] border border-amber-400/30 bg-amber-500/10 px-3 py-3">
+                  <div className="flex items-start gap-2 text-amber-200">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold uppercase tracking-wider">{t('settings.serverMergeTitle')}</p>
+                      <p className="mt-1 text-[10px] leading-relaxed text-amber-100/80">
+                        {t('settings.serverMergeDesc')}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {duplicateGameUidServerGroups.map((group) => {
+                      const selectedServerId = serverMergeSelections[group.gameUid] || group.defaultServerId || '';
+                      const loadingKey = `merge:${group.gameUid}`;
+                      const isMerging = serverLabelUpdatingAccount === loadingKey;
+
+                      return (
+                        <div key={group.gameUid} className="rounded-[0.9rem] border border-amber-400/20 bg-black/10 px-3 py-2">
+                          <div className="text-[10px] text-amber-100">
+                            <div className="font-mono font-bold">UID: {group.gameUid}</div>
+                            <div className="mt-0.5">
+                              {t('settings.serverMergeCurrent', {
+                                count: group.accounts.length,
+                                labels: group.labels.map(label => localizeGameAccountServerTag(label, locale)).join(' / '),
+                              })}
+                            </div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <select
+                              value={selectedServerId}
+                              disabled={isMerging}
+                              onChange={(event) => setServerMergeSelections((prev) => ({
+                                ...prev,
+                                [group.gameUid]: event.target.value,
+                              }))}
+                              className="rounded-[0.65rem] border border-amber-400/30 bg-zinc-950 px-2 py-1 text-[10px] font-bold text-amber-100 outline-none disabled:opacity-60"
+                            >
+                              {ACCOUNT_SERVER_LABEL_OPTIONS.map((option) => (
+                                <option key={option.serverId} value={option.serverId}>{t(option.labelKey)}</option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              disabled={!selectedServerId || isMerging}
+                              onClick={() => handleMergeDuplicateGameUidServers(group)}
+                              className="rounded-[0.65rem] border border-amber-400/40 bg-amber-500/80 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-white disabled:opacity-60"
+                            >
+                              {isMerging ? t('settings.serverMergeUpdating') : t('settings.serverMergeAction')}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 

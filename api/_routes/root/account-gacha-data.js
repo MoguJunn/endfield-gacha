@@ -479,6 +479,7 @@ async function handleUpdateAccountServerLabel(body, res, adminClient, userId) {
   const accountKey = normalizeAccountText(body.accountKey || body.account_key, 240);
   const currentServerId = normalizeAccountText(body.currentServerId || body.current_server_id, 80);
   const currentRegion = normalizeAccountText(body.currentRegion || body.current_region, 80);
+  const mergeGameUid = body.mergeGameUid === true || body.merge_game_uid === true;
   const serverId = normalizeGameAccountServerId({
     serverId: body.serverId || body.server_id,
     region: body.region,
@@ -498,7 +499,7 @@ async function handleUpdateAccountServerLabel(body, res, adminClient, userId) {
 
   const rows = await loadHistoryRowsForServerLabelUpdate(adminClient, userId, gameUid);
   const targetIds = rows
-    .filter(row => matchesServerLabelUpdateTarget(row, { accountKey, currentServerId, currentRegion }))
+    .filter(row => mergeGameUid || matchesServerLabelUpdateTarget(row, { accountKey, currentServerId, currentRegion }))
     .map(row => row.record_id)
     .filter(value => value !== null && value !== undefined);
 
@@ -508,6 +509,7 @@ async function handleUpdateAccountServerLabel(body, res, adminClient, userId) {
       updated: 0,
       serverId,
       region,
+      mergeGameUid,
     });
   }
 
@@ -531,6 +533,7 @@ async function handleUpdateAccountServerLabel(body, res, adminClient, userId) {
     updated: targetIds.length,
     serverId,
     region,
+    mergeGameUid,
   });
 }
 
