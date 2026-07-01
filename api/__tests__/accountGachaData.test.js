@@ -94,6 +94,9 @@ function createQuery(table, state) {
     }),
     order: vi.fn(() => query),
     range: vi.fn(async () => {
+      if (table === 'history' && query.selection.includes('record_id')) {
+        return { data: state.historyRows, error: null };
+      }
       if (table === 'history' && query.selection.includes('timestamp')) {
         return { data: state.dedupeRows, error: null };
       }
@@ -616,6 +619,118 @@ describe('/api/account-gacha-data', () => {
         { op: 'in', column: 'record_id', values: ['record-1'] },
       ],
     });
+  });
+
+  it('deduplicates repeated history when merging split server labels', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.historyRows = [
+      {
+        record_id: 'record-1',
+        user_id: 'user-1',
+        game_uid: 'game-1',
+        server_id: '2',
+        region: 'intl',
+        seq_id: '42',
+        pool_id: 'limited',
+        timestamp: '2026-06-05T12:00:00.000Z',
+        character_name: '弭弗',
+        item_name: null,
+        character_id: 'char-1',
+        rarity: 6,
+        is_free: false,
+      },
+      {
+        record_id: 'record-2',
+        user_id: 'user-1',
+        game_uid: 'game-1',
+        server_id: '3',
+        region: 'intl',
+        seq_id: '42',
+        pool_id: 'limited',
+        timestamp: '2026-06-05T12:00:00.000Z',
+        character_name: '弭弗',
+        item_name: null,
+        character_id: 'char-1',
+        rarity: 6,
+        is_free: false,
+      },
+    ];
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const req = createRequest({
+      method: 'POST',
+      body: {
+        action: 'updateServerLabel',
+        gameUid: 'game-1',
+        serverId: '3',
+        region: 'intl',
+        mergeGameUid: true,
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      updated: 1,
+      deletedDuplicates: 1,
+      serverId: '3',
+      region: 'intl',
+      mergeGameUid: true,
+    });
+    expect(adminClient.__state.updateCalls).toHaveLength(1);
+    expect(adminClient.__state.updateCalls[0].filters).toContainEqual({
+      op: 'in',
+      column: 'record_id',
+      values: ['record-1'],
+    });
+    expect(adminClient.__state.deleteCalls).toHaveLength(1);
+    expect(adminClient.__state.deleteCalls[0].filters).toEqual([
+      { op: 'eq', column: 'user_id', value: 'user-1' },
+      { op: 'in', column: 'record_id', values: ['record-2'] },
+    ]);
+  });
+
+  it('updates server labels in small record id chunks to avoid long request URLs', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.historyRows = Array.from({ length: 205 }, (_, index) => ({
+      record_id: `record-${index + 1}`,
+      user_id: 'user-1',
+      game_uid: 'game-1',
+      server_id: '2',
+      region: 'intl',
+      seq_id: String(index + 1),
+      pool_id: 'limited',
+      timestamp: `2026-06-05T12:${String(index % 60).padStart(2, '0')}:00.000Z`,
+      character_name: `item-${index + 1}`,
+      rarity: 4,
+      is_free: false,
+    }));
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const req = createRequest({
+      method: 'POST',
+      body: {
+        action: 'updateServerLabel',
+        gameUid: 'game-1',
+        serverId: '3',
+        region: 'intl',
+        mergeGameUid: true,
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      updated: 205,
+      deletedDuplicates: 0,
+    });
+    expect(adminClient.__state.updateCalls).toHaveLength(3);
+    expect(adminClient.__state.updateCalls.map(call => call.filters.find(filter => filter.op === 'in').values.length))
+      .toEqual([100, 100, 5]);
   });
 
   it('deletes only authenticated user records by record id', async () => {

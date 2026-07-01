@@ -146,6 +146,7 @@ export async function updateAccountGachaServerLabel({
 
   return {
     updated: Number(data?.updated || 0),
+    deletedDuplicates: Number(data?.deletedDuplicates || 0),
     serverId: data?.serverId || null,
     region: data?.region || null,
   };

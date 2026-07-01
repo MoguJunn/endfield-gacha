@@ -2,6 +2,7 @@ import { updateAccountGachaServerLabel } from '../services/accountGachaDataServi
 import {
   buildGameAccountKey,
   buildGameAccountServerTag,
+  buildHistorySeqDedupeKeys,
   getGameAccountSelectionValue,
   getHistoryRecordGameUid,
   isGameAccountSelectionMatch,
@@ -44,6 +45,49 @@ function isSameGameUidSelection(selectedValue, gameUid) {
   const selected = normalizeText(selectedValue);
   const uid = normalizeText(gameUid);
   return Boolean(selected && uid && (selected === uid || selected.startsWith(`${uid}::`)));
+}
+
+function buildServerLabelUpdatedHistory({
+  history,
+  gameUid,
+  accountValue,
+  mergeGameUid,
+  option,
+  region,
+  nextChannelMasterId,
+} = {}) {
+  const seenMergeKeys = new Set();
+
+  return history.reduce((rows, record) => {
+    const shouldUpdate = mergeGameUid
+      ? getHistoryRecordGameUid(record) === gameUid
+      : isGameAccountSelectionMatch(record, accountValue);
+
+    if (!shouldUpdate) {
+      rows.push(record);
+      return rows;
+    }
+
+    const nextRecord = {
+      ...record,
+      serverId: option.serverId,
+      server_id: option.serverId,
+      channelMasterId: nextChannelMasterId,
+      channel_master_id: nextChannelMasterId,
+      region,
+    };
+
+    if (mergeGameUid) {
+      const dedupeKeys = buildHistorySeqDedupeKeys(nextRecord);
+      if (dedupeKeys.length > 0 && dedupeKeys.some(key => seenMergeKeys.has(key))) {
+        return rows;
+      }
+      dedupeKeys.forEach(key => seenMergeKeys.add(key));
+    }
+
+    rows.push(nextRecord);
+    return rows;
+  }, []);
 }
 
 export function buildDuplicateGameUidServerGroups(accounts = []) {
@@ -150,21 +194,14 @@ export async function updateAccountServerLabel({
   });
 
   if (typeof setHistory === 'function' && Array.isArray(history)) {
-    setHistory(history.map((record) => {
-      const shouldUpdate = mergeGameUid
-        ? getHistoryRecordGameUid(record) === gameUid
-        : isGameAccountSelectionMatch(record, accountValue);
-
-      return shouldUpdate
-        ? {
-            ...record,
-            serverId: option.serverId,
-            server_id: option.serverId,
-            channelMasterId: nextChannelMasterId,
-            channel_master_id: nextChannelMasterId,
-            region,
-          }
-        : record;
+    setHistory(buildServerLabelUpdatedHistory({
+      history,
+      gameUid,
+      accountValue,
+      mergeGameUid,
+      option,
+      region,
+      nextChannelMasterId,
     }));
   }
 

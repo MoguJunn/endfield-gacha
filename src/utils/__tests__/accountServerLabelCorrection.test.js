@@ -9,6 +9,7 @@ import {
 vi.mock('../../services/accountGachaDataService.js', () => ({
   updateAccountGachaServerLabel: vi.fn(async (payload) => ({
     updated: payload.mergeGameUid ? 2 : 1,
+    deletedDuplicates: payload.mergeGameUid ? 1 : 0,
     serverId: payload.serverId,
     region: payload.region,
   })),
@@ -36,10 +37,10 @@ describe('accountServerLabelCorrection', () => {
     expect(groups[0].labels).toEqual(expect.arrayContaining(['国际服·亚服', '国际服·欧/美服']));
   });
 
-  it('updates all records for a UID when merging split server groups', async () => {
+  it('updates and deduplicates records for a UID when merging split server groups', async () => {
     const history = [
-      { gameUid: '10000001', game_uid: '10000001', serverId: '2', server_id: '2', region: 'intl' },
-      { gameUid: '10000001', game_uid: '10000001', serverId: '3', server_id: '3', region: 'intl' },
+      { gameUid: '10000001', game_uid: '10000001', serverId: '2', server_id: '2', region: 'intl', seqId: '100', seq_id: '100', poolId: 'limited', pool_id: 'limited' },
+      { gameUid: '10000001', game_uid: '10000001', serverId: '3', server_id: '3', region: 'intl', seqId: '100', seq_id: '100', poolId: 'limited', pool_id: 'limited' },
       { gameUid: '10000002', game_uid: '10000002', serverId: '2', server_id: '2', region: 'intl' },
     ];
     let nextHistory = [];
@@ -76,8 +77,7 @@ describe('accountServerLabelCorrection', () => {
     }));
     expect(setHistory).toHaveBeenCalledTimes(1);
     expect(nextHistory.filter(record => record.gameUid === '10000001')).toEqual([
-      expect.objectContaining({ serverId: '3', server_id: '3', region: 'intl' }),
-      expect.objectContaining({ serverId: '3', server_id: '3', region: 'intl' }),
+      expect.objectContaining({ serverId: '3', server_id: '3', region: 'intl', seqId: '100' }),
     ]);
     expect(nextHistory.find(record => record.gameUid === '10000002')).toMatchObject({
       serverId: '2',

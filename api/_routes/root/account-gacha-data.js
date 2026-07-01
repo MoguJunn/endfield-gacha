@@ -27,6 +27,7 @@ const MAX_PAGES = 500;
 const MAX_WRITE_POOLS = 200;
 const MAX_WRITE_HISTORY = 1000;
 const MAX_DELETE_IDS = 1000;
+const MAX_SERVER_LABEL_WRITE_IDS = 100;
 
 function getRequestUrl(req) {
   try {
@@ -456,7 +457,7 @@ async function loadHistoryRowsForServerLabelUpdate(adminClient, userId, gameUid)
     const to = from + PAGE_SIZE - 1;
     const { data, error } = await adminClient
       .from('history')
-      .select('record_id, game_uid, server_id, region')
+      .select('record_id, game_uid, server_id, region, seq_id, pool_id, timestamp, character_name, item_name, character_id, rarity, is_free')
       .eq('user_id', userId)
       .eq('game_uid', gameUid)
       .order('record_id', { ascending: true })
@@ -472,6 +473,82 @@ async function loadHistoryRowsForServerLabelUpdate(adminClient, userId, gameUid)
   }
 
   return rows;
+}
+
+function getHistoryRecordId(row) {
+  const recordId = row?.record_id ?? row?.recordId;
+  return recordId === null || recordId === undefined ? null : recordId;
+}
+
+function collectDuplicateHistoryRecordIdsForServerMerge(rows, { serverId, region } = {}) {
+  const seenKeys = new Set();
+  const duplicateIds = [];
+
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const mergedRow = {
+      ...row,
+      serverId,
+      server_id: serverId,
+      region,
+    };
+    const rowKeys = buildHistoryDedupeKeys(mergedRow);
+    if (rowKeys.length === 0) {
+      return;
+    }
+
+    const isDuplicate = rowKeys.some(key => seenKeys.has(key));
+    if (isDuplicate) {
+      const recordId = getHistoryRecordId(row);
+      if (recordId !== null) {
+        duplicateIds.push(recordId);
+      }
+      return;
+    }
+
+    rowKeys.forEach(key => seenKeys.add(key));
+  });
+
+  return duplicateIds;
+}
+
+async function updateHistoryServerLabelByRecordIds(adminClient, userId, recordIds, { serverId, region } = {}) {
+  let updated = 0;
+
+  for (let index = 0; index < recordIds.length; index += MAX_SERVER_LABEL_WRITE_IDS) {
+    const chunk = recordIds.slice(index, index + MAX_SERVER_LABEL_WRITE_IDS);
+    const { error } = await adminClient
+      .from('history')
+      .update({
+        server_id: serverId,
+        region,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId)
+      .in('record_id', chunk);
+
+    if (error) throw error;
+    updated += chunk.length;
+  }
+
+  return updated;
+}
+
+async function deleteHistoryRowsByRecordIds(adminClient, userId, recordIds) {
+  let deleted = 0;
+
+  for (let index = 0; index < recordIds.length; index += MAX_SERVER_LABEL_WRITE_IDS) {
+    const chunk = recordIds.slice(index, index + MAX_SERVER_LABEL_WRITE_IDS);
+    const { error } = await adminClient
+      .from('history')
+      .delete()
+      .eq('user_id', userId)
+      .in('record_id', chunk);
+
+    if (error) throw error;
+    deleted += chunk.length;
+  }
+
+  return deleted;
 }
 
 async function handleUpdateAccountServerLabel(body, res, adminClient, userId) {
@@ -498,39 +575,35 @@ async function handleUpdateAccountServerLabel(body, res, adminClient, userId) {
   }
 
   const rows = await loadHistoryRowsForServerLabelUpdate(adminClient, userId, gameUid);
-  const targetIds = rows
-    .filter(row => mergeGameUid || matchesServerLabelUpdateTarget(row, { accountKey, currentServerId, currentRegion }))
-    .map(row => row.record_id)
+  const targetRows = rows
+    .filter(row => mergeGameUid || matchesServerLabelUpdateTarget(row, { accountKey, currentServerId, currentRegion }));
+  const duplicateIds = mergeGameUid
+    ? collectDuplicateHistoryRecordIdsForServerMerge(targetRows, { serverId, region })
+    : [];
+  const duplicateIdSet = new Set(duplicateIds);
+  const targetIds = targetRows
+    .map(row => getHistoryRecordId(row))
+    .filter(value => !duplicateIdSet.has(value))
     .filter(value => value !== null && value !== undefined);
 
-  if (targetIds.length === 0) {
+  if (targetIds.length === 0 && duplicateIds.length === 0) {
     return res.status(200).json({
       success: true,
       updated: 0,
+      deletedDuplicates: 0,
       serverId,
       region,
       mergeGameUid,
     });
   }
 
-  for (let index = 0; index < targetIds.length; index += MAX_WRITE_HISTORY) {
-    const chunk = targetIds.slice(index, index + MAX_WRITE_HISTORY);
-    const { error } = await adminClient
-      .from('history')
-      .update({
-        server_id: serverId,
-        region,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', userId)
-      .in('record_id', chunk);
-
-    if (error) throw error;
-  }
+  const deletedDuplicates = await deleteHistoryRowsByRecordIds(adminClient, userId, duplicateIds);
+  const updated = await updateHistoryServerLabelByRecordIds(adminClient, userId, targetIds, { serverId, region });
 
   return res.status(200).json({
     success: true,
-    updated: targetIds.length,
+    updated,
+    deletedDuplicates,
     serverId,
     region,
     mergeGameUid,
