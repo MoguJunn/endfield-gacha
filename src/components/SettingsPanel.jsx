@@ -315,6 +315,14 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
 
   const handleAccountServerLabelChange = async (account, nextServerId) => {
     const accountValue = getGameAccountSelectionValue(account) || account?.gameUid || account?.game_uid;
+    const nextOption = ACCOUNT_SERVER_LABEL_OPTIONS.find(option => option.serverId === nextServerId);
+    const currentLabel = localizeGameAccountServerTag(account, locale) || accountValue || '';
+    const nextLabel = nextOption ? t(nextOption.labelKey) : nextServerId;
+
+    if (!window.confirm(t('settings.serverLabelConfirm', { current: currentLabel, next: nextLabel }))) {
+      return;
+    }
+
     setServerLabelError('');
     setServerLabelUpdatingAccount(accountValue);
     try {
@@ -327,7 +335,10 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
         switchGameAccount,
       });
     } catch (error) {
-      setServerLabelError(t('settings.serverLabelUpdateFailed', { message: error?.message || t('common.unknown') }));
+      const message = error?.message === 'server_label_update_no_records'
+        ? t('settings.serverLabelNoRecords')
+        : error?.message || t('common.unknown');
+      setServerLabelError(t('settings.serverLabelUpdateFailed', { message }));
     } finally {
       setServerLabelUpdatingAccount(null);
     }
@@ -337,6 +348,14 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
     const nextServerId = serverMergeSelections[group.gameUid] || group.defaultServerId || '';
     const anchorAccount = group.accounts[0];
     if (!anchorAccount || !nextServerId) {
+      return;
+    }
+
+    const nextOption = ACCOUNT_SERVER_LABEL_OPTIONS.find(option => option.serverId === nextServerId);
+    const nextLabel = nextOption ? t(nextOption.labelKey) : nextServerId;
+    const currentLabels = group.labels.map(label => localizeGameAccountServerTag(label, locale)).join(' / ');
+
+    if (!window.confirm(t('settings.serverMergeConfirm', { uid: group.gameUid, current: currentLabels, next: nextLabel }))) {
       return;
     }
 
@@ -360,7 +379,10 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
         return next;
       });
     } catch (error) {
-      setServerLabelError(t('settings.serverMergeFailed', { message: error?.message || t('common.unknown') }));
+      const message = error?.message === 'server_label_update_no_records'
+        ? t('settings.serverLabelNoRecords')
+        : error?.message || t('common.unknown');
+      setServerLabelError(t('settings.serverMergeFailed', { message }));
     } finally {
       setServerLabelUpdatingAccount(null);
     }
@@ -1006,7 +1028,7 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
             </div>
 
             {/* Imported Accounts Freshness */}
-            <div className="mb-6">
+            <div id="settings-account-server-labels" className="mb-6 scroll-mt-24">
               <div className="text-xs font-bold text-slate-700 dark:text-zinc-300 mb-3">{t('settings.importFreshnessTitle')}</div>
               <div className="mb-3 text-[10px] leading-relaxed text-zinc-500 dark:text-zinc-400">
                 {t('settings.serverLabelHint')}

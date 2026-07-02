@@ -269,9 +269,10 @@ const useHistoryStore = create((set, get) => ({
     history.forEach(h => {
       const gameUid = getHistoryGameUid(h);
       if (gameUid) {
-        const accountKey = getHistoryRecordAccountKey(h) || gameUid;
+        const historyAccountKey = getHistoryRecordAccountKey(h) || gameUid;
         const recordTimestamp = getHistoryRecordTimestampMs(h);
-        const metadata = getHistoryAccountMetadata(h, storedMetadataMap[accountKey] || storedMetadataMap[gameUid]);
+        const metadata = getHistoryAccountMetadata(h, storedMetadataMap[historyAccountKey] || storedMetadataMap[gameUid]);
+        const accountKey = metadata?.accountKey || historyAccountKey;
         const derivedImportTimestamp = metadata?.lastImportedAt
           || metadata?.lastImportedRecordAt
           || (recordTimestamp ? new Date(recordTimestamp).toISOString() : null);
@@ -347,10 +348,13 @@ const useHistoryStore = create((set, get) => ({
   getStatsByGameAccount: () => {
     const { history } = get();
     const statsMap = new Map();
+    const storedMetadataMap = loadGameAccountMetadataMap();
 
     history.forEach(h => {
       const gameUid = getHistoryGameUid(h) || 'unknown';
-      const accountKey = getHistoryRecordAccountKey(h) || gameUid;
+      const historyAccountKey = getHistoryRecordAccountKey(h) || gameUid;
+      const metadata = getHistoryAccountMetadata(h, storedMetadataMap[historyAccountKey] || storedMetadataMap[gameUid]);
+      const accountKey = metadata?.accountKey || historyAccountKey;
       if (!statsMap.has(accountKey)) {
         statsMap.set(accountKey, {
           accountKey,

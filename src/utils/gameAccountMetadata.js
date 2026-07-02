@@ -165,7 +165,9 @@ export function isGameAccountSelectionMatch(target = {}, selectedValue = null) {
 
   const accountKey = getGameAccountSelectionValue(target);
   const gameUid = getHistoryRecordGameUid(target) || normalizeString(target.uid);
-  return selected === accountKey || selected === gameUid;
+  return selected === accountKey
+    || selected === gameUid
+    || Boolean(gameUid && accountKey === gameUid && selected.startsWith(`${gameUid}::`));
 }
 
 export function buildHistorySeqDedupeKey(record = {}) {
@@ -302,6 +304,27 @@ export function saveGameAccountMetadata(metadata) {
       lastImportSource: normalized.lastImportSource || currentMap[normalized.gameUid]?.lastImportSource || null
     };
   }
+  writeStorageValue(STORAGE_KEYS.ACCOUNT_METADATA, JSON.stringify(currentMap), { raw: true });
+  return true;
+}
+
+export function saveGameAccountMetadataAlias(metadata, aliasKey) {
+  if (typeof localStorage === 'undefined') {
+    return false;
+  }
+
+  const normalized = normalizeGameAccountMetadata(metadata);
+  const alias = normalizeString(aliasKey);
+  if (!normalized || !alias) {
+    return false;
+  }
+
+  const currentMap = loadGameAccountMetadataMap();
+  currentMap[alias] = {
+    ...(currentMap[alias] || {}),
+    ...normalized,
+    accountKey: normalized.accountKey || normalized.gameUid,
+  };
   writeStorageValue(STORAGE_KEYS.ACCOUNT_METADATA, JSON.stringify(currentMap), { raw: true });
   return true;
 }

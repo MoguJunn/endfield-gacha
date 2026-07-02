@@ -334,6 +334,14 @@ function MobileSettingsView() {
 
   const handleAccountServerLabelChange = async (account, nextServerId) => {
     const accountValue = getGameAccountSelectionValue(account) || account?.gameUid || account?.game_uid;
+    const nextOption = ACCOUNT_SERVER_LABEL_OPTIONS.find(option => option.serverId === nextServerId);
+    const currentLabel = localizeGameAccountServerTag(account, locale) || accountValue || '';
+    const nextLabel = nextOption ? t(nextOption.labelKey) : nextServerId;
+
+    if (!window.confirm(t('settings.serverLabelConfirm', { current: currentLabel, next: nextLabel }))) {
+      return;
+    }
+
     setServerLabelError('');
     setServerLabelUpdatingAccount(accountValue);
     try {
@@ -346,7 +354,10 @@ function MobileSettingsView() {
         switchGameAccount,
       });
     } catch (error) {
-      setServerLabelError(t('settings.serverLabelUpdateFailed', { message: error?.message || t('common.unknown') }));
+      const message = error?.message === 'server_label_update_no_records'
+        ? t('settings.serverLabelNoRecords')
+        : error?.message || t('common.unknown');
+      setServerLabelError(t('settings.serverLabelUpdateFailed', { message }));
     } finally {
       setServerLabelUpdatingAccount(null);
     }
@@ -356,6 +367,14 @@ function MobileSettingsView() {
     const nextServerId = serverMergeSelections[group.gameUid] || group.defaultServerId || '';
     const anchorAccount = group.accounts[0];
     if (!anchorAccount || !nextServerId) {
+      return;
+    }
+
+    const nextOption = ACCOUNT_SERVER_LABEL_OPTIONS.find(option => option.serverId === nextServerId);
+    const nextLabel = nextOption ? t(nextOption.labelKey) : nextServerId;
+    const currentLabels = group.labels.map(label => localizeGameAccountServerTag(label, locale)).join(' / ');
+
+    if (!window.confirm(t('settings.serverMergeConfirm', { uid: group.gameUid, current: currentLabels, next: nextLabel }))) {
       return;
     }
 
@@ -379,7 +398,10 @@ function MobileSettingsView() {
         return next;
       });
     } catch (error) {
-      setServerLabelError(t('settings.serverMergeFailed', { message: error?.message || t('common.unknown') }));
+      const message = error?.message === 'server_label_update_no_records'
+        ? t('settings.serverLabelNoRecords')
+        : error?.message || t('common.unknown');
+      setServerLabelError(t('settings.serverMergeFailed', { message }));
     } finally {
       setServerLabelUpdatingAccount(null);
     }
@@ -962,7 +984,7 @@ function MobileSettingsView() {
             </div>
 
             {/* 云端同步 */}
-            <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800">
+            <div className="pt-3 border-t border-zinc-100 scroll-mt-20 dark:border-zinc-800">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-bold text-zinc-700 dark:text-zinc-300">{t('settings.syncSection')}</p>
@@ -993,7 +1015,7 @@ function MobileSettingsView() {
               )}
             </div>
 
-            <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800">
+            <div id="settings-account-server-labels" className="pt-3 border-t border-zinc-100 scroll-mt-20 dark:border-zinc-800">
               <div>
                 <p className="text-sm font-bold text-zinc-700 dark:text-zinc-300">{t('settings.importFreshnessTitle')}</p>
                 <p className="text-[10px] text-zinc-500 mt-0.5 font-mono">

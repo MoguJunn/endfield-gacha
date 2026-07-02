@@ -8,6 +8,7 @@ import {
   isGameAccountSelectionMatch,
   normalizeGameAccountRegion,
   normalizeGameAccountServerId,
+  saveGameAccountMetadataAlias,
   saveGameAccountMetadata,
 } from './gameAccountMetadata.js';
 
@@ -103,17 +104,19 @@ export function buildDuplicateGameUidServerGroups(accounts = []) {
       groups.set(gameUid, {
         gameUid,
         accounts: [],
+        accountKeys: new Set(),
         serverIdentities: new Set(),
       });
     }
 
     const group = groups.get(gameUid);
     group.accounts.push(account);
+    group.accountKeys.add(getGameAccountSelectionValue(account) || gameUid);
     group.serverIdentities.add(getAccountServerIdentity(account));
   });
 
   return Array.from(groups.values())
-    .filter(group => group.accounts.length > 1 && group.serverIdentities.size > 1)
+    .filter(group => group.accounts.length > 1 && (group.serverIdentities.size > 1 || group.accountKeys.size > 1))
     .map((group) => {
       const defaultServerId = group.accounts
         .map(account => getAccountServerOptionValue(account))
@@ -122,6 +125,7 @@ export function buildDuplicateGameUidServerGroups(accounts = []) {
       return {
         gameUid: group.gameUid,
         accounts: group.accounts,
+        accountKeyCount: group.accountKeys.size,
         serverCount: group.serverIdentities.size,
         defaultServerId,
         labels: [...new Set(group.accounts
@@ -169,6 +173,10 @@ export async function updateAccountServerLabel({
     mergeGameUid,
   });
 
+  if (Number(result?.updated || 0) + Number(result?.deletedDuplicates || 0) <= 0) {
+    throw new Error('server_label_update_no_records');
+  }
+
   const nextAccount = {
     ...account,
     serverId: option.serverId,
@@ -181,7 +189,7 @@ export async function updateAccountServerLabel({
     ? mergeAccounts
     : [account];
   metadataSeeds.forEach((seedAccount) => {
-    saveGameAccountMetadata({
+    const nextMetadata = {
       ...seedAccount,
       accountKey: getGameAccountSelectionValue(seedAccount),
       account_key: getGameAccountSelectionValue(seedAccount),
@@ -190,7 +198,10 @@ export async function updateAccountServerLabel({
       channelMasterId: nextChannelMasterId,
       channel_master_id: nextChannelMasterId,
       region,
-    });
+    };
+
+    saveGameAccountMetadata(nextMetadata);
+    saveGameAccountMetadataAlias(nextMetadata, gameUid);
   });
 
   if (typeof setHistory === 'function' && Array.isArray(history)) {

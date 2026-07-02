@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Menu, Moon, Radio, Sun, User } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ChevronDown, HelpCircle, Menu, Moon, Radio, Sun, User } from 'lucide-react';
 import { useI18n } from '../../i18n/index.js';
 import { useTheme } from '../../contexts/ThemeContext';
 import { usePoolStore, useHistoryStore } from '../../stores';
 import LocaleSwitcher from '../../components/common/LocaleSwitcher.jsx';
+import { getMobilePathForTab } from '../../constants/appRoutes.js';
 import { formatFreshnessRelative, getFreshnessTone } from '../../utils/dataFreshness.js';
 import { getAccountLastImportTimestamp } from '../../utils/accountFreshness.js';
 import {
@@ -32,8 +34,10 @@ function freshnessToneClass(tone) {
 export default function MobileHeader({ onMenuClick, activeTab }) {
   const { t, locale } = useI18n();
   const { setThemeMode } = useTheme();
+  const navigate = useNavigate();
   const menuRef = useRef(null);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [showAccountHelp, setShowAccountHelp] = useState(false);
 
   const currentGameUid = usePoolStore((state) => state.currentGameUid);
   const switchGameAccount = usePoolStore((state) => state.switchGameAccount);
@@ -78,6 +82,17 @@ export default function MobileHeader({ onMenuClick, activeTab }) {
     setThemeMode(isDark ? 'light' : 'dark');
   };
 
+  const openServerLabelSettings = () => {
+    setShowAccountHelp(false);
+    setShowAccountMenu(false);
+    navigate(getMobilePathForTab('settings'), {
+      state: {
+        scrollTo: 'settings-account-server-labels',
+        _ts: Date.now(),
+      },
+    });
+  };
+
   useEffect(() => {
     if (gameAccounts.length <= 1) {
       return;
@@ -89,19 +104,20 @@ export default function MobileHeader({ onMenuClick, activeTab }) {
   }, [currentGameUid, effectiveGameUid, gameAccounts.length, switchGameAccount]);
 
   useEffect(() => {
-    if (!showAccountMenu) {
+    if (!showAccountMenu && !showAccountHelp) {
       return undefined;
     }
 
     const handlePointerDown = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
         setShowAccountMenu(false);
+        setShowAccountHelp(false);
       }
     };
 
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
-  }, [showAccountMenu]);
+  }, [showAccountHelp, showAccountMenu]);
 
   return (
     <header ref={menuRef} className="mobile-ux-topbar relative h-14 flex items-center justify-between px-4 shrink-0 z-40 safe-area-top transition-colors duration-300">
@@ -115,6 +131,7 @@ export default function MobileHeader({ onMenuClick, activeTab }) {
 
       {showAccountSwitcher ? (
         <div className="flex flex-1 justify-center">
+          <div className="flex min-w-0 items-center gap-1.5">
           <button
             type="button"
             onClick={() => canSwitchAccount && setShowAccountMenu((value) => !value)}
@@ -126,6 +143,41 @@ export default function MobileHeader({ onMenuClick, activeTab }) {
             </span>
             {canSwitchAccount ? <ChevronDown size={12} className={cx('shrink-0 text-slate-500 dark:text-zinc-400 transition-transform', showAccountMenu ? 'rotate-180' : '')} /> : null}
           </button>
+          {canSwitchAccount ? (
+            <div
+              className="relative"
+              onMouseEnter={() => setShowAccountHelp(true)}
+              onMouseLeave={() => setShowAccountHelp(false)}
+            >
+              <button
+                type="button"
+                onClick={() => setShowAccountHelp((value) => !value)}
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-200 bg-zinc-100 text-slate-500 transition-colors hover:text-amber-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-500 dark:hover:text-ef-yellow"
+                aria-label={t('pool.selector.serverHelpTitle')}
+                title={t('pool.selector.serverHelpTitle')}
+              >
+                <HelpCircle size={14} />
+              </button>
+              {showAccountHelp ? (
+                <div className="absolute left-1/2 top-[calc(100%+0.5rem)] z-50 w-72 -translate-x-1/2 rounded-xl border border-amber-300 bg-white p-3 text-left shadow-xl dark:border-ef-yellow/30 dark:bg-zinc-950">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-amber-600 dark:text-ef-yellow">
+                    {t('pool.selector.serverHelpTitle')}
+                  </div>
+                  <p className="mt-2 text-[11px] leading-5 text-slate-600 dark:text-zinc-300">
+                    {t('pool.selector.serverHelpDesc')}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={openServerLabelSettings}
+                    className="mt-3 w-full rounded-lg border border-amber-400 bg-amber-400 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-black transition-colors hover:bg-amber-300 dark:border-ef-yellow dark:bg-ef-yellow dark:hover:bg-yellow-300"
+                  >
+                    {t('pool.selector.serverHelpAction')}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          </div>
         </div>
       ) : (
         <div className="flex flex-1 justify-center">

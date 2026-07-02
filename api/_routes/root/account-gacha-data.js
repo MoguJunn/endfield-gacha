@@ -433,9 +433,10 @@ function matchesServerLabelUpdateTarget(row, {
 } = {}) {
   const rowServerId = normalizeAccountText(row?.server_id || row?.serverId);
   const rowRegion = normalizeAccountText(row?.region || row?.serverRegion, 80);
+  const rowGameUid = normalizeAccountText(row?.game_uid || row?.gameUid || row?.hg_uid || row?.hgUid, 120);
 
   if (accountKey) {
-    return buildHistoryAccountKeyFromRow(row) === accountKey || (!rowServerId && !rowRegion);
+    return buildHistoryAccountKeyFromRow(row) === accountKey || rowGameUid === accountKey || (!rowServerId && !rowRegion);
   }
 
   if (currentServerId) {
@@ -575,8 +576,12 @@ async function handleUpdateAccountServerLabel(body, res, adminClient, userId) {
   }
 
   const rows = await loadHistoryRowsForServerLabelUpdate(adminClient, userId, gameUid);
-  const targetRows = rows
-    .filter(row => mergeGameUid || matchesServerLabelUpdateTarget(row, { accountKey, currentServerId, currentRegion }));
+let targetRows = rows
+  .filter(row => mergeGameUid || matchesServerLabelUpdateTarget(row, { accountKey, currentServerId, currentRegion }));
+
+if (!mergeGameUid && targetRows.length === 0) {
+  targetRows = rows;
+}
   const duplicateIds = mergeGameUid
     ? collectDuplicateHistoryRecordIdsForServerMerge(targetRows, { serverId, region })
     : [];

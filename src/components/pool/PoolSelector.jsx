@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Download, Upload, User, Search, X, ChevronDown } from 'lucide-react';
+import { Download, Upload, User, Search, X, ChevronDown, HelpCircle } from 'lucide-react';
 import { usePoolStore, useAuthStore, useHistoryStore } from '../../stores';
 import ImportManager from '../../features/import/ImportManager';
 import PoolGroupCardRail from './PoolGroupCardRail';
@@ -96,6 +96,7 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
   const [showImportManager, setShowImportManager] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
+  const [showAccountHelp, setShowAccountHelp] = useState(false);
   const [hideZeroPullPools, setHideZeroPullPools] = useState(true);
 
   // 获取所有游戏账号（从历史记录）
@@ -265,6 +266,17 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
     }
   }, [closeImportManager, onOpenImportWizard]);
 
+  const handleOpenServerLabelSettings = useCallback(() => {
+    setShowAccountHelp(false);
+    setShowAccountDropdown(false);
+    navigate(getDesktopPathForTab('settings'), {
+      state: {
+        scrollTo: 'settings-account-server-labels',
+        _ts: Date.now(),
+      },
+    });
+  }, [navigate]);
+
   return (
     <div className="space-y-4">
       {/* 顶部工具栏 */}
@@ -303,7 +315,8 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
 
           {/* 账号切换器 - 仅在有多个账号时显示 */}
           {gameAccounts.length > 1 && (
-            <div className="relative">
+            <div className="flex items-center gap-1.5">
+              <div className="relative">
               <button
                 onClick={() => setShowAccountDropdown(!showAccountDropdown)}
                 className="flex w-auto min-w-[140px] max-w-[224px] items-center justify-between gap-2 px-3 py-2 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 hover:border-yellow-500 dark:hover:border-yellow-500 text-xs transition-all duration-300 group hover:shadow-[0_0_15px_rgba(234,179,8,0.15)] relative overflow-hidden"
@@ -368,6 +381,40 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
                   })}
                 </div>
               )}
+              </div>
+              <div
+                className="relative"
+                onMouseEnter={() => setShowAccountHelp(true)}
+                onMouseLeave={() => setShowAccountHelp(false)}
+              >
+                <button
+                  type="button"
+                  onClick={() => setShowAccountHelp((value) => !value)}
+                  className="flex h-8 w-8 items-center justify-center border border-zinc-200 bg-white text-slate-500 transition-all duration-300 hover:border-yellow-500 hover:text-yellow-600 hover:shadow-[0_0_12px_rgba(234,179,8,0.15)] dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:border-yellow-500 dark:hover:text-yellow-500"
+                  title={t('pool.selector.serverHelpTitle')}
+                  aria-label={t('pool.selector.serverHelpTitle')}
+                  style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%)' }}
+                >
+                  <HelpCircle size={15} />
+                </button>
+                {showAccountHelp && (
+                  <div className="absolute left-1/2 top-full z-30 mt-2 w-72 -translate-x-1/2 border border-yellow-500/40 bg-white p-3 text-left shadow-xl dark:bg-zinc-900">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-yellow-600 dark:text-yellow-500">
+                      {t('pool.selector.serverHelpTitle')}
+                    </div>
+                    <p className="mt-2 text-[11px] leading-5 text-slate-600 dark:text-zinc-300">
+                      {t('pool.selector.serverHelpDesc')}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleOpenServerLabelSettings}
+                      className="mt-3 w-full border border-yellow-500 bg-yellow-500 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-black transition-colors hover:bg-yellow-400"
+                    >
+                      {t('pool.selector.serverHelpAction')}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

@@ -86,6 +86,23 @@ function normalizeString(value, maxLength = 4096) {
   return text;
 }
 
+function normalizeImportServerIdForSource(serverId, source = 'cn') {
+  const normalized = normalizeString(serverId, 80);
+  if (!normalized) {
+    return '';
+  }
+
+  if (source === 'intl') {
+    return normalized === '2' || normalized === '3' ? normalized : '';
+  }
+
+  if (source === 'cn') {
+    return normalized === '1' ? normalized : '';
+  }
+
+  return normalized;
+}
+
 function inferImportServerIdFromSignals(account = {}, source = 'cn') {
   const signal = [
     account.serverTag,
@@ -116,6 +133,10 @@ function inferImportServerIdFromSignals(account = {}, source = 'cn') {
 }
 
 function normalizeImportRegion(serverId, account = {}, source = 'cn') {
+  if (source === 'intl') {
+    return 'intl';
+  }
+
   if (serverId === '1') {
     return 'cn';
   }
@@ -172,10 +193,14 @@ async function resolveExistingAccountServerId(supabase, userId, gameUid, source 
 }
 
 async function resolveImportAccountServerContext(supabase, userId, account = {}, source = 'cn') {
-  const explicitServerId = normalizeString(account.serverId || account.server_id, 80);
-  const inferredServerId = inferImportServerIdFromSignals(account, source);
+  const explicitServerId = normalizeImportServerIdForSource(account.serverId || account.server_id, source);
+  const inferredServerId = normalizeImportServerIdForSource(inferImportServerIdFromSignals(account, source), source);
+  const existingServerId = normalizeImportServerIdForSource(
+    await resolveExistingAccountServerId(supabase, userId, account.gameUid || account.game_uid, source),
+    source
+  );
   const serverId = inferredServerId
-    || await resolveExistingAccountServerId(supabase, userId, account.gameUid || account.game_uid, source)
+    || existingServerId
     || explicitServerId
     || (source === 'cn' ? '1' : null);
   const region = normalizeImportRegion(serverId, account, source);
@@ -184,6 +209,47 @@ async function resolveImportAccountServerContext(supabase, userId, account = {},
     serverId,
     region,
     requestServerId: serverId || (source === 'intl' ? '2' : '1'),
+  };
+}
+
+function getAlternateIntlServerId(serverId) {
+  const normalized = normalizeImportServerIdForSource(serverId, 'intl');
+  if (normalized === '2') {
+    return '3';
+  }
+  if (normalized === '3') {
+    return '2';
+  }
+  return '';
+}
+
+function collectRecordsFetchErrorText(result = {}) {
+  const failedPools = Array.isArray(result?.data?.failed) ? result.data.failed : [];
+  return [
+    result?.error,
+    result?.message,
+    result?.data?.error,
+    result?.data?.message,
+    ...failedPools.flatMap(item => [item?.error, item?.message, item?.msg, item?.reason]),
+  ].map(value => normalizeString(value, 500)).filter(Boolean).join(' ');
+}
+
+function isTokenInvalidRecordsFetchResult(result = {}) {
+  const message = collectRecordsFetchErrorText(result).toLowerCase();
+  return /token is invalid|invalid token|token无效|请检查token是否有效/.test(message);
+}
+
+function withResolvedRequestServerContext(context = {}, serverId, account = {}, source = 'cn') {
+  const normalizedServerId = normalizeImportServerIdForSource(serverId, source);
+  if (!normalizedServerId) {
+    return context;
+  }
+
+  return {
+    ...context,
+    serverId: normalizedServerId,
+    region: normalizeImportRegion(normalizedServerId, account, source),
+    requestServerId: normalizedServerId,
   };
 }
 
@@ -1316,7 +1382,7 @@ export async function executeFullImport({
     }
 
     const account = accounts[accountIndex];
-    const accountServerContext = await resolveImportAccountServerContext(supabase, userId, account, source);
+    let accountServerContext = await resolveImportAccountServerContext(supabase, userId, account, source);
 
     // 4. 执行认证链 - u8token
     updateProgress({ progress: 30, message: '正在获取访问凭证...' });
@@ -1336,9 +1402,10 @@ export async function executeFullImport({
     // 5. 获取抽卡记录
     updateProgress({ progress: 40, message: '正在获取抽卡记录...' });
     const { fetchAllRecordsConcurrent } = authChainFunctions;
-    const recordsResult = await fetchAllRecordsConcurrent(
+    let recordsRequestServerId = accountServerContext.requestServerId;
+    let recordsResult = await fetchAllRecordsConcurrent(
       u8Token,
-      accountServerContext.requestServerId,
+      recordsRequestServerId,
       account.gameUid,
       account.nickName,
       {
@@ -1346,9 +1413,39 @@ export async function executeFullImport({
         existingRecordKeys: existingSeqIds
       }
     );
+
+    if (source === 'intl' && isTokenInvalidRecordsFetchResult(recordsResult)) {
+      const alternateServerId = getAlternateIntlServerId(recordsRequestServerId);
+      if (alternateServerId) {
+        console.warn(`[FullImportService] 国际服 ${recordsRequestServerId} 抽卡记录返回 Token is invalid，尝试切换到 ${alternateServerId} 重试一次`);
+        const retryResult = await fetchAllRecordsConcurrent(
+          u8Token,
+          alternateServerId,
+          account.gameUid,
+          account.nickName,
+          {
+            importMode: normalizedImportMode,
+            existingRecordKeys: null,
+          }
+        );
+
+        if (retryResult.success || !recordsResult.success) {
+          recordsResult = retryResult;
+          recordsRequestServerId = alternateServerId;
+        }
+      }
+    }
+
     if (!recordsResult.success) {
       throw new Error(recordsResult.error || 'Records fetch failed');
     }
+
+    accountServerContext = withResolvedRequestServerContext(
+      accountServerContext,
+      recordsRequestServerId,
+      account,
+      source
+    );
 
     // 6. 保存卡池信息
     updateProgress({ progress: 70, message: '正在保存卡池信息...' });
