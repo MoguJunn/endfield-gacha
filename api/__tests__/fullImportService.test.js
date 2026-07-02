@@ -1338,7 +1338,7 @@ describe('executeFullImport import mode metadata', () => {
     expect([...fetchCall[4].existingRecordKeys]).toEqual([
       '10000001:server:1:special_1_2_1:1',
     ]);
-    expect(historySelectCalls).toBe(2);
+    expect(historySelectCalls).toBe(3);
     expect(result.success).toBe(true);
     expect(result.data).toMatchObject({
       importMode: 'incremental',
