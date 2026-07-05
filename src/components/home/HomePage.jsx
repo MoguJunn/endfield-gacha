@@ -27,7 +27,7 @@ import useSiteConfigStore, {
   HOME_VERSION_TIMELINE_CONFIG_KEY,
 } from '../../stores/useSiteConfigStore';
 import CountdownTimer from './CountdownTimer';
-import HeirloomsPreviewCard from './HeirloomsPreviewCard';
+import HomecomingPreviewCard from './HomecomingPreviewCard';
 import NextVersionCountdownCard from './NextVersionCountdownCard';
 import HomeAnnouncementContent from './AnnouncementContent';
 import CollapsibleContent from './CollapsibleContent';
@@ -637,7 +637,7 @@ const HomePage = React.memo(() => {
           <HomeFriendlyLinksCard />
 
           <div className="flex flex-col gap-6">
-            <HeirloomsPreviewCard />
+            <HomecomingPreviewCard />
             <div className="shrink-0 min-h-32">
               <NextVersionCountdownCard
                 targetDate={nextVersionTargetDate}
