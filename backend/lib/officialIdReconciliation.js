@@ -44,16 +44,9 @@ function normalizeNameKey(value) {
 
 function isGenericPoolName(value) {
   const key = normalizeNameKey(value);
-  return new Set([
-    '限定角色池',
-    '限定池',
-    '武器池',
-    '附加寻访',
-    '基础寻访',
-    '启程寻访',
-    'standard',
-    'beginner',
-  ]).has(key);
+  return new Set(['限定角色池', '限定池', '武器池', '附加寻访', '基础寻访', '启程寻访', 'standard', 'beginner']).has(
+    key
+  );
 }
 
 function normalizeDateKey(value) {
@@ -133,9 +126,7 @@ async function upsertRows(adminClient, tableName, rows, options = {}) {
     return;
   }
 
-  const { error } = await adminClient
-    .from(tableName)
-    .upsert(normalizedRows, options);
+  const { error } = await adminClient.from(tableName).upsert(normalizedRows, options);
 
   if (error) {
     throw error;
@@ -187,20 +178,16 @@ function normalizeCharacterCandidate(record) {
   }
 
   const explicitType = normalizeText(record?.type || record?.recordType);
-  const inferredType = explicitType === 'weapon' || record?.weaponId || id.startsWith('weapon_')
-    ? 'weapon'
-    : 'character';
+  const inferredType =
+    explicitType === 'weapon' || record?.weaponId || id.startsWith('weapon_') ? 'weapon' : 'character';
 
   return {
     id,
     idSource: classifyCharacterIdSource(id),
-    name: normalizeText(
-      record?.name
-      || record?.character_name
-      || record?.item_name
-      || record?.charName
-      || record?.weaponName
-    ) || id,
+    name:
+      normalizeText(
+        record?.name || record?.character_name || record?.item_name || record?.charName || record?.weaponName
+      ) || id,
     type: inferredType,
     rarity: Number.parseInt(String(record?.rarity || record?.qualityLevel || ''), 10) || null,
   };
@@ -221,12 +208,7 @@ function scorePoolCandidate(officialPool, manualPool) {
     score += 60;
   }
 
-  if (
-    officialNameKey
-    && manualNameKey
-    && officialNameKey === manualNameKey
-    && !isGenericPoolName(officialPool?.name)
-  ) {
+  if (officialNameKey && manualNameKey && officialNameKey === manualNameKey && !isGenericPoolName(officialPool?.name)) {
     score += 45;
   }
 
@@ -276,8 +258,8 @@ function scoreCharacterCandidate(officialCharacter, manualCharacter) {
 
 function findUniqueMatch(target, candidates, scorer, minScore) {
   const scored = candidates
-    .map(candidate => ({ candidate, score: scorer(target, candidate) }))
-    .filter(item => item.score >= minScore)
+    .map((candidate) => ({ candidate, score: scorer(target, candidate) }))
+    .filter((item) => item.score >= minScore)
     .sort((left, right) => right.score - left.score);
 
   if (scored.length === 0) {
@@ -305,21 +287,58 @@ function buildMergedPoolRow(officialPool, manualPool, userId) {
   };
 }
 
-function buildMergedCharacterRow(officialCharacter, manualCharacter) {
-  const aliases = new Set([
-    ...(Array.isArray(manualCharacter?.aliases) ? manualCharacter.aliases : []),
-    manualCharacter?.id,
-    officialCharacter?.name,
-  ].map(normalizeText).filter(Boolean));
+function getPoolConfigWeight(config) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    return 0;
+  }
+  const pools = Array.isArray(config.pools) ? config.pools.length : 0;
+  return pools + Object.keys(config).length;
+}
 
-  return {
+function mergeCharacterPoolConfig(...configs) {
+  const sortedConfigs = configs
+    .filter((config) => config && typeof config === 'object' && !Array.isArray(config))
+    .sort((left, right) => getPoolConfigWeight(right) - getPoolConfigWeight(left));
+  for (const config of sortedConfigs) {
+    if (config && typeof config === 'object' && !Array.isArray(config)) {
+      return config;
+    }
+  }
+  return null;
+}
+
+function buildMergedCharacterRow(officialCharacter, manualCharacter, existingTarget = null) {
+  const aliases = new Set(
+    [
+      ...(Array.isArray(existingTarget?.aliases) ? existingTarget.aliases : []),
+      ...(Array.isArray(manualCharacter?.aliases) ? manualCharacter.aliases : []),
+      existingTarget?.id,
+      manualCharacter?.id,
+      officialCharacter?.name,
+    ]
+      .map(normalizeText)
+      .filter(Boolean)
+  );
+  const createdAt = existingTarget?.created_at || manualCharacter?.created_at;
+
+  const row = {
     id: officialCharacter.id,
-    name: officialCharacter.name || manualCharacter?.name || officialCharacter.id,
-    type: officialCharacter.type || manualCharacter?.type || 'character',
-    rarity: officialCharacter.rarity || manualCharacter?.rarity || null,
+    name: officialCharacter.name || existingTarget?.name || manualCharacter?.name || officialCharacter.id,
+    type: officialCharacter.type || existingTarget?.type || manualCharacter?.type || 'character',
+    rarity: officialCharacter.rarity || existingTarget?.rarity || manualCharacter?.rarity || null,
+    avatar_url: existingTarget?.avatar_url || manualCharacter?.avatar_url || null,
+    is_limited: Boolean(existingTarget?.is_limited || manualCharacter?.is_limited),
+    release_date: existingTarget?.release_date || manualCharacter?.release_date || null,
+    pool_config: mergeCharacterPoolConfig(existingTarget?.pool_config, manualCharacter?.pool_config),
     aliases: Array.from(aliases),
     updated_at: new Date().toISOString(),
   };
+
+  if (createdAt) {
+    row.created_at = createdAt;
+  }
+
+  return row;
 }
 
 function isCanonicalCharacterMatchCandidate(character) {
@@ -350,7 +369,7 @@ async function copyPoolCharactersToTarget(adminClient, sourcePoolId, targetPoolI
     await upsertRows(
       adminClient,
       'pool_characters',
-      rows.map(row => ({
+      rows.map((row) => ({
         ...row,
         pool_id: targetPoolId,
       })),
@@ -371,54 +390,83 @@ async function copyCharacterPoolRosterToTarget(adminClient, sourceCharacterId, t
   );
 
   if (rows.length > 0) {
-    await upsertRows(
+    const existingRows = await selectEq(
       adminClient,
       'pool_characters',
-      rows.map(row => ({
-        ...row,
-        character_id: targetCharacterId,
-      })),
-      { onConflict: 'pool_id,character_id' }
+      'pool_id, character_id, is_up, created_at',
+      'character_id',
+      targetCharacterId
     );
+    const existingRowsByPoolId = new Map(existingRows.map((row) => [normalizeText(row.pool_id), row]));
+    const rowsToUpsert = rows
+      .map((row) => {
+        const existing = existingRowsByPoolId.get(normalizeText(row.pool_id));
+        if (!existing) {
+          return {
+            ...row,
+            character_id: targetCharacterId,
+          };
+        }
+
+        if (Boolean(existing.is_up) === true || Boolean(row.is_up) !== true) {
+          return null;
+        }
+
+        return {
+          ...existing,
+          is_up: true,
+        };
+      })
+      .filter(Boolean);
+
+    await upsertRows(adminClient, 'pool_characters', rowsToUpsert, { onConflict: 'pool_id,character_id' });
   }
 
   await deleteEq(adminClient, 'pool_characters', 'character_id', sourceCharacterId);
 }
 
 async function replaceFeaturedCharacterRefs(adminClient, sourceCharacterId, targetCharacterId) {
-  const pools = await loadTableRows(
-    adminClient,
-    'pools',
-    'pool_id, featured_characters'
-  );
+  const pools = await loadTableRows(adminClient, 'pools', 'pool_id, featured_characters');
   const updates = pools
-    .filter(pool => Array.isArray(pool.featured_characters) && pool.featured_characters.includes(sourceCharacterId))
-    .map(pool => ({
+    .filter((pool) => Array.isArray(pool.featured_characters) && pool.featured_characters.includes(sourceCharacterId))
+    .map((pool) => ({
       pool_id: pool.pool_id,
-      featured_characters: Array.from(new Set(pool.featured_characters.map(
-        item => item === sourceCharacterId ? targetCharacterId : item
-      ))),
+      featured_characters: Array.from(
+        new Set(pool.featured_characters.map((item) => (item === sourceCharacterId ? targetCharacterId : item)))
+      ),
     }));
 
   for (const update of updates) {
-    await updateEq(adminClient, 'pools', {
-      featured_characters: update.featured_characters,
-      updated_at: new Date().toISOString(),
-    }, 'pool_id', update.pool_id);
+    await updateEq(
+      adminClient,
+      'pools',
+      {
+        featured_characters: update.featured_characters,
+        updated_at: new Date().toISOString(),
+      },
+      'pool_id',
+      update.pool_id
+    );
   }
 }
 
 async function updateHistoryCharacterIdIfPresent(adminClient, sourceCharacterId, targetCharacterId) {
   try {
-    await updateEq(adminClient, 'history', {
-      character_id: targetCharacterId,
-      updated_at: new Date().toISOString(),
-    }, 'character_id', sourceCharacterId);
+    await updateEq(
+      adminClient,
+      'history',
+      {
+        character_id: targetCharacterId,
+        updated_at: new Date().toISOString(),
+      },
+      'character_id',
+      sourceCharacterId
+    );
   } catch (error) {
     const message = String(error?.message || '');
     if (
-      message.includes('history.character_id does not exist')
-      || message.includes("Could not find the 'character_id' column")
+      message.includes('history.character_id does not exist') ||
+      message.includes("Could not find the 'character_id' column")
     ) {
       return;
     }
@@ -438,10 +486,16 @@ async function migratePoolPlaceholder(adminClient, sourcePool, targetPoolId) {
     },
   ]);
 
-  await updateEq(adminClient, 'history', {
-    pool_id: targetPoolId,
-    updated_at: new Date().toISOString(),
-  }, 'pool_id', sourcePool.pool_id);
+  await updateEq(
+    adminClient,
+    'history',
+    {
+      pool_id: targetPoolId,
+      updated_at: new Date().toISOString(),
+    },
+    'pool_id',
+    sourcePool.pool_id
+  );
 
   await copyPoolCharactersToTarget(adminClient, sourcePool.pool_id, targetPoolId);
   await deleteEq(adminClient, 'pools', 'pool_id', sourcePool.pool_id);
@@ -466,23 +520,27 @@ async function migrateCharacterPlaceholder(adminClient, sourceCharacter, targetC
 }
 
 async function retireRawCharacterDuplicate(adminClient, sourceCharacter, targetCharacterId) {
-  await updateEq(adminClient, 'character_id_aliases', {
-    character_id: targetCharacterId,
-    is_primary: false,
-    updated_at: new Date().toISOString(),
-  }, 'character_id', sourceCharacter.id);
+  await updateEq(
+    adminClient,
+    'character_id_aliases',
+    {
+      character_id: targetCharacterId,
+      is_primary: false,
+      updated_at: new Date().toISOString(),
+    },
+    'character_id',
+    sourceCharacter.id
+  );
   await updateHistoryCharacterIdIfPresent(adminClient, sourceCharacter.id, targetCharacterId);
   await copyCharacterPoolRosterToTarget(adminClient, sourceCharacter.id, targetCharacterId);
   await replaceFeaturedCharacterRefs(adminClient, sourceCharacter.id, targetCharacterId);
   await deleteEq(adminClient, 'characters', 'id', sourceCharacter.id);
 }
 
-export async function reconcileOfficialPoolIds(adminClient, pools, {
-  userId = null,
-} = {}) {
+export async function reconcileOfficialPoolIds(adminClient, pools, { userId = null } = {}) {
   const officialPools = uniqueById(
     (Array.isArray(pools) ? pools : []).map(normalizePoolCandidate).filter(Boolean),
-    row => row.pool_id
+    (row) => row.pool_id
   );
 
   if (officialPools.length === 0) {
@@ -494,8 +552,8 @@ export async function reconcileOfficialPoolIds(adminClient, pools, {
     'pools',
     'pool_id, name, type, start_time, end_time, up_character, featured_characters, user_id'
   );
-  const byId = new Map(existingPools.map(row => [normalizeText(row.pool_id), row]));
-  const manualPools = existingPools.filter(row => isManualPoolId(row.pool_id));
+  const byId = new Map(existingPools.map((row) => [normalizeText(row.pool_id), row]));
+  const manualPools = existingPools.filter((row) => isManualPoolId(row.pool_id));
   const operations = [];
   const targetRows = [];
 
@@ -503,7 +561,7 @@ export async function reconcileOfficialPoolIds(adminClient, pools, {
     const existingTarget = byId.get(officialPool.pool_id);
     const { match, reason, score } = findUniqueMatch(
       officialPool,
-      manualPools.filter(row => normalizeText(row.pool_id) !== officialPool.pool_id),
+      manualPools.filter((row) => normalizeText(row.pool_id) !== officialPool.pool_id),
       scorePoolCandidate,
       MIN_POOL_MATCH_SCORE
     );
@@ -543,13 +601,13 @@ export async function reconcileOfficialPoolIds(adminClient, pools, {
 
   await upsertPoolAliases(
     adminClient,
-    officialPools.flatMap(pool => buildPoolSelfAliasRows(pool.pool_id, 'official_api'))
+    officialPools.flatMap((pool) => buildPoolSelfAliasRows(pool.pool_id, 'official_api'))
   );
 
   return {
-    created: operations.filter(item => item.action === 'created_official').length,
-    migrated: operations.filter(item => item.action === 'migrated_manual_placeholder').length,
-    skipped: operations.filter(item => item.reason === 'ambiguous_match').length,
+    created: operations.filter((item) => item.action === 'created_official').length,
+    migrated: operations.filter((item) => item.action === 'migrated_manual_placeholder').length,
+    skipped: operations.filter((item) => item.reason === 'ambiguous_match').length,
     operations,
   };
 }
@@ -557,10 +615,10 @@ export async function reconcileOfficialPoolIds(adminClient, pools, {
 export async function reconcileOfficialCharacterIds(adminClient, records) {
   const importCharacters = uniqueById(
     (Array.isArray(records) ? records : []).map(normalizeCharacterCandidate).filter(Boolean),
-    row => row.id
+    (row) => row.id
   );
-  const officialCharacters = importCharacters.filter(character => isStableOfficialCharacterId(character.id));
-  const rawAliasCharacters = importCharacters.filter(character => isRawOfficialImportCharacterAliasId(character.id));
+  const officialCharacters = importCharacters.filter((character) => isStableOfficialCharacterId(character.id));
+  const rawAliasCharacters = importCharacters.filter((character) => isRawOfficialImportCharacterAliasId(character.id));
 
   if (officialCharacters.length === 0 && rawAliasCharacters.length === 0) {
     return { created: 0, migrated: 0, aliased: 0, rawDuplicatesRetired: 0, skipped: 0, operations: [] };
@@ -569,10 +627,10 @@ export async function reconcileOfficialCharacterIds(adminClient, records) {
   const existingCharacters = await loadTableRows(
     adminClient,
     'characters',
-    'id, name, type, rarity, aliases, avatar_url'
+    'id, name, type, rarity, aliases, avatar_url, is_limited, release_date, pool_config, created_at'
   );
-  const byId = new Map(existingCharacters.map(row => [normalizeText(row.id), row]));
-  const manualCharacters = existingCharacters.filter(row => isManualCharacterId(row.id));
+  const byId = new Map(existingCharacters.map((row) => [normalizeText(row.id), row]));
+  const manualCharacters = existingCharacters.filter((row) => isManualCharacterId(row.id));
   const operations = [];
   const targetRows = [];
 
@@ -580,13 +638,13 @@ export async function reconcileOfficialCharacterIds(adminClient, records) {
     const existingTarget = byId.get(officialCharacter.id);
     const { match, reason, score } = findUniqueMatch(
       officialCharacter,
-      manualCharacters.filter(row => normalizeText(row.id) !== officialCharacter.id),
+      manualCharacters.filter((row) => normalizeText(row.id) !== officialCharacter.id),
       scoreCharacterCandidate,
       MIN_CHARACTER_MATCH_SCORE
     );
 
     if (!existingTarget || match) {
-      targetRows.push(buildMergedCharacterRow(officialCharacter, match || existingTarget));
+      targetRows.push(buildMergedCharacterRow(officialCharacter, match, existingTarget));
     }
 
     if (!match) {
@@ -618,18 +676,16 @@ export async function reconcileOfficialCharacterIds(adminClient, records) {
     await migrateCharacterPlaceholder(adminClient, sourceCharacter, operation.officialId);
   }
 
-  const canonicalCandidates = [
-    ...existingCharacters,
-    ...targetRows,
-  ].filter(isCanonicalCharacterMatchCandidate);
-  const characterAliasRows = officialCharacters
-    .flatMap(character => buildCharacterSelfAliasRows(character.id, 'official_api'));
+  const canonicalCandidates = [...existingCharacters, ...targetRows].filter(isCanonicalCharacterMatchCandidate);
+  const characterAliasRows = officialCharacters.flatMap((character) =>
+    buildCharacterSelfAliasRows(character.id, 'official_api')
+  );
 
   for (const rawCharacter of rawAliasCharacters) {
     const existingRawDuplicate = byId.get(rawCharacter.id);
     const { match, reason, score } = findUniqueMatch(
       rawCharacter,
-      canonicalCandidates.filter(row => normalizeText(row.id) !== rawCharacter.id),
+      canonicalCandidates.filter((row) => normalizeText(row.id) !== rawCharacter.id),
       scoreCharacterCandidate,
       MIN_CHARACTER_MATCH_SCORE
     );
@@ -661,11 +717,11 @@ export async function reconcileOfficialCharacterIds(adminClient, records) {
   await upsertCharacterAliases(adminClient, characterAliasRows);
 
   return {
-    created: operations.filter(item => item.action === 'created_official').length,
-    migrated: operations.filter(item => item.action === 'migrated_manual_placeholder').length,
-    aliased: operations.filter(item => item.action === 'aliased_raw_id').length,
-    rawDuplicatesRetired: operations.filter(item => item.action === 'retired_raw_duplicate').length,
-    skipped: operations.filter(item => item.reason === 'ambiguous_match').length,
+    created: operations.filter((item) => item.action === 'created_official').length,
+    migrated: operations.filter((item) => item.action === 'migrated_manual_placeholder').length,
+    aliased: operations.filter((item) => item.action === 'aliased_raw_id').length,
+    rawDuplicatesRetired: operations.filter((item) => item.action === 'retired_raw_duplicate').length,
+    skipped: operations.filter((item) => item.reason === 'ambiguous_match').length,
     operations,
   };
 }
