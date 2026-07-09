@@ -93,6 +93,7 @@
     "fetch:announcements": "node scripts/fetch-official-announcements.mjs"
   },
   "dependencies": {
+    "@paddleocr/paddleocr-js": "^0.4.2",
     "@sparticuz/chromium": "^148.0.0",
     "@supabase/supabase-js": "^2.106.1",
     "@vercel/analytics": "^2.0.1",

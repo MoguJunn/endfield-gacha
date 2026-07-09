@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-06-13T18:00:20.748Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/147_scope_history_unique_key_by_server.sql
+--   4. 生成时间: 2026-07-02T19:20:31.726Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/149_create_game_saves_and_aic_catalog.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -1816,7 +1816,7 @@ GROUP BY p.pool_id, p.type;
 
 -- 1. 查看每个6星的出货位置和垫刀数
 WITH ordered_pulls AS (
-  SELECT
+  SELECT 
     h.record_id,
     h.rarity,
     h.is_standard,
@@ -1827,7 +1827,7 @@ WITH ordered_pulls AS (
   WHERE p.type = 'limited'
 ),
 six_stars_with_pity AS (
-  SELECT
+  SELECT 
     record_id,
     is_standard,
     special_type,
@@ -1836,7 +1836,7 @@ six_stars_with_pity AS (
   FROM ordered_pulls
   WHERE rarity = 6
 )
-SELECT
+SELECT 
   ROW_NUMBER() OVER (ORDER BY pull_number) as "第几个6星",
   record_id as "记录ID",
   CASE WHEN is_standard THEN '常驻(歪)' ELSE '限定UP' END as "类型",
@@ -1847,7 +1847,7 @@ FROM six_stars_with_pity
 ORDER BY pull_number;
 
 -- 2. 统计总览
-SELECT
+SELECT 
   '总抽数' as "指标",
   COUNT(*)::text as "数值"
 FROM history h
@@ -1856,7 +1856,7 @@ WHERE p.type = 'limited'
 
 UNION ALL
 
-SELECT
+SELECT 
   '6星总数',
   COUNT(*)::text
 FROM history h
@@ -1865,7 +1865,7 @@ WHERE p.type = 'limited' AND h.rarity = 6
 
 UNION ALL
 
-SELECT
+SELECT 
   '限定UP数',
   COUNT(*)::text
 FROM history h
@@ -1874,7 +1874,7 @@ WHERE p.type = 'limited' AND h.rarity = 6 AND h.is_standard = false
 
 UNION ALL
 
-SELECT
+SELECT 
   '常驻歪数',
   COUNT(*)::text
 FROM history h
@@ -1883,7 +1883,7 @@ WHERE p.type = 'limited' AND h.rarity = 6 AND h.is_standard = true
 
 UNION ALL
 
-SELECT
+SELECT 
   '计算平均出货',
   ROUND(480.0 / NULLIF((SELECT COUNT(*) FROM history h JOIN pools p ON h.pool_id = p.pool_id AND h.user_id = p.user_id WHERE p.type = 'limited' AND h.rarity = 6), 0), 1)::text
 
@@ -2049,13 +2049,13 @@ DECLARE
 BEGIN
   -- 提取域名
   email_domain := split_part(check_email, '@', 2);
-
+  
   -- 检查完整邮箱或域名是否在黑名单中
   RETURN EXISTS (
     SELECT 1 FROM public.blacklist
-    WHERE
+    WHERE 
       (type = 'email' AND LOWER(email) = LOWER(check_email))
-      OR
+      OR 
       (type = 'domain' AND LOWER(email) = LOWER(email_domain))
   );
 END;
@@ -2172,7 +2172,7 @@ BEGIN
     email_domain := LOWER(SPLIT_PART(check_email, '@', 2));
 
     -- 1. 检查是否在黑名单中
-    IF EXISTS (SELECT 1 FROM email_blacklist WHERE
+    IF EXISTS (SELECT 1 FROM email_blacklist WHERE 
         (type = 'email' AND LOWER(email) = LOWER(check_email)) OR
         (type = 'domain' AND LOWER(email) = email_domain)
     ) THEN
@@ -2189,7 +2189,7 @@ BEGIN
         RETURN jsonb_build_object('valid', true);
     ELSE
         RETURN jsonb_build_object(
-            'valid', false,
+            'valid', false, 
             'reason', '请使用主流邮箱服务商（如 Gmail、Outlook、QQ邮箱、163邮箱等）、知名论坛/社区邮箱或企业邮箱注册'
         );
     END IF;
@@ -2222,7 +2222,7 @@ CREATE TABLE IF NOT EXISTS rate_limit_logs (
 );
 
 -- 创建索引加速查询
-CREATE INDEX IF NOT EXISTS idx_rate_limit_logs_lookup
+CREATE INDEX IF NOT EXISTS idx_rate_limit_logs_lookup 
 ON rate_limit_logs (identifier, action, created_at DESC);
 
 -- 自动清理过期记录（保留24小时）
@@ -2268,7 +2268,7 @@ DECLARE
 BEGIN
     -- 获取配置
     SELECT * INTO config_row FROM rate_limit_config WHERE action = p_action;
-
+    
     IF config_row IS NULL THEN
         -- 如果没有配置，默认允许
         RETURN jsonb_build_object('allowed', true);
@@ -2285,7 +2285,7 @@ BEGIN
     -- 检查是否超过限制
     IF attempt_count >= config_row.max_attempts THEN
         lockout_until := oldest_attempt + (config_row.window_minutes + config_row.lockout_minutes || ' minutes')::INTERVAL;
-
+        
         IF lockout_until > NOW() THEN
             RETURN jsonb_build_object(
                 'allowed', false,
@@ -2332,12 +2332,12 @@ DECLARE
 BEGIN
     -- 先检查
     check_result := check_rate_limit(p_identifier, p_action);
-
+    
     -- 如果允许，记录这次请求
     IF (check_result->>'allowed')::BOOLEAN THEN
         PERFORM log_rate_limit(p_identifier, p_action);
     END IF;
-
+    
     RETURN check_result;
 END;
 $$;
@@ -2464,13 +2464,13 @@ CREATE POLICY "rate_limit_config_admin_delete" ON public.rate_limit_config
 -- ============================================
 -- 注释
 -- ============================================
-COMMENT ON POLICY "email_whitelist_select_all" ON public.email_whitelist
+COMMENT ON POLICY "email_whitelist_select_all" ON public.email_whitelist 
   IS '允许所有用户读取邮箱白名单，用于注册验证';
 
-COMMENT ON POLICY "rate_limit_logs_no_direct_access" ON public.rate_limit_logs
+COMMENT ON POLICY "rate_limit_logs_no_direct_access" ON public.rate_limit_logs 
   IS '禁止直接访问频率限制日志，只能通过 SECURITY DEFINER 函数访问';
 
-COMMENT ON POLICY "rate_limit_config_select_all" ON public.rate_limit_config
+COMMENT ON POLICY "rate_limit_config_select_all" ON public.rate_limit_config 
   IS '允许所有用户读取频率限制配置';
 -- <<< END MIGRATION: archive/019_enable_rls_security_fix.sql
 
@@ -2502,7 +2502,7 @@ BEGIN
     email_domain := LOWER(SPLIT_PART(check_email, '@', 2));
 
     -- 1. 检查是否在黑名单中
-    IF EXISTS (SELECT 1 FROM public.email_blacklist WHERE
+    IF EXISTS (SELECT 1 FROM public.email_blacklist WHERE 
         (type = 'email' AND LOWER(email) = LOWER(check_email)) OR
         (type = 'domain' AND LOWER(email) = email_domain)
     ) THEN
@@ -2519,7 +2519,7 @@ BEGIN
         RETURN jsonb_build_object('valid', true);
     ELSE
         RETURN jsonb_build_object(
-            'valid', false,
+            'valid', false, 
             'reason', '请使用主流邮箱服务商（如 Gmail、Outlook、QQ邮箱、163邮箱等）、知名论坛/社区邮箱或企业邮箱注册'
         );
     END IF;
@@ -2541,11 +2541,11 @@ BEGIN
     IF check_email IS NULL THEN
         RETURN FALSE;
     END IF;
-
+    
     email_domain := LOWER(SPLIT_PART(check_email, '@', 2));
-
+    
     RETURN EXISTS (
-        SELECT 1 FROM public.email_blacklist
+        SELECT 1 FROM public.email_blacklist 
         WHERE (type = 'email' AND LOWER(email) = LOWER(check_email))
            OR (type = 'domain' AND LOWER(email) = email_domain)
     );
@@ -2586,7 +2586,7 @@ DECLARE
 BEGIN
     -- 获取配置
     SELECT * INTO config_row FROM public.rate_limit_config WHERE action = p_action;
-
+    
     IF config_row IS NULL THEN
         RETURN jsonb_build_object('allowed', true);
     END IF;
@@ -2602,7 +2602,7 @@ BEGIN
     -- 检查是否超过限制
     IF attempt_count >= config_row.max_attempts THEN
         lockout_until := oldest_attempt + (config_row.window_minutes + config_row.lockout_minutes || ' minutes')::INTERVAL;
-
+        
         IF lockout_until > NOW() THEN
             RETURN jsonb_build_object(
                 'allowed', false,
@@ -2654,11 +2654,11 @@ DECLARE
     check_result JSONB;
 BEGIN
     check_result := public.check_rate_limit(p_identifier, p_action);
-
+    
     IF (check_result->>'allowed')::BOOLEAN THEN
         PERFORM public.log_rate_limit(p_identifier, p_action);
     END IF;
-
+    
     RETURN check_result;
 END;
 $$;
@@ -2674,7 +2674,7 @@ SET search_path = public
 AS $$
 BEGIN
     RETURN EXISTS (
-        SELECT 1 FROM public.profiles
+        SELECT 1 FROM public.profiles 
         WHERE id = auth.uid() AND role = 'super_admin'
     );
 END;
@@ -4287,7 +4287,7 @@ WHERE rotation_processed = FALSE AND end_time IS NOT NULL;
 -- 这样现有角色会出现在所有池子中
 UPDATE characters
 SET pool_config = pool_config || jsonb_build_object('introduced_at', '2026-01-22T11:00:00+08:00')
-WHERE pool_config IS NOT NULL
+WHERE pool_config IS NOT NULL 
   AND pool_config->>'introduced_at' IS NULL;
 
 -- 添加注释说明
@@ -4310,8 +4310,8 @@ DO $$
 BEGIN
   -- 检查是否已存在唯一约束
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'pools_pool_id_key'
+    SELECT 1 FROM pg_constraint 
+    WHERE conname = 'pools_pool_id_key' 
     AND conrelid = 'pools'::regclass
   ) THEN
     -- 添加唯一约束
@@ -4326,7 +4326,7 @@ CREATE TABLE IF NOT EXISTS pool_characters (
   character_id TEXT NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
   is_up BOOLEAN DEFAULT FALSE,  -- 是否为该池子的UP角色
   created_at TIMESTAMPTZ DEFAULT NOW(),
-
+  
   -- 确保同一个池子不会重复添加同一个角色
   UNIQUE(pool_id, character_id)
 );
@@ -21708,6 +21708,374 @@ end;
 $$;
 -- <<< END MIGRATION: active/139_add_status_heartbeat_history.sql
 
+-- >>> BEGIN MIGRATION: active/140_create_game_platform_tables.sql
+-- 140: 小游戏平台核心表
+--
+-- 为独立小游戏站 (endfield-games) 提供货币钱包、成绩流水、排行榜、用户统计
+-- 和游戏目录。小游戏站后端使用 service_role 访问这些表（前端只持有 HttpOnly
+-- 会话 cookie，不直连 Supabase），因此这些表对 anon/authenticated 一律 REVOKE，
+-- 仅授予 service_role，沿用 129 私有表的安全惯例。
+--
+-- 用户 id 锚点仍为 auth.users(id)，与主站共享同一身份体系。
+
+-- ============================================
+-- 1. 货币钱包 (game_currency_wallets)
+-- ============================================
+CREATE TABLE IF NOT EXISTS public.game_currency_wallets (
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  currency_code TEXT NOT NULL,
+  balance BIGINT NOT NULL DEFAULT 0 CHECK (balance >= 0),
+  lifetime_earned BIGINT NOT NULL DEFAULT 0 CHECK (lifetime_earned >= 0),
+  lifetime_spent BIGINT NOT NULL DEFAULT 0 CHECK (lifetime_spent >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, currency_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_game_currency_wallets_user
+  ON public.game_currency_wallets(user_id);
+
+ALTER TABLE public.game_currency_wallets ENABLE ROW LEVEL SECURITY;
+
+-- ============================================
+-- 2. 货币流水台账 (game_currency_ledger)
+-- ============================================
+-- 不可变流水，记录每一次余额变更；带幂等 key 防重复入账。
+CREATE TABLE IF NOT EXISTS public.game_currency_ledger (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  currency_code TEXT NOT NULL,
+  amount BIGINT NOT NULL,
+  reason TEXT NOT NULL DEFAULT 'unspecified',
+  source_game_id TEXT,
+  source_event_id UUID,
+  idempotency_key TEXT,
+  balance_after BIGINT NOT NULL,
+  meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_game_currency_ledger_user_created
+  ON public.game_currency_ledger(user_id, created_at DESC);
+
+ALTER TABLE public.game_currency_ledger ENABLE ROW LEVEL SECURITY;
+
+-- ============================================
+-- 3. 成绩事件流水 (game_score_events)
+-- ============================================
+CREATE TABLE IF NOT EXISTS public.game_score_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  game_id TEXT NOT NULL,
+  score INTEGER NOT NULL DEFAULT 0,
+  points INTEGER NOT NULL DEFAULT 0,
+  duration_ms INTEGER,
+  rules_version TEXT,
+  client_meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+  integrity_status TEXT NOT NULL DEFAULT 'accepted'
+    CHECK (integrity_status IN ('accepted', 'pending', 'rejected')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_game_score_events_user_game
+  ON public.game_score_events(user_id, game_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_game_score_events_game_created
+  ON public.game_score_events(game_id, created_at DESC);
+
+-- 拼图完成幂等查询使用 client_meta 上的 GIN 索引（contains 查询）
+CREATE INDEX IF NOT EXISTS idx_game_score_events_client_meta
+  ON public.game_score_events USING GIN (client_meta);
+
+ALTER TABLE public.game_score_events ENABLE ROW LEVEL SECURITY;
+
+-- ============================================
+-- 4. 排行榜条目 (game_leaderboard_entries)
+-- ============================================
+CREATE TABLE IF NOT EXISTS public.game_leaderboard_entries (
+  game_id TEXT NOT NULL,
+  season_id TEXT NOT NULL DEFAULT 'global',
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  best_score INTEGER NOT NULL DEFAULT 0,
+  best_duration_ms INTEGER,
+  total_points BIGINT NOT NULL DEFAULT 0,
+  play_count INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (game_id, season_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_game_leaderboard_rank
+  ON public.game_leaderboard_entries(game_id, season_id, best_score DESC, best_duration_ms ASC);
+
+ALTER TABLE public.game_leaderboard_entries ENABLE ROW LEVEL SECURITY;
+
+-- ============================================
+-- 5. 用户统计 (game_user_stats)
+-- ============================================
+CREATE TABLE IF NOT EXISTS public.game_user_stats (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  total_points BIGINT NOT NULL DEFAULT 0,
+  play_count INTEGER NOT NULL DEFAULT 0,
+  last_played_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.game_user_stats ENABLE ROW LEVEL SECURITY;
+
+-- ============================================
+-- 6. 游戏目录 (game_catalog)
+-- ============================================
+CREATE TABLE IF NOT EXISTS public.game_catalog (
+  game_id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'hidden', 'archived')),
+  rules_version TEXT NOT NULL DEFAULT 'v1',
+  sort_order INTEGER NOT NULL DEFAULT 100,
+  leaderboard_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_game_catalog_status_sort
+  ON public.game_catalog(status, sort_order);
+
+ALTER TABLE public.game_catalog ENABLE ROW LEVEL SECURITY;
+
+-- ============================================
+-- 7. updated_at 触发器
+-- ============================================
+DROP TRIGGER IF EXISTS update_game_currency_wallets_updated_at ON public.game_currency_wallets;
+CREATE TRIGGER update_game_currency_wallets_updated_at
+  BEFORE UPDATE ON public.game_currency_wallets
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_game_leaderboard_entries_updated_at ON public.game_leaderboard_entries;
+CREATE TRIGGER update_game_leaderboard_entries_updated_at
+  BEFORE UPDATE ON public.game_leaderboard_entries
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_game_user_stats_updated_at ON public.game_user_stats;
+CREATE TRIGGER update_game_user_stats_updated_at
+  BEFORE UPDATE ON public.game_user_stats
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_game_catalog_updated_at ON public.game_catalog;
+CREATE TRIGGER update_game_catalog_updated_at
+  BEFORE UPDATE ON public.game_catalog
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+-- ============================================
+-- 8. 权限：撤销 anon/authenticated，仅授予 service_role
+-- ============================================
+-- 小游戏站后端用 service_role 访问；浏览器不直连这些表。
+REVOKE ALL ON public.game_currency_wallets FROM anon, authenticated;
+REVOKE ALL ON public.game_currency_ledger FROM anon, authenticated;
+REVOKE ALL ON public.game_score_events FROM anon, authenticated;
+REVOKE ALL ON public.game_leaderboard_entries FROM anon, authenticated;
+REVOKE ALL ON public.game_user_stats FROM anon, authenticated;
+REVOKE ALL ON public.game_catalog FROM anon, authenticated;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON public.game_currency_wallets TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON public.game_currency_ledger TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON public.game_score_events TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON public.game_leaderboard_entries TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON public.game_user_stats TO service_role;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON public.game_catalog TO service_role;
+  END IF;
+END $$;
+
+-- ============================================
+-- 9. 注释
+-- ============================================
+COMMENT ON TABLE public.game_currency_wallets IS
+  '小游戏货币钱包（折金票等），主键 user_id + currency_code。仅 service_role 可访问。';
+COMMENT ON TABLE public.game_currency_ledger IS
+  '小游戏货币不可变流水台账，带幂等 key 防重复入账。仅 service_role 可访问。';
+COMMENT ON TABLE public.game_score_events IS
+  '小游戏成绩事件流水。client_meta 用于幂等判断（如拼图完成 mode/puzzleId）。仅 service_role 可访问。';
+COMMENT ON TABLE public.game_leaderboard_entries IS
+  '小游戏排行榜条目，按 game_id + season_id + user_id 聚合最佳成绩。仅 service_role 可访问。';
+COMMENT ON TABLE public.game_user_stats IS
+  '小游戏用户累计统计（总积分、局数、最近游玩时间）。仅 service_role 可访问。';
+COMMENT ON TABLE public.game_catalog IS
+  '小游戏目录，定义可用游戏及其展示信息与规则版本。仅 service_role 可访问。';
+-- <<< END MIGRATION: active/140_create_game_platform_tables.sql
+
+-- >>> BEGIN MIGRATION: active/141_create_game_currency_rpc.sql
+-- 141: 小游戏货币增减 RPC
+--
+-- apply_game_currency_delta 在单事务内原子地：
+--   1. upsert 钱包余额（balance / lifetime_earned / lifetime_spent）
+--   2. 写一条不可变流水（game_currency_ledger）
+-- 通过 p_idempotency_key 的唯一约束保证同一笔入账只生效一次（重复调用直接
+-- 返回已有钱包状态，不重复加减）。
+--
+-- SECURITY DEFINER 绕过 RLS；仅授予 service_role（小游戏后端调用）。
+
+CREATE OR REPLACE FUNCTION public.apply_game_currency_delta(
+  p_user_id UUID,
+  p_currency_code TEXT,
+  p_amount BIGINT,
+  p_reason TEXT DEFAULT 'unspecified',
+  p_source_game_id TEXT DEFAULT NULL,
+  p_source_event_id UUID DEFAULT NULL,
+  p_idempotency_key TEXT DEFAULT NULL,
+  p_meta JSONB DEFAULT '{}'::jsonb
+)
+RETURNS TABLE (
+  currency_code TEXT,
+  balance BIGINT,
+  lifetime_earned BIGINT,
+  lifetime_spent BIGINT,
+  ledger_id UUID
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_existing_ledger public.game_currency_ledger%ROWTYPE;
+  v_wallet public.game_currency_wallets%ROWTYPE;
+  v_earned_delta BIGINT := 0;
+  v_spent_delta BIGINT := 0;
+  v_new_ledger_id UUID;
+BEGIN
+  IF p_user_id IS NULL OR p_currency_code IS NULL THEN
+    RAISE EXCEPTION 'user id and currency code are required';
+  END IF;
+
+  -- 幂等：若该 key 已记账，直接返回当前钱包状态
+  IF p_idempotency_key IS NOT NULL THEN
+    SELECT * INTO v_existing_ledger
+    FROM public.game_currency_ledger
+    WHERE idempotency_key = p_idempotency_key;
+
+    IF FOUND THEN
+      SELECT * INTO v_wallet
+      FROM public.game_currency_wallets
+      WHERE user_id = p_user_id AND game_currency_wallets.currency_code = p_currency_code;
+
+      currency_code := v_wallet.currency_code;
+      balance := v_wallet.balance;
+      lifetime_earned := v_wallet.lifetime_earned;
+      lifetime_spent := v_wallet.lifetime_spent;
+      ledger_id := v_existing_ledger.id;
+      RETURN NEXT;
+      RETURN;
+    END IF;
+  END IF;
+
+  IF p_amount >= 0 THEN
+    v_earned_delta := p_amount;
+  ELSE
+    v_spent_delta := -p_amount;
+  END IF;
+
+  -- upsert 钱包并锁行
+  INSERT INTO public.game_currency_wallets AS w (
+    user_id, currency_code, balance, lifetime_earned, lifetime_spent
+  )
+  VALUES (
+    p_user_id,
+    p_currency_code,
+    GREATEST(0, p_amount),
+    v_earned_delta,
+    v_spent_delta
+  )
+  ON CONFLICT (user_id, currency_code) DO UPDATE
+    SET balance = w.balance + p_amount,
+        lifetime_earned = w.lifetime_earned + v_earned_delta,
+        lifetime_spent = w.lifetime_spent + v_spent_delta,
+        updated_at = NOW()
+  RETURNING * INTO v_wallet;
+
+  IF v_wallet.balance < 0 THEN
+    RAISE EXCEPTION 'insufficient balance for user % currency %', p_user_id, p_currency_code;
+  END IF;
+
+  v_new_ledger_id := gen_random_uuid();
+  INSERT INTO public.game_currency_ledger (
+    id, user_id, currency_code, amount, reason,
+    source_game_id, source_event_id, idempotency_key, balance_after, meta
+  )
+  VALUES (
+    v_new_ledger_id, p_user_id, p_currency_code, p_amount, COALESCE(p_reason, 'unspecified'),
+    p_source_game_id, p_source_event_id, p_idempotency_key, v_wallet.balance, COALESCE(p_meta, '{}'::jsonb)
+  );
+
+  currency_code := v_wallet.currency_code;
+  balance := v_wallet.balance;
+  lifetime_earned := v_wallet.lifetime_earned;
+  lifetime_spent := v_wallet.lifetime_spent;
+  ledger_id := v_new_ledger_id;
+  RETURN NEXT;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.apply_game_currency_delta(UUID, TEXT, BIGINT, TEXT, TEXT, UUID, TEXT, JSONB) FROM anon, authenticated;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION public.apply_game_currency_delta(UUID, TEXT, BIGINT, TEXT, TEXT, UUID, TEXT, JSONB) TO service_role;
+  END IF;
+END $$;
+
+COMMENT ON FUNCTION public.apply_game_currency_delta(UUID, TEXT, BIGINT, TEXT, TEXT, UUID, TEXT, JSONB) IS
+  '原子货币增减：upsert 钱包 + 写不可变流水，按 idempotency_key 幂等。仅 service_role 调用。';
+-- <<< END MIGRATION: active/141_create_game_currency_rpc.sql
+
+-- >>> BEGIN MIGRATION: active/142_grant_game_backend_profile_reads.sql
+-- 142: 确保小游戏后端 (service_role) 能读取 public_profiles
+--
+-- 小游戏站后端用 service_role 调 public_profiles 视图拼排行榜用户名。
+-- public_profiles 是 security_invoker 视图（079），底层为 public_profile_cache。
+-- 在自建实例上，service_role 默认对 public schema 拥有权限，但此处显式补授，
+-- 保证跨实例 / 重置授权后仍可用。这是幂等的安全网，不改变既有对外行为。
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT SELECT ON public.public_profile_cache TO service_role;
+    GRANT SELECT ON public.public_profiles TO service_role;
+  END IF;
+END $$;
+
+-- 备注：拼图相关对象（puzzles 表、increment_puzzle_solve / review_puzzle /
+-- update_puzzle_difficulty / delete_puzzle RPC）已由 archive/064-067 创建，
+-- 自建实例已具备，本迁移无需重建。小游戏站后端通过 service_role 调用
+-- increment_puzzle_solve，service_role 默认具备 EXECUTE 权限。
+-- <<< END MIGRATION: active/142_grant_game_backend_profile_reads.sql
+
+-- >>> BEGIN MIGRATION: active/143_seed_game_catalog.sql
+-- 143: 小游戏目录初始 seed
+--
+-- 与 endfield-games/api/_lib/gameRules.js 的 FALLBACK_GAMES 白名单保持一致。
+-- puzzle-protocol 为站内原生拼图（制作 + 游玩），reaction-grid 为轻量验证玩法。
+-- 后续新玩法（UNO / 挖矿 / 放置）接入时在此追加，并同步 gameRules.js 白名单。
+
+INSERT INTO public.game_catalog (game_id, title, summary, status, rules_version, sort_order, leaderboard_enabled)
+VALUES
+  ('puzzle-protocol', '拼图协议', '拼图创作、挑战和分享的统一入口。', 'active', 'v1', 10, TRUE),
+  ('reaction-grid', '反应矩阵', '用于验证成绩提交与排行链路的轻量玩法。', 'active', 'v1', 20, TRUE)
+ON CONFLICT (game_id) DO UPDATE
+  SET title = EXCLUDED.title,
+      summary = EXCLUDED.summary,
+      status = EXCLUDED.status,
+      rules_version = EXCLUDED.rules_version,
+      sort_order = EXCLUDED.sort_order,
+      leaderboard_enabled = EXCLUDED.leaderboard_enabled,
+      updated_at = NOW();
+-- <<< END MIGRATION: active/143_seed_game_catalog.sql
+
 -- >>> BEGIN MIGRATION: active/144_add_account_region_and_contributor_activity_stats.sql
 -- 144: normalize account region metadata and expose contributor activity stats.
 -- ACCOUNT-SERVER-001 first phase: keep history.server_id/region available and normalize region buckets.
@@ -22423,4 +22791,94 @@ COMMENT ON CONSTRAINT history_user_game_server_scope_pool_seq_unique ON public.h
 
 NOTIFY pgrst, 'reload schema';
 -- <<< END MIGRATION: active/147_scope_history_unique_key_by_server.sql
+
+-- >>> BEGIN MIGRATION: active/148_seed_uno_catalog.sql
+-- 148: 小游戏目录追加 uno-protocol（协议对决）
+--
+-- 与 endfield-games/api/_lib/gameRules.js 的 FALLBACK_GAMES 白名单保持一致。
+-- 类 UNO 卡牌对战（单人对 AI），含 7 条可选规则与「源石技艺·干员协议 / 法术异常」场外玩法。
+
+INSERT INTO public.game_catalog (game_id, title, summary, status, rules_version, sort_order, leaderboard_enabled)
+VALUES
+  ('uno-protocol', '协议对决', '类 UNO 卡牌对战，含可选规则与源石技艺·法术异常场外玩法。', 'active', 'v1', 30, TRUE)
+ON CONFLICT (game_id) DO UPDATE
+  SET title = EXCLUDED.title,
+      summary = EXCLUDED.summary,
+      status = EXCLUDED.status,
+      rules_version = EXCLUDED.rules_version,
+      sort_order = EXCLUDED.sort_order,
+      leaderboard_enabled = EXCLUDED.leaderboard_enabled,
+      updated_at = NOW();
+-- <<< END MIGRATION: active/148_seed_uno_catalog.sql
+
+-- >>> BEGIN MIGRATION: active/149_create_game_saves_and_aic_catalog.sql
+-- 149: 小游戏可变存档表 + AIC 协议目录 seed
+--
+-- 放置挂机玩法 aic-protocol（AIC 协议）需要一张按 user_id + game_id 可读写覆盖
+-- 的存档表，用于持久化产线进度（四资源、建筑数、升级、转生货币等）并支持离线
+-- 收益结算。这是小游戏平台首张「可变存档」表——已有的 game_score_events 是
+-- 只增流水、game_leaderboard_entries 只存最佳分，都不适合放可变游戏状态。
+--
+-- 沿用 140 的安全惯例：启用 RLS、REVOKE anon/authenticated、仅 GRANT
+-- service_role（小游戏站后端用 service_role 访问，浏览器只持 HttpOnly 会话
+-- cookie，不直连 Supabase）。用户 id 锚点仍为 auth.users(id)。
+
+-- ============================================
+-- 1. 可变存档表 (game_saves)
+-- ============================================
+CREATE TABLE IF NOT EXISTS public.game_saves (
+  user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  game_id     TEXT NOT NULL,
+  save_data   JSONB NOT NULL DEFAULT '{}'::jsonb,
+  version     INTEGER NOT NULL DEFAULT 1,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, game_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_game_saves_game_updated
+  ON public.game_saves(game_id, updated_at DESC);
+
+ALTER TABLE public.game_saves ENABLE ROW LEVEL SECURITY;
+
+-- ============================================
+-- 2. updated_at 触发器
+-- ============================================
+DROP TRIGGER IF EXISTS update_game_saves_updated_at ON public.game_saves;
+CREATE TRIGGER update_game_saves_updated_at
+  BEFORE UPDATE ON public.game_saves
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+-- ============================================
+-- 3. 权限：撤销 anon/authenticated，仅授予 service_role
+-- ============================================
+REVOKE ALL ON public.game_saves FROM anon, authenticated;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON public.game_saves TO service_role;
+  END IF;
+END $$;
+
+COMMENT ON TABLE public.game_saves IS
+  '小游戏可变存档（按 user_id + game_id 覆盖写）。save_data 存游戏状态，用于离线收益结算。仅 service_role 可访问。';
+
+-- ============================================
+-- 4. AIC 协议目录 seed
+-- ============================================
+-- 与 endfield-games/api/_lib/gameRules.js 的 FALLBACK_GAMES 白名单保持一致。
+-- 终末地 AIC 自动化产线放置模拟：四资源加工链 + 三层转生（MVP 仅 L1）。
+INSERT INTO public.game_catalog (game_id, title, summary, status, rules_version, sort_order, leaderboard_enabled)
+VALUES
+  ('aic-protocol', 'AIC 协议', '终末地 AIC 自动化产线放置模拟，四资源加工链 + 转生系统。', 'active', 'v1', 40, TRUE)
+ON CONFLICT (game_id) DO UPDATE
+  SET title = EXCLUDED.title,
+      summary = EXCLUDED.summary,
+      status = EXCLUDED.status,
+      rules_version = EXCLUDED.rules_version,
+      sort_order = EXCLUDED.sort_order,
+      leaderboard_enabled = EXCLUDED.leaderboard_enabled,
+      updated_at = NOW();
+-- <<< END MIGRATION: active/149_create_game_saves_and_aic_catalog.sql
 
