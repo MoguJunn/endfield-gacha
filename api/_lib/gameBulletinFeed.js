@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { normalizeOfficialHtml } from './officialAnnouncementPresentation.js';
 
 const GAME_BULLETIN_BASE_URL = 'https://game-hub.hypergryph.com/bulletin';
@@ -33,8 +34,15 @@ function buildGameBulletinSourceId(cid) {
   return `game-bulletin:${cid}`;
 }
 
-function buildGameBulletinVersion(version, cid, startAt) {
-  return `gb-${version || startAt || '0'}-${cid}`;
+function createContentHash(...values) {
+  return createHash('sha256')
+    .update(values.map((value) => String(value || '').replace(/\s+/g, ' ').trim()).join('\n'))
+    .digest('hex')
+    .slice(0, 8);
+}
+
+function buildGameBulletinVersion(version, cid, startAt, title, tab, displayType, rawContent) {
+  return `gb-${createContentHash(version, cid, startAt, title, tab, displayType, rawContent)}`;
 }
 
 function buildPublishedAt(startAt) {
@@ -135,20 +143,22 @@ function normalizeGameBulletinItem(item = {}) {
   const sourceUrl = tab
     ? `${GAME_BULLETIN_SOURCE_URL}&tab=${encodeURIComponent(tab)}#${encodeURIComponent(cid)}`
     : `${GAME_BULLETIN_SOURCE_URL}#${encodeURIComponent(cid)}`;
+  const rawContent = normalizeOfficialHtml(rawHtml, sourceUrl);
+  const displayType = normalizeText(item.displayType);
 
   return {
     source_id: buildGameBulletinSourceId(cid),
     title,
     summary: title || null,
-    raw_content: normalizeOfficialHtml(rawHtml, sourceUrl),
-    version: buildGameBulletinVersion(item.version, cid, item.startAt),
+    raw_content: rawContent,
+    version: buildGameBulletinVersion(item.version, cid, item.startAt, title, tab, displayType, rawContent),
     published_at: buildPublishedAt(item.startAt),
     source_url: sourceUrl,
     is_active: true,
     source_kind: 'game-bulletin',
     source_category: tab || null,
     tab: tab || null,
-    display_type: normalizeText(item.displayType) || null,
+    display_type: displayType || null,
   };
 }
 

@@ -98,6 +98,13 @@ describe('fetchSiteOverview', () => {
       name_en: 'Next',
       source: HOME_VERSION_TIMELINE_CONFIG_KEY,
     });
+    expect(overview.current_version).toMatchObject({
+      id: 'current',
+      name: '当前版本',
+      name_en: 'Current',
+      starts_at: '2026-06-01T12:00:00+08:00',
+      ends_at: '2026-06-30T12:00:00+08:00',
+    });
     expect(overview.next_version.countdown.days).toBeGreaterThan(0);
     expect(overview.current_limited_pool).toMatchObject({
       pool_id: 'pool-active',

@@ -9,7 +9,7 @@ import {
 } from './officialAnnouncementPresentation.js';
 import { refreshGameAnnouncementDigest } from './gameAnnouncementDigest.js';
 
-const DEFAULT_PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 30;
 const FULL_REFRESH_PAGE_SIZE = 50;
 const MIN_REFRESH_PAGE_SIZE = 1;
 const MAX_REFRESH_PAGE_SIZE = 100;

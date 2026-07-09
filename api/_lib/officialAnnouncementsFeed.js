@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { rejectDisallowedBrowserOrigin } from './http.js';
 import {
   buildAnnouncementDisplayContent,
@@ -7,7 +8,7 @@ import { getSupabaseAdminClient } from './authAdmin.js';
 import { buildGameBulletinSourceRecords } from './gameBulletinFeed.js';
 
 const OFFICIAL_NEWS_BASE_URL = 'https://web-news.hypergryph.com/api';
-const DEFAULT_PAGE_SIZE = 10;
+const DEFAULT_PAGE_SIZE = 30;
 const DEFAULT_GAME_BULLETIN_PAGE_SIZE = 30;
 const OFFICIAL_NEWS_REQUEST_TIMEOUT_MS = 15000;
 const OFFICIAL_NEWS_HEADERS = Object.freeze({
@@ -27,8 +28,15 @@ function buildOfficialArticleUrl(cid) {
   return `https://endfield.hypergryph.com/news/${cid}`;
 }
 
-function buildVersion(displayTime, cid) {
-  return `hg-${displayTime || '0'}-${cid}`;
+function createContentHash(...values) {
+  return createHash('sha256')
+    .update(values.map((value) => String(value || '').replace(/\s+/g, ' ').trim()).join('\n'))
+    .digest('hex')
+    .slice(0, 8);
+}
+
+function buildVersion(displayTime, cid, title, summary, rawContent) {
+  return `hg-${createContentHash(displayTime, cid, title, summary, rawContent)}`;
 }
 
 function buildPublishedAt(displayTime) {
@@ -166,7 +174,7 @@ export async function buildOfficialAnnouncementSourceRecords(pageSize = DEFAULT_
       title: String(detail.title || ''),
       summary: normalizedSummary,
       raw_content: rawContent,
-      version: buildVersion(detail.displayTime, detail.cid),
+      version: buildVersion(detail.displayTime, detail.cid, detail.title, normalizedSummary, rawContent),
       published_at: publishedAt,
       source_url: sourceUrl,
       is_active: true,

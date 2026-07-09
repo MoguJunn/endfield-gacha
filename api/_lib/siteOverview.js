@@ -84,6 +84,20 @@ function simplifyPool(pool, nowMs) {
   };
 }
 
+function simplifyVersion(version) {
+  if (!version) {
+    return null;
+  }
+
+  return {
+    id: version.id || null,
+    name: version.displayName || version.name || null,
+    name_en: version.nameEn || null,
+    starts_at: version.startsAt || null,
+    ends_at: version.endsAt || null,
+  };
+}
+
 export async function fetchSiteOverview(adminClient, { siteUrl = '' } = {}) {
   const [siteConfigResult, pools] = await Promise.all([
     adminClient
@@ -124,6 +138,7 @@ export async function fetchSiteOverview(adminClient, { siteUrl = '' } = {}) {
 
   return {
     site_url: siteUrl,
+    current_version: simplifyVersion(versionPlan.currentVersion),
     next_version: {
       target_at: nextVersionTargetAt,
       name: versionPlan.countdownVersion?.name || null,

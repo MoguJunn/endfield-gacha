@@ -723,7 +723,24 @@ assert.match(
   /\/api\/official-announcement-image\?url=https%3A%2F%2Fendfield\.hypergryph\.com%2Fimages%2Ftest-banner\.png/,
   '原始正文中的相对图片地址应被归一化并改写为站内代理地址'
 );
-assert.match(res.payload.records[0].version, /^hg-1773203400-5992$/, 'version 应可从官方时间戳构造');
+assert.match(res.payload.records[0].version, /^hg-[a-f0-9]{8}$/, 'version 应包含公告内容指纹');
+assert.notEqual(
+  __internal.buildVersion(
+    1773203400,
+    '5992',
+    '「河流的女儿」特许寻访说明',
+    '亲爱的管理员：测试摘要',
+    '<p>这是很长的版本公告正文。</p>'
+  ),
+  __internal.buildVersion(
+    1773203400,
+    '5992',
+    '「河流的女儿」特许寻访说明',
+    '亲爱的管理员：测试摘要',
+    '<p>这是更新后的版本公告正文。</p>'
+  ),
+  '同一公告正文变化时 version 应变化'
+);
 
 {
   const digest = digestInternal.parseDigestJson(JSON.stringify({
