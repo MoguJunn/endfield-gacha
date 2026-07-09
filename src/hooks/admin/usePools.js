@@ -20,7 +20,7 @@ export const INITIAL_POOL_FORM = {
   start_time: '',
   end_time: '',
   is_limited_weapon: true,
-  locked: false
+  locked: false,
 };
 
 function normalizePoolType(type) {
@@ -69,12 +69,14 @@ function areValuesEqual(left, right) {
 }
 
 export function parseFeaturedCharactersInput(value) {
-  return Array.from(new Set(
-    String(value || '')
-      .split(/[\n,，、；;|]+/u)
-      .map((item) => item.trim())
-      .filter(Boolean)
-  ));
+  return Array.from(
+    new Set(
+      String(value || '')
+        .split(/[\n,，、；;|]+/u)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
 }
 
 function buildFeaturedCharacterSet(poolType, upCharacter, featuredCharactersInput) {
@@ -110,11 +112,11 @@ export function normalizeDraftPoolCharacters(rows = [], characters = [], poolTyp
   const expectedType = getExpectedCharacterType(poolType);
   const validCharactersById = new Map(
     (Array.isArray(characters) ? characters : [])
-      .filter(character => character?.id && character.type === expectedType)
-      .map(character => [character.id, character])
+      .filter((character) => character?.id && character.type === expectedType)
+      .map((character) => [character.id, character])
   );
   const validCharactersByName = buildCharacterNameMap(characters, expectedType);
-  const featuredNameSet = new Set(featuredNames.map(name => String(name || '').trim()).filter(Boolean));
+  const featuredNameSet = new Set(featuredNames.map((name) => String(name || '').trim()).filter(Boolean));
   const dedupedRows = new Map();
 
   (Array.isArray(rows) ? rows : []).forEach((row) => {
@@ -126,7 +128,7 @@ export function normalizeDraftPoolCharacters(rows = [], characters = [], poolTyp
 
     dedupedRows.set(characterId, {
       character_id: characterId,
-      is_up: Boolean(row?.is_up) || featuredNameSet.has(character.name)
+      is_up: Boolean(row?.is_up) || featuredNameSet.has(character.name),
     });
   });
 
@@ -135,7 +137,7 @@ export function normalizeDraftPoolCharacters(rows = [], characters = [], poolTyp
     if (character) {
       dedupedRows.set(character.id, {
         character_id: character.id,
-        is_up: true
+        is_up: true,
       });
     }
   });
@@ -146,9 +148,8 @@ export function normalizeDraftPoolCharacters(rows = [], characters = [], poolTyp
 export function buildPoolDataFromForm(poolForm = {}) {
   const normalizedPoolType = normalizePoolType(poolForm.type);
   const featuredCharacters = parseFeaturedCharactersInput(poolForm.featured_characters_text);
-  const upCharacterName = normalizedPoolType === 'extra'
-    ? (featuredCharacters[0] || '')
-    : normalizeText(poolForm.up_character);
+  const upCharacterName =
+    normalizedPoolType === 'extra' ? featuredCharacters[0] || '' : normalizeText(poolForm.up_character);
 
   return {
     normalizedPoolType,
@@ -166,8 +167,8 @@ export function buildPoolDataFromForm(poolForm = {}) {
       start_time: normalizeDateInput(poolForm.start_time),
       end_time: normalizeDateInput(poolForm.end_time),
       is_limited_weapon: normalizedPoolType === 'weapon' ? Boolean(poolForm.is_limited_weapon) : null,
-      locked: Boolean(poolForm.locked)
-    }
+      locked: Boolean(poolForm.locked),
+    },
   };
 }
 
@@ -179,18 +180,18 @@ function getCharacterLabel(characterId, characterMap) {
 function buildRosterDiff(currentRows = [], originalRows = [], characters = []) {
   const characterMap = new Map(
     (Array.isArray(characters) ? characters : [])
-      .filter(character => character?.id)
-      .map(character => [character.id, character])
+      .filter((character) => character?.id)
+      .map((character) => [character.id, character])
   );
   const currentMap = new Map(
     (Array.isArray(currentRows) ? currentRows : [])
-      .filter(row => row?.character_id)
-      .map(row => [row.character_id, Boolean(row.is_up)])
+      .filter((row) => row?.character_id)
+      .map((row) => [row.character_id, Boolean(row.is_up)])
   );
   const originalMap = new Map(
     (Array.isArray(originalRows) ? originalRows : [])
-      .filter(row => row?.character_id)
-      .map(row => [row.character_id, Boolean(row.is_up)])
+      .filter((row) => row?.character_id)
+      .map((row) => [row.character_id, Boolean(row.is_up)])
   );
 
   const added = [];
@@ -202,7 +203,7 @@ function buildRosterDiff(currentRows = [], originalRows = [], characters = []) {
       added.push({
         id: characterId,
         name: getCharacterLabel(characterId, characterMap),
-        is_up: isUp
+        is_up: isUp,
       });
       return;
     }
@@ -212,7 +213,7 @@ function buildRosterDiff(currentRows = [], originalRows = [], characters = []) {
         id: characterId,
         name: getCharacterLabel(characterId, characterMap),
         before: originalMap.get(characterId),
-        after: isUp
+        after: isUp,
       });
     }
   });
@@ -222,7 +223,7 @@ function buildRosterDiff(currentRows = [], originalRows = [], characters = []) {
       removed.push({
         id: characterId,
         name: getCharacterLabel(characterId, characterMap),
-        is_up: isUp
+        is_up: isUp,
       });
     }
   });
@@ -233,7 +234,7 @@ function buildRosterDiff(currentRows = [], originalRows = [], characters = []) {
     upChanged,
     currentCount: currentMap.size,
     originalCount: originalMap.size,
-    changed: added.length > 0 || removed.length > 0 || upChanged.length > 0
+    changed: added.length > 0 || removed.length > 0 || upChanged.length > 0,
   };
 }
 
@@ -244,15 +245,8 @@ export function buildPoolDraftDiff({
   originalPoolCharacters = [],
   characters = [],
 } = {}) {
-  const {
-    normalizedPoolType,
-    featuredCharacters,
-    upCharacterName,
-    poolData,
-  } = buildPoolDataFromForm(poolForm);
-  const featuredNamesForSave = normalizedPoolType === 'extra'
-    ? featuredCharacters
-    : [upCharacterName].filter(Boolean);
+  const { normalizedPoolType, featuredCharacters, upCharacterName, poolData } = buildPoolDataFromForm(poolForm);
+  const featuredNamesForSave = normalizedPoolType === 'extra' ? featuredCharacters : [upCharacterName].filter(Boolean);
   const normalizedCurrentRows = normalizeDraftPoolCharacters(
     editingPoolCharacters,
     characters,
@@ -326,7 +320,7 @@ export function buildPoolDraftDiff({
  * 卡池管理主 Hook
  */
 export const usePools = (showToast) => {
-  const userRole = useAuthStore(state => state.userRole);
+  const userRole = useAuthStore((state) => state.userRole);
 
   // 数据状态
   const [pools, setPools] = useState([]);
@@ -395,11 +389,12 @@ export const usePools = (showToast) => {
 
   // 过滤并排序后的卡池列表
   const filteredPools = useMemo(() => {
-    const result = pools.filter(pool => {
-      const matchesSearch = pool.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           pool.up_character?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           (Array.isArray(pool.featured_characters)
-                             && pool.featured_characters.some((name) => name?.toLowerCase().includes(searchQuery.toLowerCase())));
+    const result = pools.filter((pool) => {
+      const matchesSearch =
+        pool.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        pool.up_character?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (Array.isArray(pool.featured_characters) &&
+          pool.featured_characters.some((name) => name?.toLowerCase().includes(searchQuery.toLowerCase())));
       const matchesType = typeFilter === 'all' || pool.type === typeFilter;
       return matchesSearch && matchesType;
     });
@@ -418,9 +413,7 @@ export const usePools = (showToast) => {
         case 'name':
           aVal = a.name || '';
           bVal = b.name || '';
-          return sortOrder === 'asc'
-            ? aVal.localeCompare(bVal, 'zh-CN')
-            : bVal.localeCompare(aVal, 'zh-CN');
+          return sortOrder === 'asc' ? aVal.localeCompare(bVal, 'zh-CN') : bVal.localeCompare(aVal, 'zh-CN');
         default:
           aVal = a.created_at ? new Date(a.created_at).getTime() : 0;
           bVal = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -432,13 +425,13 @@ export const usePools = (showToast) => {
   }, [pools, searchQuery, typeFilter, sortField, sortOrder]);
 
   // 检查UP角色/武器是否存在
-  const checkUpCharacterExists = useCallback((upCharacterName, expectedType = null) => {
-    if (!upCharacterName || !upCharacterName.trim()) return true;
-    return characters.some(c => (
-      c.name === upCharacterName.trim()
-      && (!expectedType || c.type === expectedType)
-    ));
-  }, [characters]);
+  const checkUpCharacterExists = useCallback(
+    (upCharacterName, expectedType = null) => {
+      if (!upCharacterName || !upCharacterName.trim()) return true;
+      return characters.some((c) => c.name === upCharacterName.trim() && (!expectedType || c.type === expectedType));
+    },
+    [characters]
+  );
 
   // 重置表单
   const resetForm = useCallback(() => {
@@ -479,7 +472,7 @@ export const usePools = (showToast) => {
       start_time: formatDateTimeLocal(pool.start_time),
       end_time: formatDateTimeLocal(pool.end_time),
       is_limited_weapon: pool.is_limited_weapon !== false,
-      locked: pool.locked || false
+      locked: pool.locked || false,
     });
     setEditingPool(pool);
     setShowEditDialog(true);
@@ -493,32 +486,32 @@ export const usePools = (showToast) => {
     setShowEditDialog(true);
   }, []);
 
-  const poolDraftDiff = useMemo(() => buildPoolDraftDiff({
-    editingPool,
-    poolForm,
-    editingPoolCharacters,
-    originalPoolCharacters: editingPoolOriginalCharacters,
-    characters,
-  }), [editingPool, poolForm, editingPoolCharacters, editingPoolOriginalCharacters, characters]);
+  const poolDraftDiff = useMemo(
+    () =>
+      buildPoolDraftDiff({
+        editingPool,
+        poolForm,
+        editingPoolCharacters,
+        originalPoolCharacters: editingPoolOriginalCharacters,
+        characters,
+      }),
+    [editingPool, poolForm, editingPoolCharacters, editingPoolOriginalCharacters, characters]
+  );
 
   // 保存卡池
   const handleSavePool = useCallback(async () => {
-    if (!ensureSuperAdmin()) return;
+    if (!ensureSuperAdmin()) return null;
 
     if (!poolForm.name.trim()) {
       showToast('卡池名称不能为空', 'error');
-      return;
+      return null;
     }
 
     setActionLoading('save');
 
     try {
-      const {
-        normalizedPoolType,
-        expectedCharacterType,
-        featuredCharacters,
-        upCharacterName,
-      } = buildPoolDataFromForm(poolForm);
+      const { normalizedPoolType, expectedCharacterType, featuredCharacters, upCharacterName } =
+        buildPoolDataFromForm(poolForm);
 
       if (normalizedPoolType === 'extra') {
         if (featuredCharacters.length !== 4) {
@@ -527,7 +520,9 @@ export const usePools = (showToast) => {
           return;
         }
 
-        const missingFeaturedCharacters = featuredCharacters.filter((name) => !checkUpCharacterExists(name, 'character'));
+        const missingFeaturedCharacters = featuredCharacters.filter(
+          (name) => !checkUpCharacterExists(name, 'character')
+        );
         if (missingFeaturedCharacters.length > 0) {
           showToast(`以下角色不存在，无法创建附加寻访：${missingFeaturedCharacters.join('、')}`, 'error');
           setActionLoading(null);
@@ -537,9 +532,8 @@ export const usePools = (showToast) => {
 
       let charactersForSave = characters;
       let editingPoolCharactersForSave = editingPoolCharacters;
-      const featuredNamesForSave = normalizedPoolType === 'extra'
-        ? featuredCharacters
-        : [upCharacterName].filter(Boolean);
+      const featuredNamesForSave =
+        normalizedPoolType === 'extra' ? featuredCharacters : [upCharacterName].filter(Boolean);
 
       // 检查UP角色是否存在
       if (upCharacterName && (normalizedPoolType === 'limited' || normalizedPoolType === 'weapon')) {
@@ -547,13 +541,19 @@ export const usePools = (showToast) => {
 
         if (!upExists) {
           try {
-            const poolStartTime = poolForm.start_time ? new Date(poolForm.start_time).toISOString() : new Date().toISOString();
-            const createdCharacter = await poolService.createUpCharacter(upCharacterName, normalizedPoolType, poolStartTime);
+            const poolStartTime = poolForm.start_time
+              ? new Date(poolForm.start_time).toISOString()
+              : new Date().toISOString();
+            const createdCharacter = await poolService.createUpCharacter(
+              upCharacterName,
+              normalizedPoolType,
+              poolStartTime
+            );
             charactersForSave = [...characters, createdCharacter];
-            if (!editingPoolCharactersForSave.some(row => row.character_id === createdCharacter.id)) {
+            if (!editingPoolCharactersForSave.some((row) => row.character_id === createdCharacter.id)) {
               editingPoolCharactersForSave = [
                 ...editingPoolCharactersForSave,
-                { character_id: createdCharacter.id, is_up: true }
+                { character_id: createdCharacter.id, is_up: true },
               ];
             }
             showToast(`已自动创建UP角色「${upCharacterName}」并加入本次卡池草稿`, 'success');
@@ -577,12 +577,7 @@ export const usePools = (showToast) => {
 
       const { poolData } = buildPoolDataFromForm(poolForm);
 
-      const result = await poolService.savePool(
-        poolData,
-        editingPool,
-        charactersForSave,
-        editingPoolCharactersForSave
-      );
+      const result = await poolService.savePool(poolData, editingPool, charactersForSave, editingPoolCharactersForSave);
 
       if (result.success) {
         if (result.isNew) {
@@ -593,36 +588,57 @@ export const usePools = (showToast) => {
         await loadPoolsData();
         await loadAllPoolCharactersData();
         await invalidatePublicCache('pools', 'admin:pool:save');
+        const savedPool = {
+          ...poolData,
+          pool_id: result.poolId || poolData.pool_id || editingPool?.pool_id,
+        };
         resetForm();
+        return { ...result, pool: savedPool };
       } else {
         showToast('保存失败: ' + result.error, 'error');
+        return result;
       }
     } finally {
       setActionLoading(null);
     }
-  }, [poolForm, editingPool, editingPoolCharacters, characters, checkUpCharacterExists, ensureSuperAdmin, showToast, loadPoolsData, loadCharactersData, loadAllPoolCharactersData, resetForm]);
+  }, [
+    poolForm,
+    editingPool,
+    editingPoolCharacters,
+    characters,
+    checkUpCharacterExists,
+    ensureSuperAdmin,
+    showToast,
+    loadPoolsData,
+    loadCharactersData,
+    loadAllPoolCharactersData,
+    resetForm,
+  ]);
 
   // 删除卡池
-  const handleDeletePool = useCallback(async (pool) => {
-    if (!ensureSuperAdmin()) return;
+  const handleDeletePool = useCallback(
+    async (pool) => {
+      if (!ensureSuperAdmin()) return;
 
-    if (!window.confirm(`确定要删除卡池「${pool.name}」吗？此操作将删除该卡池的所有相关数据，且无法撤销。`)) {
-      return;
-    }
+      if (!window.confirm(`确定要删除卡池「${pool.name}」吗？此操作将删除该卡池的所有相关数据，且无法撤销。`)) {
+        return;
+      }
 
-    setActionLoading(pool.pool_id);
+      setActionLoading(pool.pool_id);
 
-    const result = await poolService.deletePool(pool.pool_id);
-    if (result.success) {
-      showToast('卡池已删除', 'success');
-      await loadPoolsData();
-      await invalidatePublicCache('pools', 'admin:pool:delete');
-    } else {
-      showToast('删除失败: ' + result.error, 'error');
-    }
+      const result = await poolService.deletePool(pool.pool_id);
+      if (result.success) {
+        showToast('卡池已删除', 'success');
+        await loadPoolsData();
+        await invalidatePublicCache('pools', 'admin:pool:delete');
+      } else {
+        showToast('删除失败: ' + result.error, 'error');
+      }
 
-    setActionLoading(null);
-  }, [ensureSuperAdmin, showToast, loadPoolsData]);
+      setActionLoading(null);
+    },
+    [ensureSuperAdmin, showToast, loadPoolsData]
+  );
 
   // 重新计算限定/常驻
   const handleRecalculateIsStandard = useCallback(async () => {
@@ -646,58 +662,72 @@ export const usePools = (showToast) => {
   }, [ensureSuperAdmin, pools, showToast]);
 
   // 角色池子管理操作
-  const toggleCharacterInPool = useCallback((char, isInPool) => {
-    if (!ensureSuperAdmin()) return;
+  const toggleCharacterInPool = useCallback(
+    (char, isInPool) => {
+      if (!ensureSuperAdmin()) return;
 
-    const featuredCharacterSet = buildFeaturedCharacterSet(
+      const featuredCharacterSet = buildFeaturedCharacterSet(
+        poolForm.type,
+        poolForm.up_character,
+        poolForm.featured_characters_text
+      );
+      const isUp = featuredCharacterSet.has(char.name);
+      setEditingPoolCharacters((prev) =>
+        isInPool ? prev.filter((pc) => pc.character_id !== char.id) : [...prev, { character_id: char.id, is_up: isUp }]
+      );
+    },
+    [ensureSuperAdmin, poolForm.featured_characters_text, poolForm.type, poolForm.up_character]
+  );
+
+  const addAllCharactersToPool = useCallback(
+    (charList) => {
+      if (!ensureSuperAdmin()) return;
+
+      const currentIds = editingPoolCharacters.map((pc) => pc.character_id);
+      const toAdd = charList.filter((c) => !currentIds.includes(c.id));
+
+      if (toAdd.length === 0) {
+        showToast('所有角色已在池中', 'info');
+        return;
+      }
+
+      const featuredCharacterSet = buildFeaturedCharacterSet(
+        poolForm.type,
+        poolForm.up_character,
+        poolForm.featured_characters_text
+      );
+      setEditingPoolCharacters((prev) => [
+        ...prev,
+        ...toAdd.map((c) => ({ character_id: c.id, is_up: featuredCharacterSet.has(c.name) })),
+      ]);
+    },
+    [
+      ensureSuperAdmin,
+      editingPoolCharacters,
+      poolForm.featured_characters_text,
       poolForm.type,
       poolForm.up_character,
-      poolForm.featured_characters_text
-    );
-    const isUp = featuredCharacterSet.has(char.name);
-    setEditingPoolCharacters(prev => (
-      isInPool
-        ? prev.filter(pc => pc.character_id !== char.id)
-        : [...prev, { character_id: char.id, is_up: isUp }]
-    ));
-  }, [ensureSuperAdmin, poolForm.featured_characters_text, poolForm.type, poolForm.up_character]);
+      showToast,
+    ]
+  );
 
-  const addAllCharactersToPool = useCallback((charList) => {
-    if (!ensureSuperAdmin()) return;
+  const removeAllCharactersFromPool = useCallback(
+    (charList) => {
+      if (!ensureSuperAdmin()) return;
 
-    const currentIds = editingPoolCharacters.map(pc => pc.character_id);
-    const toAdd = charList.filter(c => !currentIds.includes(c.id));
+      const currentIds = editingPoolCharacters.map((pc) => pc.character_id);
+      const toRemove = charList.filter((c) => currentIds.includes(c.id));
 
-    if (toAdd.length === 0) {
-      showToast('所有角色已在池中', 'info');
-      return;
-    }
+      if (toRemove.length === 0) {
+        showToast('没有角色需要移除', 'info');
+        return;
+      }
 
-    const featuredCharacterSet = buildFeaturedCharacterSet(
-      poolForm.type,
-      poolForm.up_character,
-      poolForm.featured_characters_text
-    );
-    setEditingPoolCharacters(prev => [
-      ...prev,
-      ...toAdd.map(c => ({ character_id: c.id, is_up: featuredCharacterSet.has(c.name) }))
-    ]);
-  }, [ensureSuperAdmin, editingPoolCharacters, poolForm.featured_characters_text, poolForm.type, poolForm.up_character, showToast]);
-
-  const removeAllCharactersFromPool = useCallback((charList) => {
-    if (!ensureSuperAdmin()) return;
-
-    const currentIds = editingPoolCharacters.map(pc => pc.character_id);
-    const toRemove = charList.filter(c => currentIds.includes(c.id));
-
-    if (toRemove.length === 0) {
-      showToast('没有角色需要移除', 'info');
-      return;
-    }
-
-    const removeIds = toRemove.map(c => c.id);
-    setEditingPoolCharacters(prev => prev.filter(pc => !removeIds.includes(pc.character_id)));
-  }, [ensureSuperAdmin, editingPoolCharacters, showToast]);
+      const removeIds = toRemove.map((c) => c.id);
+      setEditingPoolCharacters((prev) => prev.filter((pc) => !removeIds.includes(pc.character_id)));
+    },
+    [ensureSuperAdmin, editingPoolCharacters, showToast]
+  );
 
   return {
     // 数据
@@ -741,7 +771,7 @@ export const usePools = (showToast) => {
     // 角色池子管理
     toggleCharacterInPool,
     addAllCharactersToPool,
-    removeAllCharactersFromPool
+    removeAllCharactersFromPool,
   };
 };
 

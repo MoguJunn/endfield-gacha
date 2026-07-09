@@ -1,5 +1,5 @@
 import React from 'react';
-import { Edit2, Trash2, Calendar, Star, Layers, Swords, Users } from 'lucide-react';
+import { Edit2, Trash2, Calendar, Star, Layers, Swords, Users, Send } from 'lucide-react';
 import { StatusDot, PanelToolbarButton } from '../panels/shared/PanelUi.jsx';
 
 /**
@@ -79,28 +79,30 @@ const getPoolStatus = (pool) => {
  * 卡池角色一览组件
  */
 const PoolCharacterList = ({ pool, poolCharacters, characters }) => {
-  const poolCharIds = (poolCharacters[pool.pool_id] || []).map(pc => pc.character_id);
-  const poolChars = characters.filter(c => poolCharIds.includes(c.id));
+  const poolCharIds = (poolCharacters[pool.pool_id] || []).map((pc) => pc.character_id);
+  const poolChars = characters.filter((c) => poolCharIds.includes(c.id));
   const featuredCharacterSet = new Set(
     Array.isArray(pool.featured_characters) && pool.featured_characters.length > 0
       ? pool.featured_characters.filter(Boolean)
       : [pool.up_character].filter(Boolean)
   );
 
-  const sixStars = poolChars.filter(c => c.rarity === 6).sort((a, b) => {
-    const aIsUp = featuredCharacterSet.has(a.name);
-    const bIsUp = featuredCharacterSet.has(b.name);
-    if (aIsUp && !bIsUp) return -1;
-    if (!aIsUp && bIsUp) return 1;
-    const aIsLimited = a.is_limited;
-    const bIsLimited = b.is_limited;
-    if (aIsLimited && !bIsLimited) return -1;
-    if (!aIsLimited && bIsLimited) return 1;
-    return a.name.localeCompare(b.name, 'zh-CN');
-  });
+  const sixStars = poolChars
+    .filter((c) => c.rarity === 6)
+    .sort((a, b) => {
+      const aIsUp = featuredCharacterSet.has(a.name);
+      const bIsUp = featuredCharacterSet.has(b.name);
+      if (aIsUp && !bIsUp) return -1;
+      if (!aIsUp && bIsUp) return 1;
+      const aIsLimited = a.is_limited;
+      const bIsLimited = b.is_limited;
+      if (aIsLimited && !bIsLimited) return -1;
+      if (!aIsLimited && bIsLimited) return 1;
+      return a.name.localeCompare(b.name, 'zh-CN');
+    });
 
-  const fiveStars = poolChars.filter(c => c.rarity === 5);
-  const fourStars = poolChars.filter(c => c.rarity === 4);
+  const fiveStars = poolChars.filter((c) => c.rarity === 5);
+  const fourStars = poolChars.filter((c) => c.rarity === 4);
 
   return (
     <div className="mt-2.5 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
@@ -115,7 +117,7 @@ const PoolCharacterList = ({ pool, poolCharacters, characters }) => {
           <div className="flex items-start gap-1">
             <span className="w-8 shrink-0 font-mono text-[11px] font-semibold text-orange-500">6★</span>
             <div className="flex flex-wrap gap-1">
-              {sixStars.slice(0, 6).map(char => {
+              {sixStars.slice(0, 6).map((char) => {
                 const isUp = featuredCharacterSet.has(char.name);
                 const isLimited = char.is_limited;
                 return (
@@ -130,7 +132,8 @@ const PoolCharacterList = ({ pool, poolCharacters, characters }) => {
                     }`}
                     title={`${char.name}${isUp ? ' [当期UP]' : isLimited ? ' [限定]' : ' [常驻]'}`}
                   >
-                    {isUp && '★'}{char.name.length > 4 ? char.name.slice(0, 4) + '...' : char.name}
+                    {isUp && '★'}
+                    {char.name.length > 4 ? char.name.slice(0, 4) + '...' : char.name}
                   </span>
                 );
               })}
@@ -144,7 +147,7 @@ const PoolCharacterList = ({ pool, poolCharacters, characters }) => {
           <div className="flex items-start gap-1">
             <span className="w-8 shrink-0 font-mono text-[11px] font-semibold text-purple-500">5★</span>
             <div className="flex flex-wrap gap-1">
-              {fiveStars.slice(0, 4).map(char => (
+              {fiveStars.slice(0, 4).map((char) => (
                 <span
                   key={char.id}
                   className="border border-purple-100 bg-purple-50 px-1.5 py-0.5 text-[11px] text-purple-600 dark:border-purple-900 dark:bg-purple-900/20 dark:text-purple-400"
@@ -167,9 +170,7 @@ const PoolCharacterList = ({ pool, poolCharacters, characters }) => {
           </div>
         )}
         {poolChars.length === 0 && (
-          <p className="text-[11px] italic text-slate-400 dark:text-zinc-500">
-            暂无角色配置，点击编辑来添加
-          </p>
+          <p className="text-[11px] italic text-slate-400 dark:text-zinc-500">暂无角色配置，点击编辑来添加</p>
         )}
       </div>
     </div>
@@ -179,17 +180,8 @@ const PoolCharacterList = ({ pool, poolCharacters, characters }) => {
 /**
  * 卡池卡片组件
  */
-const PoolCard = ({
-  pool,
-  poolCharacters,
-  characters,
-  actionLoading,
-  onEdit,
-  onDelete
-}) => {
-  const featuredCharacters = Array.isArray(pool.featured_characters)
-    ? pool.featured_characters.filter(Boolean)
-    : [];
+const PoolCard = ({ pool, poolCharacters, characters, actionLoading, onEdit, onDelete, onPreviewPush }) => {
+  const featuredCharacters = Array.isArray(pool.featured_characters) ? pool.featured_characters.filter(Boolean) : [];
   const poolStatus = getPoolStatus(pool);
 
   return (
@@ -215,9 +207,7 @@ const PoolCard = ({
           <div className="min-w-0 flex-1">
             <div className="mb-1 flex items-center gap-2">
               {getTypeIcon(pool.type)}
-              <h4 className="truncate text-sm font-bold text-slate-700 dark:text-zinc-200">
-                {pool.name}
-              </h4>
+              <h4 className="truncate text-sm font-bold text-slate-700 dark:text-zinc-200">{pool.name}</h4>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <span className={`border px-1.5 py-0.5 text-[11px] font-medium ${getTypeColor(pool.type)}`}>
@@ -265,9 +255,7 @@ const PoolCard = ({
 
         {/* 描述 */}
         {pool.description && (
-          <p className="mt-1.5 line-clamp-2 text-[11px] text-slate-500 dark:text-zinc-500">
-            {pool.description}
-          </p>
+          <p className="mt-1.5 line-clamp-2 text-[11px] text-slate-500 dark:text-zinc-500">{pool.description}</p>
         )}
 
         {/* 时间范围 */}
@@ -281,26 +269,24 @@ const PoolCard = ({
         )}
 
         {/* 卡池角色一览 */}
-        <PoolCharacterList
-          pool={pool}
-          poolCharacters={poolCharacters}
-          characters={characters}
-        />
+        <PoolCharacterList pool={pool} poolCharacters={poolCharacters} characters={characters} />
 
         {/* 操作按钮 */}
         <div className="mt-2.5 flex items-center gap-2 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
-          <PanelToolbarButton
-            onClick={() => onEdit(pool)}
-            disabled={actionLoading === pool.pool_id}
-          >
+          {onPreviewPush && (
+            <PanelToolbarButton
+              onClick={() => onPreviewPush(pool)}
+              disabled={actionLoading === pool.pool_id || actionLoading === 'pool-push'}
+            >
+              <Send size={12} />
+              预览推送
+            </PanelToolbarButton>
+          )}
+          <PanelToolbarButton onClick={() => onEdit(pool)} disabled={actionLoading === pool.pool_id}>
             <Edit2 size={12} />
             编辑
           </PanelToolbarButton>
-          <PanelToolbarButton
-            onClick={() => onDelete(pool)}
-            disabled={actionLoading === pool.pool_id}
-            tone="danger"
-          >
+          <PanelToolbarButton onClick={() => onDelete(pool)} disabled={actionLoading === pool.pool_id} tone="danger">
             <Trash2 size={12} />
             {actionLoading === pool.pool_id ? '删除中...' : '删除'}
           </PanelToolbarButton>

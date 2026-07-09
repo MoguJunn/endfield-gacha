@@ -8,6 +8,7 @@ import accountProfileHandler from './root/account-profile.js';
 import accountSecurityStateHandler from './root/account-security-state.js';
 import adminHandler from './root/admin.js';
 import adminCharactersHandler from './root/admin-characters.js';
+import adminPoolPushHandler from './root/admin-pool-push.js';
 import adminPoolsHandler from './root/admin-pools.js';
 import announcementsHandler from './root/announcements.js';
 import authEmailActionHandler from './root/auth-email-action.js';
@@ -103,6 +104,7 @@ export const API_ROUTE_ENTRIES = [
   ['/api/admin-account-recovery', adminHandler],
   ['/api/admin-announcements', adminHandler],
   ['/api/admin-characters', adminCharactersHandler],
+  ['/api/admin-pool-push', adminPoolPushHandler],
   ['/api/admin-pools', adminPoolsHandler],
   ['/api/admin-ops-automation', adminHandler],
   ['/api/admin-mail-alert', adminHandler],

@@ -1,19 +1,35 @@
 import React, { useState } from 'react';
-import { X, Save, Star, Users, UserPlus, CheckCircle, CheckSquare, Square, ChevronDown, ChevronRight, Search } from 'lucide-react';
+import {
+  X,
+  Save,
+  Send,
+  Star,
+  Users,
+  UserPlus,
+  CheckCircle,
+  CheckSquare,
+  Square,
+  ChevronDown,
+  ChevronRight,
+  Search,
+} from 'lucide-react';
 import DateTimePicker from '../../common/DateTimePicker';
 import { PanelToolbarButton } from '../panels/shared/PanelUi.jsx';
 
-const FIELD_INPUT_CLASS = 'w-full border bg-white px-3 py-1.5 text-xs text-slate-700 outline-none transition-colors focus:border-amber-500 dark:bg-zinc-900 dark:text-zinc-300 dark:focus:border-endfield-yellow';
+const FIELD_INPUT_CLASS =
+  'w-full border bg-white px-3 py-1.5 text-xs text-slate-700 outline-none transition-colors focus:border-amber-500 dark:bg-zinc-900 dark:text-zinc-300 dark:focus:border-endfield-yellow';
 const FIELD_BORDER_CLASS = 'border-zinc-300 dark:border-zinc-700';
 const FIELD_LABEL_CLASS = 'mb-1 block text-xs font-medium text-slate-700 dark:text-zinc-300';
 
 function parseFeaturedCharactersInput(value) {
-  return Array.from(new Set(
-    String(value || '')
-      .split(/[\n,，、；;|]+/u)
-      .map((item) => item.trim())
-      .filter(Boolean)
-  ));
+  return Array.from(
+    new Set(
+      String(value || '')
+        .split(/[\n,，、；;|]+/u)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  );
 }
 
 /**
@@ -53,22 +69,22 @@ const CharacterGroup = ({
   onRemoveAll,
   renderCharTag,
   collapsed,
-  onToggleCollapsed
+  onToggleCollapsed,
 }) => {
   if (items.length === 0) return null;
 
-  const inPoolCount = items.filter(c => isInPool(c)).length;
+  const inPoolCount = items.filter((c) => isInPool(c)).length;
   const allSelected = inPoolCount === items.length;
 
   return (
     <div className="border border-zinc-200 bg-zinc-50/50 p-2.5 dark:border-zinc-800 dark:bg-zinc-800/30">
       <div className="mb-2 flex items-center justify-between">
-        <button
-          type="button"
-          onClick={onToggleCollapsed}
-          className="flex min-w-0 items-center gap-2 text-left"
-        >
-          {collapsed ? <ChevronRight size={14} className={colorClass} /> : <ChevronDown size={14} className={colorClass} />}
+        <button type="button" onClick={onToggleCollapsed} className="flex min-w-0 items-center gap-2 text-left">
+          {collapsed ? (
+            <ChevronRight size={14} className={colorClass} />
+          ) : (
+            <ChevronDown size={14} className={colorClass} />
+          )}
           <Star size={14} className={colorClass} />
           <span className={`text-xs font-semibold uppercase tracking-wider ${colorClass}`}>{label}</span>
           <span className="font-mono text-[11px] text-slate-400 dark:text-zinc-500">
@@ -92,11 +108,7 @@ const CharacterGroup = ({
           </button>
         </div>
       </div>
-      {!collapsed && (
-        <div className="flex flex-wrap gap-1.5">
-          {items.map(renderCharTag)}
-        </div>
-      )}
+      {!collapsed && <div className="flex flex-wrap gap-1.5">{items.map(renderCharTag)}</div>}
     </div>
   );
 };
@@ -127,13 +139,13 @@ function sortByAddedDateThenName(left, right) {
 function matchesQuery(character, query) {
   if (!query) return true;
 
-  const fields = [
-    character?.name,
-    character?.id,
-    ...(Array.isArray(character?.aliases) ? character.aliases : [])
-  ];
+  const fields = [character?.name, character?.id, ...(Array.isArray(character?.aliases) ? character.aliases : [])];
 
-  return fields.some((field) => String(field || '').toLowerCase().includes(query));
+  return fields.some((field) =>
+    String(field || '')
+      .toLowerCase()
+      .includes(query)
+  );
 }
 
 function formatDiffValue(value) {
@@ -164,7 +176,7 @@ function formatDiffValue(value) {
 }
 
 function summarizeNames(items = [], limit = 4) {
-  const names = items.map(item => item?.name || item?.id).filter(Boolean);
+  const names = items.map((item) => item?.name || item?.id).filter(Boolean);
   if (names.length === 0) return '';
   const visible = names.slice(0, limit).join('、');
   return names.length > limit ? `${visible} 等 ${names.length} 项` : visible;
@@ -188,7 +200,9 @@ const PoolDraftDiffPreview = ({ diff }) => {
           <span className="h-3 w-1 bg-amber-500 dark:bg-endfield-yellow" aria-hidden="true"></span>
           {diff.mode === 'create' ? '保存预览：将创建卡池' : '保存前差异预览'}
         </span>
-        <span className={diff.hasChanges ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-400'}>
+        <span
+          className={diff.hasChanges ? 'text-amber-600 dark:text-amber-300' : 'text-emerald-600 dark:text-emerald-400'}
+        >
           {diff.hasChanges ? `${fieldChanges.length} 个字段变化` : '暂无差异'}
         </span>
       </div>
@@ -220,7 +234,9 @@ const PoolDraftDiffPreview = ({ diff }) => {
             </div>
           ))}
           {fieldChanges.length > 5 && (
-            <div className="text-[11px] text-slate-400 dark:text-zinc-500">另有 {fieldChanges.length - 5} 个字段变化</div>
+            <div className="text-[11px] text-slate-400 dark:text-zinc-500">
+              另有 {fieldChanges.length - 5} 个字段变化
+            </div>
           )}
         </div>
       )}
@@ -250,10 +266,11 @@ const PoolEditDialog = ({
   actionLoading,
   checkUpCharacterExists,
   onSave,
+  onSaveAndPreviewPush,
   onClose,
   onToggleCharacter,
   onAddAllCharacters,
-  onRemoveAllCharacters
+  onRemoveAllCharacters,
 }) => {
   const [collapsedGroups, setCollapsedGroups] = useState({});
   const [candidateQuery, setCandidateQuery] = useState('');
@@ -275,25 +292,35 @@ const PoolEditDialog = ({
     onSave();
   };
 
+  const handleSaveAndPreviewPush = () => {
+    resetCandidateControls();
+    onSaveAndPreviewPush?.();
+  };
+
   const handlePoolTypeChange = (nextType) => {
     resetCandidateControls();
-    setPoolForm(prev => ({ ...prev, type: nextType }));
+    setPoolForm((prev) => ({ ...prev, type: nextType }));
   };
 
   if (!show) return null;
 
-  const poolType = (poolForm.type === 'limited_character' || poolForm.type === 'limited') ? 'limited'
-    : (poolForm.type === 'weapon' || poolForm.type === 'limited_weapon') ? 'weapon'
-    : poolForm.type;
+  const poolType =
+    poolForm.type === 'limited_character' || poolForm.type === 'limited'
+      ? 'limited'
+      : poolForm.type === 'weapon' || poolForm.type === 'limited_weapon'
+        ? 'weapon'
+        : poolForm.type;
   const isExtraPool = poolType === 'extra';
   const expectedCharacterType = poolType === 'weapon' ? 'weapon' : 'character';
   const allChars = characters
-    .filter(c => c.type === (poolType === 'weapon' ? 'weapon' : 'character'))
+    .filter((c) => c.type === (poolType === 'weapon' ? 'weapon' : 'character'))
     .sort(sortByAddedDateThenName);
   const featuredCharacters = parseFeaturedCharactersInput(poolForm.featured_characters_text);
-  const featuredCharacterSet = new Set(isExtraPool ? featuredCharacters : [poolForm.up_character.trim()].filter(Boolean));
+  const featuredCharacterSet = new Set(
+    isExtraPool ? featuredCharacters : [poolForm.up_character.trim()].filter(Boolean)
+  );
   const normalizedCandidateQuery = candidateQuery.trim().toLowerCase();
-  const isInPool = (char) => editingPoolCharacters.some(pc => pc.character_id === char.id);
+  const isInPool = (char) => editingPoolCharacters.some((pc) => pc.character_id === char.id);
   const visibleChars = allChars.filter((char) => {
     if (!matchesQuery(char, normalizedCandidateQuery)) return false;
 
@@ -309,39 +336,39 @@ const PoolEditDialog = ({
       key: 'six-limited',
       label: '6星限定',
       colorClass: 'text-orange-500',
-      items: visibleChars.filter(c => c.rarity === 6 && c.is_limited).sort(sortByAddedDateThenName)
+      items: visibleChars.filter((c) => c.rarity === 6 && c.is_limited).sort(sortByAddedDateThenName),
     },
     {
       key: 'six-standard',
       label: '6星常驻',
       colorClass: 'text-amber-600 dark:text-endfield-yellow',
-      items: visibleChars.filter(c => c.rarity === 6 && !c.is_limited).sort(sortByAddedDateThenName)
+      items: visibleChars.filter((c) => c.rarity === 6 && !c.is_limited).sort(sortByAddedDateThenName),
     },
     {
       key: 'five',
       label: '5星',
       colorClass: 'text-purple-500',
-      items: visibleChars.filter(c => c.rarity === 5).sort(sortByAddedDateThenName)
+      items: visibleChars.filter((c) => c.rarity === 5).sort(sortByAddedDateThenName),
     },
     {
       key: 'four',
       label: '4星',
       colorClass: 'text-blue-500',
-      items: visibleChars.filter(c => c.rarity === 4).sort(sortByAddedDateThenName)
-    }
+      items: visibleChars.filter((c) => c.rarity === 4).sort(sortByAddedDateThenName),
+    },
   ];
   const selectedCharacters = editingPoolCharacters
-    .map(pc => allChars.find(c => c.id === pc.character_id))
+    .map((pc) => allChars.find((c) => c.id === pc.character_id))
     .filter(Boolean);
   const selectedSummary = {
     total: selectedCharacters.length,
-    six: selectedCharacters.filter(c => c.rarity === 6).length,
-    five: selectedCharacters.filter(c => c.rarity === 5).length,
-    four: selectedCharacters.filter(c => c.rarity === 4).length,
+    six: selectedCharacters.filter((c) => c.rarity === 6).length,
+    five: selectedCharacters.filter((c) => c.rarity === 5).length,
+    four: selectedCharacters.filter((c) => c.rarity === 4).length,
   };
 
   const toggleGroupCollapsed = (key) => {
-    setCollapsedGroups(prev => ({ ...prev, [key]: !prev[key] }));
+    setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const renderCharTag = (char) => {
@@ -393,26 +420,22 @@ const PoolEditDialog = ({
 
                 {/* 卡池名称 */}
                 <div>
-                  <label className={FIELD_LABEL_CLASS}>
-                    卡池名称 *
-                  </label>
+                  <label className={FIELD_LABEL_CLASS}>卡池名称 *</label>
                   <input
                     type="text"
                     value={poolForm.name}
-                    onChange={(e) => setPoolForm(prev => ({ ...prev, name: e.target.value }))}
+                    onChange={(e) => setPoolForm((prev) => ({ ...prev, name: e.target.value }))}
                     placeholder="例如：终末序曲 - 莱万汀UP"
                     className={`${FIELD_INPUT_CLASS} ${FIELD_BORDER_CLASS}`}
                   />
                 </div>
 
                 <div>
-                  <label className={FIELD_LABEL_CLASS}>
-                    英文卡池名称
-                  </label>
+                  <label className={FIELD_LABEL_CLASS}>英文卡池名称</label>
                   <input
                     type="text"
                     value={poolForm.name_en || ''}
-                    onChange={(e) => setPoolForm(prev => ({ ...prev, name_en: e.target.value }))}
+                    onChange={(e) => setPoolForm((prev) => ({ ...prev, name_en: e.target.value }))}
                     placeholder="e.g. Laevatain Featured Banner"
                     className={`${FIELD_INPUT_CLASS} ${FIELD_BORDER_CLASS}`}
                   />
@@ -423,9 +446,7 @@ const PoolEditDialog = ({
 
                 {/* 卡池类型 */}
                 <div>
-                  <label className={FIELD_LABEL_CLASS}>
-                    卡池类型 *
-                  </label>
+                  <label className={FIELD_LABEL_CLASS}>卡池类型 *</label>
                   <select
                     value={poolForm.type}
                     onChange={(e) => handlePoolTypeChange(e.target.value)}
@@ -445,7 +466,7 @@ const PoolEditDialog = ({
                       <input
                         type="checkbox"
                         checked={poolForm.is_limited_weapon}
-                        onChange={(e) => setPoolForm(prev => ({ ...prev, is_limited_weapon: e.target.checked }))}
+                        onChange={(e) => setPoolForm((prev) => ({ ...prev, is_limited_weapon: e.target.checked }))}
                         className="h-4 w-4 accent-amber-500"
                       />
                       是否为限定武器池（影响赠送规则）
@@ -455,12 +476,10 @@ const PoolEditDialog = ({
 
                 {isExtraPool ? (
                   <div>
-                    <label className={FIELD_LABEL_CLASS}>
-                      附加寻访 6★ 名单 *
-                    </label>
+                    <label className={FIELD_LABEL_CLASS}>附加寻访 6★ 名单 *</label>
                     <textarea
                       value={poolForm.featured_characters_text || ''}
-                      onChange={(e) => setPoolForm(prev => ({ ...prev, featured_characters_text: e.target.value }))}
+                      onChange={(e) => setPoolForm((prev) => ({ ...prev, featured_characters_text: e.target.value }))}
                       placeholder={'每行一个，或用逗号分隔\n例如：\n莱万汀\n伊冯\n洁尔佩塔\n余烬'}
                       rows={5}
                       className={`${FIELD_INPUT_CLASS} ${FIELD_BORDER_CLASS} resize-none`}
@@ -469,7 +488,9 @@ const PoolEditDialog = ({
                       需填写 4 个不重复的 6★ 角色；保存时会自动将这 4 位标记为本池 UP。
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      <span className="text-[11px] text-slate-400 dark:text-zinc-500">当前已识别 <span className="font-mono">{featuredCharacters.length}/4</span>：</span>
+                      <span className="text-[11px] text-slate-400 dark:text-zinc-500">
+                        当前已识别 <span className="font-mono">{featuredCharacters.length}/4</span>：
+                      </span>
                       {featuredCharacters.map((name) => (
                         <span
                           key={name}
@@ -486,39 +507,43 @@ const PoolEditDialog = ({
                   </div>
                 ) : (
                   <div>
-                    <label className={FIELD_LABEL_CLASS}>
-                      UP 角色/武器名称
-                    </label>
+                    <label className={FIELD_LABEL_CLASS}>UP 角色/武器名称</label>
                     <input
                       type="text"
                       value={poolForm.up_character}
-                      onChange={(e) => setPoolForm(prev => ({ ...prev, up_character: e.target.value }))}
+                      onChange={(e) => setPoolForm((prev) => ({ ...prev, up_character: e.target.value }))}
                       placeholder="例如：莱万汀"
                       className={`${FIELD_INPUT_CLASS} ${
-                        poolForm.up_character.trim() && !checkUpCharacterExists(poolForm.up_character, expectedCharacterType)
+                        poolForm.up_character.trim() &&
+                        !checkUpCharacterExists(poolForm.up_character, expectedCharacterType)
                           ? 'border-amber-400 dark:border-amber-600'
                           : FIELD_BORDER_CLASS
                       }`}
                     />
-                    {poolForm.up_character.trim() && !checkUpCharacterExists(poolForm.up_character, expectedCharacterType) && (
-                      <div className="animate-fade-in-up-small mt-2 border border-amber-200 bg-amber-50 p-2 text-xs dark:border-amber-800 dark:bg-amber-900/20">
-                        <div className="flex items-start gap-2">
-                          <UserPlus size={14} className="mt-0.5 shrink-0 text-amber-500" />
-                          <div className="text-amber-700 dark:text-amber-400">
-                            <p className="font-medium">
-                              将自动创建新{expectedCharacterType === 'weapon' ? '武器' : '角色'}「{poolForm.up_character.trim()}」
-                            </p>
-                            <p className="mt-0.5 opacity-80">6星 · {poolForm.type === 'weapon' ? '武器' : '角色'} · 保存时加入当前卡池草稿</p>
+                    {poolForm.up_character.trim() &&
+                      !checkUpCharacterExists(poolForm.up_character, expectedCharacterType) && (
+                        <div className="animate-fade-in-up-small mt-2 border border-amber-200 bg-amber-50 p-2 text-xs dark:border-amber-800 dark:bg-amber-900/20">
+                          <div className="flex items-start gap-2">
+                            <UserPlus size={14} className="mt-0.5 shrink-0 text-amber-500" />
+                            <div className="text-amber-700 dark:text-amber-400">
+                              <p className="font-medium">
+                                将自动创建新{expectedCharacterType === 'weapon' ? '武器' : '角色'}「
+                                {poolForm.up_character.trim()}」
+                              </p>
+                              <p className="mt-0.5 opacity-80">
+                                6星 · {poolForm.type === 'weapon' ? '武器' : '角色'} · 保存时加入当前卡池草稿
+                              </p>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
-                    {poolForm.up_character.trim() && checkUpCharacterExists(poolForm.up_character, expectedCharacterType) && (
-                      <div className="animate-fade-in-up-small mt-1 flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-                        <CheckCircle size={12} />
-                        {expectedCharacterType === 'weapon' ? '武器已存在' : '角色已存在'}
-                      </div>
-                    )}
+                      )}
+                    {poolForm.up_character.trim() &&
+                      checkUpCharacterExists(poolForm.up_character, expectedCharacterType) && (
+                        <div className="animate-fade-in-up-small mt-1 flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                          <CheckCircle size={12} />
+                          {expectedCharacterType === 'weapon' ? '武器已存在' : '角色已存在'}
+                        </div>
+                      )}
                   </div>
                 )}
 
@@ -527,13 +552,13 @@ const PoolEditDialog = ({
                   <DateTimePicker
                     label="开始时间"
                     value={poolForm.start_time}
-                    onChange={(val) => setPoolForm(prev => ({ ...prev, start_time: val }))}
+                    onChange={(val) => setPoolForm((prev) => ({ ...prev, start_time: val }))}
                     placeholder="选择开始时间"
                   />
                   <DateTimePicker
                     label="结束时间"
                     value={poolForm.end_time}
-                    onChange={(val) => setPoolForm(prev => ({ ...prev, end_time: val }))}
+                    onChange={(val) => setPoolForm((prev) => ({ ...prev, end_time: val }))}
                     placeholder="选择结束时间"
                     minDate={poolForm.start_time}
                     durationPresets={[
@@ -548,20 +573,18 @@ const PoolEditDialog = ({
                       const d = String(endDate.getDate()).padStart(2, '0');
                       const h = String(endDate.getHours()).padStart(2, '0');
                       const min = String(endDate.getMinutes()).padStart(2, '0');
-                      setPoolForm(prev => ({ ...prev, end_time: `${y}-${m}-${d}T${h}:${min}` }));
+                      setPoolForm((prev) => ({ ...prev, end_time: `${y}-${m}-${d}T${h}:${min}` }));
                     }}
                   />
                 </div>
 
                 {/* Banner URL */}
                 <div>
-                  <label className={FIELD_LABEL_CLASS}>
-                    Banner 图片 URL
-                  </label>
+                  <label className={FIELD_LABEL_CLASS}>Banner 图片 URL</label>
                   <input
                     type="text"
                     value={poolForm.banner_url}
-                    onChange={(e) => setPoolForm(prev => ({ ...prev, banner_url: e.target.value }))}
+                    onChange={(e) => setPoolForm((prev) => ({ ...prev, banner_url: e.target.value }))}
                     placeholder="https://..."
                     className={`${FIELD_INPUT_CLASS} ${FIELD_BORDER_CLASS} font-mono`}
                   />
@@ -569,12 +592,10 @@ const PoolEditDialog = ({
 
                 {/* 描述 */}
                 <div>
-                  <label className={FIELD_LABEL_CLASS}>
-                    描述
-                  </label>
+                  <label className={FIELD_LABEL_CLASS}>描述</label>
                   <textarea
                     value={poolForm.description}
-                    onChange={(e) => setPoolForm(prev => ({ ...prev, description: e.target.value }))}
+                    onChange={(e) => setPoolForm((prev) => ({ ...prev, description: e.target.value }))}
                     placeholder="卡池描述..."
                     rows={2}
                     className={`${FIELD_INPUT_CLASS} ${FIELD_BORDER_CLASS} resize-none`}
@@ -610,7 +631,11 @@ const PoolEditDialog = ({
                         清空
                       </button>
                       <span className="ml-auto text-[11px] text-slate-400 dark:text-zinc-500">
-                        已选 <span className="font-mono">{selectedSummary.total}/{allChars.length}</span> · 显示 <span className="font-mono">{visibleChars.length}</span>
+                        已选{' '}
+                        <span className="font-mono">
+                          {selectedSummary.total}/{allChars.length}
+                        </span>{' '}
+                        · 显示 <span className="font-mono">{visibleChars.length}</span>
                       </span>
                     </div>
                   )}
@@ -618,7 +643,10 @@ const PoolEditDialog = ({
                   {allChars.length > 0 && (
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto]">
                       <div className="relative">
-                        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-zinc-500" />
+                        <Search
+                          size={14}
+                          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-zinc-500"
+                        />
                         <input
                           type="text"
                           value={candidateQuery}
@@ -643,7 +671,9 @@ const PoolEditDialog = ({
 
                   {allChars.length > 0 && (
                     <div className="border border-blue-100 bg-blue-50 p-2 text-[11px] leading-4 text-blue-700 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-300">
-                      当前为浏览器草稿：已选 {selectedSummary.total} 个，6★ {selectedSummary.six} 个，5★ {selectedSummary.five} 个，4★ {selectedSummary.four} 个；候选按添加日期新到旧排序，点击保存后才同步到数据库。
+                      当前为浏览器草稿：已选 {selectedSummary.total} 个，6★ {selectedSummary.six} 个，5★{' '}
+                      {selectedSummary.five} 个，4★ {selectedSummary.four}{' '}
+                      个；候选按添加日期新到旧排序，点击保存后才同步到数据库。
                     </div>
                   )}
 
@@ -651,7 +681,7 @@ const PoolEditDialog = ({
 
                   <div className="max-h-[48vh] space-y-2.5 overflow-y-auto pr-1">
                     {/* 按稀有度分组 */}
-                    {groupedCharacters.map(group => (
+                    {groupedCharacters.map((group) => (
                       <CharacterGroup
                         key={group.key}
                         items={group.items}
@@ -682,9 +712,7 @@ const PoolEditDialog = ({
                   {isExtraPool && allChars.length > 0 && (
                     <div className="border border-cyan-200 bg-cyan-50 p-2.5 text-xs text-cyan-700 dark:border-cyan-900 dark:bg-cyan-950/30 dark:text-cyan-300">
                       <p className="font-medium">附加寻访配置说明</p>
-                      <p className="mt-1 opacity-80">
-                        • 仅这 4 位 6★ 会按 UP 处理；5★ / 4★ 可在上方草稿中手动维护。
-                      </p>
+                      <p className="mt-1 opacity-80">• 仅这 4 位 6★ 会按 UP 处理；5★ / 4★ 可在上方草稿中手动维护。</p>
                     </div>
                   )}
                 </div>
@@ -694,14 +722,14 @@ const PoolEditDialog = ({
 
           {/* 对话框操作按钮 */}
           <div className="flex shrink-0 items-center justify-end gap-2 border-t border-zinc-100 px-3 py-2.5 dark:border-zinc-800">
-            <PanelToolbarButton onClick={handleClose}>
-              取消
-            </PanelToolbarButton>
-            <PanelToolbarButton
-              onClick={handleSave}
-              disabled={actionLoading === 'save'}
-              tone="primary"
-            >
+            <PanelToolbarButton onClick={handleClose}>取消</PanelToolbarButton>
+            {onSaveAndPreviewPush && (
+              <PanelToolbarButton onClick={handleSaveAndPreviewPush} disabled={actionLoading === 'save'}>
+                <Send size={14} />
+                保存并预览推送
+              </PanelToolbarButton>
+            )}
+            <PanelToolbarButton onClick={handleSave} disabled={actionLoading === 'save'} tone="primary">
               <Save size={14} />
               {actionLoading === 'save' ? '保存中...' : '保存'}
             </PanelToolbarButton>

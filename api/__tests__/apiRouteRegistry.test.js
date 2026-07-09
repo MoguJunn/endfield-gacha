@@ -1,10 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
-import {
-  getApiRouteEntries,
-  getApiRouteHandler,
-} from '../_routes/index.js';
+import { getApiRouteEntries, getApiRouteHandler } from '../_routes/index.js';
 import { buildDevApiOpenApiSpec } from '../_lib/devApiOpenApi.js';
 
 const OFFICIAL_BOT_PATHS = [
@@ -26,6 +23,7 @@ const INTERNAL_OPERATION_PATHS = [
   '/api/admin-mail-budget-config',
   '/api/admin-mail-outbox-drain',
   '/api/admin-mail-smoke-test',
+  '/api/admin-pool-push',
   '/api/admin-pools',
   '/api/admin-site-health',
   '/api/admin-user-data',
@@ -62,9 +60,7 @@ const USER_OPERATION_PATHS = [
   '/api/tickets/reply',
 ];
 
-const PUBLIC_STATUS_PATHS = [
-  '/api/site-status',
-];
+const PUBLIC_STATUS_PATHS = ['/api/site-status'];
 
 describe('API route registry', () => {
   it('registers every public v1 OpenAPI path in the single-function router map', () => {
