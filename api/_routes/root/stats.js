@@ -10,10 +10,8 @@ import {
   sendPublicJson,
 } from '../../_lib/publicCache.js';
 import { serverLogger } from '../../_lib/serverLogger.js';
-import {
-  resolveSupabaseServerKey,
-  resolveSupabaseUrl,
-} from '../../_lib/supabaseEnv.js';
+import { resolveSupabaseServerKey, resolveSupabaseUrl } from '../../_lib/supabaseEnv.js';
+import { buildVersionCalendarPayload } from '../../_lib/versionCalendarSnapshot.js';
 
 // 内存缓存
 const cache = {
@@ -21,6 +19,8 @@ const cache = {
   poolsLastFetch: 0,
   poolCatalog: null,
   poolCatalogLastFetch: 0,
+  versionCalendar: null,
+  versionCalendarLastFetch: 0,
   characters: null,
   charactersLastFetch: 0,
   globalSummary: null,
@@ -29,7 +29,7 @@ const cache = {
   characterRankingLastFetch: 0,
   characterCatalog: null,
   characterCatalogLastFetch: 0,
-  metaByType: {}
+  metaByType: {},
 };
 
 const CACHE_TTL = 60 * 1000; // 60秒缓存
@@ -42,18 +42,18 @@ const PRIVATE_CHARACTER_CATALOG_KEYS = new Set([
   'history_id',
   'record_id',
   'platform_user_id',
-  'email'
+  'email',
 ]);
 
 // 创建 Supabase 客户端
 function getSupabaseClient() {
   const supabaseUrl = resolveSupabaseUrl();
   const supabaseKey = resolveSupabaseServerKey();
-  
+
   if (!supabaseUrl || !supabaseKey) {
     return null;
   }
-  
+
   return createClient(supabaseUrl, supabaseKey);
 }
 
@@ -126,9 +126,7 @@ function normalizeCharacterCatalogAvatars(catalog) {
     characters: Array.isArray(catalog.characters)
       ? catalog.characters.map(normalizeCharacterAvatarRecord)
       : catalog.characters,
-    rows: Array.isArray(catalog.rows)
-      ? catalog.rows.map(normalizeCharacterAvatarRecord)
-      : catalog.rows,
+    rows: Array.isArray(catalog.rows) ? catalog.rows.map(normalizeCharacterAvatarRecord) : catalog.rows,
   };
 }
 
@@ -187,7 +185,7 @@ function formatVisiblePoolRecord(record) {
     banner_url: record.banner_url || null,
     start_time: record.start_time || null,
     end_time: record.end_time || null,
-    featured_characters: record.featured_characters || null
+    featured_characters: record.featured_characters || null,
   };
 }
 
@@ -209,7 +207,9 @@ function sortPoolCatalogRecords(left, right) {
 async function fetchCharactersTable(supabase) {
   const { data, error } = await supabase
     .from('characters')
-    .select('id, name, avatar_url, rarity, type, aliases, is_limited, release_date, created_at, updated_at, pool_config')
+    .select(
+      'id, name, avatar_url, rarity, type, aliases, is_limited, release_date, created_at, updated_at, pool_config'
+    )
     .order('name');
 
   if (error) {
@@ -333,10 +333,7 @@ async function fetchPublicProfilesMap(supabase, userIds = []) {
     return new Map();
   }
 
-  const { data, error } = await supabase
-    .from('public_profiles')
-    .select('id, username, role')
-    .in('id', uniqueIds);
+  const { data, error } = await supabase.from('public_profiles').select('id, username, role').in('id', uniqueIds);
 
   if (error) {
     throw error;
@@ -348,7 +345,9 @@ async function fetchPublicProfilesMap(supabase, userIds = []) {
 async function fetchPoolCatalog(supabase) {
   const { data, error } = await supabase
     .from('pools')
-    .select('pool_id, name, name_en, type, locked, is_limited_weapon, created_at, updated_at, user_id, up_character, description, banner_url, start_time, end_time, featured_characters');
+    .select(
+      'pool_id, name, name_en, type, locked, is_limited_weapon, created_at, updated_at, user_id, up_character, description, banner_url, start_time, end_time, featured_characters'
+    );
 
   if (error) {
     throw error;
@@ -364,10 +363,42 @@ async function fetchPoolCatalog(supabase) {
     .map((row) => ({
       ...row,
       creator_username: profilesMap.get(row.user_id)?.username || null,
-      creator_role: profilesMap.get(row.user_id)?.role || null
+      creator_role: profilesMap.get(row.user_id)?.role || null,
     }))
     .sort(sortPoolCatalogRecords)
     .map(formatVisiblePoolRecord);
+}
+
+async function fetchActiveVersionCalendar(supabase) {
+  const { data: snapshot, error: snapshotError } = await supabase
+    .from('version_content_snapshots')
+    .select(
+      'version_key, revision, title, starts_at, ends_at, content, pool_bindings, source_meta, published_at, updated_at'
+    )
+    .eq('is_active', true)
+    .order('published_at', { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (snapshotError) {
+    throw snapshotError;
+  }
+  if (!snapshot) {
+    return null;
+  }
+
+  const poolBindings =
+    snapshot.pool_bindings && typeof snapshot.pool_bindings === 'object' ? snapshot.pool_bindings : {};
+  const poolIds = [...new Set(Object.values(poolBindings).filter(Boolean))];
+  let poolRows = [];
+
+  if (poolIds.length > 0) {
+    const visiblePools = await fetchVisiblePools(supabase);
+    const requestedPoolIds = new Set(poolIds);
+    poolRows = (visiblePools || []).filter((pool) => requestedPoolIds.has(pool?.pool_id || pool?.id));
+  }
+
+  return buildVersionCalendarPayload(snapshot, poolRows);
 }
 
 export default async function handler(req, res) {
@@ -389,7 +420,7 @@ export default async function handler(req, res) {
   const now = Date.now();
   const supabase = getSupabaseClient();
   const cacheVersion = await resolvePublicCacheVersion(supabase, {
-    requestVersion: readRequestCacheVersion(req)
+    requestVersion: readRequestCacheVersion(req),
   });
   const cacheKey = getStatsPublicCacheKey(type, cacheVersion);
   const context = { cacheKey, cacheVersion };
@@ -406,7 +437,7 @@ export default async function handler(req, res) {
         cacheKey,
         cacheVersion,
         lastFetch: getAnyCachedLastFetch(type),
-        message: 'Database not configured, returning cached/default data'
+        message: 'Database not configured, returning cached/default data',
       });
     }
 
@@ -415,6 +446,8 @@ export default async function handler(req, res) {
         return await handlePools(supabase, res, now, context);
       case 'pool_catalog':
         return await handlePoolCatalog(supabase, res, now, context);
+      case 'version_calendar':
+        return await handleVersionCalendar(supabase, res, now, context);
       case 'characters':
         return await handleCharacters(supabase, res, now, context);
       case 'global_summary':
@@ -443,7 +476,7 @@ export default async function handler(req, res) {
       cacheKey,
       cacheVersion,
       lastFetch: getAnyCachedLastFetch(type),
-      error: error.message
+      error: error.message,
     });
   }
 }
@@ -465,21 +498,14 @@ function setTypeMeta(type, meta) {
 
 function isFreshTypeCache(type, lastFetch, now, cacheKey) {
   const meta = getTypeMeta(type);
-  return lastFetch > 0
-    && now - lastFetch < CACHE_TTL
-    && (!meta?.cacheKey || meta.cacheKey === cacheKey);
+  return lastFetch > 0 && now - lastFetch < CACHE_TTL && (!meta?.cacheKey || meta.cacheKey === cacheKey);
 }
 
-function sendStatsJson(res, _type, {
-  data,
-  cached = false,
-  partial = false,
-  stale = false,
-  source = null,
-  context,
-  lastFetch = 0,
-  error = null,
-} = {}) {
+function sendStatsJson(
+  res,
+  _type,
+  { data, cached = false, partial = false, stale = false, source = null, context, lastFetch = 0, error = null } = {}
+) {
   return sendPublicJson(res, {
     data,
     cached,
@@ -501,6 +527,8 @@ function getAnyCachedLastFetch(type) {
       return cache.charactersLastFetch || 0;
     case 'pool_catalog':
       return cache.poolCatalogLastFetch || 0;
+    case 'version_calendar':
+      return cache.versionCalendarLastFetch || 0;
     case 'global_summary':
       return cache.globalSummaryLastFetch || 0;
     case 'character_ranking':
@@ -530,6 +558,8 @@ function getCachedData(type) {
       return { characters: cache.characters ?? [] };
     case 'pool_catalog':
       return { pools: cache.poolCatalog ?? [] };
+    case 'version_calendar':
+      return { versionCalendar: cache.versionCalendar ?? null };
     case 'global_summary':
       return { globalSummary: cache.globalSummary ?? null };
     case 'character_ranking':
@@ -543,7 +573,7 @@ function getCachedData(type) {
         characters: cache.characters ?? [],
         globalSummary: cache.globalSummary ?? null,
         characterRanking: cache.characterRanking ?? null,
-        characterCatalog: sanitizeCharacterCatalog(cache.characterCatalog)
+        characterCatalog: sanitizeCharacterCatalog(cache.characterCatalog),
       };
     default:
       return {};
@@ -559,7 +589,7 @@ async function handlePools(supabase, res, now, context) {
       data: { pools: cache.pools },
       source: 'memory-cache',
       context,
-      lastFetch: cache.poolsLastFetch
+      lastFetch: cache.poolsLastFetch,
     });
   }
 
@@ -574,19 +604,22 @@ async function handlePools(supabase, res, now, context) {
     data: { pools: data || [] },
     source: 'origin',
     context,
-    lastFetch: cache.poolsLastFetch
+    lastFetch: cache.poolsLastFetch,
   });
 }
 
 // 处理角色列表
 async function handlePoolCatalog(supabase, res, now, context) {
-  if (cache.poolCatalog !== null && isFreshTypeCache('pool_catalog', cache.poolCatalogLastFetch, now, context.cacheKey)) {
+  if (
+    cache.poolCatalog !== null &&
+    isFreshTypeCache('pool_catalog', cache.poolCatalogLastFetch, now, context.cacheKey)
+  ) {
     return sendStatsJson(res, 'pool_catalog', {
       cached: true,
       data: { pools: cache.poolCatalog },
       source: 'memory-cache',
       context,
-      lastFetch: cache.poolCatalogLastFetch
+      lastFetch: cache.poolCatalogLastFetch,
     });
   }
 
@@ -601,7 +634,35 @@ async function handlePoolCatalog(supabase, res, now, context) {
     data: { pools: data || [] },
     source: 'origin',
     context,
-    lastFetch: cache.poolCatalogLastFetch
+    lastFetch: cache.poolCatalogLastFetch,
+  });
+}
+
+async function handleVersionCalendar(supabase, res, now, context) {
+  if (
+    cache.versionCalendar !== null &&
+    isFreshTypeCache('version_calendar', cache.versionCalendarLastFetch, now, context.cacheKey)
+  ) {
+    return sendStatsJson(res, 'version_calendar', {
+      cached: true,
+      data: { versionCalendar: cache.versionCalendar },
+      source: 'memory-cache',
+      context,
+      lastFetch: cache.versionCalendarLastFetch,
+    });
+  }
+
+  const data = await fetchActiveVersionCalendar(supabase);
+  cache.versionCalendar = data;
+  cache.versionCalendarLastFetch = now;
+  setTypeMeta('version_calendar', context);
+
+  return sendStatsJson(res, 'version_calendar', {
+    cached: false,
+    data: { versionCalendar: data },
+    source: 'origin',
+    context,
+    lastFetch: cache.versionCalendarLastFetch,
   });
 }
 
@@ -614,7 +675,7 @@ async function handleCharacters(supabase, res, now, context) {
       data: { characters: cache.characters },
       source: 'memory-cache',
       context,
-      lastFetch: cache.charactersLastFetch
+      lastFetch: cache.charactersLastFetch,
     });
   }
 
@@ -629,18 +690,21 @@ async function handleCharacters(supabase, res, now, context) {
     data: { characters: data || [] },
     source: 'origin',
     context,
-    lastFetch: cache.charactersLastFetch
+    lastFetch: cache.charactersLastFetch,
   });
 }
 
 async function handleGlobalSummary(supabase, res, now, context) {
-  if (cache.globalSummary !== null && isFreshTypeCache('global_summary', cache.globalSummaryLastFetch, now, context.cacheKey)) {
+  if (
+    cache.globalSummary !== null &&
+    isFreshTypeCache('global_summary', cache.globalSummaryLastFetch, now, context.cacheKey)
+  ) {
     return sendStatsJson(res, 'global_summary', {
       cached: true,
       data: { globalSummary: cache.globalSummary },
       source: 'memory-cache',
       context,
-      lastFetch: cache.globalSummaryLastFetch
+      lastFetch: cache.globalSummaryLastFetch,
     });
   }
 
@@ -658,18 +722,21 @@ async function handleGlobalSummary(supabase, res, now, context) {
     data: { globalSummary: data ?? null },
     source: 'origin',
     context,
-    lastFetch: cache.globalSummaryLastFetch
+    lastFetch: cache.globalSummaryLastFetch,
   });
 }
 
 async function handleCharacterRanking(supabase, res, now, context) {
-  if (cache.characterRanking !== null && isFreshTypeCache('character_ranking', cache.characterRankingLastFetch, now, context.cacheKey)) {
+  if (
+    cache.characterRanking !== null &&
+    isFreshTypeCache('character_ranking', cache.characterRankingLastFetch, now, context.cacheKey)
+  ) {
     return sendStatsJson(res, 'character_ranking', {
       cached: true,
       data: { characterRanking: cache.characterRanking },
       source: 'memory-cache',
       context,
-      lastFetch: cache.characterRankingLastFetch
+      lastFetch: cache.characterRankingLastFetch,
     });
   }
 
@@ -685,7 +752,7 @@ async function handleCharacterRanking(supabase, res, now, context) {
       source: cache.characterRanking !== null ? 'memory-cache' : 'origin-timeout',
       context,
       lastFetch: cache.characterRankingLastFetch,
-      error: error?.message || 'character_ranking_timeout'
+      error: error?.message || 'character_ranking_timeout',
     });
   }
 
@@ -698,18 +765,21 @@ async function handleCharacterRanking(supabase, res, now, context) {
     data: { characterRanking: data ?? null },
     source: 'origin',
     context,
-    lastFetch: cache.characterRankingLastFetch
+    lastFetch: cache.characterRankingLastFetch,
   });
 }
 
 async function handleCharacterCatalog(supabase, res, now, context) {
-  if (cache.characterCatalog !== null && isFreshTypeCache('character_catalog', cache.characterCatalogLastFetch, now, context.cacheKey)) {
+  if (
+    cache.characterCatalog !== null &&
+    isFreshTypeCache('character_catalog', cache.characterCatalogLastFetch, now, context.cacheKey)
+  ) {
     return sendStatsJson(res, 'character_catalog', {
       cached: true,
       data: { characterCatalog: sanitizeCharacterCatalog(cache.characterCatalog) },
       source: 'memory-cache',
       context,
-      lastFetch: cache.characterCatalogLastFetch
+      lastFetch: cache.characterCatalogLastFetch,
     });
   }
 
@@ -726,7 +796,7 @@ async function handleCharacterCatalog(supabase, res, now, context) {
     source: catalogResult.source,
     context,
     lastFetch: cache.characterCatalogLastFetch,
-    error: catalogResult.partial ? (catalogResult.error?.message || 'character_catalog_fallback') : null,
+    error: catalogResult.partial ? catalogResult.error?.message || 'character_catalog_fallback' : null,
   });
 }
 
@@ -738,7 +808,7 @@ async function handleAll(supabase, res, now, context) {
     characters: [],
     globalSummary: null,
     characterRanking: null,
-    characterCatalog: null
+    characterCatalog: null,
   };
 
   // 并行获取所有数据
@@ -748,14 +818,14 @@ async function handleAll(supabase, res, now, context) {
     charactersResult,
     globalSummaryResult,
     characterRankingResult,
-    characterCatalogResult
+    characterCatalogResult,
   ] = await Promise.allSettled([
     fetchVisiblePools(supabase),
     fetchPoolCatalog(supabase),
     fetchCharactersTable(supabase),
     supabase.rpc('get_global_stats_cached'),
     fetchCharacterRankingStatsCached(supabase),
-    fetchCharacterCatalogForStats(supabase)
+    fetchCharacterCatalogForStats(supabase),
   ]);
 
   // 处理卡池
@@ -827,12 +897,12 @@ async function handleAll(supabase, res, now, context) {
       charactersResult,
       globalSummaryResult,
       characterRankingResult,
-      characterCatalogResult
+      characterCatalogResult,
     ].some((resultItem) => resultItem.status === 'rejected' || resultItem.value?.error || resultItem.value?.partial),
     data: result,
     source: 'origin',
     context,
-    lastFetch: getAnyCachedLastFetch('all')
+    lastFetch: getAnyCachedLastFetch('all'),
   });
 }
 
@@ -842,4 +912,3 @@ function getAllChildContext(context, type) {
     cacheKey: getStatsPublicCacheKey(type, context.cacheVersion),
   };
 }
-

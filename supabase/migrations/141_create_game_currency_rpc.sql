@@ -108,7 +108,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.apply_game_currency_delta(UUID, TEXT, BIGINT, TEXT, TEXT, UUID, TEXT, JSONB) FROM anon, authenticated;
+REVOKE ALL ON FUNCTION public.apply_game_currency_delta(UUID, TEXT, BIGINT, TEXT, TEXT, UUID, TEXT, JSONB)
+  FROM PUBLIC, anon, authenticated;
 
 DO $$
 BEGIN
