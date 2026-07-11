@@ -11,7 +11,10 @@ import {
 } from '../../_lib/publicCache.js';
 import { serverLogger } from '../../_lib/serverLogger.js';
 import { resolveSupabaseServerKey, resolveSupabaseUrl } from '../../_lib/supabaseEnv.js';
-import { buildVersionCalendarPayload } from '../../_lib/versionCalendarSnapshot.js';
+import {
+  buildVersionCalendarPayload,
+  mergeVersionTimelineConfig,
+} from '../../_lib/versionCalendarSnapshot.js';
 
 // 内存缓存
 const cache = {
@@ -369,36 +372,60 @@ async function fetchPoolCatalog(supabase) {
     .map(formatVisiblePoolRecord);
 }
 
+async function fetchVersionCalendarCharacters(supabase) {
+  const { data, error } = await supabase
+    .from('characters')
+    .select('id, name, avatar_url, aliases, type')
+    .in('type', ['character', 'weapon']);
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
 async function fetchActiveVersionCalendar(supabase) {
-  const { data: snapshot, error: snapshotError } = await supabase
+  const { data: snapshots, error: snapshotError } = await supabase
     .from('version_content_snapshots')
     .select(
-      'version_key, revision, title, starts_at, ends_at, content, pool_bindings, source_meta, published_at, updated_at'
+      'version_key, version_number, revision, title, starts_at, ends_at, content, pool_bindings, source_meta, published_at, updated_at'
     )
     .eq('is_active', true)
-    .order('published_at', { ascending: false, nullsFirst: false })
-    .limit(1)
-    .maybeSingle();
+    .order('starts_at', { ascending: true, nullsFirst: false });
 
   if (snapshotError) {
     throw snapshotError;
   }
-  if (!snapshot) {
+  if (!Array.isArray(snapshots) || snapshots.length === 0) {
     return null;
   }
 
-  const poolBindings =
-    snapshot.pool_bindings && typeof snapshot.pool_bindings === 'object' ? snapshot.pool_bindings : {};
-  const poolIds = [...new Set(Object.values(poolBindings).filter(Boolean))];
-  let poolRows = [];
-
-  if (poolIds.length > 0) {
-    const visiblePools = await fetchVisiblePools(supabase);
-    const requestedPoolIds = new Set(poolIds);
-    poolRows = (visiblePools || []).filter((pool) => requestedPoolIds.has(pool?.pool_id || pool?.id));
+  let timelineConfig = null;
+  try {
+    const { data: configRow, error: configError } = await supabase
+      .from('site_config')
+      .select('value, updated_at')
+      .eq('key', 'home_version_timeline')
+      .maybeSingle();
+    if (configError) {
+      throw configError;
+    }
+    timelineConfig = configRow;
+  } catch (error) {
+    serverLogger.error('Failed to read version timeline config; using snapshots', error);
   }
 
-  return buildVersionCalendarPayload(snapshot, poolRows);
+  const configuredSnapshots = mergeVersionTimelineConfig(
+    snapshots,
+    timelineConfig?.value,
+    timelineConfig?.updated_at,
+  );
+  const [visiblePools, characterRows] = await Promise.all([
+    fetchVisiblePools(supabase),
+    fetchVersionCalendarCharacters(supabase),
+  ]);
+  return buildVersionCalendarPayload(configuredSnapshots, visiblePools, characterRows);
 }
 
 export default async function handler(req, res) {
