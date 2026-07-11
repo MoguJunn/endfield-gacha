@@ -11,6 +11,8 @@ const messages = {
   "app.documentTitle": "Endfield Gacha Analyzer",
   "app.metaDescription": "Endfield Gacha Analyzer is an Arknights: Endfield pull history analyzer with cloud sync, simulator, and multi-account workflows.",
   "app.metaKeywords": "Arknights Endfield, Endfield, gacha analyzer, pity, pull history, simulator",
+  "home.rotation.calendar": "Version Calendar",
+  "home.rotation.openCalendar": "Open Version Calendar",
   "common.loading": "Loading...",
   "common.unit.pulls": "{count} pulls",
   "common.retry": "Retry",

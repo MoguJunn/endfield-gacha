@@ -1,10 +1,12 @@
 import React, { useRef, useEffect } from 'react';
-import { RefreshCw, User } from 'lucide-react';
+import { CalendarDays, ExternalLink, RefreshCw, User } from 'lucide-react';
 import { getCharacterAvatarUrl } from '../../utils/characterUtils';
 import { useI18n } from '../../i18n/index.js';
 import { localizeEntityName } from '../../utils/gameDataI18n.js';
 import { bindHorizontalWheelScroll } from '../../utils/horizontalScroll.js';
 import { getPoolFeaturedLabel, getPoolSelectorFeaturedCharacters } from '../../utils/poolSelectorDisplay.js';
+
+const VERSION_CALENDAR_URL = 'https://ef-cal.mogujun.icu/';
 
 function getFeaturedTextFontClass(featuredText = '') {
   if (featuredText.length > 42) {
@@ -283,10 +285,23 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
     <div className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 overflow-hidden relative">
       <div className="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.02)_1px,transparent_1px)] dark:bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none"></div>
       <div className="relative z-10 px-6 py-4">
-        <h4 className="font-bold text-zinc-500 dark:text-zinc-400 text-xs mb-4 flex items-center gap-2 uppercase tracking-widest">
-          <RefreshCw size={12} />
-          {tt('home.rotation.title', 'Rotation Schedule')}
-        </h4>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+            <RefreshCw size={12} />
+            {tt('home.rotation.title', 'Rotation Schedule')}
+          </h4>
+          <a
+            href={VERSION_CALENDAR_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex shrink-0 items-center gap-1.5 border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11px] font-bold text-amber-700 transition-colors hover:border-amber-400 hover:bg-amber-100 hover:text-amber-800 dark:border-endfield-yellow/35 dark:bg-endfield-yellow/10 dark:text-endfield-yellow dark:hover:border-endfield-yellow/60 dark:hover:bg-endfield-yellow/15"
+            aria-label={tt('home.rotation.openCalendar', 'Open Version Calendar')}
+          >
+            <CalendarDays size={13} />
+            <span>{tt('home.rotation.calendar', 'Version Calendar')}</span>
+            <ExternalLink size={11} />
+          </a>
+        </div>
         <div 
           ref={scrollContainerRef}
           className="pool-card-rail-scrollbar flex flex-nowrap items-stretch gap-6 overflow-x-scroll overflow-y-hidden pb-4 pt-2 -mx-6 px-6"

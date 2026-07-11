@@ -11,6 +11,8 @@ const messages = {
   "app.documentTitle": "终末地抽卡分析器 | Endfield Gacha Analyzer",
   "app.metaDescription": "终末地抽卡分析器 - 《明日方舟：终末地》抽卡记录分析工具，支持云端同步、模拟器、多账号和第三方文件导入导出。",
   "app.metaKeywords": "明日方舟,终末地,Endfield,抽卡,分析器,保底,概率,模拟器,导入导出",
+  "home.rotation.calendar": "版本日历",
+  "home.rotation.openCalendar": "打开版本日历",
   "common.loading": "加载中...",
   "common.unit.pulls": "{count} 抽",
   "common.retry": "重试",

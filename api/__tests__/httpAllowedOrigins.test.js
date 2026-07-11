@@ -4,6 +4,8 @@ import { isAllowedOrigin } from '../_lib/http.js';
 
 describe('API allowed origins', () => {
   it('allows the public version calendar deployment', () => {
+    expect(isAllowedOrigin('https://ef-cal.mogujun.icu')).toBe(true);
+    expect(isAllowedOrigin('https://ef-cal.mogujun.icu/')).toBe(true);
     expect(isAllowedOrigin('https://endfield-version-calendar.vercel.app')).toBe(true);
     expect(isAllowedOrigin('https://endfield-version-calendar.vercel.app/')).toBe(true);
   });
