@@ -1,7 +1,7 @@
 import { getAppLocale, isEnglishLocale } from '../i18n/index.js';
 import useSiteConfigStore from '../stores/useSiteConfigStore.js';
 import { characterCache, resolveCharacterRecordByName } from './characterUtils.js';
-import { getPoolFeaturedNames } from './poolFeaturedResolver.js';
+import { getPoolFeaturedNames, isInternalEntityReference } from './poolFeaturedResolver.js';
 
 export const POOL_LOCALIZATION_CONFIG_KEY = 'pool_localizations';
 export const ENTITY_LOCALIZATION_CONFIG_KEY = 'entity_localizations';
@@ -336,7 +336,7 @@ function buildGenericPoolFallback(name, pool, locale) {
     return 'Beginner Banner';
   }
 
-  return normalizedName;
+  return isInternalEntityReference(normalizedName) ? '' : normalizedName;
 }
 
 export function localizeEntityName(name, { locale = getAppLocale(), type = null } = {}) {
@@ -373,7 +373,7 @@ export function localizeEntityName(name, { locale = getAppLocale(), type = null 
     return alias;
   }
 
-  return normalizedName;
+  return isInternalEntityReference(normalizedName) ? '' : normalizedName;
 }
 
 export function localizeEntityList(names = [], options = {}) {

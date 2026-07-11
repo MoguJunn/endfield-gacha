@@ -1,6 +1,7 @@
 import React from 'react';
 import { Edit2, Trash2, Calendar, Star, Layers, Swords, Users, Send } from 'lucide-react';
 import { StatusDot, PanelToolbarButton } from '../panels/shared/PanelUi.jsx';
+import { getPoolFeaturedNames } from '../../../utils/poolFeaturedResolver.js';
 
 /**
  * 获取类型图标
@@ -81,11 +82,7 @@ const getPoolStatus = (pool) => {
 const PoolCharacterList = ({ pool, poolCharacters, characters }) => {
   const poolCharIds = (poolCharacters[pool.pool_id] || []).map((pc) => pc.character_id);
   const poolChars = characters.filter((c) => poolCharIds.includes(c.id));
-  const featuredCharacterSet = new Set(
-    Array.isArray(pool.featured_characters) && pool.featured_characters.length > 0
-      ? pool.featured_characters.filter(Boolean)
-      : [pool.up_character].filter(Boolean)
-  );
+  const featuredCharacterSet = new Set(getPoolFeaturedNames(pool, { entities: characters }));
 
   const sixStars = poolChars
     .filter((c) => c.rarity === 6)
@@ -181,7 +178,8 @@ const PoolCharacterList = ({ pool, poolCharacters, characters }) => {
  * 卡池卡片组件
  */
 const PoolCard = ({ pool, poolCharacters, characters, actionLoading, onEdit, onDelete, onPreviewPush }) => {
-  const featuredCharacters = Array.isArray(pool.featured_characters) ? pool.featured_characters.filter(Boolean) : [];
+  const featuredCharacters = getPoolFeaturedNames(pool, { entities: characters });
+  const singleUpCharacter = featuredCharacters[0] || '';
   const poolStatus = getPoolStatus(pool);
 
   return (
@@ -227,10 +225,10 @@ const PoolCard = ({ pool, poolCharacters, characters, actionLoading, onEdit, onD
         </div>
 
         {/* UP 角色 */}
-        {pool.up_character && pool.type !== 'extra' && (
+        {singleUpCharacter && pool.type !== 'extra' && (
           <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-600 dark:text-zinc-400">
             <Star size={12} className="text-orange-500" />
-            UP: {pool.up_character}
+            UP: {singleUpCharacter}
           </div>
         )}
 

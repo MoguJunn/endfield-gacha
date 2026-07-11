@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { usePools } from '../../hooks/admin/usePools';
 import * as poolPushService from '../../services/admin/poolPushService';
+import { getPoolFeaturedNames } from '../../utils/poolFeaturedResolver.js';
 import { PoolCard, PoolEditDialog } from './pools';
 import VirtualizedList from './VirtualizedList';
 import HomeVersionTimelineManager from './HomeVersionTimelineManager.jsx';
@@ -48,8 +49,14 @@ function buildPoolPushPayload(pool, poolCharacters, characters) {
     .filter((row) => row?.is_up)
     .map((row) => characterNameById.get(row.character_id))
     .filter(Boolean);
-  const featuredItems = Array.isArray(pool.featured_characters) ? pool.featured_characters : [];
-  const upItems = uniqueTextValues([...featuredItems, pool.up_character, ...rosterUpItems]);
+  const existingRosterUp = Array.isArray(pool.resolved_roster?.up) ? pool.resolved_roster.up : [];
+  const upItems = uniqueTextValues(getPoolFeaturedNames({
+    ...pool,
+    resolved_roster: {
+      ...pool.resolved_roster,
+      up: [...existingRosterUp, ...rosterUpItems]
+    }
+  }, { entities: characters }));
 
   const payload = {
     id,

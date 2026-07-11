@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import DateTimePicker from '../../common/DateTimePicker';
 import { PanelToolbarButton } from '../panels/shared/PanelUi.jsx';
+import { getPoolFeaturedNames } from '../../../utils/poolFeaturedResolver.js';
 
 const FIELD_INPUT_CLASS =
   'w-full border bg-white px-3 py-1.5 text-xs text-slate-700 outline-none transition-colors focus:border-amber-500 dark:bg-zinc-900 dark:text-zinc-300 dark:focus:border-endfield-yellow';
@@ -316,9 +317,11 @@ const PoolEditDialog = ({
     .filter((c) => c.type === (poolType === 'weapon' ? 'weapon' : 'character'))
     .sort(sortByAddedDateThenName);
   const featuredCharacters = parseFeaturedCharactersInput(poolForm.featured_characters_text);
-  const featuredCharacterSet = new Set(
-    isExtraPool ? featuredCharacters : [poolForm.up_character.trim()].filter(Boolean)
-  );
+  const featuredCharacterSet = new Set(getPoolFeaturedNames({
+    type: poolForm.type,
+    up_character: poolForm.up_character,
+    featured_characters: isExtraPool ? featuredCharacters : []
+  }, { entities: allChars }));
   const normalizedCandidateQuery = candidateQuery.trim().toLowerCase();
   const isInPool = (char) => editingPoolCharacters.some((pc) => pc.character_id === char.id);
   const visibleChars = allChars.filter((char) => {

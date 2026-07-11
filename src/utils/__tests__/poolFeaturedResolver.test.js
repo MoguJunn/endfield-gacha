@@ -126,4 +126,27 @@ describe('poolFeaturedResolver', () => {
     expect(getPoolFeaturedNames(pool)).toEqual(['汤汤']);
     expect(getPoolFeaturedLead(pool)).toBe('汤汤');
   });
+
+  it('filters unresolved internal entity IDs from featured display names', () => {
+    expect(getPoolFeaturedNames({
+      type: 'extra',
+      featured_characters: ['wpn_lance_0015', '镀红祝福']
+    })).toEqual(['镀红祝福']);
+  });
+
+  it('keeps a weapon pool focused on its named single UP item', () => {
+    expect(getPoolFeaturedNames({
+      type: 'weapon',
+      up_character: '镀红祝福',
+      featured_characters: [
+        'wpn_lance_0015',
+        'wpn_lance_0010',
+        'wpn_lance_0011',
+        'wpn_pistol_0009',
+        'wpn_sword_0012',
+        'wpn_funnel_0009',
+        'wpn_claym_0004'
+      ]
+    })).toEqual(['镀红祝福']);
+  });
 });

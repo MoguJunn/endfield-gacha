@@ -101,4 +101,23 @@ describe('poolSelectorDisplay', () => {
     expect(weaponPool.avatarLookupNames).toEqual(['焰羽火燎']);
     expect(weaponPool.displayUpCharacter).toBe('焰羽火燎');
   });
+
+  it('does not display malformed weapon featured IDs beside a named UP item', () => {
+    const groups = buildPoolSelectorGroups({
+      pools: [{
+        id: 'weponbox_1_3_2',
+        type: 'weapon',
+        isLimitedWeapon: true,
+        name: '染赤申领',
+        up_character: '镀红祝福',
+        featured_characters: ['wpn_lance_0015', 'wpn_lance_0010', 'wpn_lance_0011']
+      }],
+      locale: 'zh-CN'
+    });
+
+    const weaponPool = groups[0].pools[0];
+    expect(weaponPool.displayFeaturedCharacters).toEqual(['镀红祝福']);
+    expect(weaponPool.displayUpCharacter).toBe('镀红祝福');
+    expect(weaponPool.displayFeaturedCharacters).not.toContain('wpn_lance_0015');
+  });
 });

@@ -86,13 +86,15 @@ describe('PoolManagement', () => {
       success: true,
       pool: {
         pool_id: 'pool_saved',
-        name: '逐罪者',
-        type: 'limited',
-        up_character: '卡缪',
+        name: '染赤申领',
+        type: 'weapon',
+        up_character: '镀红祝福',
+        featured_characters: ['wpn_lance_0015', 'wpn_lance_0010'],
       },
     });
     usePools.mockReturnValue({
       ...usePools(),
+      characters: [{ id: 'wpn_lance_0015', name: '不应进入推送的武器', type: 'weapon' }],
       showEditDialog: true,
       handleSavePool,
     });
@@ -131,9 +133,9 @@ describe('PoolManagement', () => {
     expect(poolPushService.previewPoolPush).toHaveBeenCalledWith({
       pool: {
         id: 'pool_saved',
-        name: '逐罪者',
-        type: 'limited',
-        upItems: ['卡缪'],
+        name: '染赤申领',
+        type: 'weapon',
+        upItems: ['镀红祝福'],
       },
     });
 

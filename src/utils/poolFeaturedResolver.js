@@ -5,19 +5,46 @@ function normalizeName(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function canonicalizeCharacterRef(value) {
+export function isInternalEntityReference(value) {
+  return /^(?:char|character|chr|wpn|weapon|manual_character|manual_weapon)_[a-z0-9_]+$/iu.test(normalizeName(value));
+}
+
+function resolveEntityRecord(value, entities = []) {
+  const normalized = normalizeName(value);
+  if (!normalized) {
+    return null;
+  }
+
+  const cachedRecord = resolveCharacterRecordByName(normalized, { fuzzy: true });
+  if (cachedRecord) {
+    return cachedRecord;
+  }
+
+  return (Array.isArray(entities) ? entities : []).find((entity) => (
+    normalizeName(entity?.id) === normalized
+    || normalizeName(entity?.name) === normalized
+    || (Array.isArray(entity?.aliases) && entity.aliases.some((alias) => normalizeName(alias) === normalized))
+  )) || null;
+}
+
+function canonicalizeCharacterRef(value, entities = []) {
   const normalized = normalizeName(value);
   if (!normalized) {
     return '';
   }
 
-  return resolveCharacterRecordByName(normalized, { fuzzy: true })?.name || normalized;
+  const record = resolveEntityRecord(normalized, entities);
+  if (record?.name) {
+    return record.name;
+  }
+
+  return isInternalEntityReference(normalized) ? '' : normalized;
 }
 
-function dedupeNames(items = []) {
+function dedupeNames(items = [], entities = []) {
   const seen = new Set();
   return (Array.isArray(items) ? items : []).reduce((result, item) => {
-    const normalized = canonicalizeCharacterRef(item);
+    const normalized = canonicalizeCharacterRef(item, entities);
     if (!normalized || seen.has(normalized)) {
       return result;
     }
@@ -28,10 +55,10 @@ function dedupeNames(items = []) {
   }, []);
 }
 
-function extractRosterUpNames(pool) {
+function extractRosterUpNames(pool, entities = []) {
   const rosterUp = Array.isArray(pool?.resolved_roster?.up) ? pool.resolved_roster.up : [];
   return rosterUp
-    .map((entry) => canonicalizeCharacterRef(entry?.name || entry?.id || entry))
+    .map((entry) => canonicalizeCharacterRef(entry?.name || entry?.id || entry, entities))
     .filter(Boolean);
 }
 
@@ -57,10 +84,10 @@ function shouldPreferSingleUpName(pool) {
     && normalizedType !== 'beginner';
 }
 
-export function getPoolFeaturedNames(pool) {
-  const rosterUpNames = extractRosterUpNames(pool);
+export function getPoolFeaturedNames(pool, { entities = [] } = {}) {
+  const rosterUpNames = extractRosterUpNames(pool, entities);
   const explicitFeaturedNames = Array.isArray(pool?.featured_characters) ? pool.featured_characters : [];
-  const singleUpName = canonicalizeCharacterRef(pool?.up_character || pool?.upCharacter || '');
+  const singleUpName = canonicalizeCharacterRef(pool?.up_character || pool?.upCharacter || '', entities);
 
   if (singleUpName && shouldPreferSingleUpName(pool)) {
     return [singleUpName];
@@ -71,7 +98,7 @@ export function getPoolFeaturedNames(pool) {
   }
 
   if (explicitFeaturedNames.length > 0) {
-    return dedupeNames(explicitFeaturedNames);
+    return dedupeNames(explicitFeaturedNames, entities);
   }
 
   if (singleUpName) {
