@@ -2,6 +2,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'https://ef-gacha.mogujun.icu',
   'https://endfield.15963574.xyz',
   'https://endfield-gacha.vercel.app',
+  'https://endfield-version-calendar.vercel.app',
   'https://endfield-status-page.vercel.app',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
