@@ -154,4 +154,41 @@ describe('reconcileOfficialCharacterIds', () => {
       ])
     );
   });
+
+  it('keeps the manual avatar when the official ID has no existing row', async () => {
+    const manualId = 'char_manual_lizhiyan_abc123';
+    const officialId = 'chr_0032_lizhiyan';
+    const state = {
+      characters: [
+        {
+          id: manualId,
+          name: '黎知言',
+          type: 'character',
+          rarity: 6,
+          aliases: [],
+          avatar_url: `/avatars/characters/${manualId}.png`,
+          is_limited: false,
+          release_date: null,
+          pool_config: { pools: [] },
+          created_at: '2026-07-01T00:00:00.000Z',
+        },
+      ],
+      pool_characters: [],
+      pools: [],
+      history: [],
+      character_id_aliases: [],
+    };
+
+    const result = await reconcileOfficialCharacterIds(createQueryClient(state), [
+      { id: officialId, name: '黎知言', type: 'character', rarity: 6 },
+    ]);
+
+    expect(result).toMatchObject({ migrated: 1 });
+    expect(state.characters).toHaveLength(1);
+    expect(state.characters[0]).toMatchObject({
+      id: officialId,
+      avatar_url: `/avatars/characters/${manualId}.png`,
+    });
+    expect(state.characters[0].aliases).toContain(manualId);
+  });
 });
