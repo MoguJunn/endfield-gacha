@@ -9,6 +9,15 @@ DECLARE
   v_featured_refs TEXT[];
   v_missing_names TEXT[];
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.pools
+    WHERE pool_id = v_pool_id
+  ) THEN
+    RAISE NOTICE '122_fix_joint_pool_featured_character_refs skipped: target pool % not found', v_pool_id;
+    RETURN;
+  END IF;
+
   WITH featured(source_id, legacy_id, fallback_name, sort_order) AS (
     VALUES
       ('chr_0016_laevat', 'char_levantin', '莱万汀', 1),

@@ -78,6 +78,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
     CREATE ROLE authenticated;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    CREATE ROLE service_role;
+  END IF;
 END $$;
 
 CREATE SCHEMA IF NOT EXISTS auth;
@@ -215,7 +218,9 @@ async function main() {
 
   const dockerVersion = await run('docker', ['version', '--format', '{{.Server.Version}}'], { allowFailure: true });
   if (dockerVersion.code !== 0) {
-    throw new Error('Docker daemon is not available. Start Docker Desktop or another Docker engine before running this smoke test.');
+    throw new Error(
+      'Docker daemon is not available. Start Docker Desktop or another Docker engine before running this smoke test.'
+    );
   }
 
   try {
@@ -237,25 +242,25 @@ async function main() {
     await run(
       'docker',
       ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName],
-      { input: `${buildSupabaseStubSql()}\n` },
+      { input: `${buildSupabaseStubSql()}\n` }
     );
 
     await run(
       'docker',
       ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName],
-      { input: baselineSql },
+      { input: baselineSql }
     );
 
     await run(
       'docker',
       ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName],
-      { input: `${buildTargetIntervalFixtureSql()}\n` },
+      { input: `${buildTargetIntervalFixtureSql()}\n` }
     );
 
     const verification = await run(
       'docker',
       ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName, '-At'],
-      { input: `${buildVerificationSql()}\n` },
+      { input: `${buildVerificationSql()}\n` }
     );
 
     const output = verification.stdout.trim();
