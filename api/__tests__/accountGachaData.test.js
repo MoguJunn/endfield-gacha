@@ -20,7 +20,7 @@ vi.mock('../_lib/siteAuth.js', () => ({
   resolveAuthenticatedRequestUser: mocks.resolveAuthenticatedRequestUser,
 }));
 
-import accountGachaDataHandler from '../_routes/root/account-gacha-data.js';
+import accountGachaDataHandler, { __internal } from '../_routes/root/account-gacha-data.js';
 
 function createJsonResponseRecorder() {
   return {
@@ -67,8 +67,10 @@ function createQuery(table, state) {
     filters: [],
     operation: 'select',
     updatePayload: null,
-    select: vi.fn((selection = '*') => {
+    selectOptions: null,
+    select: vi.fn((selection = '*', options = null) => {
       query.selection = selection;
+      query.selectOptions = options;
       return query;
     }),
     delete: vi.fn(() => {
@@ -130,7 +132,12 @@ function createQuery(table, state) {
       return { data: [], error: null };
     }),
     then(resolve, reject) {
-      return Promise.resolve({ data: null, error: null }).then(resolve, reject);
+      const isHeadCount = table === 'history' && query.selectOptions?.head === true;
+      return Promise.resolve({
+        data: isHeadCount ? null : [],
+        count: isHeadCount ? state.historyRows.length : null,
+        error: null,
+      }).then(resolve, reject);
     },
   };
   return query;
@@ -188,6 +195,7 @@ function createAdminClient() {
     upsertCalls: [],
     deleteCalls: [],
     updateCalls: [],
+    rpcCalls: [],
   };
 
   const client = {
@@ -204,6 +212,21 @@ function createAdminClient() {
         return { data: rows, error: null };
       }),
     })),
+    rpc: vi.fn(async (functionName, params = {}) => {
+      state.rpcCalls.push({ functionName, params });
+      if (functionName === 'delete_history_records_controlled') {
+        return {
+          data: {
+            deleted: Array.isArray(params.p_record_ids) ? params.p_record_ids.length : 0,
+          },
+          error: null,
+        };
+      }
+      return {
+        data: null,
+        error: new Error(`Unexpected RPC: ${functionName}`),
+      };
+    }),
     __state: state,
   };
 
@@ -235,7 +258,7 @@ describe('/api/account-gacha-data', () => {
     expect(res.headers['Cache-Control']).toBe('no-store');
     expect(mocks.resolveAuthenticatedRequestUser).toHaveBeenCalledWith(req, {
       adminClient,
-      touch: true,
+      touch: false,
     });
     expect(res.body).toMatchObject({
       success: true,
@@ -256,6 +279,70 @@ describe('/api/account-gacha-data', () => {
         gameUid: 'game-1',
       }),
     ]);
+  });
+
+  it('loads known history pages concurrently with an explicit column list', async () => {
+    const totalRows = 1500;
+    const pageSelections = [];
+    let activePageRequests = 0;
+    let maxActivePageRequests = 0;
+
+    const client = {
+      from: vi.fn(() => {
+        const query = {
+          selection: '',
+          selectOptions: null,
+          select(selection, options = null) {
+            query.selection = selection;
+            query.selectOptions = options;
+            return query;
+          },
+          eq() {
+            return query;
+          },
+          order() {
+            return query;
+          },
+          range(from, to) {
+            pageSelections.push(query.selection);
+            activePageRequests += 1;
+            maxActivePageRequests = Math.max(maxActivePageRequests, activePageRequests);
+
+            return new Promise((resolve) => {
+              setTimeout(() => {
+                const rowCount = Math.max(0, Math.min(totalRows - from, to - from + 1));
+                activePageRequests -= 1;
+                resolve({
+                  data: Array.from({ length: rowCount }, (_, index) => ({
+                    record_id: String(from + index + 1),
+                  })),
+                  error: null,
+                });
+              }, 5);
+            });
+          },
+          then(resolve, reject) {
+            return Promise.resolve({
+              data: null,
+              count: query.selectOptions?.head ? totalRows : null,
+              error: null,
+            }).then(resolve, reject);
+          },
+        };
+        return query;
+      }),
+    };
+
+    const result = await __internal.loadAllHistoryForUser(client, 'user-1');
+
+    expect(result).toMatchObject({
+      truncated: false,
+    });
+    expect(result.rows).toHaveLength(totalRows);
+    expect(maxActivePageRequests).toBe(2);
+    expect(pageSelections).toHaveLength(2);
+    expect(pageSelections.every((selection) => selection !== '*')).toBe(true);
+    expect(pageSelections.every((selection) => selection.includes('edit_version'))).toBe(true);
   });
 
   it('loads current user history with the caller client when admin secrets are absent', async () => {
@@ -363,8 +450,8 @@ describe('/api/account-gacha-data', () => {
       },
     });
 
-    const poolUpsert = adminClient.__state.upsertCalls.find(call => call.table === 'pools');
-    const historyUpsert = adminClient.__state.upsertCalls.find(call => call.table === 'history');
+    const poolUpsert = adminClient.__state.upsertCalls.find((call) => call.table === 'pools');
+    const historyUpsert = adminClient.__state.upsertCalls.find((call) => call.table === 'history');
     expect(poolUpsert).toMatchObject({
       options: { onConflict: 'pool_id' },
     });
@@ -432,7 +519,7 @@ describe('/api/account-gacha-data', () => {
         history: 1,
       },
     });
-    expect(adminClient.__state.upsertCalls.some(call => call.table === 'history')).toBe(false);
+    expect(adminClient.__state.upsertCalls.some((call) => call.table === 'history')).toBe(false);
   });
 
   it('skips legacy JSON duplicates even when existing rows have no game uid', async () => {
@@ -484,7 +571,7 @@ describe('/api/account-gacha-data', () => {
         history: 1,
       },
     });
-    expect(adminClient.__state.upsertCalls.some(call => call.table === 'history')).toBe(false);
+    expect(adminClient.__state.upsertCalls.some((call) => call.table === 'history')).toBe(false);
   });
 
   it('keeps same-batch duplicate items when their seq ids differ', async () => {
@@ -533,9 +620,9 @@ describe('/api/account-gacha-data', () => {
         history: 0,
       },
     });
-    const historyUpsert = adminClient.__state.upsertCalls.find(call => call.table === 'history');
+    const historyUpsert = adminClient.__state.upsertCalls.find((call) => call.table === 'history');
     expect(historyUpsert.rows).toHaveLength(2);
-    expect(historyUpsert.rows.map(row => row.seq_id)).toEqual(['4201', '4202']);
+    expect(historyUpsert.rows.map((row) => row.seq_id)).toEqual(['4201', '4202']);
   });
 
   it('resolves pool and character aliases through the authenticated endpoint', async () => {
@@ -729,8 +816,9 @@ describe('/api/account-gacha-data', () => {
       deletedDuplicates: 0,
     });
     expect(adminClient.__state.updateCalls).toHaveLength(3);
-    expect(adminClient.__state.updateCalls.map(call => call.filters.find(filter => filter.op === 'in').values.length))
-      .toEqual([100, 100, 5]);
+    expect(
+      adminClient.__state.updateCalls.map((call) => call.filters.find((filter) => filter.op === 'in').values.length)
+    ).toEqual([100, 100, 5]);
   });
 
   it('deletes only authenticated user records by record id', async () => {
@@ -751,17 +839,49 @@ describe('/api/account-gacha-data', () => {
     expect(res.body).toMatchObject({
       success: true,
       deleted: {
-        history: 2,
+        history: 3,
         pools: 0,
       },
     });
-    expect(adminClient.__state.deleteCalls[0]).toMatchObject({
-      table: 'history',
-    });
-    expect(adminClient.__state.deleteCalls[0].filters).toEqual([
-      { op: 'eq', column: 'user_id', value: 'user-1' },
-      { op: 'in', column: 'record_id', values: [1, 2] },
+    expect(adminClient.__state.rpcCalls).toEqual([
+      {
+        functionName: 'delete_history_records_controlled',
+        params: {
+          p_user_id: 'user-1',
+          p_record_ids: ['1', '2', 'bad'],
+          p_reason: '用户批量删除记录',
+        },
+      },
     ]);
+  });
+
+  it('rejects legacy batch deletion when a record id spans multiple account scopes', async () => {
+    const adminClient = createAdminClient();
+    adminClient.rpc.mockResolvedValueOnce({
+      data: null,
+      error: {
+        code: '21000',
+        message: 'ambiguous_history_record_id',
+      },
+    });
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const req = createRequest({
+      method: 'DELETE',
+      body: {
+        action: 'records',
+        recordIds: ['shared-record-id'],
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(req, res);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toEqual({
+      success: false,
+      error: '所选记录 ID 跨多个游戏账号重复，请刷新页面后按完整记录重新删除',
+      code: 'ambiguous_history_record_id',
+    });
   });
 
   it('rejects unauthenticated requests without returning private rows', async () => {

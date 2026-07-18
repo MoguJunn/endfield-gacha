@@ -3,9 +3,27 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 let mockSupabaseClient;
 
+const officialImportStagingMocks = vi.hoisted(() => ({
+  stageOfficialImportTask: vi.fn(),
+  confirmOfficialImportTask: vi.fn(),
+  getOfficialImportReview: vi.fn(),
+  rejectOfficialImportTask: vi.fn(),
+}));
+
 vi.mock('@supabase/supabase-js', () => ({
   createClient: vi.fn(() => mockSupabaseClient),
 }));
+
+vi.mock('../../backend/lib/officialImportStaging.js', () => officialImportStagingMocks);
+
+beforeEach(() => {
+  Object.values(officialImportStagingMocks).forEach((mock) => mock.mockReset());
+  officialImportStagingMocks.stageOfficialImportTask.mockResolvedValue({
+    task: { id: 'task-1', status: 'awaiting_confirmation' },
+    accessKey: 'access-key',
+    records: [],
+  });
+});
 
 function toBase64UrlJson(value) {
   return Buffer.from(JSON.stringify(value)).toString('base64url');
@@ -25,6 +43,37 @@ function createHistoryRangeQuery(rangeHandler) {
     range: rangeHandler,
   };
   return query;
+}
+
+function mockConfirmationCommitFromLatestStaging() {
+  const stagedPayload = officialImportStagingMocks.stageOfficialImportTask.mock.calls.at(-1)?.[0];
+  if (!stagedPayload) {
+    throw new Error('Expected executeFullImport to stage records before confirmation');
+  }
+
+  officialImportStagingMocks.confirmOfficialImportTask.mockImplementation(async ({ commit }) => {
+    const poolById = new Map(
+      (stagedPayload.pools || []).map((pool) => [String(pool.pool_id), pool])
+    );
+    const rows = (stagedPayload.stagedRecords || []).map((record, ordinal) => ({
+      ordinal,
+      selected_action: 'keep',
+      normalized_record: {
+        history: record.historyRecord,
+        normalized: record.normalized,
+        pool: poolById.get(String(record.historyRecord?.pool_id || record.normalized?.poolId)) || null,
+      },
+    }));
+    const task = {
+      id: 'task-1',
+      user_id: stagedPayload.userId,
+      source: stagedPayload.source,
+      import_mode: stagedPayload.importMode,
+      summary: stagedPayload.importSummary,
+    };
+    const result = await commit({ task, rows });
+    return { task, result, idempotent: false };
+  });
 }
 
 describe('verifySupabaseAccessToken', () => {
@@ -314,19 +363,39 @@ describe('executeFullImport import mode metadata', () => {
     expect(normalizeFullImportMode(undefined)).toBe('incremental');
   });
 
-  it('returns selected mode and save counts without changing full-fetch dedupe semantics', async () => {
+  it('stages the selected mode without changing full-fetch dedupe semantics, then commits on confirmation', async () => {
     const operations = [];
     const insertedPoolIds = new Set();
     let savedHistoryRows = [];
-    const rpc = vi.fn(async (functionName) => ({
-      data: {
-        refreshedPools: 1,
-        refreshedTrendRows: 3,
-        updatedAt: '2026-06-05T12:00:00.000Z',
-      },
-      error: null,
-      functionName,
-    }));
+    const rpc = vi.fn(async (functionName, args = {}) => {
+      if (functionName === 'commit_official_import_records') {
+        savedHistoryRows = args.p_history || [];
+        operations.push({
+          tableName: 'official_import_records',
+          action: 'rpc',
+          poolCount: (args.p_pools || []).length,
+          historyCount: savedHistoryRows.length,
+        });
+        return {
+          data: {
+            savedRecords: savedHistoryRows.length,
+            skippedRecords: 0,
+            createdPools: (args.p_pools || []).length,
+            atomicCommit: true,
+          },
+          error: null,
+        };
+      }
+      return {
+        data: {
+          refreshedPools: 1,
+          refreshedTrendRows: 3,
+          updatedAt: '2026-06-05T12:00:00.000Z',
+        },
+        error: null,
+        functionName,
+      };
+    });
 
     mockSupabaseClient = {
       auth: {
@@ -466,6 +535,7 @@ describe('executeFullImport import mode metadata', () => {
               rarity: 6,
               gachaTs: '1767225600000',
               isFree: false,
+              isInfoBook: true,
               isNew: true,
             }],
           }],
@@ -489,17 +559,17 @@ describe('executeFullImport import mode metadata', () => {
       fetchStrategy: 'full_official_fetch_with_dedupe',
       totalRecords: 1,
       newRecords: 1,
-      savedRecords: 1,
+      savedRecords: 0,
       duplicates: 0,
-      publicAnalyticsRefresh: {
-        ok: true,
-        functionName: 'refresh_public_analytics_cache',
-        refreshedPools: 1,
-        refreshedTrendRows: 3,
+      reviewRequired: true,
+      reviewTask: {
+        id: 'task-1',
+        status: 'awaiting_confirmation',
+        accessKey: 'access-key',
       },
       warnings: [],
     });
-    expect(rpc).toHaveBeenCalledWith('refresh_public_analytics_cache');
+    expect(rpc).not.toHaveBeenCalled();
     expect(authChainFunctions.fetchAllRecordsConcurrent).toHaveBeenCalledWith(
       'u8-token',
       '1',
@@ -510,20 +580,79 @@ describe('executeFullImport import mode metadata', () => {
         existingRecordKeys: null,
       }
     );
-    expect(operations).toEqual([
-      { tableName: 'pools', action: 'upsert', count: 1 },
-      { tableName: 'pool_id_aliases', action: 'upsert', count: 2 },
+    expect(operations).toEqual([]);
+    expect(savedHistoryRows).toEqual([]);
+    expect(officialImportStagingMocks.stageOfficialImportTask).toHaveBeenCalledTimes(1);
+    const stagedPayload = officialImportStagingMocks.stageOfficialImportTask.mock.calls[0][0];
+    expect(stagedPayload).toMatchObject({
+      userId: '00000000-0000-0000-0000-000000000001',
+      source: 'cn',
+      importMode: 'full',
+      account: {
+        gameUid: '10000001',
+        serverId: '1',
+        region: 'cn',
+      },
+      importSummary: {
+        fetchStrategy: 'full_official_fetch_with_dedupe',
+        newRecords: 1,
+        savedRecords: 0,
+      },
+    });
+    expect(stagedPayload.stagedRecords).toHaveLength(1);
+    expect(stagedPayload.stagedRecords[0]).toMatchObject({
+      historyRecord: {
+        game_uid: '10000001',
+        nick_name: '测试账号',
+        server_id: '1',
+        region: 'cn',
+        is_info_book: true,
+      },
+    });
+    expect(updateProgress).toHaveBeenCalledWith({ progress: 100, message: '记录已暂存，请确认后写入' });
+
+    mockConfirmationCommitFromLatestStaging();
+    const { confirmFullImportReview } = await import('../../backend/fullImportService.js');
+    const confirmed = await confirmFullImportReview({
+      taskId: 'task-1',
+      accessKey: 'access-key',
+      userId: '00000000-0000-0000-0000-000000000001',
+    });
+
+    expect(confirmed.result).toMatchObject({
+      savedRecords: 1,
+      atomicCommit: true,
+      publicAnalyticsRefresh: {
+        ok: true,
+        functionName: 'refresh_public_analytics_cache',
+        refreshedPools: 1,
+        refreshedTrendRows: 3,
+      },
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      'commit_official_import_records',
+      expect.objectContaining({
+        p_task_id: 'task-1',
+        p_user_id: '00000000-0000-0000-0000-000000000001',
+        p_pools: expect.any(Array),
+        p_history: expect.any(Array),
+      })
+    );
+    expect(rpc).toHaveBeenCalledWith('refresh_public_analytics_cache');
+    expect(operations).toEqual(expect.arrayContaining([
+      { tableName: 'official_import_records', action: 'rpc', poolCount: 1, historyCount: 1 },
       { tableName: 'characters', action: 'upsert', count: 1 },
       { tableName: 'character_id_aliases', action: 'upsert', count: 2 },
-      { tableName: 'history', action: 'upsert', count: 1 },
-    ]);
+      { tableName: 'pools', action: 'upsert', count: 1 },
+      { tableName: 'pool_id_aliases', action: 'upsert', count: 2 },
+    ]));
     expect(savedHistoryRows[0]).toMatchObject({
       game_uid: '10000001',
       nick_name: '测试账号',
       server_id: '1',
       region: 'cn',
+      is_info_book: true,
     });
-    expect(updateProgress).toHaveBeenCalledWith({ progress: 100, message: '导入完成' });
   });
 
   it('preserves existing international EU/NA server when bindings omit sub-server', async () => {
@@ -711,11 +840,30 @@ describe('executeFullImport import mode metadata', () => {
       serverId: '3',
       region: 'intl',
     });
-    expect(savedHistoryRows[0]).toMatchObject({
-      game_uid: '20000001',
-      nick_name: 'EU/NA账号',
-      server_id: '3',
+    expect(result.data).toMatchObject({
+      savedRecords: 0,
+      reviewRequired: true,
+      reviewTask: {
+        id: 'task-1',
+        accessKey: 'access-key',
+      },
+    });
+    expect(operations).toEqual([]);
+    expect(savedHistoryRows).toEqual([]);
+    expect(rpc).not.toHaveBeenCalled();
+    const stagedPayload = officialImportStagingMocks.stageOfficialImportTask.mock.calls[0][0];
+    expect(stagedPayload.account).toEqual({
+      gameUid: '20000001',
+      serverId: '3',
       region: 'intl',
+    });
+    expect(stagedPayload.stagedRecords[0]).toMatchObject({
+      historyRecord: {
+        game_uid: '20000001',
+        nick_name: 'EU/NA账号',
+        server_id: '3',
+        region: 'intl',
+      },
     });
   });
 
@@ -840,7 +988,11 @@ describe('executeFullImport import mode metadata', () => {
       },
     };
 
-    const { executeFullImport, initSupabaseAdmin } = await import('../../backend/fullImportService.js');
+    const {
+      executeFullImport,
+      initSupabaseAdmin,
+      saveHistoryToServer,
+    } = await import('../../backend/fullImportService.js');
 
     initSupabaseAdmin('https://example.supabase.co', 'service-role-key');
 
@@ -901,14 +1053,20 @@ describe('executeFullImport import mode metadata', () => {
     expect(result.success).toBe(true);
     expect(result.data).toMatchObject({
       newRecords: 1,
-      savedRecords: 1,
+      savedRecords: 0,
+      reviewRequired: true,
     });
+
+    const stagedRecord = officialImportStagingMocks.stageOfficialImportTask.mock.calls[0][0]
+      .stagedRecords[0].historyRecord;
+    const saved = await saveHistoryToServer(
+      [stagedRecord],
+      '00000000-0000-0000-0000-000000000001'
+    );
+
+    expect(saved.saved).toBe(1);
     expect(historyUpsertAttempts).toBe(2);
     expect(operations).toEqual([
-      { tableName: 'pools', action: 'upsert', count: 1 },
-      { tableName: 'pool_id_aliases', action: 'upsert', count: 2 },
-      { tableName: 'characters', action: 'upsert', count: 1 },
-      { tableName: 'character_id_aliases', action: 'upsert', count: 2 },
       {
         tableName: 'history',
         action: 'upsert',
@@ -1047,7 +1205,11 @@ describe('executeFullImport import mode metadata', () => {
       },
     };
 
-    const { executeFullImport, initSupabaseAdmin } = await import('../../backend/fullImportService.js');
+    const {
+      executeFullImport,
+      initSupabaseAdmin,
+      saveHistoryToServer,
+    } = await import('../../backend/fullImportService.js');
 
     initSupabaseAdmin('https://example.supabase.co', 'service-role-key');
 
@@ -1108,8 +1270,18 @@ describe('executeFullImport import mode metadata', () => {
     expect(result.success).toBe(true);
     expect(result.data).toMatchObject({
       newRecords: 1,
-      savedRecords: 1,
+      savedRecords: 0,
+      reviewRequired: true,
     });
+
+    const stagedRecord = officialImportStagingMocks.stageOfficialImportTask.mock.calls[0][0]
+      .stagedRecords[0].historyRecord;
+    const saved = await saveHistoryToServer(
+      [stagedRecord],
+      '00000000-0000-0000-0000-000000000001'
+    );
+
+    expect(saved.saved).toBe(1);
     expect(historyUpsertAttempts).toBe(3);
     expect(operations.filter(operation => operation.tableName === 'history')).toEqual([
       {
@@ -1345,22 +1517,28 @@ describe('executeFullImport import mode metadata', () => {
       fetchStrategy: 'incremental_official_fetch_with_context_guard',
       totalRecords: 2,
       newRecords: 1,
-      savedRecords: 1,
+      savedRecords: 0,
       duplicates: 1,
       earlyStoppedPools: earlyStopped,
-      publicAnalyticsRefresh: {
-        ok: true,
-        functionName: 'refresh_public_analytics_cache',
+      reviewRequired: true,
+    });
+    expect(rpc).not.toHaveBeenCalled();
+    expect(operations).toEqual([]);
+    const stagedPayload = officialImportStagingMocks.stageOfficialImportTask.mock.calls[0][0];
+    expect(stagedPayload.importSummary).toMatchObject({
+      importMode: 'incremental',
+      fetchStrategy: 'incremental_official_fetch_with_context_guard',
+      newRecords: 1,
+      duplicates: 1,
+    });
+    expect(stagedPayload.stagedRecords).toHaveLength(1);
+    expect(stagedPayload.stagedRecords[0]).toMatchObject({
+      historyRecord: {
+        seq_id: '2',
+        game_uid: '10000001',
+        server_id: '1',
       },
     });
-    expect(rpc).toHaveBeenCalledWith('refresh_public_analytics_cache');
-    expect(operations).toEqual([
-      { tableName: 'pools', action: 'upsert', count: 1 },
-      { tableName: 'pool_id_aliases', action: 'upsert', count: 2 },
-      { tableName: 'characters', action: 'upsert', count: 2 },
-      { tableName: 'character_id_aliases', action: 'upsert', count: 4 },
-      { tableName: 'history', action: 'upsert', count: 1 },
-    ]);
   });
 
   it('skips public analytics refresh when incremental import has no new records', async () => {
@@ -1512,28 +1690,40 @@ describe('executeFullImport import mode metadata', () => {
       newRecords: 0,
       savedRecords: 0,
       duplicates: 1,
-      publicAnalyticsRefresh: {
-        ok: true,
-        skipped: true,
-        reason: 'no_new_records',
-      },
+      reviewRequired: false,
+      warnings: [],
     });
     expect(rpc).not.toHaveBeenCalled();
-    expect(operations).toEqual([
-      { tableName: 'pools', action: 'upsert', count: 1 },
-      { tableName: 'pool_id_aliases', action: 'upsert', count: 2 },
-      { tableName: 'characters', action: 'upsert', count: 1 },
-      { tableName: 'character_id_aliases', action: 'upsert', count: 2 },
-    ]);
+    expect(operations).toEqual([]);
+    expect(officialImportStagingMocks.stageOfficialImportTask).not.toHaveBeenCalled();
   });
 
   it('keeps import successful when public analytics refresh fails after saving records', async () => {
     const operations = [];
     const insertedPoolIds = new Set();
-    const rpc = vi.fn(async () => ({
-      data: null,
-      error: { message: 'refresh timeout' },
-    }));
+    const rpc = vi.fn(async (functionName, args = {}) => {
+      if (functionName === 'commit_official_import_records') {
+        operations.push({
+          tableName: 'official_import_records',
+          action: 'rpc',
+          poolCount: (args.p_pools || []).length,
+          historyCount: (args.p_history || []).length,
+        });
+        return {
+          data: {
+            savedRecords: (args.p_history || []).length,
+            skippedRecords: 0,
+            createdPools: (args.p_pools || []).length,
+            atomicCommit: true,
+          },
+          error: null,
+        };
+      }
+      return {
+        data: null,
+        error: { message: 'refresh timeout' },
+      };
+    });
 
     mockSupabaseClient = {
       auth: {
@@ -1672,21 +1862,36 @@ describe('executeFullImport import mode metadata', () => {
     expect(result.success).toBe(true);
     expect(result.data).toMatchObject({
       newRecords: 1,
+      savedRecords: 0,
+      reviewRequired: true,
+    });
+    expect(rpc).not.toHaveBeenCalled();
+    expect(operations).toEqual([]);
+
+    mockConfirmationCommitFromLatestStaging();
+    const { confirmFullImportReview } = await import('../../backend/fullImportService.js');
+    const confirmed = await confirmFullImportReview({
+      taskId: 'task-1',
+      accessKey: 'access-key',
+      userId: '00000000-0000-0000-0000-000000000001',
+    });
+
+    expect(confirmed.result).toMatchObject({
       savedRecords: 1,
+      atomicCommit: true,
       publicAnalyticsRefresh: {
         ok: false,
         error: 'refresh timeout',
       },
     });
-    expect(result.data.warnings).toEqual(['公共统计刷新失败：refresh timeout']);
     expect(rpc).toHaveBeenCalledWith('refresh_public_analytics_cache');
-    expect(operations).toEqual([
-      { tableName: 'pools', action: 'upsert', count: 1 },
-      { tableName: 'pool_id_aliases', action: 'upsert', count: 2 },
+    expect(operations).toEqual(expect.arrayContaining([
+      { tableName: 'official_import_records', action: 'rpc', poolCount: 1, historyCount: 1 },
       { tableName: 'characters', action: 'upsert', count: 1 },
       { tableName: 'character_id_aliases', action: 'upsert', count: 2 },
-      { tableName: 'history', action: 'upsert', count: 1 },
-    ]);
+      { tableName: 'pools', action: 'upsert', count: 1 },
+      { tableName: 'pool_id_aliases', action: 'upsert', count: 2 },
+    ]));
   });
 });
 

@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  deleteAccountGachaRecord,
   deleteAccountGachaRecords,
   loadAccountGachaData,
   loadAccountGachaSeqKeys,
   resolveAccountGachaAliases,
   saveAccountGachaData,
+  updateAccountGachaRecord,
 } from '../accountGachaDataService.js';
 import { getSupabaseAccessToken } from '../authFetchService.js';
 import { fetchJsonWithTimeout } from '../supabaseRequest.js';
@@ -294,5 +296,63 @@ describe('accountGachaDataService', () => {
     }, expect.objectContaining({
       label: 'account-gacha-data-delete',
     }));
+  });
+
+  it('updates one owned record with its complete account scope and optimistic version', async () => {
+    fetchJsonWithTimeout.mockResolvedValue({
+      response: { ok: true, status: 200 },
+      data: { success: true, updated: 1, record: { id: 'record-1', editVersion: 3 } },
+    });
+
+    const payload = {
+      recordId: 'record-1',
+      gameUid: 'game-1',
+      serverScope: '1',
+      currentPoolId: 'pool-1',
+      seqId: '10',
+      editVersion: 2,
+      changes: {
+        poolId: 'pool-2',
+        characterId: 'char-1',
+        drawMethod: 'info_book',
+      },
+      reason: '修正错误导入',
+    };
+
+    await expect(updateAccountGachaRecord(payload)).resolves.toEqual({
+      updated: 1,
+      record: { id: 'record-1', editVersion: 3 },
+    });
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/account-gacha-data', expect.objectContaining({
+      method: 'PATCH',
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    }), expect.objectContaining({
+      label: 'account-gacha-data-record-update',
+      retries: 0,
+    }));
+  });
+
+  it('deletes one detailed record with its complete account scope', async () => {
+    fetchJsonWithTimeout.mockResolvedValue({
+      response: { ok: true, status: 200 },
+      data: { success: true, deleted: { history: 1, pools: 0 } },
+    });
+
+    const locator = {
+      recordId: 'record-1',
+      gameUid: 'game-1',
+      serverScope: '1',
+      currentPoolId: 'pool-1',
+      seqId: '10',
+      reason: '不是我的记录',
+    };
+    await expect(deleteAccountGachaRecord(locator)).resolves.toEqual({
+      deleted: { history: 1, pools: 0 },
+    });
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/account-gacha-data', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ action: 'record', ...locator }),
+    }), expect.objectContaining({ label: 'account-gacha-data-delete' }));
   });
 });

@@ -15,6 +15,7 @@ describe('cloudDataWriteRows', () => {
       gameUid: '10000001',
       serverId: '1',
       serverRegion: '官服',
+      isInfoBook: true,
       timestamp: '2026-06-05T12:00:00.000Z',
     }, 'user-1');
     const intlRow = serializeHistoryForUpsert({
@@ -32,12 +33,27 @@ describe('cloudDataWriteRows', () => {
       user_id: 'user-1',
       server_id: '1',
       region: 'cn',
+      is_info_book: true,
     });
     expect(intlRow).toMatchObject({
       user_id: 'user-1',
       server_id: '3',
       region: 'intl',
     });
+  });
+
+  it('preserves text record ids without numeric coercion', () => {
+    const row = serializeHistoryForUpsert({
+      id: '00123-official',
+      poolId: 'special_1_2_1',
+      rarity: 5,
+      seqId: '9007199254740993',
+      gameUid: '10000001',
+      serverId: '1',
+      timestamp: '2026-06-05T12:00:00.000Z',
+    }, 'user-1');
+
+    expect(row.record_id).toBe('00123-official');
   });
 
   it('retries history upserts without unavailable optional columns', async () => {
