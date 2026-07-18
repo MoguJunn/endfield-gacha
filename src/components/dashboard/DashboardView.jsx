@@ -73,9 +73,13 @@ function resolvePieLabelColor(fill, isDark) {
   }
 
   const hex = fill.slice(1);
-  const normalized = hex.length === 3
-    ? hex.split('').map((char) => char + char).join('')
-    : hex;
+  const normalized =
+    hex.length === 3
+      ? hex
+          .split('')
+          .map((char) => char + char)
+          .join('')
+      : hex;
 
   if (normalized.length !== 6) {
     return isDark ? '#fafafa' : '#ffffff';
@@ -84,7 +88,7 @@ function resolvePieLabelColor(fill, isDark) {
   const r = parseInt(normalized.slice(0, 2), 16);
   const g = parseInt(normalized.slice(2, 4), 16);
   const b = parseInt(normalized.slice(4, 6), 16);
-  const luma = (0.299 * r) + (0.587 * g) + (0.114 * b);
+  const luma = 0.299 * r + 0.587 * g + 0.114 * b;
   return luma > 170 ? '#111827' : '#ffffff';
 }
 
@@ -94,9 +98,9 @@ function renderPiePercentLabel(isDark) {
       return null;
     }
 
-    const radius = innerRadius + ((outerRadius - innerRadius) * 0.58);
-    const x = cx + (radius * Math.cos(-midAngle * PIE_LABEL_RADIAN));
-    const y = cy + (radius * Math.sin(-midAngle * PIE_LABEL_RADIAN));
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.58;
+    const x = cx + radius * Math.cos(-midAngle * PIE_LABEL_RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * PIE_LABEL_RADIAN);
 
     return (
       <text
@@ -185,9 +189,7 @@ function getHistoryPoolId(item) {
 }
 
 function buildCustomSharePoolName(pools, locale, isEnglish) {
-  const localizedNames = pools
-    .map((pool) => localizePoolName(pool, { locale }))
-    .filter(Boolean);
+  const localizedNames = pools.map((pool) => localizePoolName(pool, { locale })).filter(Boolean);
 
   if (localizedNames.length === 0) {
     return isEnglish ? 'No banner selected' : '未选择卡池';
@@ -224,7 +226,13 @@ const StatBox = ({ title, value, subValue, colorClass, icon: Icon, isAnimated })
   </div>
 );
 
-const OverviewBanner = ({ title, value, accentClass = 'text-slate-800 dark:text-zinc-100', unitLabel = 'PULLS', children }) => (
+const OverviewBanner = ({
+  title,
+  value,
+  accentClass = 'text-slate-800 dark:text-zinc-100',
+  unitLabel = 'PULLS',
+  children,
+}) => (
   <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 flex flex-col gap-4 shadow-sm relative overflow-hidden group">
     <div className="absolute right-0 top-0 h-full w-24 bg-gradient-to-l from-zinc-50 dark:from-zinc-800 to-transparent" />
     <div className="relative z-10 flex items-start justify-between gap-4">
@@ -256,7 +264,9 @@ const FreePullStatsToggle = ({ enabled, onToggle, t }) => (
     title={enabled ? t('dashboard.analysis.includeFreeTenTitle') : t('dashboard.analysis.excludeFreeTenTitle')}
   >
     <span>
-      <span className="block text-[11px] font-black uppercase tracking-wider">{t('dashboard.analysis.freeTenToggleLabel')}</span>
+      <span className="block text-[11px] font-black uppercase tracking-wider">
+        {t('dashboard.analysis.freeTenToggleLabel')}
+      </span>
     </span>
     {enabled ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
   </button>
@@ -313,12 +323,12 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
   const { isDark } = useTheme();
   const { t, formatNumber, isEnglish, locale } = useI18n();
   const [allOverviewPoolFilter, setAllOverviewPoolFilter] = React.useState('all');
-  const [characterOverviewPoolTypes, setCharacterOverviewPoolTypes] = React.useState(() => (
+  const [characterOverviewPoolTypes, setCharacterOverviewPoolTypes] = React.useState(() =>
     CHARACTER_OVERVIEW_TYPE_OPTIONS.map((option) => option.id)
-  ));
-  const [weaponOverviewPoolTypes, setWeaponOverviewPoolTypes] = React.useState(() => (
+  );
+  const [weaponOverviewPoolTypes, setWeaponOverviewPoolTypes] = React.useState(() =>
     WEAPON_OVERVIEW_TYPE_OPTIONS.map((option) => option.id)
-  ));
+  );
   const [showShareMenu, setShowShareMenu] = React.useState(false);
   const [shareMode, setShareMode] = React.useState('current');
   const [customSharePoolIds, setCustomSharePoolIds] = React.useState([]);
@@ -333,7 +343,10 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
 
     return normalizeShareThemeMode(readStorageValue(STORAGE_KEYS.DASHBOARD_SHARE_THEME_MODE, null, { raw: true }));
   });
-  const resolvedShareTheme = React.useMemo(() => resolveShareThemeMode(shareThemeMode, isDark), [isDark, shareThemeMode]);
+  const resolvedShareTheme = React.useMemo(
+    () => resolveShareThemeMode(shareThemeMode, isDark),
+    [isDark, shareThemeMode]
+  );
   const shareCardRef = React.useRef(null);
   const shareMenuRef = React.useRef(null);
   const shareImageCacheRef = React.useRef({
@@ -396,10 +409,11 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
     }
   }, [location.state, setCharViewMode]);
   const allOverviewFilterOptions = React.useMemo(
-    () => ALL_OVERVIEW_FILTER_OPTIONS.map((option) => ({
-      ...option,
-      label: t(`dashboard.overview.filter.${option.id}`),
-    })),
+    () =>
+      ALL_OVERVIEW_FILTER_OPTIONS.map((option) => ({
+        ...option,
+        label: t(`dashboard.overview.filter.${option.id}`),
+      })),
     [t]
   );
   const pullUnitLabel = isEnglish ? 'PULLS' : t('dashboard.unit.pull');
@@ -408,18 +422,23 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
   const standardSixLabel = isEnglish ? 'Standard 6★' : '常驻6★';
   const crossBannerSummary = isEnglish ? 'Cross-banner summary' : '跨卡池汇总';
   const offrateShort = isEnglish ? 'Off-rate' : '歪';
-  const localizedCurrentPoolName = React.useMemo(() => localizePoolName(currentPool, { locale }), [currentPool, locale]);
+  const localizedCurrentPoolName = React.useMemo(
+    () => localizePoolName(currentPool, { locale }),
+    [currentPool, locale]
+  );
   const totalPullBannerTitle = isGroupMode
-    ? (isEnglish ? `${localizedCurrentPoolName || ''} Total Pulls` : `${localizedCurrentPoolName || ''}总投入`)
-    : (isEnglish ? 'Current Banner Total Pulls' : '当前卡池总投入');
+    ? isEnglish
+      ? `${localizedCurrentPoolName || ''} Total Pulls`
+      : `${localizedCurrentPoolName || ''}总投入`
+    : isEnglish
+      ? 'Current Banner Total Pulls'
+      : '当前卡池总投入';
   const primarySixStarLabel = isAllPoolsOverview
     ? t('dashboard.overview.targetSixStar')
     : normalizedPoolType === 'weapon'
       ? t('dashboard.overview.upWeapon')
       : t('dashboard.average.limitedSix');
-  const secondarySixStarLabel = isAllPoolsOverview
-    ? t('dashboard.overview.offrateSixStar')
-    : standardSixLabel;
+  const secondarySixStarLabel = isAllPoolsOverview ? t('dashboard.overview.offrateSixStar') : standardSixLabel;
   const resourceSummaryTitle = isGroupMode
     ? t('dashboard.resources.groupTitle', { name: localizedCurrentPoolName || '' })
     : t('dashboard.resources.title');
@@ -431,12 +450,14 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
       }),
     [formatNumber]
   );
-  const localizeChartData = React.useCallback((items = [], primaryLabel, secondaryLabel) => (
-    localizeDashboardChartItems(items, {
-      primarySixStarLabel: primaryLabel,
-      secondarySixStarLabel: secondaryLabel,
-    })
-  ), []);
+  const localizeChartData = React.useCallback(
+    (items = [], primaryLabel, secondaryLabel) =>
+      localizeDashboardChartItems(items, {
+        primarySixStarLabel: primaryLabel,
+        secondarySixStarLabel: secondaryLabel,
+      }),
+    []
+  );
   const customShareRecordCountByPoolId = React.useMemo(() => {
     const counts = new Map();
     accountHistory.forEach((item) => {
@@ -474,7 +495,9 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
   }, [customShareCandidatePools, customShareRecordCountByPoolId, locale]);
 
   React.useEffect(() => {
-    setCustomShareExpandedGroupIds((previous) => previous.filter((groupId) => customSharePoolGroups.some((group) => group.id === groupId)));
+    setCustomShareExpandedGroupIds((previous) =>
+      previous.filter((groupId) => customSharePoolGroups.some((group) => group.id === groupId))
+    );
   }, [customSharePoolGroups]);
 
   React.useEffect(() => {
@@ -534,24 +557,26 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
       return poolId && overviewStatsSelection.poolIds.has(poolId);
     });
   }, [isAllPoolsOverview, normalizedPoolHistory, overviewStatsSelection]);
-  const visibleLimitedPoolIds = React.useMemo(() => (
-    new Set(
-      selectedPools
-        .filter((pool) => {
-          if (pool?.type !== 'limited' && pool?.type !== 'limited_character') {
-            return false;
-          }
+  const visibleLimitedPoolIds = React.useMemo(
+    () =>
+      new Set(
+        selectedPools
+          .filter((pool) => {
+            if (pool?.type !== 'limited' && pool?.type !== 'limited_character') {
+              return false;
+            }
 
-          if (!allOverviewFilterPoolIds) {
-            return true;
-          }
+            if (!allOverviewFilterPoolIds) {
+              return true;
+            }
 
-          return allOverviewFilterPoolIds.has(pool.id);
-        })
-        .map((pool) => pool.id)
-        .filter(Boolean)
-    )
-  ), [allOverviewFilterPoolIds, selectedPools]);
+            return allOverviewFilterPoolIds.has(pool.id);
+          })
+          .map((pool) => pool.id)
+          .filter(Boolean)
+      ),
+    [allOverviewFilterPoolIds, selectedPools]
+  );
 
   const visibleCharacterStats = React.useMemo(() => {
     if (!isAllPoolsOverview || !allOverviewFilterPoolIds) {
@@ -654,12 +679,16 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
     () => new Set(customShareSelectedPools.map((pool) => pool.id)),
     [customShareSelectedPools]
   );
+  const shouldBuildCustomShareData = shareMode === 'custom';
   const customShareHistory = React.useMemo(
-    () => accountHistory.filter((item) => customSharePoolIdSet.has(getHistoryPoolId(item))),
-    [accountHistory, customSharePoolIdSet]
+    () =>
+      shouldBuildCustomShareData
+        ? accountHistory.filter((item) => customSharePoolIdSet.has(getHistoryPoolId(item)))
+        : [],
+    [accountHistory, customSharePoolIdSet, shouldBuildCustomShareData]
   );
   const customShareSplitStats = React.useMemo(() => {
-    if (customShareSelectedPools.length === 0) {
+    if (!shouldBuildCustomShareData || customShareSelectedPools.length === 0) {
       return null;
     }
 
@@ -668,9 +697,9 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
       selectedPools: customShareSelectedPools,
       includeFreePullsInStats,
     });
-  }, [customShareHistory, customShareSelectedPools, includeFreePullsInStats]);
+  }, [customShareHistory, customShareSelectedPools, includeFreePullsInStats, shouldBuildCustomShareData]);
   const customShareTimelineSections = React.useMemo(() => {
-    if (customShareSelectedPools.length === 0) {
+    if (!shouldBuildCustomShareData || customShareSelectedPools.length === 0) {
       return [];
     }
 
@@ -697,7 +726,15 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
       locale,
       showFiveStarDrops: showTimelineFiveStarDrops,
     });
-  }, [customShareHistory, customShareSelectedPools, hasMergedAccountView, locale, showTimelineFiveStarDrops, t]);
+  }, [
+    customShareHistory,
+    customShareSelectedPools,
+    hasMergedAccountView,
+    locale,
+    shouldBuildCustomShareData,
+    showTimelineFiveStarDrops,
+    t,
+  ]);
   const customShareBucketSet = React.useMemo(
     () => new Set(customShareSelectedPools.map((pool) => getOverviewPoolBucket(pool))),
     [customShareSelectedPools]
@@ -731,43 +768,48 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
     }
 
     const pool = customShareSelectedPools[0];
-    return localizePoolFeaturedName(pool, { locale })
-        || localizeEntityName(pool?.up_character || pool?.upCharacter || null, {
-          locale,
-          type: getOverviewPoolBucket(pool) === 'weapon' ? 'weapon' : 'character',
-        })
-        || null;
+    return (
+      localizePoolFeaturedName(pool, { locale }) ||
+      localizeEntityName(pool?.up_character || pool?.upCharacter || null, {
+        locale,
+        type: getOverviewPoolBucket(pool) === 'weapon' ? 'weapon' : 'character',
+      }) ||
+      null
+    );
   }, [customShareSelectedPools, locale]);
   const customSharePayload = React.useMemo(() => {
     if (customShareSelectedPools.length === 0 || !customShareSplitStats) {
       return null;
     }
 
-    return buildDashboardSharePayload({
-      currentPool: {
-        id: 'custom-share',
-        name: t('dashboard.share.custom.scope'),
-        type: 'all',
+    return buildDashboardSharePayload(
+      {
+        currentPool: {
+          id: 'custom-share',
+          name: t('dashboard.share.custom.scope'),
+          type: 'all',
+          isGroupMode: true,
+          isAllPoolsOverview: true,
+          up_character: null,
+        },
+        normalizedPoolType: 'all',
         isGroupMode: true,
         isAllPoolsOverview: true,
-        up_character: null,
+        hasMergedAccountView,
+        overviewPoolFilter: 'all',
+        stats: {},
+        analysisPity: null,
+        sections: customShareTimelineSections,
+        overviewSplitStats: customShareSplitStats,
+        includeFreePullsInStats,
+        scopeLabelOverride: t('dashboard.share.custom.scope'),
+        poolNameOverride: buildCustomSharePoolName(customShareSelectedPools, locale, isEnglish),
+        poolTypeLabelOverride: customSharePoolTypeLabel,
+        featuredOverride: customShareFeatured,
+        showFiveStarDrops: showTimelineFiveStarDrops,
       },
-      normalizedPoolType: 'all',
-      isGroupMode: true,
-      isAllPoolsOverview: true,
-      hasMergedAccountView,
-      overviewPoolFilter: 'all',
-      stats: {},
-      analysisPity: null,
-      sections: customShareTimelineSections,
-      overviewSplitStats: customShareSplitStats,
-      includeFreePullsInStats,
-      scopeLabelOverride: t('dashboard.share.custom.scope'),
-      poolNameOverride: buildCustomSharePoolName(customShareSelectedPools, locale, isEnglish),
-      poolTypeLabelOverride: customSharePoolTypeLabel,
-      featuredOverride: customShareFeatured,
-      showFiveStarDrops: showTimelineFiveStarDrops,
-    }, locale);
+      locale
+    );
   }, [
     customShareFeatured,
     customSharePoolTypeLabel,
@@ -783,20 +825,23 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
   ]);
   const dashboardSharePayload = React.useMemo(
     () =>
-      buildDashboardSharePayload({
-        currentPool,
-        normalizedPoolType,
-        isGroupMode,
-        isAllPoolsOverview,
-        hasMergedAccountView,
-        overviewPoolFilter: allOverviewPoolFilter,
-        stats,
-        analysisPity,
-        sections: timelineSections,
-        overviewSplitStats: splitOverviewStats,
-        includeFreePullsInStats,
-        showFiveStarDrops: showTimelineFiveStarDrops,
-      }, locale),
+      buildDashboardSharePayload(
+        {
+          currentPool,
+          normalizedPoolType,
+          isGroupMode,
+          isAllPoolsOverview,
+          hasMergedAccountView,
+          overviewPoolFilter: allOverviewPoolFilter,
+          stats,
+          analysisPity,
+          sections: timelineSections,
+          overviewSplitStats: splitOverviewStats,
+          includeFreePullsInStats,
+          showFiveStarDrops: showTimelineFiveStarDrops,
+        },
+        locale
+      ),
     [
       allOverviewPoolFilter,
       analysisPity,
@@ -819,15 +864,17 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
   const activeSharePayload = isCustomShareMode ? customSharePayload : dashboardSharePayload;
   const activeTimelineSections = isCustomShareMode ? customShareTimelineSections : timelineSections;
   const hasActiveShareData = isCustomShareMode ? hasCustomShareData : hasDashboardShareData;
-  const clipboardImageWarmKey = React.useMemo(() => (
-    hasActiveShareData && activeSharePayload
-      ? JSON.stringify({
-          locale,
-          theme: resolvedShareTheme,
-          payload: activeSharePayload,
-        })
-      : null
-  ), [activeSharePayload, hasActiveShareData, locale, resolvedShareTheme]);
+  const clipboardImageWarmKey = React.useMemo(
+    () =>
+      hasActiveShareData && activeSharePayload
+        ? JSON.stringify({
+            locale,
+            theme: resolvedShareTheme,
+            payload: activeSharePayload,
+          })
+        : null,
+    [activeSharePayload, hasActiveShareData, locale, resolvedShareTheme]
+  );
   const canOpenShareMenu = hasDashboardShareData || customShareCandidatePools.length > 0;
   const supportsNativeImageShare = React.useMemo(() => {
     if (typeof window === 'undefined' || typeof File === 'undefined' || typeof navigator?.share !== 'function') {
@@ -859,14 +906,14 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
 
     return clipboardImageReadyKey === clipboardImageWarmKey;
   }, [clipboardImageReadyKey, clipboardImageWarmKey, isFirefoxClipboardBrowser, supportsClipboardImageCopy]);
-  const copyImageMenuLabel = isFirefoxClipboardBrowser && (clipboardImageWarmState === 'preparing' || !isClipboardImageReady)
-    ? t('dashboard.share.progress.prepareClipboardImage')
-    : t('dashboard.share.copyImage');
-  const shouldMountShareCard = hasActiveShareData && activeSharePayload && (
-    showShareMenu
-    || isShareActionBusy
-    || (supportsClipboardImageCopy && isFirefoxClipboardBrowser)
-  );
+  const copyImageMenuLabel =
+    isFirefoxClipboardBrowser && (clipboardImageWarmState === 'preparing' || !isClipboardImageReady)
+      ? t('dashboard.share.progress.prepareClipboardImage')
+      : t('dashboard.share.copyImage');
+  const shouldMountShareCard =
+    hasActiveShareData &&
+    activeSharePayload &&
+    (showShareMenu || isShareActionBusy || (supportsClipboardImageCopy && isFirefoxClipboardBrowser));
 
   React.useEffect(() => {
     if (!showShareMenu) {
@@ -926,7 +973,16 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
       failShareAction('copy-text', message);
       showToast?.(message, 'error');
     }
-  }, [activeSharePayload, beginShareAction, failShareAction, finishShareAction, hasActiveShareData, locale, showToast, t]);
+  }, [
+    activeSharePayload,
+    beginShareAction,
+    failShareAction,
+    finishShareAction,
+    hasActiveShareData,
+    locale,
+    showToast,
+    t,
+  ]);
 
   const waitForShareCard = React.useCallback(async () => {
     if (shareCardRef.current) return shareCardRef.current;
@@ -1010,7 +1066,13 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
         setClipboardImageWarmState('idle');
         throw error;
       });
-  }, [activeSharePayload, getActiveShareImageBlob, hasActiveShareData, isClipboardImageReady, supportsClipboardImageCopy]);
+  }, [
+    activeSharePayload,
+    getActiveShareImageBlob,
+    hasActiveShareData,
+    isClipboardImageReady,
+    supportsClipboardImageCopy,
+  ]);
 
   React.useEffect(() => {
     setClipboardImageReadyKey(null);
@@ -1073,7 +1135,9 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
 
       updateShareAction('share', t('dashboard.share.progress.downloadImage'));
       const downloaded = downloadShareCard(blob, fileName);
-      const message = downloaded ? t('dashboard.share.systemUnavailableDownloaded') : t('dashboard.share.downloadFailure');
+      const message = downloaded
+        ? t('dashboard.share.systemUnavailableDownloaded')
+        : t('dashboard.share.downloadFailure');
       if (downloaded) {
         finishShareAction('share', message);
       } else {
@@ -1246,7 +1310,9 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
             <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center mx-auto mb-4">
               <Upload size={28} className="text-zinc-400 dark:text-zinc-500" />
             </div>
-            <h3 className="font-bold text-lg text-slate-700 dark:text-zinc-300 mb-2">{t('dashboard.empty.startRecordTitle')}</h3>
+            <h3 className="font-bold text-lg text-slate-700 dark:text-zinc-300 mb-2">
+              {t('dashboard.empty.startRecordTitle')}
+            </h3>
             <p className="text-sm text-slate-500 dark:text-zinc-500 max-w-md mx-auto">
               {t('dashboard.empty.startRecordBody')}
             </p>
@@ -1365,8 +1431,11 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                       subValue={
                         splitOverviewStats.character.totalSixStar > 0
                           ? t('dashboard.overview.allSixRate', {
-                            percent: formatPercentValue((splitOverviewStats.character.counts[6] / splitOverviewStats.character.totalSixStar) * 100),
-                          })
+                              percent: formatPercentValue(
+                                (splitOverviewStats.character.counts[6] / splitOverviewStats.character.totalSixStar) *
+                                  100
+                              ),
+                            })
                           : t('dashboard.empty.noSixStarData')
                       }
                       colorClass="rainbow-text"
@@ -1436,8 +1505,10 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                       subValue={
                         splitOverviewStats.weapon.totalSixStar > 0
                           ? t('dashboard.overview.allSixRate', {
-                            percent: formatPercentValue((splitOverviewStats.weapon.counts[6] / splitOverviewStats.weapon.totalSixStar) * 100),
-                          })
+                              percent: formatPercentValue(
+                                (splitOverviewStats.weapon.counts[6] / splitOverviewStats.weapon.totalSixStar) * 100
+                              ),
+                            })
                           : t('dashboard.empty.noSixStarData')
                       }
                       colorClass="text-amber-600 dark:text-amber-400"
@@ -1556,19 +1627,27 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
                             <RainbowGradientDefs />
-                              <Pie
-                                data={localizeChartData(group.stats.chartData, group.primaryLabel, t('dashboard.overview.offrateSixStar'))}
-                                cx="50%"
-                                cy="50%"
-                                innerRadius={44}
-                                outerRadius={82}
-                                paddingAngle={2}
-                                dataKey="displayValue"
-                                isAnimationActive={false}
-                                labelLine={false}
-                                label={renderPiePercentLabel(isDark)}
-                              >
-                              {localizeChartData(group.stats.chartData, group.primaryLabel, t('dashboard.overview.offrateSixStar')).map((entry, index) => (
+                            <Pie
+                              data={localizeChartData(
+                                group.stats.chartData,
+                                group.primaryLabel,
+                                t('dashboard.overview.offrateSixStar')
+                              )}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={44}
+                              outerRadius={82}
+                              paddingAngle={2}
+                              dataKey="displayValue"
+                              isAnimationActive={false}
+                              labelLine={false}
+                              label={renderPiePercentLabel(isDark)}
+                            >
+                              {localizeChartData(
+                                group.stats.chartData,
+                                group.primaryLabel,
+                                t('dashboard.overview.offrateSixStar')
+                              ).map((entry, index) => (
                                 <Cell key={`cell-${group.key}-${index}`} fill={entry.color} stroke="none" />
                               ))}
                             </Pie>
@@ -1665,8 +1744,8 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                       if (isAllPoolsOverview) {
                         return stats.totalSixStar > 0
                           ? t('dashboard.overview.allSixRate', {
-                            percent: formatPercentValue((stats.counts[6] / stats.totalSixStar) * 100),
-                          })
+                              percent: formatPercentValue((stats.counts[6] / stats.totalSixStar) * 100),
+                            })
                           : t('dashboard.empty.noSixStarData');
                       }
                       if (isGroupMode) {
@@ -1679,7 +1758,9 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                         if (stats.total >= 180) bonusCount = 1 + Math.floor((stats.total - 180) / 160);
                       }
                       return bonusCount > 0
-                        ? (isEnglish ? `Includes ${bonusCount} bonus` : `含赠送 ${bonusCount}`)
+                        ? isEnglish
+                          ? `Includes ${bonusCount} bonus`
+                          : `含赠送 ${bonusCount}`
                         : t('dashboard.overview.ratio', { percent: formatPercentValue(stats.winRate) });
                     })()}
                     colorClass={normalizedPoolType === 'limited' ? 'rainbow-text' : 'text-slate-700 dark:text-zinc-300'}
@@ -1694,7 +1775,9 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                     isAllPoolsOverview
                       ? crossBannerSummary
                       : normalizedPoolType === 'standard' && stats.total >= 300
-                        ? (isEnglish ? 'Includes 1 bonus' : '含赠送 1')
+                        ? isEnglish
+                          ? 'Includes 1 bonus'
+                          : '含赠送 1'
                         : offrateShort
                   }
                   colorClass="text-red-600 dark:text-red-400"
@@ -1723,7 +1806,9 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
               {isGroupMode && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <StatBox
-                    title={isAllPoolsOverview ? t('dashboard.overview.targetSixStarRate') : t('dashboard.analysis.winRate')}
+                    title={
+                      isAllPoolsOverview ? t('dashboard.overview.targetSixStarRate') : t('dashboard.analysis.winRate')
+                    }
                     value={`${stats.winRate}%`}
                     subValue={`${stats.upSixStarCount || 0}/${stats.sixStarCount || 0}`}
                     colorClass="text-green-600 dark:text-green-400"
@@ -1732,7 +1817,9 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                   <StatBox
                     title={primarySixStarLabel}
                     value={stats.counts[6] ?? 0}
-                    subValue={isEnglish ? `Standard 6★ ${stats.counts['6_std'] ?? 0}` : `常驻6星 ${stats.counts['6_std'] ?? 0}`}
+                    subValue={
+                      isEnglish ? `Standard 6★ ${stats.counts['6_std'] ?? 0}` : `常驻6星 ${stats.counts['6_std'] ?? 0}`
+                    }
                     colorClass={normalizedPoolType === 'weapon' ? 'text-slate-700 dark:text-zinc-300' : 'rainbow-text'}
                     icon={Star}
                     isAnimated={normalizedPoolType !== 'weapon' && !isAllPoolsOverview}
@@ -1772,21 +1859,23 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                           <RainbowGradientDefs />
-                            <Pie
-                              data={localizeChartData(stats.chartData, primarySixStarLabel, secondarySixStarLabel)}
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={44}
-                              outerRadius={82}
-                              paddingAngle={2}
-                              dataKey="displayValue"
-                              isAnimationActive={false}
-                              labelLine={false}
-                              label={renderPiePercentLabel(isDark)}
-                            >
-                            {localizeChartData(stats.chartData, primarySixStarLabel, secondarySixStarLabel).map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
-                            ))}
+                          <Pie
+                            data={localizeChartData(stats.chartData, primarySixStarLabel, secondarySixStarLabel)}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={44}
+                            outerRadius={82}
+                            paddingAngle={2}
+                            dataKey="displayValue"
+                            isAnimationActive={false}
+                            labelLine={false}
+                            label={renderPiePercentLabel(isDark)}
+                          >
+                            {localizeChartData(stats.chartData, primarySixStarLabel, secondarySixStarLabel).map(
+                              (entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
+                              )
+                            )}
                           </Pie>
                           <RechartsTooltip
                             formatter={(value, name, props) => [
@@ -1976,11 +2065,11 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        setCustomShareExpandedGroupIds((previous) => (
+                                        setCustomShareExpandedGroupIds((previous) =>
                                           previous.includes(group.id)
                                             ? previous.filter((groupId) => groupId !== group.id)
                                             : [...previous, group.id]
-                                        ));
+                                        );
                                       }}
                                       className="flex w-full items-center justify-between text-left"
                                     >
@@ -1989,47 +2078,51 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                                       </span>
                                       <span className="flex items-center gap-2 text-[10px] font-mono text-zinc-500">
                                         {group.pools.length}
-                                        {customShareExpandedGroupIds.includes(group.id) ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                        {customShareExpandedGroupIds.includes(group.id) ? (
+                                          <ChevronDown size={12} />
+                                        ) : (
+                                          <ChevronRight size={12} />
+                                        )}
                                       </span>
                                     </button>
                                     {customShareExpandedGroupIds.includes(group.id) && (
                                       <div className="mt-2 space-y-1">
                                         {group.pools.map((pool) => {
-                                        const checked = customSharePoolIds.includes(pool.id);
-                                        const localizedPoolName = localizePoolName(pool, { locale });
-                                        const recordCount = customShareRecordCountByPoolId.get(pool.id) || 0;
+                                          const checked = customSharePoolIds.includes(pool.id);
+                                          const localizedPoolName = localizePoolName(pool, { locale });
+                                          const recordCount = customShareRecordCountByPoolId.get(pool.id) || 0;
 
-                                        return (
-                                          <label
-                                            key={pool.id}
-                                            className={`flex items-start gap-2 px-2 py-1.5 border transition-colors ${
-                                              checked
-                                                ? 'border-endfield-yellow bg-yellow-50 dark:bg-yellow-500/10'
-                                                : 'border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800'
-                                            }`}
-                                          >
-                                            <input
-                                              type="checkbox"
-                                              checked={checked}
-                                              disabled={isShareActionBusy}
-                                              onChange={() => {
-                                                setCustomSharePoolIds((previous) => (
-                                                  previous.includes(pool.id)
-                                                    ? previous.filter((poolId) => poolId !== pool.id)
-                                                    : [...previous, pool.id]
-                                                ));
-                                              }}
-                                              className="mt-0.5"
-                                            />
-                                            <span className="min-w-0 flex-1">
-                                              <span className="block text-xs text-slate-700 dark:text-zinc-200 truncate">
-                                                {localizedPoolName}
+                                          return (
+                                            <label
+                                              key={pool.id}
+                                              className={`flex items-start gap-2 px-2 py-1.5 border transition-colors ${
+                                                checked
+                                                  ? 'border-endfield-yellow bg-yellow-50 dark:bg-yellow-500/10'
+                                                  : 'border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                                              }`}
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                disabled={isShareActionBusy}
+                                                onChange={() => {
+                                                  setCustomSharePoolIds((previous) =>
+                                                    previous.includes(pool.id)
+                                                      ? previous.filter((poolId) => poolId !== pool.id)
+                                                      : [...previous, pool.id]
+                                                  );
+                                                }}
+                                                className="mt-0.5"
+                                              />
+                                              <span className="min-w-0 flex-1">
+                                                <span className="block text-xs text-slate-700 dark:text-zinc-200 truncate">
+                                                  {localizedPoolName}
+                                                </span>
+                                                <span className="block text-[11px] text-zinc-500 font-mono">
+                                                  {recordCount} {pullUnitLabel}
+                                                </span>
                                               </span>
-                                              <span className="block text-[11px] text-zinc-500 font-mono">
-                                                {recordCount} {pullUnitLabel}
-                                              </span>
-                                            </span>
-                                          </label>
+                                            </label>
                                           );
                                         })}
                                       </div>
@@ -2118,13 +2211,19 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                         {supportsClipboardImageCopy && (
                           <button
                             type="button"
-                            disabled={isShareActionBusy || !hasActiveShareData || (isFirefoxClipboardBrowser && !isClipboardImageReady)}
+                            disabled={
+                              isShareActionBusy ||
+                              !hasActiveShareData ||
+                              (isFirefoxClipboardBrowser && !isClipboardImageReady)
+                            }
                             onClick={() => {
                               setShowShareMenu(false);
                               void handleCopyShareImage();
                             }}
                             className={`w-full text-left px-3 py-2 text-xs text-slate-600 dark:text-zinc-400 transition-colors border-t border-zinc-100 dark:border-zinc-800 flex items-center gap-2 ${
-                              isShareActionBusy || !hasActiveShareData || (isFirefoxClipboardBrowser && !isClipboardImageReady)
+                              isShareActionBusy ||
+                              !hasActiveShareData ||
+                              (isFirefoxClipboardBrowser && !isClipboardImageReady)
                                 ? 'cursor-not-allowed opacity-60'
                                 : 'hover:bg-slate-50 dark:hover:bg-zinc-800'
                             }`}
@@ -2187,6 +2286,7 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
 
             {charViewMode === 'waterfall' ? (
               <PoolTimelinePanel
+                sections={timelineSections}
                 currentPool={currentPool}
                 currentPoolHistory={normalizedPoolHistory}
                 groupedHistory={groupedHistory}
@@ -2195,16 +2295,18 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                 isGroupMode={isGroupMode}
                 isAllPoolsOverview={isAllPoolsOverview}
                 effectivePity={effectivePity}
-              analysisPity={analysisPity}
-              overviewAnalysisPityMap={overviewAnalysisPityMap}
-              overviewPoolFilter={allOverviewPoolFilter}
-              hasMergedAccountView={hasMergedAccountView}
-              embedded={true}
-              showFiveStarDrops={showTimelineFiveStarDrops}
-              onToggleShowFiveStarDrops={setShowTimelineFiveStarDrops}
-            />
+                analysisPity={analysisPity}
+                overviewAnalysisPityMap={overviewAnalysisPityMap}
+                overviewPoolFilter={allOverviewPoolFilter}
+                hasMergedAccountView={hasMergedAccountView}
+                embedded={true}
+                showFiveStarDrops={showTimelineFiveStarDrops}
+                onToggleShowFiveStarDrops={setShowTimelineFiveStarDrops}
+              />
             ) : visibleCharacterStats.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 dark:text-zinc-600 text-sm">{t('dashboard.empty.noHighRarityRecords')}</div>
+              <div className="text-center py-8 text-slate-400 dark:text-zinc-600 text-sm">
+                {t('dashboard.empty.noHighRarityRecords')}
+              </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {visibleCharacterStats.map((char) => {
@@ -2213,7 +2315,7 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                   const isStandardChar = isSixStar && char.isStandard;
                   const localizedCharacterName = localizeEntityName(char.name, {
                     locale,
-                    type: normalizedPoolType === 'weapon' ? 'weapon' : 'character'
+                    type: normalizedPoolType === 'weapon' ? 'weapon' : 'character',
                   });
 
                   // 生成出货抽数描述

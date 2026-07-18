@@ -1,22 +1,15 @@
 import { characterCache } from './characterUtils.js';
-import {
-  isFreeHistoryPull,
-  isGiftHistoryPull,
-  isInfoBookHistoryPull
-} from './historyInfoBook.js';
+import { isFreeHistoryPull, isGiftHistoryPull, isInfoBookHistoryPull } from './historyInfoBook.js';
 import { getPoolTimingMeta, normalizePoolGroupType } from './poolSelectorDisplay.js';
-import {
-  compareHistoryTimelineAsc,
-  getHistoryTimelineTimestampMs
-} from './historyTimelineSort.js';
-import {
-  EXTRA_POOL_RULES,
-  LIMITED_POOL_RULES,
-  STANDARD_POOL_RULES,
-  WEAPON_POOL_RULES
-} from '../constants/index.js';
+import { compareHistoryTimelineAsc, getHistoryTimelineTimestampMs } from './historyTimelineSort.js';
+import { EXTRA_POOL_RULES, LIMITED_POOL_RULES, STANDARD_POOL_RULES, WEAPON_POOL_RULES } from '../constants/index.js';
 import { getAppLocale, isEnglishLocale } from '../i18n/index.js';
-import { localizeEntityName, localizeHistoryItemName, localizePoolFeaturedName, localizePoolName } from './gameDataI18n.js';
+import {
+  localizeEntityName,
+  localizeHistoryItemName,
+  localizePoolFeaturedName,
+  localizePoolName,
+} from './gameDataI18n.js';
 
 function normalizePoolType(type) {
   if (type === 'extra') return 'extra';
@@ -90,16 +83,16 @@ export function getTimelineStageElementId(sectionId, entryId) {
 }
 
 function getSourceRecordKeys(items = []) {
-  return (Array.isArray(items) ? items : [])
-    .map(getHistoryRecordKey)
-    .filter(Boolean);
+  return (Array.isArray(items) ? items : []).map(getHistoryRecordKey).filter(Boolean);
 }
 
 function isGuaranteedHistoryPull(item) {
-  return item?.specialType === 'guaranteed'
-    || item?.special_type === 'guaranteed'
-    || item?.isSpark === true
-    || item?.isGuaranteed === true;
+  return (
+    item?.specialType === 'guaranteed' ||
+    item?.special_type === 'guaranteed' ||
+    item?.isSpark === true ||
+    item?.isGuaranteed === true
+  );
 }
 
 function shouldExcludeFromWinRate(item, poolType) {
@@ -166,7 +159,7 @@ function createDropBadges(items, locale = getAppLocale()) {
       label,
       rarity: Number(item?.rarity) || 0,
       count: 1,
-      avatarUrl: getAvatarUrl(item?.item_name || item?.character_name || item?.characterName || item?.name)
+      avatarUrl: getAvatarUrl(item?.item_name || item?.character_name || item?.characterName || item?.name),
     });
   });
 
@@ -191,7 +184,7 @@ function createLeadBadge(item, fallbackLabel = '?', locale = getAppLocale()) {
       label: fallbackLabel,
       rarity: 0,
       count: 1,
-      avatarUrl: null
+      avatarUrl: null,
     };
   }
 
@@ -200,7 +193,7 @@ function createLeadBadge(item, fallbackLabel = '?', locale = getAppLocale()) {
     label,
     rarity: Number(item?.rarity) || 0,
     count: 1,
-    avatarUrl: getAvatarUrl(item?.item_name || item?.character_name || item?.characterName || item?.name)
+    avatarUrl: getAvatarUrl(item?.item_name || item?.character_name || item?.characterName || item?.name),
   };
 }
 
@@ -236,7 +229,10 @@ function formatBadgeSummary(badges = [], locale = getAppLocale()) {
   }
 
   return badges
-    .map((badge) => `${badge.rarity > 0 ? `${badge.rarity}★` : ''}${formatQuotedLabel(badge.label, locale)}${badge.count > 1 ? `x${badge.count}` : ''}`)
+    .map(
+      (badge) =>
+        `${badge.rarity > 0 ? `${badge.rarity}★` : ''}${formatQuotedLabel(badge.label, locale)}${badge.count > 1 ? `x${badge.count}` : ''}`
+    )
     .join(' / ');
 }
 
@@ -245,12 +241,17 @@ function formatSecondarySixStarNames(items = [], locale = getAppLocale()) {
     return '';
   }
 
-  const badges = createDropBadges(items.filter((item) => Number(item?.rarity) >= 6), locale);
+  const badges = createDropBadges(
+    items.filter((item) => Number(item?.rarity) >= 6),
+    locale
+  );
   if (badges.length === 0) {
     return '';
   }
 
-  const labels = badges.map((badge) => `${formatQuotedLabel(badge.label, locale)}${badge.count > 1 ? `x${badge.count}` : ''}`);
+  const labels = badges.map(
+    (badge) => `${formatQuotedLabel(badge.label, locale)}${badge.count > 1 ? `x${badge.count}` : ''}`
+  );
   if (labels.length === 1) {
     return labels[0];
   }
@@ -288,7 +289,7 @@ function classifySixStarStageKind(item) {
 }
 
 function mergeBadgeItems(...groups) {
-  return groups.flatMap((group) => Array.isArray(group) ? group : []);
+  return groups.flatMap((group) => (Array.isArray(group) ? group : []));
 }
 
 function buildOrderedTimelineGroups(history = []) {
@@ -387,13 +388,13 @@ function calculateTimelineMetrics(history = [], { poolType = 'standard', crossPo
   })();
   const sixStarIntervals = isLimitedPool
     ? sixStars
-      .map((item) => getInheritedLimitedPityForItem(item, crossPoolPityMap))
-      .filter((value) => Number.isFinite(value) && value > 0)
+        .map((item) => getInheritedLimitedPityForItem(item, crossPoolPityMap))
+        .filter((value) => Number.isFinite(value) && value > 0)
     : [];
   const upSixStarIntervals = isLimitedPool
     ? upSixStars
-      .map((item) => getInheritedLimitedPityForItem(item, crossPoolPityMap))
-      .filter((value) => Number.isFinite(value) && value > 0)
+        .map((item) => getInheritedLimitedPityForItem(item, crossPoolPityMap))
+        .filter((value) => Number.isFinite(value) && value > 0)
     : [];
 
   return {
@@ -401,25 +402,23 @@ function calculateTimelineMetrics(history = [], { poolType = 'standard', crossPo
     sixStarCount: sixStars.length,
     fiveStarCount: fiveStars.length,
     upSixStarCount: upSixStars.length,
-    winRate: winRateSixStars.length > 0 ? ((winRateUpSixStars.length / winRateSixStars.length) * 100) : 0,
-    avgSixStarPulls: sixStars.length > 0
-      ? (
-        isLimitedPool && sixStarIntervals.length === sixStars.length
+    winRate: winRateSixStars.length > 0 ? (winRateUpSixStars.length / winRateSixStars.length) * 100 : 0,
+    avgSixStarPulls:
+      sixStars.length > 0
+        ? isLimitedPool && sixStarIntervals.length === sixStars.length
           ? sixStarIntervals.reduce((sum, value) => sum + value, 0) / sixStarIntervals.length
-          : (validPulls.length / sixStars.length)
-      )
-      : Number.NaN,
-    avgFiveStarPulls: fiveStars.length > 0 ? (validPulls.length / fiveStars.length) : Number.NaN,
-    avgUpPulls: upSixStars.length > 0
-      ? (
-        isLimitedPool && upSixStarIntervals.length === upSixStars.length
+          : validPulls.length / sixStars.length
+        : Number.NaN,
+    avgFiveStarPulls: fiveStars.length > 0 ? validPulls.length / fiveStars.length : Number.NaN,
+    avgUpPulls:
+      upSixStars.length > 0
+        ? isLimitedPool && upSixStarIntervals.length === upSixStars.length
           ? upSixStarIntervals.reduce((sum, value) => sum + value, 0) / upSixStarIntervals.length
-          : (validPulls.length / upSixStars.length)
-      )
-      : Number.NaN,
+          : validPulls.length / upSixStars.length
+        : Number.NaN,
     currentPity,
     currentPity5,
-    isExtraPool
+    isExtraPool,
   };
 }
 
@@ -460,7 +459,7 @@ function summarizeGroup(group = []) {
     groupSize: group.length,
     timestamp: timestampSource?.timestamp || timestampSource?.gacha_time || null,
     primaryBatchKey: getHistoryBatchKey(primarySixStar || primaryHighRarity),
-    sourceBatchKeys
+    sourceBatchKeys,
   };
 }
 
@@ -484,8 +483,16 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
   const english = isEnglishLocale(locale);
   if (summary.hasGift) {
     const stageLabel = summary.hasFreePulls
-      ? (summary.groupSize >= 10 ? (english ? 'Urgent Recruitment' : '免费十连') : (english ? 'Free Node' : '免费节点'))
-      : (english ? 'Gift Node' : '赠送节点');
+      ? summary.groupSize >= 10
+        ? english
+          ? 'Urgent Recruitment'
+          : '免费十连'
+        : english
+          ? 'Free Node'
+          : '免费节点'
+      : english
+        ? 'Gift Node'
+        : '赠送节点';
     const allBadges = createDropBadges(summary.highRarityItems, locale);
     const sixStarBadges = createDropBadges(summary.sixStars, locale);
     const highlightStageKind = resolveGiftHighlightStageKind(summary);
@@ -493,13 +500,13 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
       stageLabel,
       resultSummary: buildGiftResultSummary(stageLabel, allBadges, locale),
       resultSummaryWithoutFiveStar: buildGiftResultSummary(stageLabel, sixStarBadges, locale),
-      tags: [summary.hasFreePulls ? (english ? 'Free' : '免费') : (english ? 'Gift' : '赠送')],
+      tags: [summary.hasFreePulls ? (english ? 'Free' : '免费') : english ? 'Gift' : '赠送'],
       stageKind: 'gift',
       highlightStageKind,
       highestRarity: Number(summary.primaryHighRarity?.rarity) || 0,
       leadBadge: summary.hasSixStar
         ? createLeadBadge(summary.primarySixStar, '?', locale)
-        : createLeadBadge(summary.primaryHighRarity, '?', locale)
+        : createLeadBadge(summary.primaryHighRarity, '?', locale),
     };
   }
 
@@ -520,7 +527,7 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
       tags: [],
       stageKind: primaryStageKind === 'offLimited' ? 'offLimited' : 'offStandard',
       highestRarity: 6,
-      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale)
+      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale),
     };
   }
 
@@ -529,14 +536,21 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
     secondarySegments.push(formatSecondarySegment('UP ', summary.upSixStars, locale));
   }
   if (summary.offLimitedSixStars.length > 0 && primaryStageKind !== 'offLimited') {
-    secondarySegments.push(formatSecondarySegment(english ? 'Off Limited ' : '歪限定', summary.offLimitedSixStars, locale));
+    secondarySegments.push(
+      formatSecondarySegment(english ? 'Off Limited ' : '歪限定', summary.offLimitedSixStars, locale)
+    );
   }
   if (summary.offStandardSixStars.length > 0 && primaryStageKind !== 'offStandard') {
-    secondarySegments.push(formatSecondarySegment(english ? 'Off Standard ' : '歪常驻', summary.offStandardSixStars, locale));
+    secondarySegments.push(
+      formatSecondarySegment(english ? 'Off Standard ' : '歪常驻', summary.offStandardSixStars, locale)
+    );
   }
-  const secondarySummary = secondarySegments.filter(Boolean).length > 0
-    ? (english ? `, same batch includes ${secondarySegments.filter(Boolean).join(' / ')}` : `，同批含 ${secondarySegments.filter(Boolean).join(' / ')}`)
-    : '';
+  const secondarySummary =
+    secondarySegments.filter(Boolean).length > 0
+      ? english
+        ? `, same batch includes ${secondarySegments.filter(Boolean).join(' / ')}`
+        : `，同批含 ${secondarySegments.filter(Boolean).join(' / ')}`
+      : '';
 
   if (primaryStageKind === 'up') {
     const resultSummaryWithoutFiveStar = `${english ? 'Hit target 6★' : '命中目标 6★'} ${formatQuotedLabel(primaryLabel, locale)}${summary.upSixStars.length > 1 ? formatRepeatedCount(summary.upSixStars.length, locale) : ''}${secondarySummary}`;
@@ -547,7 +561,7 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
       tags: ['UP'],
       stageKind: 'up',
       highestRarity: 6,
-      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale)
+      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale),
     };
   }
 
@@ -560,7 +574,7 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
       tags: [english ? 'Off-rate' : '偏移'],
       stageKind: 'offLimited',
       highestRarity: 6,
-      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale)
+      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale),
     };
   }
 
@@ -573,7 +587,7 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
       tags: [english ? 'Off-rate' : '歪'],
       stageKind: 'offStandard',
       highestRarity: 6,
-      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale)
+      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale),
     };
   }
 
@@ -584,7 +598,7 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
     tags: [],
     stageKind: 'generic',
     highestRarity: Number(summary.primaryHighRarity?.rarity) || 0,
-    leadBadge: createLeadBadge(summary.primaryHighRarity, '?', locale)
+    leadBadge: createLeadBadge(summary.primaryHighRarity, '?', locale),
   };
 }
 
@@ -596,12 +610,22 @@ function getStageTargetPulls(poolType, stageKind, stageSize = 0) {
   return getPoolSixStarPity(poolType);
 }
 
-function buildCurrentStageEntry(pool, pendingPaidCount, currentPityValue, supportItems = [], currentTargetPullsOverride, locale = getAppLocale()) {
+function buildCurrentStageEntry(
+  pool,
+  pendingPaidCount,
+  currentPityValue,
+  supportItems = [],
+  currentTargetPullsOverride,
+  locale = getAppLocale()
+) {
   const english = isEnglishLocale(locale);
   const targetLabel = english ? '6★ milestone' : '6★ 节点';
   const displayPulls = Number.isFinite(currentPityValue) ? currentPityValue : pendingPaidCount;
   const normalizedType = normalizePoolType(pool?.type);
-  const supportBadges = createDropBadges(supportItems.filter((item) => Number(item?.rarity) === 5), locale);
+  const supportBadges = createDropBadges(
+    supportItems.filter((item) => Number(item?.rarity) === 5),
+    locale
+  );
 
   return {
     id: `${pool?.id || 'pool'}-current-stage`,
@@ -613,22 +637,33 @@ function buildCurrentStageEntry(pool, pendingPaidCount, currentPityValue, suppor
     targetPulls: Number.isFinite(currentTargetPullsOverride)
       ? currentTargetPullsOverride
       : getStageTargetPulls(normalizedType, 'current'),
-    resultSummary: displayPulls > 0
-      ? (english ? `Still progressing. No new ${targetLabel} has been triggered yet.` : `当前仍在推进，尚未触发新的 ${targetLabel}`)
-      : (english ? 'No new high-rarity milestone has formed in the current stage.' : '当前阶段尚未形成新的高稀有节点'),
-    resultSummaryWithoutFiveStar: displayPulls > 0
-      ? (english ? `Still progressing. No new ${targetLabel} has been triggered yet.` : `当前仍在推进，尚未触发新的 ${targetLabel}`)
-      : (english ? 'No new high-rarity milestone has formed in the current stage.' : '当前阶段尚未形成新的高稀有节点'),
+    resultSummary:
+      displayPulls > 0
+        ? english
+          ? `Still progressing. No new ${targetLabel} has been triggered yet.`
+          : `当前仍在推进，尚未触发新的 ${targetLabel}`
+        : english
+          ? 'No new high-rarity milestone has formed in the current stage.'
+          : '当前阶段尚未形成新的高稀有节点',
+    resultSummaryWithoutFiveStar:
+      displayPulls > 0
+        ? english
+          ? `Still progressing. No new ${targetLabel} has been triggered yet.`
+          : `当前仍在推进，尚未触发新的 ${targetLabel}`
+        : english
+          ? 'No new high-rarity milestone has formed in the current stage.'
+          : '当前阶段尚未形成新的高稀有节点',
     metaSummary: null,
     tags: [english ? 'Current' : '当前'],
-      leadBadge: createLeadBadge(
-        null,
-        localizePoolFeaturedName(pool, { locale }) || localizeEntityName(pool?.up_character || pool?.upCharacter || '?', { locale }),
-        locale
-      ),
+    leadBadge: createLeadBadge(
+      null,
+      localizePoolFeaturedName(pool, { locale }) ||
+        localizeEntityName(pool?.up_character || pool?.upCharacter || '?', { locale }),
+      locale
+    ),
     dropBadges: supportBadges,
     highestRarity: supportBadges.some((badge) => Number(badge?.rarity) >= 5) ? 5 : 0,
-    sourceRecordKeys: getSourceRecordKeys(supportItems)
+    sourceRecordKeys: getSourceRecordKeys(supportItems),
   };
 }
 
@@ -639,7 +674,7 @@ function buildStageEntries({
   currentTargetPullsOverride,
   crossPoolPityMap,
   showCurrentStage = true,
-  locale = getAppLocale()
+  locale = getAppLocale(),
 }) {
   const ascendingGroups = buildOrderedTimelineGroups(history);
   const stages = [];
@@ -664,9 +699,12 @@ function buildStageEntries({
         resultSummaryWithoutFiveStar: milestone.resultSummaryWithoutFiveStar || milestone.resultSummary,
         metaSummary: null,
         tags: milestone.tags,
-          leadBadge: milestone.leadBadge || createLeadBadge(
+        leadBadge:
+          milestone.leadBadge ||
+          createLeadBadge(
             summary.primaryHighRarity,
-            localizePoolFeaturedName(pool, { locale }) || localizeEntityName(pool?.up_character || pool?.upCharacter || '?', { locale }),
+            localizePoolFeaturedName(pool, { locale }) ||
+              localizeEntityName(pool?.up_character || pool?.upCharacter || '?', { locale }),
             locale
           ),
         dropBadges: createDropBadges(summary.highRarityItems, locale),
@@ -674,7 +712,7 @@ function buildStageEntries({
         highestRarity: milestone.highestRarity || Number(summary.primaryHighRarity?.rarity) || 0,
         sourceRecordKeys: getSourceRecordKeys(group),
         sourceBatchKeys: summary.sourceBatchKeys,
-        multiDropBatchKey: summary.primaryBatchKey
+        multiDropBatchKey: summary.primaryBatchKey,
       });
       return;
     }
@@ -682,16 +720,15 @@ function buildStageEntries({
     const shouldEmitMilestone = summary.hasSixStar;
     if (!shouldEmitMilestone) {
       if (summary.fiveStars.length > 0) {
-        pendingSupportItems = mergeBadgeItems(pendingSupportItems, summary.fiveStars);
+        pendingSupportItems.push(...summary.fiveStars);
       }
       return;
     }
 
     const milestone = buildMilestoneSummary(summary, normalizedType, locale);
     const mergedSupportItems = mergeBadgeItems(pendingSupportItems, summary.fiveStars);
-    const inheritedPulls = normalizedType === 'limited'
-      ? getInheritedLimitedPityForItem(summary.primarySixStar, crossPoolPityMap)
-      : null;
+    const inheritedPulls =
+      normalizedType === 'limited' ? getInheritedLimitedPityForItem(summary.primarySixStar, crossPoolPityMap) : null;
     stages.push({
       id: `${pool?.id || 'pool'}-stage-${stages.length + 1}`,
       stageKind: milestone.stageKind,
@@ -703,16 +740,19 @@ function buildStageEntries({
       resultSummaryWithoutFiveStar: milestone.resultSummaryWithoutFiveStar || milestone.resultSummary,
       metaSummary: null,
       tags: milestone.tags,
-        leadBadge: milestone.leadBadge || createLeadBadge(
+      leadBadge:
+        milestone.leadBadge ||
+        createLeadBadge(
           summary.primaryHighRarity,
-          localizePoolFeaturedName(pool, { locale }) || localizeEntityName(pool?.up_character || pool?.upCharacter || '?', { locale }),
+          localizePoolFeaturedName(pool, { locale }) ||
+            localizeEntityName(pool?.up_character || pool?.upCharacter || '?', { locale }),
           locale
-      ),
+        ),
       dropBadges: createDropBadges(mergedSupportItems, locale),
       highestRarity: milestone.highestRarity || 6,
       sourceRecordKeys: getSourceRecordKeys(mergeBadgeItems(pendingSupportItems, group)),
       sourceBatchKeys: summary.sourceBatchKeys,
-      multiDropBatchKey: summary.primaryBatchKey
+      multiDropBatchKey: summary.primaryBatchKey,
     });
     pendingPaidCount = 0;
     pendingSupportItems = [];
@@ -744,18 +784,17 @@ function buildTimelineSection({
   currentTargetPullsOverride,
   crossPoolPityMap,
   disablePityState = false,
-  locale = getAppLocale()
+  locale = getAppLocale(),
 }) {
   const normalizedType = normalizePoolType(pool?.type);
   const metrics = calculateTimelineMetrics(history, {
     poolType: normalizedType,
-    crossPoolPityMap
+    crossPoolPityMap,
   });
   const timing = getPoolTimingMeta(pool, new Date(), locale);
   const beginnerProgressClosed = pool?.type === 'beginner' && metrics.totalPulls >= 40;
-  const showCurrentStage = !disablePityState
-    && !beginnerProgressClosed
-    && (normalizedType === 'weapon' || !timing.isTimed || timing.isActive);
+  const showCurrentStage =
+    !disablePityState && !beginnerProgressClosed && (normalizedType === 'weapon' || !timing.isTimed || timing.isActive);
   const entries = buildStageEntries({
     history,
     pool,
@@ -763,7 +802,7 @@ function buildTimelineSection({
     currentTargetPullsOverride,
     crossPoolPityMap,
     showCurrentStage,
-    locale
+    locale,
   });
   const maxEntryPulls = entries.reduce((maxValue, entry) => Math.max(maxValue, entry.pulls || 0), 0);
   const minimumScale = normalizedType === 'weapon' ? 40 : 60;
@@ -772,10 +811,13 @@ function buildTimelineSection({
     id: pool?.id || 'pool-timeline',
     title: localizePoolName(pool, { locale }) || (isEnglishLocale(locale) ? 'Unknown Banner' : '未知卡池'),
     type: normalizedType,
-    featured: localizePoolFeaturedName(pool, { locale }) || localizeEntityName(pool?.up_character || pool?.upCharacter || null, {
-      locale,
-      type: normalizedType === 'weapon' ? 'weapon' : 'character'
-    }) || null,
+    featured:
+      localizePoolFeaturedName(pool, { locale }) ||
+      localizeEntityName(pool?.up_character || pool?.upCharacter || null, {
+        locale,
+        type: normalizedType === 'weapon' ? 'weapon' : 'character',
+      }) ||
+      null,
     period: formatPeriod(pool, locale),
     status: timing,
     totalPulls: metrics.totalPulls,
@@ -789,8 +831,11 @@ function buildTimelineSection({
     avgFiveStarPulls: metrics.avgFiveStarPulls,
     avgUpPulls: metrics.avgUpPulls,
     hidePityState: disablePityState,
-    scaleMax: roundScaleMax(Math.max(maxEntryPulls, disablePityState ? 0 : (currentPityOverride ?? metrics.currentPity)), minimumScale),
-    entries
+    scaleMax: roundScaleMax(
+      Math.max(maxEntryPulls, disablePityState ? 0 : (currentPityOverride ?? metrics.currentPity)),
+      minimumScale
+    ),
+    entries,
   };
 }
 
@@ -802,7 +847,7 @@ export function buildSinglePoolTimelineSection({
   currentTargetPullsOverride,
   crossPoolPityMap = null,
   disablePityState = false,
-  locale = getAppLocale()
+  locale = getAppLocale(),
 }) {
   if (!pool) {
     return null;
@@ -816,7 +861,7 @@ export function buildSinglePoolTimelineSection({
     currentTargetPullsOverride,
     crossPoolPityMap,
     disablePityState,
-    locale
+    locale,
   });
 }
 
@@ -826,7 +871,7 @@ export function buildOverviewTimelineSections({
   analysisPityByPoolId = null,
   crossPoolPityMap = null,
   disablePityState = false,
-  locale = getAppLocale()
+  locale = getAppLocale(),
 }) {
   const historyByPoolId = new Map();
 
@@ -852,7 +897,7 @@ export function buildOverviewTimelineSections({
       return buildTimelineSection({
         pool: {
           ...pool,
-          selectorGroupType: normalizePoolGroupType(pool)
+          selectorGroupType: normalizePoolGroupType(pool),
         },
         history: poolHistory,
         currentPityOverride: disablePityState ? null : analysisPityByPoolId?.get(pool.id)?.displayPity6,
@@ -860,7 +905,7 @@ export function buildOverviewTimelineSections({
         currentTargetPullsOverride: analysisPityByPoolId?.get(pool.id)?.maxPity6,
         crossPoolPityMap,
         disablePityState,
-        locale
+        locale,
       });
     })
     .filter(Boolean);
@@ -885,8 +930,8 @@ export function buildLimitedCrossPoolPityMap(history = []) {
 
       if (Number(item?.rarity) >= 5 && recordKey) {
         map.set(recordKey, {
-          sixStarPity: isFree ? 'free' : (Number(item?.rarity) >= 6 ? sixPity : null),
-          fiveStarPity: isFree ? 'free' : fivePity
+          sixStarPity: isFree ? 'free' : Number(item?.rarity) >= 6 ? sixPity : null,
+          fiveStarPity: isFree ? 'free' : fivePity,
         });
       }
 
@@ -907,14 +952,14 @@ export function buildTimelineAcquisitionIndex({
   pools = [],
   history = [],
   crossPoolPityMap = null,
-  locale = getAppLocale()
+  locale = getAppLocale(),
 } = {}) {
   const sections = buildOverviewTimelineSections({
     pools,
     history,
     crossPoolPityMap,
     disablePityState: false,
-    locale
+    locale,
   });
   const recordByKey = new Map();
   (Array.isArray(history) ? history : []).forEach((item) => {
@@ -953,7 +998,7 @@ export function buildTimelineAcquisitionIndex({
           timelineSectionId: section.id,
           poolId: section.id,
           poolName: section.title,
-          timestamp: record?.timestamp || record?.gacha_time || null
+          timestamp: record?.timestamp || record?.gacha_time || null,
         });
       });
     });
@@ -961,7 +1006,7 @@ export function buildTimelineAcquisitionIndex({
 
   return {
     sections,
-    byRecordKey
+    byRecordKey,
   };
 }
 
@@ -970,5 +1015,5 @@ export default {
   buildOverviewTimelineSections,
   buildLimitedCrossPoolPityMap,
   buildTimelineAcquisitionIndex,
-  getTimelineStageElementId
+  getTimelineStageElementId,
 };

@@ -1,9 +1,6 @@
 import React, { useMemo } from 'react';
 import { Eye, EyeOff, Layers } from 'lucide-react';
-import {
-  buildDashboardTimelineSections,
-  countDashboardTimelineNodes
-} from '../../utils/dashboardTimelineSections.js';
+import { buildDashboardTimelineSections, countDashboardTimelineNodes } from '../../utils/dashboardTimelineSections.js';
 import { isEnglishLocale, useI18n } from '../../i18n/index.js';
 import { getTimelineStageElementId } from '../../utils/poolTimelineView.js';
 import { getTimelineBarColor, getTimelineTextBadgeStyle } from '../../utils/timelineVisuals.js';
@@ -21,7 +18,7 @@ function getTimelineTone(type) {
     return {
       rail: 'bg-cyan-400 dark:bg-cyan-500',
       chip: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border-cyan-300/60 dark:border-cyan-500/30',
-      accent: 'text-cyan-700 dark:text-cyan-300'
+      accent: 'text-cyan-700 dark:text-cyan-300',
     };
   }
 
@@ -29,7 +26,7 @@ function getTimelineTone(type) {
     return {
       rail: 'bg-amber-400 dark:bg-amber-500',
       chip: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-300/60 dark:border-amber-500/30',
-      accent: 'text-amber-700 dark:text-amber-300'
+      accent: 'text-amber-700 dark:text-amber-300',
     };
   }
 
@@ -37,14 +34,14 @@ function getTimelineTone(type) {
     return {
       rail: 'bg-blue-400 dark:bg-blue-500',
       chip: 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-300/60 dark:border-blue-500/30',
-      accent: 'text-blue-700 dark:text-blue-300'
+      accent: 'text-blue-700 dark:text-blue-300',
     };
   }
 
   return {
     rail: 'bg-fuchsia-400 dark:bg-fuchsia-500',
     chip: 'bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300 border-fuchsia-300/60 dark:border-fuchsia-500/30',
-    accent: 'text-fuchsia-700 dark:text-fuchsia-300'
+    accent: 'text-fuchsia-700 dark:text-fuchsia-300',
   };
 }
 
@@ -81,24 +78,29 @@ function getStatusText(status, t) {
 }
 
 function getLeadBadge(entry, featured) {
-  return entry.leadBadge || entry.dropBadges[0] || {
-    label: featured || '?',
-    rarity: 0
-  };
+  return (
+    entry.leadBadge ||
+    entry.dropBadges[0] || {
+      label: featured || '?',
+      rarity: 0,
+    }
+  );
 }
 
 function getStampConfig(entry, sectionType, t) {
   if (entry.stageKind === 'gift') {
     return {
       label: t('dashboard.timeline.badge.free'),
-      className: 'border-emerald-400 bg-emerald-50 text-emerald-700 dark:border-emerald-500/70 dark:bg-emerald-500/10 dark:text-emerald-300'
+      className:
+        'border-emerald-400 bg-emerald-50 text-emerald-700 dark:border-emerald-500/70 dark:bg-emerald-500/10 dark:text-emerald-300',
     };
   }
 
   if (entry.stageKind === 'up') {
     return {
       label: 'UP',
-      className: 'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500/70 dark:bg-amber-500/10 dark:text-amber-300'
+      className:
+        'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500/70 dark:bg-amber-500/10 dark:text-amber-300',
     };
   }
 
@@ -106,7 +108,8 @@ function getStampConfig(entry, sectionType, t) {
     if (sectionType === 'limited' || sectionType === 'extra' || sectionType === 'weapon') {
       return {
         label: t('dashboard.timeline.badge.offrate'),
-        className: 'border-rose-400 bg-rose-50 text-rose-600 dark:border-rose-500/70 dark:bg-rose-500/10 dark:text-rose-400'
+        className:
+          'border-rose-400 bg-rose-50 text-rose-600 dark:border-rose-500/70 dark:bg-rose-500/10 dark:text-rose-400',
       };
     }
 
@@ -116,21 +119,23 @@ function getStampConfig(entry, sectionType, t) {
 
     return {
       label: t('dashboard.timeline.badge.offrate'),
-      className: 'border-rose-400 bg-rose-50 text-rose-600 dark:border-rose-500/70 dark:bg-rose-500/10 dark:text-rose-400'
+      className:
+        'border-rose-400 bg-rose-50 text-rose-600 dark:border-rose-500/70 dark:bg-rose-500/10 dark:text-rose-400',
     };
   }
 
   if (entry.stageKind === 'fiveStar') {
     return {
       label: '5★',
-      className: 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-300'
+      className:
+        'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-300',
     };
   }
 
   if (entry.isCurrentStage) {
     return {
       label: t('dashboard.timeline.badge.progress'),
-      className: 'border-zinc-300 bg-zinc-50 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-300'
+      className: 'border-zinc-300 bg-zinc-50 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-300',
     };
   }
 
@@ -211,9 +216,7 @@ function getLengthAwareSummaryClass(value, dense = false, compact = false) {
 }
 
 function isMultiDropTimelineEntry(entry) {
-  return Boolean(entry?.multiDropBatchKey)
-    && !entry?.isCurrentStage
-    && Number(entry?.highestRarity) >= 6;
+  return Boolean(entry?.multiDropBatchKey) && !entry?.isCurrentStage && Number(entry?.highestRarity) >= 6;
 }
 
 function buildTimelineRenderGroups(entries = []) {
@@ -226,7 +229,7 @@ function buildTimelineRenderGroups(entries = []) {
       groups.push({
         type: 'single',
         key: entry?.id || `entry-${index}`,
-        entry
+        entry,
       });
       index += 1;
       continue;
@@ -237,9 +240,9 @@ function buildTimelineRenderGroups(entries = []) {
     let cursor = index + 1;
 
     while (
-      cursor < entries.length
-      && isMultiDropTimelineEntry(entries[cursor])
-      && entries[cursor].multiDropBatchKey === batchKey
+      cursor < entries.length &&
+      isMultiDropTimelineEntry(entries[cursor]) &&
+      entries[cursor].multiDropBatchKey === batchKey
     ) {
       batchEntries.push(entries[cursor]);
       cursor += 1;
@@ -249,13 +252,13 @@ function buildTimelineRenderGroups(entries = []) {
       groups.push({
         type: 'multi',
         key: `${batchKey}-${batchEntries.map((item) => item.id).join('-')}`,
-        entries: batchEntries
+        entries: batchEntries,
       });
     } else {
       groups.push({
         type: 'single',
         key: entry?.id || `entry-${index}`,
-        entry
+        entry,
       });
     }
 
@@ -290,14 +293,11 @@ function StagePortrait({ entry, featured, compact = false, t }) {
   const sizeClass = compact ? 'h-9 w-9 sm:h-10 sm:w-10' : 'h-12 w-12 sm:h-14 sm:w-14';
 
   return (
-    <div className={`relative ${sizeClass} shrink-0 overflow-hidden border ${portraitTone} flex flex-col items-center justify-center`}>
+    <div
+      className={`relative ${sizeClass} shrink-0 overflow-hidden border ${portraitTone} flex flex-col items-center justify-center`}
+    >
       {leadBadge.avatarUrl ? (
-        <img
-          src={leadBadge.avatarUrl}
-          alt={leadBadge.label}
-          className="h-full w-full object-cover"
-          loading="lazy"
-        />
+        <img src={leadBadge.avatarUrl} alt={leadBadge.label} className="h-full w-full object-cover" loading="lazy" />
       ) : (
         <div className={`${compact ? 'text-base sm:text-lg' : 'text-lg sm:text-xl'} mt-1 font-black tracking-tight`}>
           {leadBadge.label.slice(0, 1) || '?'}
@@ -313,21 +313,24 @@ function StagePortrait({ entry, featured, compact = false, t }) {
 function StageBadge({ badge, compact = false, mobile = false }) {
   const isSixStar = badge.rarity >= 6;
   return (
-    <div className={`flex items-center gap-1.5 p-0.5 ${mobile ? 'mobile-ux-card-chip' : 'border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900'} ${compact ? 'pr-1.5' : 'pr-2'}`}>
-      <div className={`relative flex items-center justify-center overflow-hidden font-black ${compact ? 'h-5 w-5 text-[9px]' : 'h-6 w-6 text-[10px]'} ${isSixStar ? 'bg-yellow-400/80 text-yellow-900 dark:bg-yellow-500/80' : 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200'}`}>
+    <div
+      className={`flex items-center gap-1.5 p-0.5 ${mobile ? 'mobile-ux-card-chip' : 'border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900'} ${compact ? 'pr-1.5' : 'pr-2'}`}
+    >
+      <div
+        className={`relative flex items-center justify-center overflow-hidden font-black ${compact ? 'h-5 w-5 text-[9px]' : 'h-6 w-6 text-[10px]'} ${isSixStar ? 'bg-yellow-400/80 text-yellow-900 dark:bg-yellow-500/80' : 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200'}`}
+      >
         {badge.avatarUrl ? (
-          <img
-            src={badge.avatarUrl}
-            alt={badge.label}
-            className="h-full w-full object-cover"
-            loading="lazy"
-          />
+          <img src={badge.avatarUrl} alt={badge.label} className="h-full w-full object-cover" loading="lazy" />
         ) : (
           badge.label.slice(0, 1)
         )}
       </div>
       <div className="flex items-baseline gap-1">
-        <span className={`${compact ? 'text-[10px]' : 'text-[11px]'} font-bold leading-none text-zinc-700 dark:text-zinc-300`}>{badge.label}</span>
+        <span
+          className={`${compact ? 'text-[10px]' : 'text-[11px]'} font-bold leading-none text-zinc-700 dark:text-zinc-300`}
+        >
+          {badge.label}
+        </span>
         {(badge.rarity < 6 || badge.count > 1) && (
           <span className="text-[10px] font-black font-mono text-zinc-400 dark:text-zinc-500">x{badge.count}</span>
         )}
@@ -342,69 +345,109 @@ function MetricItem({ label, value, mobile = false, dense = false }) {
   const valueClass = dense && valueLength > 8 ? 'text-[11px]' : dense ? 'text-xs' : 'text-sm';
 
   return (
-      <div className={`min-w-0 border-l ${dense ? 'pl-2' : 'pl-3'} ${mobile ? 'border-zinc-200 dark:border-zinc-800' : 'border-zinc-200 dark:border-zinc-800'}`}>
-      <div className={`${labelClass} font-bold uppercase tracking-wider ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-slate-500 dark:text-zinc-500'}`}>{label}</div>
-      <div className={`mt-1 break-words font-black font-mono leading-tight ${valueClass} ${mobile ? 'text-slate-900 dark:text-zinc-100' : 'text-slate-800 dark:text-zinc-100'}`}>{value}</div>
+    <div
+      className={`min-w-0 border-l ${dense ? 'pl-2' : 'pl-3'} ${mobile ? 'border-zinc-200 dark:border-zinc-800' : 'border-zinc-200 dark:border-zinc-800'}`}
+    >
+      <div
+        className={`${labelClass} font-bold uppercase tracking-wider ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-slate-500 dark:text-zinc-500'}`}
+      >
+        {label}
+      </div>
+      <div
+        className={`mt-1 break-words font-black font-mono leading-tight ${valueClass} ${mobile ? 'text-slate-900 dark:text-zinc-100' : 'text-slate-800 dark:text-zinc-100'}`}
+      >
+        {value}
+      </div>
     </div>
   );
 }
 
-function TimelineStageCard({ entry, sectionId, sectionType, featured, t, mobile = false, showFiveStarDrops = true, dense = false }) {
+function TimelineStageCard({
+  entry,
+  sectionId,
+  sectionType,
+  featured,
+  t,
+  mobile = false,
+  showFiveStarDrops = true,
+  dense = false,
+}) {
   const compact = entry.stageKind === 'fiveStar';
   const visibleBadges = getVisibleDropBadges(entry, showFiveStarDrops);
   const resultSummary = getVisibleResultSummary(entry, showFiveStarDrops);
   const stamp = getStampConfig(entry, sectionType, t);
-  const widthPercent = entry.stageKind === 'gift'
-    ? 100
-    : Math.max(
-    compact ? 10 : 12,
-    Math.min(100, (entry.pulls / Math.max(entry.targetPulls || 1, 1)) * 100)
-  );
+  const widthPercent =
+    entry.stageKind === 'gift'
+      ? 100
+      : Math.max(compact ? 10 : 12, Math.min(100, (entry.pulls / Math.max(entry.targetPulls || 1, 1)) * 100));
   const portraitCompact = compact || dense;
   const summaryTextClass = getLengthAwareSummaryClass(resultSummary, dense, compact);
 
   return (
-    <div id={getTimelineStageElementId(sectionId, entry.id)} className={`relative flex group ${dense ? 'gap-3' : 'gap-3 sm:gap-5'}`}>
-      <div className={`flex flex-col items-center shrink-0 relative z-10 ${portraitCompact ? 'w-10 sm:w-12' : 'w-12 sm:w-16'}`}>
+    <div
+      id={getTimelineStageElementId(sectionId, entry.id)}
+      className={`relative flex group ${dense ? 'gap-3' : 'gap-3 sm:gap-5'}`}
+    >
+      <div
+        className={`flex flex-col items-center shrink-0 relative z-10 ${portraitCompact ? 'w-10 sm:w-12' : 'w-12 sm:w-16'}`}
+      >
         <StagePortrait entry={entry} featured={featured} compact={portraitCompact} t={t} />
-        <span className={`mt-2 font-black font-mono ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-zinc-500 dark:text-zinc-400'} ${compact ? 'text-[9px] sm:text-[10px]' : 'text-[10px] sm:text-[11px]'}`}>
+        <span
+          className={`mt-2 font-black font-mono ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-zinc-500 dark:text-zinc-400'} ${compact ? 'text-[9px] sm:text-[10px]' : 'text-[10px] sm:text-[11px]'}`}
+        >
           {entry.dateLabel}
         </span>
       </div>
 
-      <div className={`flex-1 min-w-0 border-b ${mobile ? 'border-zinc-200/90 dark:border-zinc-800/70' : 'border-zinc-100 dark:border-zinc-800/60'} group-last:border-0 group-last:pb-0 ${dense ? 'pb-4' : compact ? 'pb-4 sm:pb-5' : 'pb-6 sm:pb-8'}`}>
+      <div
+        className={`flex-1 min-w-0 border-b ${mobile ? 'border-zinc-200/90 dark:border-zinc-800/70' : 'border-zinc-100 dark:border-zinc-800/60'} group-last:border-0 group-last:pb-0 ${dense ? 'pb-4' : compact ? 'pb-4 sm:pb-5' : 'pb-6 sm:pb-8'}`}
+      >
         <div className={`flex items-start gap-2 ${dense ? 'mb-2' : compact ? 'mb-1.5 sm:mb-2' : 'mb-2 sm:mb-3'}`}>
-          <span className={`${mobile ? 'mobile-ux-card-chip text-slate-500 dark:text-zinc-400' : 'border border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-400'} font-bold uppercase ${compact ? 'px-1.5 py-0.5 text-[8px] sm:text-[9px]' : 'px-1.5 py-0.5 text-[9px] sm:text-[10px]'}`}>
+          <span
+            className={`${mobile ? 'mobile-ux-card-chip text-slate-500 dark:text-zinc-400' : 'border border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-400'} font-bold uppercase ${compact ? 'px-1.5 py-0.5 text-[8px] sm:text-[9px]' : 'px-1.5 py-0.5 text-[9px] sm:text-[10px]'}`}
+          >
             {entry.stageLabel}
           </span>
-            <span className={`min-w-0 break-words font-bold ${mobile ? 'text-slate-700 dark:text-zinc-200' : 'text-zinc-700 dark:text-zinc-300'} ${summaryTextClass}`}>
-              {renderResultSummary(entry, resultSummary, mobile)}
-            </span>
-          </div>
+          <span
+            className={`min-w-0 break-words font-bold ${mobile ? 'text-slate-700 dark:text-zinc-200' : 'text-zinc-700 dark:text-zinc-300'} ${summaryTextClass}`}
+          >
+            {renderResultSummary(entry, resultSummary, mobile)}
+          </span>
+        </div>
 
-          <div className={`flex items-center ${dense ? 'gap-2' : 'gap-2 sm:gap-3'}`}>
-            <div className={`relative flex-1 overflow-hidden ${mobile ? 'rounded-2xl bg-zinc-100/90 dark:bg-zinc-950/75' : 'border border-zinc-200 bg-zinc-100 shadow-sm dark:border-zinc-700/50 dark:bg-zinc-800/50'} ${dense ? 'h-7 max-w-full' : compact ? 'h-6 sm:h-7 max-w-[70%] sm:max-w-[60%]' : 'h-8 sm:h-10 max-w-[90%] sm:max-w-[85%]'}`}>
-              <div
+        <div className={`flex items-center ${dense ? 'gap-2' : 'gap-2 sm:gap-3'}`}>
+          <div
+            className={`relative flex-1 overflow-hidden ${mobile ? 'rounded-2xl bg-zinc-100/90 dark:bg-zinc-950/75' : 'border border-zinc-200 bg-zinc-100 shadow-sm dark:border-zinc-700/50 dark:bg-zinc-800/50'} ${dense ? 'h-7 max-w-full' : compact ? 'h-6 sm:h-7 max-w-[70%] sm:max-w-[60%]' : 'h-8 sm:h-10 max-w-[90%] sm:max-w-[85%]'}`}
+          >
+            <div
               className="absolute inset-y-0 left-0"
               style={{ width: `${widthPercent}%`, background: getTimelineBarColor(sectionType, entry) }}
             >
               <div className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.15)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.15)_50%,rgba(255,255,255,0.15)_75%,transparent_75%,transparent_100%)] bg-[length:12px_12px]" />
             </div>
-            <div className={`absolute inset-y-0 left-2 sm:left-3 flex items-center font-black font-mono tracking-tight ${mobile ? 'text-slate-900 dark:text-zinc-100' : 'text-zinc-900 dark:text-zinc-100'} ${dense ? 'text-base' : compact ? 'text-sm sm:text-base' : 'text-lg sm:text-xl'}`}>
+            <div
+              className={`absolute inset-y-0 left-2 sm:left-3 flex items-center font-black font-mono tracking-tight ${mobile ? 'text-slate-900 dark:text-zinc-100' : 'text-zinc-900 dark:text-zinc-100'} ${dense ? 'text-base' : compact ? 'text-sm sm:text-base' : 'text-lg sm:text-xl'}`}
+            >
               {entry.pulls}
-              <span className={`ml-0.5 font-bold ${compact ? 'text-[10px] sm:text-xs' : 'text-xs sm:text-sm'}`}>{t('dashboard.unit.pull')}</span>
+              <span className={`ml-0.5 font-bold ${compact ? 'text-[10px] sm:text-xs' : 'text-xs sm:text-sm'}`}>
+                {t('dashboard.unit.pull')}
+              </span>
             </div>
           </div>
 
           {stamp && (
-            <div className={`shrink-0 flex items-center justify-center rotate-[14deg] rounded-full border-2 font-black shadow-sm ${dense ? 'h-8 w-8 text-[10px]' : compact ? 'h-8 w-8 text-[10px]' : 'h-10 w-10 text-xs sm:text-sm'} ${stamp.className}`}>
+            <div
+              className={`shrink-0 flex items-center justify-center rotate-[14deg] rounded-full border-2 font-black shadow-sm ${dense ? 'h-8 w-8 text-[10px]' : compact ? 'h-8 w-8 text-[10px]' : 'h-10 w-10 text-xs sm:text-sm'} ${stamp.className}`}
+            >
               {stamp.label}
             </div>
           )}
         </div>
 
         {visibleBadges.length > 0 && (
-          <div className={`flex flex-wrap ${dense ? 'mt-2 gap-1.5' : compact ? 'mt-2.5 sm:mt-3 gap-1.5' : 'mt-2.5 sm:mt-3 gap-1.5 sm:gap-2'}`}>
+          <div
+            className={`flex flex-wrap ${dense ? 'mt-2 gap-1.5' : compact ? 'mt-2.5 sm:mt-3 gap-1.5' : 'mt-2.5 sm:mt-3 gap-1.5 sm:gap-2'}`}
+          >
             {visibleBadges.map((badge) => (
               <StageBadge key={`${entry.id}-${badge.label}`} badge={badge} compact={portraitCompact} mobile={mobile} />
             ))}
@@ -415,12 +458,24 @@ function TimelineStageCard({ entry, sectionId, sectionType, featured, t, mobile 
   );
 }
 
-function TimelineMultiDropGroup({ group, sectionId, sectionType, featured, t, locale, mobile = false, showFiveStarDrops = true, dense = false }) {
+function TimelineMultiDropGroup({
+  group,
+  sectionId,
+  sectionType,
+  featured,
+  t,
+  locale,
+  mobile = false,
+  showFiveStarDrops = true,
+  dense = false,
+}) {
   const count = group.entries.length;
   const labelClass = getMultiDropLabelClass(count);
 
   return (
-    <div className={`relative mb-4 border border-yellow-400/25 border-l-[3px] border-l-yellow-400 bg-yellow-400/[0.035] px-2.5 pb-0 pt-5 shadow-[inset_0_1px_0_rgba(250,204,21,0.12)] dark:bg-yellow-400/[0.04] ${mobile ? 'rounded-2xl' : ''} ${dense ? '-mx-1' : '-mx-1 sm:-mx-2'}`}>
+    <div
+      className={`relative mb-4 border border-yellow-400/25 border-l-[3px] border-l-yellow-400 bg-yellow-400/[0.035] px-2.5 pb-0 pt-5 shadow-[inset_0_1px_0_rgba(250,204,21,0.12)] dark:bg-yellow-400/[0.04] ${mobile ? 'rounded-2xl' : ''} ${dense ? '-mx-1' : '-mx-1 sm:-mx-2'}`}
+    >
       <div className="absolute right-3 top-0 border border-yellow-300/45 bg-zinc-950 px-2 py-1 text-[10px] font-black tracking-[0.08em]">
         <span className={labelClass}>{getMultiDropLabel(count, locale)}</span>
       </div>
@@ -444,53 +499,100 @@ function TimelineMultiDropGroup({ group, sectionId, sectionType, featured, t, lo
   );
 }
 
-function TimelineSectionCard({ section, isOverview, embedded, t, locale, mobile = false, showFiveStarDrops = true, dense = false }) {
+function TimelineSectionCard({
+  section,
+  isOverview,
+  embedded,
+  t,
+  locale,
+  mobile = false,
+  showFiveStarDrops = true,
+  dense = false,
+}) {
   const tone = getTimelineTone(section.type);
-  const pityValue = section.hidePityState
-    ? t('dashboard.timeline.multiAccount')
-    : `${section.currentPity}`;
+  const pityValue = section.hidePityState ? t('dashboard.timeline.multiAccount') : `${section.currentPity}`;
   const titleClass = getLengthAwareTitleClass(section.title, dense, embedded);
   const chipClass = dense ? 'px-1.5 py-0.5 text-[9px] tracking-[0.08em]' : 'px-2 py-0.5 text-[11px] tracking-[0.18em]';
   const renderGroups = buildTimelineRenderGroups(section.entries);
 
   return (
-    <div className={`relative overflow-hidden ${mobile ? (embedded ? 'mobile-ux-card-inset' : 'mobile-ux-soft-card mobile-ux-soft-card--muted') : 'rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900'}`}>
+    <div
+      className={`relative overflow-hidden ${mobile ? (embedded ? 'mobile-ux-card-inset' : 'mobile-ux-soft-card mobile-ux-soft-card--muted') : 'rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900'}`}
+    >
       <div className={`absolute left-0 top-0 h-1 w-full ${tone.rail}`} />
 
-      <div className={`border-b ${mobile ? 'border-zinc-200/90 dark:border-zinc-800' : 'border-zinc-100 dark:border-zinc-800'} ${dense ? 'p-3.5' : mobile ? (embedded ? 'p-3.5' : 'p-4') : (embedded ? 'p-4' : 'p-5')}`}>
-        <div className={dense ? 'relative flex flex-col gap-3' : 'relative flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between'}>
+      <div
+        className={`border-b ${mobile ? 'border-zinc-200/90 dark:border-zinc-800' : 'border-zinc-100 dark:border-zinc-800'} ${dense ? 'p-3.5' : mobile ? (embedded ? 'p-3.5' : 'p-4') : embedded ? 'p-4' : 'p-5'}`}
+      >
+        <div
+          className={
+            dense
+              ? 'relative flex flex-col gap-3'
+              : 'relative flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between'
+          }
+        >
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className={`${titleClass} min-w-0 break-words font-bold leading-tight tracking-tight ${mobile ? 'text-slate-900 dark:text-zinc-100' : 'text-slate-900 dark:text-zinc-100'}`}>{section.title}</h3>
+              <h3
+                className={`${titleClass} min-w-0 break-words font-bold leading-tight tracking-tight ${mobile ? 'text-slate-900 dark:text-zinc-100' : 'text-slate-900 dark:text-zinc-100'}`}
+              >
+                {section.title}
+              </h3>
               <span className={`inline-flex border font-bold uppercase ${chipClass} ${tone.chip}`}>
                 {getSectionTypeLabel(section.type, t)}
               </span>
               {section.featured && (
-                <span className={`inline-flex max-w-full break-words border font-bold uppercase ${chipClass} ${tone.chip}`}>
+                <span
+                  className={`inline-flex max-w-full break-words border font-bold uppercase ${chipClass} ${tone.chip}`}
+                >
                   {section.featured}
                 </span>
               )}
               {isOverview && (
-                <span className={`border font-bold uppercase ${chipClass} ${mobile ? 'border-zinc-200 text-slate-500 dark:border-zinc-700 dark:text-zinc-400' : 'border-zinc-200 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400'}`}>
+                <span
+                  className={`border font-bold uppercase ${chipClass} ${mobile ? 'border-zinc-200 text-slate-500 dark:border-zinc-700 dark:text-zinc-400' : 'border-zinc-200 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400'}`}
+                >
                   {t('dashboard.timeline.overview')}
                 </span>
               )}
             </div>
 
-            <div className={`mt-2 flex flex-wrap items-center gap-2 font-mono ${dense ? 'text-[10px]' : 'text-[11px]'} ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-zinc-500 dark:text-zinc-400'}`}>
+            <div
+              className={`mt-2 flex flex-wrap items-center gap-2 font-mono ${dense ? 'text-[10px]' : 'text-[11px]'} ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-zinc-500 dark:text-zinc-400'}`}
+            >
               <span>{section.period}</span>
-              <span className={mobile ? 'text-zinc-300 dark:text-zinc-700' : 'text-zinc-300 dark:text-zinc-700'}>|</span>
+              <span className={mobile ? 'text-zinc-300 dark:text-zinc-700' : 'text-zinc-300 dark:text-zinc-700'}>
+                |
+              </span>
               <span className={tone.accent}>{getStatusText(section.status, t)}</span>
             </div>
           </div>
 
           <div className={dense ? 'grid grid-cols-4 gap-2' : 'grid grid-cols-2 gap-3 md:grid-cols-4'}>
-            <MetricItem label={t('dashboard.timeline.metric.total')} value={t('dashboard.unit.pulls', { count: section.totalPulls })} mobile={mobile} dense={dense} />
-            <MetricItem label={t('dashboard.timeline.metric.pity')} value={pityValue} mobile={mobile} dense={dense} />
-            <MetricItem label={t('dashboard.timeline.metric.avgSix')} value={formatAverage(section.avgSixStarPulls, t)} mobile={mobile} dense={dense} />
             <MetricItem
-              label={section.type === 'standard' ? t('dashboard.timeline.metric.avgFive') : t('dashboard.timeline.metric.avgUp')}
-              value={section.type === 'standard' ? formatAverage(section.avgFiveStarPulls, t) : formatAverage(section.avgUpPulls, t)}
+              label={t('dashboard.timeline.metric.total')}
+              value={t('dashboard.unit.pulls', { count: section.totalPulls })}
+              mobile={mobile}
+              dense={dense}
+            />
+            <MetricItem label={t('dashboard.timeline.metric.pity')} value={pityValue} mobile={mobile} dense={dense} />
+            <MetricItem
+              label={t('dashboard.timeline.metric.avgSix')}
+              value={formatAverage(section.avgSixStarPulls, t)}
+              mobile={mobile}
+              dense={dense}
+            />
+            <MetricItem
+              label={
+                section.type === 'standard'
+                  ? t('dashboard.timeline.metric.avgFive')
+                  : t('dashboard.timeline.metric.avgUp')
+              }
+              value={
+                section.type === 'standard'
+                  ? formatAverage(section.avgFiveStarPulls, t)
+                  : formatAverage(section.avgUpPulls, t)
+              }
               mobile={mobile}
               dense={dense}
             />
@@ -498,14 +600,16 @@ function TimelineSectionCard({ section, isOverview, embedded, t, locale, mobile 
         </div>
       </div>
 
-      <div className={dense ? 'p-3.5' : mobile ? (embedded ? 'p-3.5' : 'p-4') : (embedded ? 'p-4' : 'p-5')}>
+      <div className={dense ? 'p-3.5' : mobile ? (embedded ? 'p-3.5' : 'p-4') : embedded ? 'p-4' : 'p-5'}>
         {section.entries.length === 0 ? (
-          <div className={`border border-dashed px-4 py-8 text-center text-sm ${mobile ? 'rounded-2xl border-zinc-200 bg-zinc-50/70 text-slate-500 dark:border-zinc-800 dark:bg-zinc-900/45 dark:text-zinc-500' : 'border-zinc-200 text-slate-400 dark:border-zinc-800 dark:text-zinc-500'}`}>
+          <div
+            className={`border border-dashed px-4 py-8 text-center text-sm ${mobile ? 'rounded-2xl border-zinc-200 bg-zinc-50/70 text-slate-500 dark:border-zinc-800 dark:bg-zinc-900/45 dark:text-zinc-500' : 'border-zinc-200 text-slate-400 dark:border-zinc-800 dark:text-zinc-500'}`}
+          >
             {t('dashboard.timeline.noStageNodes')}
           </div>
         ) : (
           <div className="space-y-0">
-            {renderGroups.map((group) => (
+            {renderGroups.map((group) =>
               group.type === 'multi' ? (
                 <TimelineMultiDropGroup
                   key={group.key}
@@ -532,7 +636,7 @@ function TimelineSectionCard({ section, isOverview, embedded, t, locale, mobile 
                   dense={dense}
                 />
               )
-            ))}
+            )}
           </div>
         )}
       </div>
@@ -541,6 +645,7 @@ function TimelineSectionCard({ section, isOverview, embedded, t, locale, mobile 
 }
 
 const PoolTimelinePanel = ({
+  sections: precomputedSections = null,
   currentPool,
   currentPoolHistory = [],
   groupedHistory = [],
@@ -556,10 +661,14 @@ const PoolTimelinePanel = ({
   embedded = false,
   mobile = false,
   showFiveStarDrops = true,
-  onToggleShowFiveStarDrops = null
+  onToggleShowFiveStarDrops = null,
 }) => {
   const { t, locale } = useI18n();
   const sections = useMemo(() => {
+    if (Array.isArray(precomputedSections)) {
+      return precomputedSections;
+    }
+
     return buildDashboardTimelineSections({
       currentPool,
       currentPoolHistory,
@@ -573,9 +682,24 @@ const PoolTimelinePanel = ({
       overviewAnalysisPityMap,
       overviewPoolFilter,
       hasMergedAccountView,
-      locale
+      locale,
     });
-  }, [analysisPity, crossPoolPityMap, currentPool, currentPoolHistory, effectivePity, groupedHistory, hasMergedAccountView, isAllPoolsOverview, isGroupMode, locale, overviewAnalysisPityMap, overviewPoolFilter, selectedPools]);
+  }, [
+    analysisPity,
+    crossPoolPityMap,
+    currentPool,
+    currentPoolHistory,
+    effectivePity,
+    groupedHistory,
+    hasMergedAccountView,
+    isAllPoolsOverview,
+    isGroupMode,
+    locale,
+    overviewAnalysisPityMap,
+    overviewPoolFilter,
+    precomputedSections,
+    selectedPools,
+  ]);
 
   const totalNodes = countDashboardTimelineNodes(sections);
   const title = isAllPoolsOverview
@@ -591,29 +715,62 @@ const PoolTimelinePanel = ({
   const useMasonryLayout = !mobile && (isAllPoolsOverview || isGroupMode);
 
   return (
-    <div className={embedded ? 'space-y-3.5' : `space-y-4 ${mobile ? 'mobile-ux-card p-4' : 'border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900'}`}>
-      <div className={`flex flex-col gap-3 ${embedded ? 'pb-1' : `${mobile ? 'border-b border-zinc-200/90 pb-4 dark:border-zinc-800' : 'border-b border-zinc-100 pb-4 dark:border-zinc-800'}`} lg:flex-row lg:items-end lg:justify-between`}>
+    <div
+      className={
+        embedded
+          ? 'space-y-3.5'
+          : `space-y-4 ${mobile ? 'mobile-ux-card p-4' : 'border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900'}`
+      }
+    >
+      <div
+        className={`flex flex-col gap-3 ${embedded ? 'pb-1' : `${mobile ? 'border-b border-zinc-200/90 pb-4 dark:border-zinc-800' : 'border-b border-zinc-100 pb-4 dark:border-zinc-800'}`} lg:flex-row lg:items-end lg:justify-between`}
+      >
         {!embedded ? (
           <div>
-            <div className={`text-[10px] font-bold uppercase tracking-[0.2em] ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-slate-500 dark:text-zinc-500'}`}>{t('dashboard.timeline.header')}</div>
-            <div className="mt-1 flex items-center gap-2">
-              <Layers size={18} className={mobile ? 'text-slate-400 dark:text-zinc-500' : 'text-slate-400 dark:text-zinc-500'} />
-              <h2 className={`text-xl font-black tracking-tight ${mobile ? 'text-slate-900 dark:text-zinc-100' : 'text-slate-800 dark:text-zinc-100'}`}>{title}</h2>
+            <div
+              className={`text-[10px] font-bold uppercase tracking-[0.2em] ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-slate-500 dark:text-zinc-500'}`}
+            >
+              {t('dashboard.timeline.header')}
             </div>
-            <p className={`mt-2 max-w-3xl text-sm ${mobile ? 'text-slate-500 dark:text-zinc-400' : 'text-slate-500 dark:text-zinc-400'}`}>{subtitle}</p>
+            <div className="mt-1 flex items-center gap-2">
+              <Layers
+                size={18}
+                className={mobile ? 'text-slate-400 dark:text-zinc-500' : 'text-slate-400 dark:text-zinc-500'}
+              />
+              <h2
+                className={`text-xl font-black tracking-tight ${mobile ? 'text-slate-900 dark:text-zinc-100' : 'text-slate-800 dark:text-zinc-100'}`}
+              >
+                {title}
+              </h2>
+            </div>
+            <p
+              className={`mt-2 max-w-3xl text-sm ${mobile ? 'text-slate-500 dark:text-zinc-400' : 'text-slate-500 dark:text-zinc-400'}`}
+            >
+              {subtitle}
+            </p>
           </div>
         ) : (
           <div className="min-w-0">
-            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">{t('dashboard.timeline.mode')}</div>
-            <p className={`mt-1 text-[11px] ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-zinc-500 dark:text-zinc-500'}`}>{subtitle}</p>
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">
+              {t('dashboard.timeline.mode')}
+            </div>
+            <p
+              className={`mt-1 text-[11px] ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-zinc-500 dark:text-zinc-500'}`}
+            >
+              {subtitle}
+            </p>
           </div>
         )}
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <div className={`border px-3 py-1.5 text-xs font-mono ${mobile ? 'rounded-xl border-zinc-200 bg-zinc-50 text-slate-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400' : 'border-zinc-200 text-slate-600 dark:border-zinc-800 dark:text-zinc-400'}`}>
+          <div
+            className={`border px-3 py-1.5 text-xs font-mono ${mobile ? 'rounded-xl border-zinc-200 bg-zinc-50 text-slate-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400' : 'border-zinc-200 text-slate-600 dark:border-zinc-800 dark:text-zinc-400'}`}
+          >
             {t('dashboard.unit.stagePoolCount', { count: sections.length })}
           </div>
-          <div className={`border px-3 py-1.5 text-xs font-mono ${mobile ? 'rounded-xl border-zinc-200 bg-zinc-50 text-slate-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400' : 'border-zinc-200 text-slate-600 dark:border-zinc-800 dark:text-zinc-400'}`}>
+          <div
+            className={`border px-3 py-1.5 text-xs font-mono ${mobile ? 'rounded-xl border-zinc-200 bg-zinc-50 text-slate-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400' : 'border-zinc-200 text-slate-600 dark:border-zinc-800 dark:text-zinc-400'}`}
+          >
             {t('dashboard.unit.timelineNodeCount', { count: totalNodes })}
           </div>
           {typeof onToggleShowFiveStarDrops === 'function' && (
@@ -623,21 +780,29 @@ const PoolTimelinePanel = ({
               className={`inline-flex items-center gap-1.5 border px-3 py-1.5 text-xs font-medium transition-colors ${mobile ? 'rounded-xl border-zinc-200 bg-zinc-50 text-slate-600 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400 dark:hover:bg-zinc-900' : 'border-zinc-200 text-slate-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-900'}`}
             >
               {showFiveStarDrops ? <Eye size={14} /> : <EyeOff size={14} />}
-              <span>{showFiveStarDrops ? t('dashboard.timeline.toggle.hideFiveStar') : t('dashboard.timeline.toggle.showFiveStar')}</span>
+              <span>
+                {showFiveStarDrops
+                  ? t('dashboard.timeline.toggle.hideFiveStar')
+                  : t('dashboard.timeline.toggle.showFiveStar')}
+              </span>
             </button>
           )}
         </div>
       </div>
 
       {hasMergedAccountView && (
-        <div className={`border border-dashed px-3 py-2 text-[11px] font-mono ${mobile ? 'rounded-2xl border-zinc-200 bg-zinc-50/85 text-slate-500 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-500' : 'border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400'}`}>
+        <div
+          className={`border border-dashed px-3 py-2 text-[11px] font-mono ${mobile ? 'rounded-2xl border-zinc-200 bg-zinc-50/85 text-slate-500 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-500' : 'border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400'}`}
+        >
           {t('dashboard.timeline.mergedViewNote')}
         </div>
       )}
 
       <div className={useMasonryLayout ? 'columns-1 [column-gap:1rem] xl:columns-3' : 'space-y-4'}>
         {sections.length === 0 ? (
-          <div className={`border border-dashed px-4 py-10 text-center text-sm ${mobile ? 'rounded-2xl border-zinc-200 bg-zinc-50/85 text-slate-500 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-500' : 'border-zinc-200 text-slate-400 dark:border-zinc-800 dark:text-zinc-500'}`}>
+          <div
+            className={`border border-dashed px-4 py-10 text-center text-sm ${mobile ? 'rounded-2xl border-zinc-200 bg-zinc-50/85 text-slate-500 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-500' : 'border-zinc-200 text-slate-400 dark:border-zinc-800 dark:text-zinc-500'}`}
+          >
             {t('dashboard.timeline.noSelection')}
           </div>
         ) : (

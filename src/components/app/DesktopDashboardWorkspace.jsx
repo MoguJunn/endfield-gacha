@@ -4,7 +4,6 @@ import EditItemModal from '../modals/EditItemModal';
 import DataExportOptionsModal from '../modals/DataExportOptionsModal.jsx';
 import { useI18n } from '../../i18n/index.js';
 import { useHistoryStore, usePoolStore } from '../../stores';
-import { useCurrentPoolData } from '../../hooks';
 import { isPoolGroupId } from '../../stores/usePoolStore';
 import { localizePoolName } from '../../utils/gameDataI18n.js';
 import { resolveEffectiveGameUid } from '../../utils/accountScopeUtils.js';
@@ -34,26 +33,29 @@ function RecordsSectionTitleBar({
   handleExportEndfieldGachaHelperCSV,
   handleExportEndfieldGachaHelperUserDataZip,
   handleExportEndgachaKwerTopPlainJSON,
-  handleExportEndgachaKwerTopPlainTXT
+  handleExportEndgachaKwerTopPlainTXT,
 }) {
   const { isEnglish, locale, t } = useI18n();
   const tt = (zh, en) => (isEnglish ? en : zh);
-  const pools = usePoolStore(state => state.pools);
-  const currentPoolId = usePoolStore(state => state.currentPoolId);
-  const currentGameUid = usePoolStore(state => state.currentGameUid);
-  const getGameAccountsFromHistory = useHistoryStore(state => state.getGameAccountsFromHistory);
-  const { currentPool } = useCurrentPoolData();
-  const activePool = currentPool || fallbackCurrentPool;
+  const pools = usePoolStore((state) => state.pools);
+  const currentPoolId = usePoolStore((state) => state.currentPoolId);
+  const currentGameUid = usePoolStore((state) => state.currentGameUid);
+  const getGameAccountsFromHistory = useHistoryStore((state) => state.getGameAccountsFromHistory);
+  const activePool = fallbackCurrentPool;
   const currentPoolName = localizePoolName(activePool, { locale }) || activePool?.name || t('records.unknownPool');
   const poolOptions = useMemo(
     () => [...(Array.isArray(pools) ? pools : [])].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-CN')),
     [pools]
   );
   const gameAccounts = getGameAccountsFromHistory();
-  const effectiveGameUid = useMemo(() => resolveEffectiveGameUid({
-    currentGameUid,
-    gameAccounts,
-  }), [currentGameUid, gameAccounts]);
+  const effectiveGameUid = useMemo(
+    () =>
+      resolveEffectiveGameUid({
+        currentGameUid,
+        gameAccounts,
+      }),
+    [currentGameUid, gameAccounts]
+  );
 
   const buildDefaultExportOptions = () => ({
     poolFilter: 'current',
@@ -61,7 +63,7 @@ function RecordsSectionTitleBar({
     accountFilter: effectiveGameUid ? 'current' : 'all',
     gameUid: effectiveGameUid || '',
     dateFrom: '',
-    dateTo: ''
+    dateTo: '',
   });
 
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -74,9 +76,9 @@ function RecordsSectionTitleBar({
   };
 
   const updateExportOption = (key, value) => {
-    setExportOptions(prev => ({
+    setExportOptions((prev) => ({
       ...prev,
-      [key]: value
+      [key]: value,
     }));
   };
 
@@ -86,7 +88,7 @@ function RecordsSectionTitleBar({
     accountFilter: exportOptions.accountFilter,
     gameUid: exportOptions.accountFilter === 'specific' ? exportOptions.gameUid || null : null,
     dateFrom: exportOptions.dateFrom,
-    dateTo: exportOptions.dateTo
+    dateTo: exportOptions.dateTo,
   });
 
   const canExportWithSpecificPool = exportOptions.poolFilter !== 'specific' || Boolean(exportOptions.poolId);
@@ -148,7 +150,10 @@ function RecordsSectionTitleBar({
             <Download size={14} />
             {t('records.exportPoolFile')}
           </button>
-          <ChevronDown size={20} className="ml-1 text-slate-400 dark:text-zinc-500 group-open:rotate-180 transition-transform" />
+          <ChevronDown
+            size={20}
+            className="ml-1 text-slate-400 dark:text-zinc-500 group-open:rotate-180 transition-transform"
+          />
         </div>
       </summary>
 
@@ -196,26 +201,30 @@ export default function DesktopDashboardWorkspace({
   handleExportEndfieldGachaHelperCSV,
   handleExportEndfieldGachaHelperUserDataZip,
   handleExportEndgachaKwerTopPlainJSON,
-  handleExportEndgachaKwerTopPlainTXT
+  handleExportEndgachaKwerTopPlainTXT,
 }) {
   const { isEnglish, locale, t } = useI18n();
   const tt = (zh, en) => (isEnglish ? en : zh);
-  const pools = usePoolStore(state => state.pools);
-  const currentPoolId = usePoolStore(state => state.currentPoolId);
-  const currentGameUid = usePoolStore(state => state.currentGameUid);
-  const getGameAccountsFromHistory = useHistoryStore(state => state.getGameAccountsFromHistory);
-  const { currentPool: storeCurrentPool } = useCurrentPoolData();
-  const activeExportPool = storeCurrentPool || currentPool;
-  const exportCurrentPoolName = localizePoolName(activeExportPool, { locale }) || activeExportPool?.name || t('records.unknownPool');
+  const pools = usePoolStore((state) => state.pools);
+  const currentPoolId = usePoolStore((state) => state.currentPoolId);
+  const currentGameUid = usePoolStore((state) => state.currentGameUid);
+  const getGameAccountsFromHistory = useHistoryStore((state) => state.getGameAccountsFromHistory);
+  const activeExportPool = currentPool;
+  const exportCurrentPoolName =
+    localizePoolName(activeExportPool, { locale }) || activeExportPool?.name || t('records.unknownPool');
   const exportPoolOptions = useMemo(
     () => [...(Array.isArray(pools) ? pools : [])].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-CN')),
     [pools]
   );
   const exportGameAccounts = getGameAccountsFromHistory();
-  const effectiveExportGameUid = useMemo(() => resolveEffectiveGameUid({
-    currentGameUid,
-    gameAccounts: exportGameAccounts,
-  }), [currentGameUid, exportGameAccounts]);
+  const effectiveExportGameUid = useMemo(
+    () =>
+      resolveEffectiveGameUid({
+        currentGameUid,
+        gameAccounts: exportGameAccounts,
+      }),
+    [currentGameUid, exportGameAccounts]
+  );
 
   const buildDefaultExportOptions = () => ({
     poolFilter: 'current',
@@ -223,9 +232,10 @@ export default function DesktopDashboardWorkspace({
     accountFilter: effectiveExportGameUid ? 'current' : 'all',
     gameUid: effectiveExportGameUid || '',
     dateFrom: '',
-    dateTo: ''
+    dateTo: '',
   });
   const [showQuickExportMenu, setShowQuickExportMenu] = useState(false);
+  const [recordsOpen, setRecordsOpen] = useState(false);
   const [quickExportOptions, setQuickExportOptions] = useState(buildDefaultExportOptions);
   const closeQuickExportMenu = () => setShowQuickExportMenu(false);
   const openQuickExportMenu = () => {
@@ -233,9 +243,9 @@ export default function DesktopDashboardWorkspace({
     setShowQuickExportMenu(true);
   };
   const updateQuickExportOption = (key, value) => {
-    setQuickExportOptions(prev => ({
+    setQuickExportOptions((prev) => ({
       ...prev,
-      [key]: value
+      [key]: value,
     }));
   };
   const resetQuickExportOptions = () => setQuickExportOptions(buildDefaultExportOptions());
@@ -245,12 +255,11 @@ export default function DesktopDashboardWorkspace({
     accountFilter: quickExportOptions.accountFilter,
     gameUid: quickExportOptions.accountFilter === 'specific' ? quickExportOptions.gameUid || null : null,
     dateFrom: quickExportOptions.dateFrom,
-    dateTo: quickExportOptions.dateTo
+    dateTo: quickExportOptions.dateTo,
   });
-  const canQuickExport = (
-    (quickExportOptions.poolFilter !== 'specific' || Boolean(quickExportOptions.poolId))
-    && (quickExportOptions.accountFilter !== 'specific' || Boolean(quickExportOptions.gameUid))
-  );
+  const canQuickExport =
+    (quickExportOptions.poolFilter !== 'specific' || Boolean(quickExportOptions.poolId)) &&
+    (quickExportOptions.accountFilter !== 'specific' || Boolean(quickExportOptions.gameUid));
   const runQuickExport = async (handler) => {
     if (!canQuickExport || typeof handler !== 'function') {
       return false;
@@ -265,10 +274,19 @@ export default function DesktopDashboardWorkspace({
           <div className="w-16 h-16 bg-endfield-yellow/20 dark:bg-endfield-yellow/10 rounded-full flex items-center justify-center mx-auto mb-4">
             <LogIn size={32} className="text-amber-600 dark:text-endfield-yellow" />
           </div>
-          <h3 className="font-bold text-xl text-slate-800 dark:text-zinc-100 mb-3">{tt('登录后即可导入抽卡数据', 'Sign in to import your pull history')}</h3>
+          <h3 className="font-bold text-xl text-slate-800 dark:text-zinc-100 mb-3">
+            {tt('登录后即可导入抽卡数据', 'Sign in to import your pull history')}
+          </h3>
           <p className="text-sm text-slate-600 dark:text-zinc-400 mb-6 max-w-md mx-auto">
-            {tt('注册并登录后，您可以导入自己的抽卡记录进行分析。', 'After you register and sign in, you can import your own pull history for analysis.')}
-            <br />{tt('数据安全存储在云端，可在任意设备访问。', 'Your data is stored in the cloud and can be accessed on any device.')}
+            {tt(
+              '注册并登录后，您可以导入自己的抽卡记录进行分析。',
+              'After you register and sign in, you can import your own pull history for analysis.'
+            )}
+            <br />
+            {tt(
+              '数据安全存储在云端，可在任意设备访问。',
+              'Your data is stored in the cloud and can be accessed on any device.'
+            )}
           </p>
           <p className="text-xs text-slate-400 dark:text-zinc-500 mt-4">
             {tt('已有账号？点击右上角登录', 'Already have an account? Use the top-right sign-in button.')}
@@ -279,10 +297,16 @@ export default function DesktopDashboardWorkspace({
       {user && canEdit && !canEditCurrentPool && (
         <div className="mb-8 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-none p-6 text-center">
           <Lock size={40} className="mx-auto text-amber-400 mb-3" />
-          <h3 className="font-bold text-amber-700 dark:text-amber-400 mb-2">{tt('此卡池已被锁定', 'This banner is locked')}</h3>
+          <h3 className="font-bold text-amber-700 dark:text-amber-400 mb-2">
+            {tt('此卡池已被锁定', 'This banner is locked')}
+          </h3>
           <p className="text-sm text-amber-600 dark:text-amber-500">
-            {tt(`卡池「${currentPool?.name}」已被超级管理员锁定，暂时无法编辑。`, `Banner "${currentPool?.name}" has been locked by a super admin and cannot be edited right now.`)}
-            <br />{tt('如需修改，请联系超级管理员解锁。', 'Contact a super admin if you need it unlocked.')}
+            {tt(
+              `卡池「${currentPool?.name}」已被超级管理员锁定，暂时无法编辑。`,
+              `Banner "${currentPool?.name}" has been locked by a super admin and cannot be edited right now.`
+            )}
+            <br />
+            {tt('如需修改，请联系超级管理员解锁。', 'Contact a super admin if you need it unlocked.')}
           </p>
         </div>
       )}
@@ -298,7 +322,12 @@ export default function DesktopDashboardWorkspace({
           </Suspense>
 
           <div className="mt-6">
-            <details id="guide-export-section" className="group">
+            <details
+              id="guide-export-section"
+              className="group"
+              open={recordsOpen}
+              onToggle={(event) => setRecordsOpen(event.currentTarget.open)}
+            >
               <RecordsSectionTitleBar
                 canEdit={canEdit}
                 currentPool={currentPool}
@@ -312,21 +341,26 @@ export default function DesktopDashboardWorkspace({
                 handleExportEndgachaKwerTopPlainJSON={handleExportEndgachaKwerTopPlainJSON}
                 handleExportEndgachaKwerTopPlainTXT={handleExportEndgachaKwerTopPlainTXT}
               />
-              <div className="mt-2">
-                <Suspense fallback={<TabPanelFallback label={tt('正在加载详细日志...', 'Loading detailed records...')} />}>
-                  <RecordsView
-                    onEdit={setEditItemState}
-                    onDeleteGroup={handleDeleteGroup}
-                  />
-                </Suspense>
-              </div>
+              {recordsOpen && (
+                <div className="mt-2">
+                  <Suspense
+                    fallback={<TabPanelFallback label={tt('正在加载详细日志...', 'Loading detailed records...')} />}
+                  >
+                    <RecordsView
+                      onEdit={setEditItemState}
+                      onDeleteItem={handleDeleteItem}
+                      onDeleteGroup={handleDeleteGroup}
+                    />
+                  </Suspense>
+                </div>
+              )}
             </details>
           </div>
 
           {editItemState && (
             <EditItemModal
               item={editItemState}
-              poolType={currentPool?.type}
+              pools={pools}
               onClose={() => setEditItemState(null)}
               onUpdate={handleUpdateItem}
               onDelete={handleDeleteItem}
