@@ -180,6 +180,48 @@ export async function resolveAccountGachaAliases({ poolIds = [], characterIds = 
   };
 }
 
+export async function updateAccountGachaRecord({
+  recordId,
+  gameUid,
+  serverScope,
+  currentPoolId,
+  seqId,
+  editVersion,
+  changes,
+  reason = '',
+} = {}) {
+  const headers = await buildAccountGachaHeaders();
+  headers['Content-Type'] = 'application/json';
+
+  const { response, data } = await fetchJsonWithTimeout('/api/account-gacha-data', {
+    method: 'PATCH',
+    credentials: 'same-origin',
+    headers,
+    body: JSON.stringify({
+      recordId,
+      gameUid,
+      serverScope,
+      currentPoolId,
+      seqId,
+      editVersion,
+      changes,
+      reason,
+    }),
+  }, {
+    label: 'account-gacha-data-record-update',
+    retries: 0,
+  });
+
+  if (!response.ok || data?.success === false) {
+    createAccountGachaDataError(data, response, '抽卡记录更新失败', 'account_gacha_record_update_failed');
+  }
+
+  return {
+    updated: Number(data?.updated || 0),
+    record: data?.record || null,
+  };
+}
+
 export async function deleteAccountGachaData(payload) {
   const headers = await buildAccountGachaHeaders();
   headers['Content-Type'] = 'application/json';
@@ -210,6 +252,25 @@ export function deleteAccountGachaRecords(recordIds) {
   });
 }
 
+export function deleteAccountGachaRecord({
+  recordId,
+  gameUid,
+  serverScope,
+  currentPoolId,
+  seqId,
+  reason = '',
+} = {}) {
+  return deleteAccountGachaData({
+    action: 'record',
+    recordId,
+    gameUid,
+    serverScope,
+    currentPoolId,
+    seqId,
+    reason,
+  });
+}
+
 export function deleteAccountGachaPoolHistory(poolId) {
   return deleteAccountGachaData({
     action: 'poolHistory',
@@ -234,6 +295,7 @@ export default {
   deleteAccountGachaData,
   deleteAccountGachaPool,
   deleteAccountGachaPoolHistory,
+  deleteAccountGachaRecord,
   deleteAccountGachaRecords,
   deleteAllAccountGachaData,
   loadAccountGachaData,
@@ -241,4 +303,5 @@ export default {
   resolveAccountGachaAliases,
   saveAccountGachaData,
   updateAccountGachaServerLabel,
+  updateAccountGachaRecord,
 };

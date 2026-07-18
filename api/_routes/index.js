@@ -7,6 +7,7 @@ import accountPasswordSetupHandler from './root/account-password-setup.js';
 import accountProfileHandler from './root/account-profile.js';
 import accountSecurityStateHandler from './root/account-security-state.js';
 import adminHandler from './root/admin.js';
+import adminHistoryAnomaliesHandler from './root/admin-history-anomalies.js';
 import adminCharactersHandler from './root/admin-characters.js';
 import adminPoolPushHandler from './root/admin-pool-push.js';
 import adminPoolsHandler from './root/admin-pools.js';
@@ -76,6 +77,7 @@ import bindingMeHandler from './integrations/bindings/me.js';
 import bindingRevokeHandler from './integrations/bindings/revoke.js';
 import bindingVerifyHandler from './integrations/bindings/verify.js';
 import botImportNotifyHandler from './integrations/bot/import-notify.js';
+import historyAnomaliesHandler from './root/history-anomalies.js';
 
 async function devV1BotShareCardHandler(req, res) {
   const mod = await import('./dev/v1/bot/share-card.js');
@@ -101,6 +103,7 @@ export const API_ROUTE_ENTRIES = [
   ['/api/account-profile', accountProfileHandler],
   ['/api/account-security-state', accountSecurityStateHandler],
   ['/api/admin', adminHandler],
+  ['/api/admin-history-anomalies', adminHistoryAnomaliesHandler],
   ['/api/admin-account-recovery', adminHandler],
   ['/api/admin-announcements', adminHandler],
   ['/api/admin-characters', adminCharactersHandler],
@@ -135,6 +138,7 @@ export const API_ROUTE_ENTRIES = [
   ['/api/auth-rate-limit', authRateLimitHandler],
   ['/api/automation-feed', automationFeedHandler],
   ['/api/bootstrap', bootstrapHandler],
+  ['/api/history-anomalies', historyAnomaliesHandler],
   ['/api/mail-delivery-feedback', mailDeliveryFeedbackHandler],
   ['/api/mail-inbound', mailInboundHandler],
   ['/api/mail-outbox-worker', mailOutboxWorkerHandler],

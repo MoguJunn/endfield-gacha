@@ -1,5 +1,10 @@
 import { useCallback } from 'react';
 import { useHistoryStore, useUIStore, useAuthStore } from '../../stores';
+import {
+  deleteAccountGachaRecord,
+  loadAccountGachaData,
+  updateAccountGachaRecord,
+} from '../../services/accountGachaDataService.js';
 
 /**
  * 历史记录操作 Hook
@@ -8,13 +13,9 @@ import { useHistoryStore, useUIStore, useAuthStore } from '../../stores';
 export function useHistoryOperations({
   showToast,
   cloudSync,
-  currentPool,
   clearEditItemState
 }) {
   const user = useAuthStore(state => state.user);
-  const userRole = useAuthStore(state => state.userRole);
-  const isSuperAdmin = userRole === 'super_admin';
-
   const history = useHistoryStore(state => state.history);
   const setHistory = useHistoryStore(state => state.setHistory);
 
@@ -22,7 +23,21 @@ export function useHistoryOperations({
   const setModalState = useUIStore(state => state.setModalState);
   const closeModal = useUIStore(state => state.closeModal);
 
-  const { saveHistoryToCloud, deleteHistoryFromCloud } = cloudSync;
+  const { saveHistoryToCloud } = cloudSync;
+
+  const buildRecordLocator = useCallback((item) => ({
+    recordId: item?.id ?? item?.record_id,
+    gameUid: item?.gameUid || item?.game_uid,
+    serverScope: item?.serverScope || item?.server_scope || item?.serverId || item?.server_id || 'legacy',
+    currentPoolId: item?.poolId || item?.pool_id,
+    seqId: item?.seqId || item?.seq_id,
+  }), []);
+
+  const reloadHistory = useCallback(async () => {
+    const result = await loadAccountGachaData();
+    setHistory(Array.isArray(result?.history) ? result.history : []);
+    return result;
+  }, [setHistory]);
 
   // 关闭弹窗并清理编辑状态的辅助函数
   const closeModalAndClear = useCallback(() => {
@@ -31,65 +46,74 @@ export function useHistoryOperations({
   }, [closeModal, clearEditItemState]);
 
   // 编辑记录
-  const handleUpdateItem = useCallback(async (id, newConfig) => {
-    // 提交前验证：检查卡池是否已被锁定
-    if (currentPool?.locked && !isSuperAdmin) {
-      showToast('卡池已被锁定，无法修改数据', 'error', '操作被阻止');
-      return;
-    }
-
-    // 查找要更新的记录
-    const itemToUpdate = history.find(item => item.id === id);
-    if (!itemToUpdate) return;
+  const handleUpdateItem = useCallback(async (itemOrId, newConfig, reason = '') => {
+    const itemToUpdate = typeof itemOrId === 'object'
+      ? itemOrId
+      : history.find(item => item.id === itemOrId);
+    if (!itemToUpdate) return false;
 
     const updatedItem = { ...itemToUpdate, ...newConfig };
 
-    // 修复ERROR-NEW-001: 先同步到云端，成功后再更新本地状态
     if (user) {
       try {
-        await saveHistoryToCloud([updatedItem]);
-        // 云端保存成功，更新本地状态
-        setHistory(prev => prev.map(item => item.id === id ? updatedItem : item));
+        await updateAccountGachaRecord({
+          ...buildRecordLocator(itemToUpdate),
+          editVersion: Number(itemToUpdate.editVersion || itemToUpdate.edit_version || 1),
+          changes: newConfig,
+          reason,
+        });
+        await reloadHistory();
         clearEditItemState?.();
-      } catch {
-        // 云端保存失败，已在saveHistoryToCloud中显示错误，不更新本地状态
+        showToast('记录已更新，保底与批次已重新计算', 'success');
+        return true;
+      } catch (error) {
+        showToast(error.message || '记录更新失败', 'error', '保存失败');
+        return false;
       }
-    } else {
-      // 未登录用户，仅更新本地状态
-      setHistory(prev => prev.map(item => item.id === id ? updatedItem : item));
-      clearEditItemState?.();
     }
-  }, [currentPool?.locked, isSuperAdmin, history, user, saveHistoryToCloud, setHistory, clearEditItemState, showToast]);
+
+    await saveHistoryToCloud([updatedItem]);
+    setHistory(prev => prev.map(item => item.id === itemToUpdate.id ? updatedItem : item));
+    clearEditItemState?.();
+    return true;
+  }, [buildRecordLocator, clearEditItemState, history, reloadHistory, saveHistoryToCloud, setHistory, showToast, user]);
 
   // 删除单条记录 (触发弹窗)
-  const handleDeleteItem = useCallback((id) => {
-    setModalState({ type: 'deleteItem', data: id });
-  }, [setModalState]);
+  const handleDeleteItem = useCallback((itemOrId) => {
+    const item = typeof itemOrId === 'object'
+      ? itemOrId
+      : history.find(record => record.id === itemOrId);
+    if (!item) return;
+    setModalState({ type: 'deleteItem', data: item });
+  }, [history, setModalState]);
 
   // 确认删除单条记录
   const confirmRealDeleteItem = useCallback(async () => {
-    // 提交前验证：检查卡池是否已被锁定
-    if (currentPool?.locked && !isSuperAdmin) {
-      showToast('卡池已被锁定，无法删除数据', 'error', '操作被阻止');
-      setModalState({ type: null, data: null });
+    const itemToDelete = typeof modalState.data === 'object'
+      ? modalState.data
+      : history.find(item => item.id === modalState.data);
+    if (!itemToDelete) return;
+
+    if (user) {
+      try {
+        await deleteAccountGachaRecord({
+          ...buildRecordLocator(itemToDelete),
+          reason: '用户确认该记录异常或不属于自己',
+        });
+        await reloadHistory();
+        clearEditItemState?.();
+        setModalState({ type: null, data: null });
+        showToast('记录已删除并同步到云端', 'success');
+      } catch (error) {
+        showToast(error.message || '记录删除失败', 'error', '删除失败');
+      }
       return;
     }
 
-    const idToDelete = modalState.data;
-    setHistory(prev => prev.filter(item => item.id !== idToDelete));
+    setHistory(prev => prev.filter(item => item.id !== itemToDelete.id));
     clearEditItemState?.();
     setModalState({ type: null, data: null });
-
-    // 同步到云端
-    if (user) {
-      const success = await deleteHistoryFromCloud([idToDelete]);
-      if (success) {
-        showToast('记录已删除并同步到云端', 'success');
-      } else {
-        showToast('记录已删除，但云端同步失败', 'warning');
-      }
-    }
-  }, [currentPool?.locked, isSuperAdmin, modalState.data, user, setHistory, clearEditItemState, setModalState, deleteHistoryFromCloud, showToast]);
+  }, [buildRecordLocator, clearEditItemState, history, modalState.data, reloadHistory, setHistory, setModalState, showToast, user]);
 
   // 删除整组记录 (触发弹窗)
   const handleDeleteGroup = useCallback((items) => {
@@ -98,28 +122,30 @@ export function useHistoryOperations({
 
   // 确认删除整组记录
   const confirmRealDeleteGroup = useCallback(async () => {
-    // 提交前验证：检查卡池是否已被锁定
-    if (currentPool?.locked && !isSuperAdmin) {
-      showToast('卡池已被锁定，无法删除数据', 'error', '操作被阻止');
+    const itemsToDelete = Array.isArray(modalState.data) ? modalState.data : [];
+    const idsToDelete = new Set(itemsToDelete.map(item => item.id));
+
+    if (user) {
+      const results = await Promise.allSettled(itemsToDelete.map((item) => (
+        deleteAccountGachaRecord({
+          ...buildRecordLocator(item),
+          reason: '用户删除所选批次记录',
+        })
+      )));
+      await reloadHistory();
       setModalState({ type: null, data: null });
+      const failed = results.filter((result) => result.status === 'rejected').length;
+      if (failed === 0) {
+        showToast(`已删除 ${itemsToDelete.length} 条记录并同步到云端`, 'success');
+      } else {
+        showToast(`${itemsToDelete.length - failed} 条已删除，${failed} 条删除失败，列表已刷新`, 'warning');
+      }
       return;
     }
 
-    const itemsToDelete = modalState.data;
-    const idsToDelete = new Set(itemsToDelete.map(i => i.id));
     setHistory(prev => prev.filter(item => !idsToDelete.has(item.id)));
     setModalState({ type: null, data: null });
-
-    // 同步到云端
-    if (user) {
-      const success = await deleteHistoryFromCloud(Array.from(idsToDelete));
-      if (success) {
-        showToast(`已删除 ${itemsToDelete.length} 条记录并同步到云端`, 'success');
-      } else {
-        showToast(`已删除 ${itemsToDelete.length} 条记录，但云端同步失败`, 'warning');
-      }
-    }
-  }, [currentPool?.locked, isSuperAdmin, modalState.data, user, setHistory, setModalState, deleteHistoryFromCloud, showToast]);
+  }, [buildRecordLocator, modalState.data, reloadHistory, setHistory, setModalState, showToast, user]);
 
   return {
     closeModalAndClear,

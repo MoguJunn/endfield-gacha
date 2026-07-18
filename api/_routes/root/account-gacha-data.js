@@ -1,11 +1,7 @@
 import { getSupabaseAdminClient } from '../../_lib/authAdmin.js';
 import { rejectDisallowedBrowserOrigin } from '../../_lib/http.js';
 import { resolveAuthenticatedRequestUser } from '../../_lib/siteAuth.js';
-import {
-  resolveAliasValue,
-  resolveCharacterAliasMap,
-  resolvePoolAliasMap,
-} from '../../../shared/idAliasService.js';
+import { resolveAliasValue, resolveCharacterAliasMap, resolvePoolAliasMap } from '../../../shared/idAliasService.js';
 import {
   serializeHistoryForUpsert,
   serializePoolForUpsert,
@@ -24,6 +20,31 @@ import {
 
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 500;
+const HISTORY_PAGE_CONCURRENCY = 4;
+const HISTORY_READ_COLUMNS = [
+  'user_id',
+  'record_id',
+  'pool_id',
+  'rarity',
+  'is_standard',
+  'special_type',
+  'item_name',
+  'timestamp',
+  'game_uid',
+  'seq_id',
+  'server_id',
+  'server_scope',
+  'region',
+  'is_free',
+  'character_id',
+  'character_name',
+  'nick_name',
+  'pity',
+  'is_new',
+  'batch_id',
+  'is_info_book',
+  'edit_version',
+].join(',');
 const MAX_WRITE_POOLS = 200;
 const MAX_WRITE_HISTORY = 1000;
 const MAX_DELETE_IDS = 1000;
@@ -58,61 +79,86 @@ function parseRequestBody(req) {
 }
 
 function normalizeRecordIds(recordIds) {
-  return [...new Set((Array.isArray(recordIds) ? recordIds : [])
-    .map((value) => {
-      const number = Number.parseInt(String(value || ''), 10);
-      return Number.isFinite(number) ? number : null;
-    })
-    .filter(value => value != null))]
-    .slice(0, MAX_DELETE_IDS);
+  return [
+    ...new Set((Array.isArray(recordIds) ? recordIds : []).map((value) => String(value ?? '').trim()).filter(Boolean)),
+  ].slice(0, MAX_DELETE_IDS);
 }
 
 function normalizePoolId(value) {
-  return String(value || '').trim().slice(0, 160);
+  return String(value || '')
+    .trim()
+    .slice(0, 160);
 }
 
 function normalizeAccountText(value, maxLength = 160) {
-  return String(value || '').trim().slice(0, maxLength);
+  return String(value || '')
+    .trim()
+    .slice(0, maxLength);
+}
+
+async function loadHistoryPageForUser(adminClient, userId, page) {
+  const from = page * PAGE_SIZE;
+  const to = from + PAGE_SIZE - 1;
+  const { data, error } = await adminClient
+    .from('history')
+    .select(HISTORY_READ_COLUMNS)
+    .eq('user_id', userId)
+    .order('record_id', { ascending: true })
+    .range(from, to);
+
+  if (error) {
+    throw error;
+  }
+
+  return Array.isArray(data) ? data : [];
+}
+
+async function loadHistoryPagesForUser(adminClient, userId, pageCount) {
+  const pages = Array.from({ length: pageCount });
+  let nextPage = 0;
+
+  const worker = async () => {
+    while (nextPage < pageCount) {
+      const page = nextPage;
+      nextPage += 1;
+      pages[page] = await loadHistoryPageForUser(adminClient, userId, page);
+    }
+  };
+
+  const workerCount = Math.min(HISTORY_PAGE_CONCURRENCY, pageCount);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return pages.flat();
 }
 
 async function loadAllHistoryForUser(adminClient, userId) {
-  const allHistory = [];
+  const { count, error: countError } = await adminClient
+    .from('history')
+    .select('record_id', { count: 'exact', head: true })
+    .eq('user_id', userId);
 
-  for (let page = 0; page < MAX_PAGES; page += 1) {
-    const from = page * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
-    const { data, error } = await adminClient
-      .from('history')
-      .select('*')
-      .eq('user_id', userId)
-      .order('record_id', { ascending: true })
-      .range(from, to);
-
-    if (error) {
-      throw error;
-    }
-
-    const rows = Array.isArray(data) ? data : [];
-    allHistory.push(...rows);
-    if (rows.length < PAGE_SIZE) {
-      return {
-        rows: allHistory,
-        truncated: false,
-      };
-    }
+  if (countError) {
+    throw countError;
   }
 
+  const totalRows = Math.max(0, Number(count) || 0);
+  if (totalRows === 0) {
+    return {
+      rows: [],
+      truncated: false,
+    };
+  }
+
+  const totalPages = Math.ceil(totalRows / PAGE_SIZE);
+  const pageCount = Math.min(totalPages, MAX_PAGES);
+  const rows = await loadHistoryPagesForUser(adminClient, userId, pageCount);
+
   return {
-    rows: allHistory,
-    truncated: true,
+    rows,
+    truncated: totalPages > MAX_PAGES,
   };
 }
 
-async function loadHistorySeqKeysForUser(adminClient, userId, {
-  gameUid = '',
-  serverId = '',
-  region = '',
-} = {}) {
+async function loadHistorySeqKeysForUser(adminClient, userId, { gameUid = '', serverId = '', region = '' } = {}) {
   const keys = [];
   const normalizedGameUid = String(gameUid || '').trim();
   const normalizedServerId = String(serverId || '').trim();
@@ -137,31 +183,31 @@ async function loadHistorySeqKeysForUser(adminClient, userId, {
       query = query.eq('region', normalizedRegion);
     }
 
-    const { data, error } = await query
-      .order('record_id', { ascending: true })
-      .range(from, to);
+    const { data, error } = await query.order('record_id', { ascending: true }).range(from, to);
     if (error) throw error;
 
     const rows = Array.isArray(data) ? data : [];
-    keys.push(...rows.map((row) => {
-      const keyRow = {
-        seqId: row.seq_id,
-        seq_id: row.seq_id,
-        gameUid: row.game_uid,
-        game_uid: row.game_uid,
-        poolId: row.pool_id,
-        pool_id: row.pool_id,
-        serverId: row.server_id,
-        server_id: row.server_id,
-        region: row.region,
-      };
+    keys.push(
+      ...rows.map((row) => {
+        const keyRow = {
+          seqId: row.seq_id,
+          seq_id: row.seq_id,
+          gameUid: row.game_uid,
+          game_uid: row.game_uid,
+          poolId: row.pool_id,
+          pool_id: row.pool_id,
+          serverId: row.server_id,
+          server_id: row.server_id,
+          region: row.region,
+        };
 
-      return {
-        ...keyRow,
-        accountKey: buildGameAccountKey(keyRow),
-        account_key: buildGameAccountKey(keyRow),
-      };
-    }));
+        return {
+          ...keyRow,
+          accountKey: buildGameAccountKey(keyRow),
+          account_key: buildGameAccountKey(keyRow),
+        };
+      })
+    );
 
     if (rows.length < PAGE_SIZE) {
       return {
@@ -185,7 +231,9 @@ async function loadHistoryDedupeRowsForUser(adminClient, userId) {
     const to = from + PAGE_SIZE - 1;
     const { data, error } = await adminClient
       .from('history')
-      .select('seq_id, game_uid, pool_id, server_id, region, timestamp, character_name, item_name, character_id, rarity, is_free')
+      .select(
+        'seq_id, game_uid, pool_id, server_id, region, timestamp, character_name, item_name, character_id, rarity, is_free'
+      )
       .eq('user_id', userId)
       .order('record_id', { ascending: true })
       .range(from, to);
@@ -240,24 +288,32 @@ function getDedupeAccountKey(row) {
     return '';
   }
 
-  return buildGameAccountKey({
-    gameUid,
-    serverId: getDedupeServerId(row),
-    region: getDedupeRegion(row),
-  }) || gameUid;
+  return (
+    buildGameAccountKey({
+      gameUid,
+      serverId: getDedupeServerId(row),
+      region: getDedupeRegion(row),
+    }) || gameUid
+  );
 }
 
 function getDedupeItemIdentities(row) {
-  return [...new Set([
-    row?.character_id,
-    row?.item_id,
-    row?.charId,
-    row?.weaponId,
-    row?.character_name,
-    row?.characterName,
-    row?.item_name,
-    row?.name,
-  ].map(value => normalizeDedupeValue(value)).filter(Boolean))];
+  return [
+    ...new Set(
+      [
+        row?.character_id,
+        row?.item_id,
+        row?.charId,
+        row?.weaponId,
+        row?.character_name,
+        row?.characterName,
+        row?.item_name,
+        row?.name,
+      ]
+        .map((value) => normalizeDedupeValue(value))
+        .filter(Boolean)
+    ),
+  ];
 }
 
 function buildHistoryDedupeKeys(row) {
@@ -316,7 +372,7 @@ function buildHistoryDedupeKeys(row) {
 function createHistoryDedupeSet(rows) {
   const dedupeKeys = new Set();
   (Array.isArray(rows) ? rows : []).forEach((row) => {
-    buildHistoryDedupeKeys(row).forEach(key => dedupeKeys.add(key));
+    buildHistoryDedupeKeys(row).forEach((key) => dedupeKeys.add(key));
   });
   return dedupeKeys;
 }
@@ -328,7 +384,7 @@ function filterDuplicateHistoryRows(rows, existingRows) {
 
   (Array.isArray(rows) ? rows : []).forEach((row) => {
     const rowKeys = buildHistoryDedupeKeys(row);
-    const duplicate = rowKeys.some(key => dedupeKeys.has(key));
+    const duplicate = rowKeys.some((key) => dedupeKeys.has(key));
 
     if (duplicate) {
       duplicateCount += 1;
@@ -336,7 +392,7 @@ function filterDuplicateHistoryRows(rows, existingRows) {
     }
 
     newRows.push(row);
-    rowKeys.forEach(key => dedupeKeys.add(key));
+    rowKeys.forEach((key) => dedupeKeys.add(key));
   });
 
   return {
@@ -345,10 +401,7 @@ function filterDuplicateHistoryRows(rows, existingRows) {
   };
 }
 
-function formatHistoryRows(historyRows, {
-  poolAliasMap,
-  characterAliasMap,
-} = {}) {
+function formatHistoryRows(historyRows, { poolAliasMap, characterAliasMap } = {}) {
   return (Array.isArray(historyRows) ? historyRows : []).map((row) => ({
     id: row.record_id,
     rarity: row.rarity,
@@ -370,21 +423,26 @@ function formatHistoryRows(historyRows, {
     is_new: row.is_new,
     isFree: row.is_free || false,
     is_free: row.is_free,
+    isInfoBook: row.is_info_book || false,
+    is_info_book: row.is_info_book,
+    editVersion: Number(row.edit_version || 1),
+    edit_version: Number(row.edit_version || 1),
     gameUid: row.game_uid,
     game_uid: row.game_uid,
     nickName: row.nick_name,
     nick_name: row.nick_name,
     serverId: row.server_id,
     server_id: row.server_id,
+    serverScope: row.server_scope,
+    server_scope: row.server_scope,
     region: row.region,
   }));
 }
 
 function normalizeTextValues(values) {
-  return [...new Set((Array.isArray(values) ? values : [])
-    .map(value => String(value || '').trim())
-    .filter(Boolean))]
-    .slice(0, 1000);
+  return [
+    ...new Set((Array.isArray(values) ? values : []).map((value) => String(value || '').trim()).filter(Boolean)),
+  ].slice(0, 1000);
 }
 
 async function resolveAliasMapOptional(resolver, supabaseClient, ids, preferredSource, { optional = false } = {}) {
@@ -403,7 +461,9 @@ async function handleResolveAccountGachaAliases(body, res, adminClient, { option
   const characterIds = normalizeTextValues(body.characterIds);
   const [poolAliasMap, characterAliasMap] = await Promise.all([
     resolveAliasMapOptional(resolvePoolAliasMap, adminClient, poolIds, 'official_api', { optional: optionalAliases }),
-    resolveAliasMapOptional(resolveCharacterAliasMap, adminClient, characterIds, 'official_api', { optional: optionalAliases }),
+    resolveAliasMapOptional(resolveCharacterAliasMap, adminClient, characterIds, 'official_api', {
+      optional: optionalAliases,
+    }),
   ]);
 
   return res.status(200).json({
@@ -419,24 +479,24 @@ function buildHistoryAccountKeyFromRow(row) {
     return '';
   }
 
-  return buildGameAccountKey({
-    gameUid,
-    serverId: row?.server_id || row?.serverId,
-    region: row?.region || row?.serverRegion,
-  }) || gameUid;
+  return (
+    buildGameAccountKey({
+      gameUid,
+      serverId: row?.server_id || row?.serverId,
+      region: row?.region || row?.serverRegion,
+    }) || gameUid
+  );
 }
 
-function matchesServerLabelUpdateTarget(row, {
-  accountKey = '',
-  currentServerId = '',
-  currentRegion = '',
-} = {}) {
+function matchesServerLabelUpdateTarget(row, { accountKey = '', currentServerId = '', currentRegion = '' } = {}) {
   const rowServerId = normalizeAccountText(row?.server_id || row?.serverId);
   const rowRegion = normalizeAccountText(row?.region || row?.serverRegion, 80);
   const rowGameUid = normalizeAccountText(row?.game_uid || row?.gameUid || row?.hg_uid || row?.hgUid, 120);
 
   if (accountKey) {
-    return buildHistoryAccountKeyFromRow(row) === accountKey || rowGameUid === accountKey || (!rowServerId && !rowRegion);
+    return (
+      buildHistoryAccountKeyFromRow(row) === accountKey || rowGameUid === accountKey || (!rowServerId && !rowRegion)
+    );
   }
 
   if (currentServerId) {
@@ -458,7 +518,9 @@ async function loadHistoryRowsForServerLabelUpdate(adminClient, userId, gameUid)
     const to = from + PAGE_SIZE - 1;
     const { data, error } = await adminClient
       .from('history')
-      .select('record_id, game_uid, server_id, region, seq_id, pool_id, timestamp, character_name, item_name, character_id, rarity, is_free')
+      .select(
+        'record_id, game_uid, server_id, region, seq_id, pool_id, timestamp, character_name, item_name, character_id, rarity, is_free'
+      )
       .eq('user_id', userId)
       .eq('game_uid', gameUid)
       .order('record_id', { ascending: true })
@@ -497,7 +559,7 @@ function collectDuplicateHistoryRecordIdsForServerMerge(rows, { serverId, region
       return;
     }
 
-    const isDuplicate = rowKeys.some(key => seenKeys.has(key));
+    const isDuplicate = rowKeys.some((key) => seenKeys.has(key));
     if (isDuplicate) {
       const recordId = getHistoryRecordId(row);
       if (recordId !== null) {
@@ -506,7 +568,7 @@ function collectDuplicateHistoryRecordIdsForServerMerge(rows, { serverId, region
       return;
     }
 
-    rowKeys.forEach(key => seenKeys.add(key));
+    rowKeys.forEach((key) => seenKeys.add(key));
   });
 
   return duplicateIds;
@@ -539,11 +601,7 @@ async function deleteHistoryRowsByRecordIds(adminClient, userId, recordIds) {
 
   for (let index = 0; index < recordIds.length; index += MAX_SERVER_LABEL_WRITE_IDS) {
     const chunk = recordIds.slice(index, index + MAX_SERVER_LABEL_WRITE_IDS);
-    const { error } = await adminClient
-      .from('history')
-      .delete()
-      .eq('user_id', userId)
-      .in('record_id', chunk);
+    const { error } = await adminClient.from('history').delete().eq('user_id', userId).in('record_id', chunk);
 
     if (error) throw error;
     deleted += chunk.length;
@@ -576,20 +634,21 @@ async function handleUpdateAccountServerLabel(body, res, adminClient, userId) {
   }
 
   const rows = await loadHistoryRowsForServerLabelUpdate(adminClient, userId, gameUid);
-let targetRows = rows
-  .filter(row => mergeGameUid || matchesServerLabelUpdateTarget(row, { accountKey, currentServerId, currentRegion }));
+  let targetRows = rows.filter(
+    (row) => mergeGameUid || matchesServerLabelUpdateTarget(row, { accountKey, currentServerId, currentRegion })
+  );
 
-if (!mergeGameUid && targetRows.length === 0) {
-  targetRows = rows;
-}
+  if (!mergeGameUid && targetRows.length === 0) {
+    targetRows = rows;
+  }
   const duplicateIds = mergeGameUid
     ? collectDuplicateHistoryRecordIdsForServerMerge(targetRows, { serverId, region })
     : [];
   const duplicateIdSet = new Set(duplicateIds);
   const targetIds = targetRows
-    .map(row => getHistoryRecordId(row))
-    .filter(value => !duplicateIdSet.has(value))
-    .filter(value => value !== null && value !== undefined);
+    .map((row) => getHistoryRecordId(row))
+    .filter((value) => !duplicateIdSet.has(value))
+    .filter((value) => value !== null && value !== undefined);
 
   if (targetIds.length === 0 && duplicateIds.length === 0) {
     return res.status(200).json({
@@ -615,10 +674,13 @@ if (!mergeGameUid && targetRows.length === 0) {
   });
 }
 
-async function handleSaveAccountGachaData(body, res, adminClient, userId, {
-  reconcile = true,
-  optionalAliases = false,
-} = {}) {
+async function handleSaveAccountGachaData(
+  body,
+  res,
+  adminClient,
+  userId,
+  { reconcile = true, optionalAliases = false } = {}
+) {
   const pools = Array.isArray(body.pools) ? body.pools.slice(0, MAX_WRITE_POOLS) : [];
   const history = Array.isArray(body.history) ? body.history.slice(0, MAX_WRITE_HISTORY) : [];
 
@@ -646,11 +708,11 @@ async function handleSaveAccountGachaData(body, res, adminClient, userId, {
     const poolAliasMap = await resolveAliasMapOptional(
       resolvePoolAliasMap,
       adminClient,
-      pools.map(pool => pool?.id || pool?.pool_id || pool?.poolId),
+      pools.map((pool) => pool?.id || pool?.pool_id || pool?.poolId),
       'official_api',
       { optional: optionalAliases }
     );
-    const rows = pools.map(pool => ({
+    const rows = pools.map((pool) => ({
       ...serializePoolForUpsert(
         pool,
         userId,
@@ -658,22 +720,24 @@ async function handleSaveAccountGachaData(body, res, adminClient, userId, {
       ),
       user_id: userId,
     }));
-    const { error } = await adminClient
-      .from('pools')
-      .upsert(rows, { onConflict: 'pool_id' });
+    const { error } = await adminClient.from('pools').upsert(rows, { onConflict: 'pool_id' });
     if (error) throw error;
   }
 
   if (history.length > 0) {
     if (reconcile) {
-      await reconcileOfficialPoolIds(adminClient, history.map(record => ({
-        ...record,
-        pool_id: record?.poolId || record?.pool_id,
-        name: record?.pool_name || record?.poolName,
-        type: record?.poolType || record?.type,
-      })), {
-        userId,
-      });
+      await reconcileOfficialPoolIds(
+        adminClient,
+        history.map((record) => ({
+          ...record,
+          pool_id: record?.poolId || record?.pool_id,
+          name: record?.pool_name || record?.poolName,
+          type: record?.poolType || record?.type,
+        })),
+        {
+          userId,
+        }
+      );
       await reconcileOfficialCharacterIds(adminClient, history);
     }
 
@@ -681,24 +745,27 @@ async function handleSaveAccountGachaData(body, res, adminClient, userId, {
       resolveAliasMapOptional(
         resolvePoolAliasMap,
         adminClient,
-        history.map(record => record?.poolId || record?.pool_id),
+        history.map((record) => record?.poolId || record?.pool_id),
         'official_api',
         { optional: optionalAliases }
       ),
       resolveAliasMapOptional(
         resolveCharacterAliasMap,
         adminClient,
-        history.map(record => record?.character_id || record?.item_id || record?.charId || record?.weaponId),
+        history.map((record) => record?.character_id || record?.item_id || record?.charId || record?.weaponId),
         'official_api',
         { optional: optionalAliases }
       ),
     ]);
-    const rows = history.map(record => ({
+    const rows = history.map((record) => ({
       ...serializeHistoryForUpsert(
         record,
         userId,
         resolveAliasValue(poolAliasMap, record?.poolId || record?.pool_id),
-        resolveAliasValue(characterAliasMap, record?.character_id || record?.item_id || record?.charId || record?.weaponId)
+        resolveAliasValue(
+          characterAliasMap,
+          record?.character_id || record?.item_id || record?.charId || record?.weaponId
+        )
       ),
       user_id: userId,
     }));
@@ -706,11 +773,9 @@ async function handleSaveAccountGachaData(body, res, adminClient, userId, {
     const { newRows, duplicateCount } = filterDuplicateHistoryRows(rows, existingRows);
 
     if (newRows.length > 0) {
-      await upsertHistoryRowsWithOptionalColumnFallback(newRows, (pendingRows, onConflict) => (
-        adminClient
-          .from('history')
-          .upsert(pendingRows, { onConflict })
-      ));
+      await upsertHistoryRowsWithOptionalColumnFallback(newRows, (pendingRows, onConflict) =>
+        adminClient.from('history').upsert(pendingRows, { onConflict })
+      );
     }
 
     return res.status(200).json({
@@ -739,9 +804,217 @@ async function handleSaveAccountGachaData(body, res, adminClient, userId, {
   });
 }
 
+function normalizeDetailedRecordLocator(body = {}) {
+  const recordId = normalizeAccountText(body.recordId || body.record_id, 200);
+  const gameUid = normalizeAccountText(body.gameUid || body.game_uid, 160);
+  const serverScope = normalizeAccountText(body.serverScope || body.server_scope, 160);
+  const poolId = normalizePoolId(body.currentPoolId || body.current_pool_id || body.poolId || body.pool_id);
+  const seqId = normalizeAccountText(body.seqId || body.seq_id, 200);
+  return { recordId, gameUid, serverScope, poolId, seqId };
+}
+
+function applyDetailedRecordLocator(query, userId, locator) {
+  let nextQuery = query
+    .eq('user_id', userId)
+    .eq('record_id', locator.recordId)
+    .eq('game_uid', locator.gameUid)
+    .eq('pool_id', locator.poolId)
+    .eq('seq_id', locator.seqId);
+  if (locator.serverScope) {
+    nextQuery = nextQuery.eq('server_scope', locator.serverScope);
+  }
+  return nextQuery;
+}
+
+function validateDetailedRecordLocator(locator, res) {
+  if (!locator.recordId || !locator.gameUid || !locator.poolId || !locator.seqId) {
+    sendError(res, 400, '缺少记录所属账号、卡池或序号信息', 'record_scope_required');
+    return false;
+  }
+  return true;
+}
+
+async function loadDetailedHistoryRecord(adminClient, userId, locator) {
+  const query = applyDetailedRecordLocator(adminClient.from('history').select('*'), userId, locator);
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+async function loadCatalogPool(adminClient, poolId) {
+  const { data, error } = await adminClient
+    .from('pools')
+    .select('pool_id, name, type')
+    .eq('pool_id', poolId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+async function loadCatalogItem(adminClient, characterId) {
+  const { data, error } = await adminClient
+    .from('characters')
+    .select('id, name, rarity, type')
+    .eq('id', characterId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+function buildChangedFields(oldValues, newValues) {
+  return Object.keys(newValues).filter((field) => oldValues[field] !== newValues[field]);
+}
+
+async function handlePatchDetailedHistoryRecord(req, res, adminClient, userId) {
+  const body = parseRequestBody(req);
+  const locator = normalizeDetailedRecordLocator(body);
+  if (!validateDetailedRecordLocator(locator, res)) return;
+
+  const expectedVersion = Number(body.editVersion ?? body.edit_version);
+  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
+    return sendError(res, 400, '记录版本无效，请刷新后重试', 'edit_version_required');
+  }
+
+  const current = await loadDetailedHistoryRecord(adminClient, userId, locator);
+  if (!current) {
+    return sendError(res, 404, '没有找到这条记录，或它不属于当前用户', 'history_record_not_found');
+  }
+  if (Number(current.edit_version || 1) !== expectedVersion) {
+    return sendError(res, 409, '这条记录已在其他页面被修改，请刷新后重试', 'history_record_conflict');
+  }
+
+  const changes = body.changes && typeof body.changes === 'object' ? body.changes : {};
+  const update = {};
+
+  if (Object.prototype.hasOwnProperty.call(changes, 'timestamp')) {
+    const timestamp = new Date(changes.timestamp);
+    if (Number.isNaN(timestamp.getTime())) {
+      return sendError(res, 400, '抽卡时间格式无效', 'invalid_history_timestamp');
+    }
+    update.timestamp = timestamp.toISOString();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(changes, 'poolId')) {
+    const poolId = normalizePoolId(changes.poolId);
+    const pool = poolId ? await loadCatalogPool(adminClient, poolId) : null;
+    if (!pool) {
+      return sendError(res, 400, '选择的卡池不存在，请刷新卡池列表后重试', 'invalid_history_pool');
+    }
+    update.pool_id = pool.pool_id;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(changes, 'characterId')) {
+    const characterId = normalizeAccountText(changes.characterId, 200);
+    const item = characterId ? await loadCatalogItem(adminClient, characterId) : null;
+    if (!item) {
+      return sendError(res, 400, '选择的角色或武器不存在，请刷新列表后重试', 'invalid_history_item');
+    }
+    update.character_id = item.id;
+    update.character_name = item.name;
+    update.item_name = item.name;
+    update.rarity = Number(item.rarity);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(changes, 'drawMethod')) {
+    const drawMethod = String(changes.drawMethod || '');
+    if (!['normal', 'free', 'info_book'].includes(drawMethod)) {
+      return sendError(res, 400, '抽取方式无效', 'invalid_draw_method');
+    }
+    update.is_free = drawMethod === 'free';
+    update.is_info_book = drawMethod === 'info_book';
+  }
+
+  if (Object.prototype.hasOwnProperty.call(changes, 'isStandard')) {
+    if (typeof changes.isStandard !== 'boolean') {
+      return sendError(res, 400, 'UP/常驻标记格式无效', 'invalid_standard_flag');
+    }
+    update.is_standard = changes.isStandard;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(changes, 'specialType')) {
+    const specialType = changes.specialType == null || changes.specialType === '' ? null : String(changes.specialType);
+    if (specialType !== null && !['gift', 'guaranteed'].includes(specialType)) {
+      return sendError(res, 400, '特殊记录标记无效', 'invalid_special_type');
+    }
+    update.special_type = specialType;
+  }
+
+  const changedFields = buildChangedFields(current, update);
+  if (changedFields.length === 0) {
+    return res.status(200).json({
+      success: true,
+      updated: 0,
+      record: formatHistoryRows([current])[0],
+    });
+  }
+
+  const { data: mutation, error: updateError } = await adminClient.rpc('update_history_record_controlled', {
+    p_user_id: userId,
+    p_record_id: locator.recordId,
+    p_game_uid: locator.gameUid,
+    p_server_scope: locator.serverScope || null,
+    p_pool_id: locator.poolId,
+    p_seq_id: locator.seqId,
+    p_expected_version: expectedVersion,
+    p_changes: update,
+    p_reason: normalizeAccountText(body.reason, 500) || null,
+  });
+  if (updateError?.code === '23505') {
+    return sendError(res, 409, '目标卡池中已经存在相同序号的记录，请检查卡池选择', 'history_record_duplicate');
+  }
+  if (updateError?.code === '40001') {
+    return sendError(res, 409, '这条记录已在其他页面被修改，请刷新后重试', 'history_record_conflict');
+  }
+  if (updateError?.code === 'P0002') {
+    return sendError(res, 404, '没有找到这条记录，或它不属于当前用户', 'history_record_not_found');
+  }
+  if (updateError) throw updateError;
+  const updated = mutation?.record || null;
+  if (!updated) {
+    return sendError(res, 409, '这条记录已在其他页面被修改，请刷新后重试', 'history_record_conflict');
+  }
+  return res.status(200).json({
+    success: true,
+    updated: 1,
+    record: formatHistoryRows([updated])[0],
+  });
+}
+
+async function handleDeleteDetailedHistoryRecord(body, res, adminClient, userId) {
+  const locator = normalizeDetailedRecordLocator(body);
+  if (!validateDetailedRecordLocator(locator, res)) return;
+  const current = await loadDetailedHistoryRecord(adminClient, userId, locator);
+  if (!current) {
+    return sendError(res, 404, '没有找到这条记录，或它不属于当前用户', 'history_record_not_found');
+  }
+
+  const { error } = await adminClient.rpc('delete_history_record_controlled', {
+    p_user_id: userId,
+    p_record_id: locator.recordId,
+    p_game_uid: locator.gameUid,
+    p_server_scope: locator.serverScope || null,
+    p_pool_id: locator.poolId,
+    p_seq_id: locator.seqId,
+    p_reason: normalizeAccountText(body.reason, 500) || '用户删除异常记录',
+  });
+  if (error?.code === 'P0002') {
+    return sendError(res, 404, '没有找到这条记录，或它不属于当前用户', 'history_record_not_found');
+  }
+  if (error) throw error;
+
+  return res.status(200).json({
+    success: true,
+    deleted: { history: 1, pools: 0 },
+  });
+}
+
 async function handleDeleteAccountGachaData(req, res, adminClient, userId) {
   const body = parseRequestBody(req);
   const action = String(body.action || '').trim();
+
+  if (action === 'record') {
+    return handleDeleteDetailedHistoryRecord(body, res, adminClient, userId);
+  }
 
   if (action === 'records') {
     const recordIds = normalizeRecordIds(body.recordIds);
@@ -755,18 +1028,26 @@ async function handleDeleteAccountGachaData(req, res, adminClient, userId) {
       });
     }
 
-    const { error } = await adminClient
-      .from('history')
-      .delete()
-      .eq('user_id', userId)
-      .in('record_id', recordIds);
+    const { data, error } = await adminClient.rpc('delete_history_records_controlled', {
+      p_user_id: userId,
+      p_record_ids: recordIds,
+      p_reason: '用户批量删除记录',
+    });
 
+    if (error?.code === '21000' || String(error?.message || '').includes('ambiguous_history_record_id')) {
+      return sendError(
+        res,
+        409,
+        '所选记录 ID 跨多个游戏账号重复，请刷新页面后按完整记录重新删除',
+        'ambiguous_history_record_id'
+      );
+    }
     if (error) throw error;
 
     return res.status(200).json({
       success: true,
       deleted: {
-        history: recordIds.length,
+        history: Number(data?.deleted || 0),
         pools: 0,
       },
     });
@@ -778,11 +1059,7 @@ async function handleDeleteAccountGachaData(req, res, adminClient, userId) {
       return sendError(res, 400, 'Missing pool id', 'pool_id_required');
     }
 
-    const { error } = await adminClient
-      .from('history')
-      .delete()
-      .eq('user_id', userId)
-      .eq('pool_id', poolId);
+    const { error } = await adminClient.from('history').delete().eq('user_id', userId).eq('pool_id', poolId);
 
     if (error) throw error;
 
@@ -801,11 +1078,7 @@ async function handleDeleteAccountGachaData(req, res, adminClient, userId) {
       return sendError(res, 400, 'Missing pool id', 'pool_id_required');
     }
 
-    const { error } = await adminClient
-      .from('pools')
-      .delete()
-      .eq('user_id', userId)
-      .eq('pool_id', poolId);
+    const { error } = await adminClient.from('pools').delete().eq('user_id', userId).eq('pool_id', poolId);
 
     if (error) throw error;
 
@@ -819,16 +1092,10 @@ async function handleDeleteAccountGachaData(req, res, adminClient, userId) {
   }
 
   if (action === 'all') {
-    const { error: historyError } = await adminClient
-      .from('history')
-      .delete()
-      .eq('user_id', userId);
+    const { error: historyError } = await adminClient.from('history').delete().eq('user_id', userId);
     if (historyError) throw historyError;
 
-    const { error: poolError } = await adminClient
-      .from('pools')
-      .delete()
-      .eq('user_id', userId);
+    const { error: poolError } = await adminClient.from('pools').delete().eq('user_id', userId);
     if (poolError) throw poolError;
 
     return res.status(200).json({
@@ -846,10 +1113,12 @@ async function handleDeleteAccountGachaData(req, res, adminClient, userId) {
 export default async function accountGachaDataHandler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
-  if (rejectDisallowedBrowserOrigin(req, res, {
-    methods: 'GET, POST, DELETE, OPTIONS',
-    headers: 'Content-Type, Authorization',
-  })) {
+  if (
+    rejectDisallowedBrowserOrigin(req, res, {
+      methods: 'GET, POST, PATCH, DELETE, OPTIONS',
+      headers: 'Content-Type, Authorization',
+    })
+  ) {
     return;
   }
 
@@ -858,8 +1127,8 @@ export default async function accountGachaDataHandler(req, res) {
     return;
   }
 
-  if (!['GET', 'POST', 'DELETE'].includes(req.method)) {
-    res.setHeader('Allow', 'GET, POST, DELETE');
+  if (!['GET', 'POST', 'PATCH', 'DELETE'].includes(req.method)) {
+    res.setHeader('Allow', 'GET, POST, PATCH, DELETE');
     sendError(res, 405, 'Method not allowed', 'method_not_allowed');
     return;
   }
@@ -867,7 +1136,8 @@ export default async function accountGachaDataHandler(req, res) {
   const adminClient = getSupabaseAdminClient();
   const authResult = await resolveAuthenticatedRequestUser(req, {
     adminClient,
-    touch: Boolean(adminClient),
+    // 应用初始化已有独立的 last_seen 更新；GET 避免为大数据读取增加两次跨网写入。
+    touch: Boolean(adminClient) && req.method !== 'GET',
   });
 
   if (!authResult.ok) {
@@ -912,17 +1182,18 @@ export default async function accountGachaDataHandler(req, res) {
       return;
     }
 
+    if (req.method === 'PATCH') {
+      await handlePatchDetailedHistoryRecord(req, res, dbClient, authResult.user.id);
+      return;
+    }
+
     const url = getRequestUrl(req);
     if (url.searchParams.get('mode') === 'seq-keys') {
-      const { keys, truncated } = await loadHistorySeqKeysForUser(
-        dbClient,
-        authResult.user.id,
-        {
-          gameUid: url.searchParams.get('gameUid') || '',
-          serverId: url.searchParams.get('serverId') || '',
-          region: url.searchParams.get('region') || '',
-        }
-      );
+      const { keys, truncated } = await loadHistorySeqKeysForUser(dbClient, authResult.user.id, {
+        gameUid: url.searchParams.get('gameUid') || '',
+        serverId: url.searchParams.get('serverId') || '',
+        region: url.searchParams.get('region') || '',
+      });
       res.status(200).json({
         success: true,
         source: authResult.source || 'unknown',
@@ -932,9 +1203,7 @@ export default async function accountGachaDataHandler(req, res) {
           pageSize: PAGE_SIZE,
           truncated,
         },
-        warnings: truncated
-          ? [{ code: 'history_seq_key_page_limit_reached' }]
-          : [],
+        warnings: truncated ? [{ code: 'history_seq_key_page_limit_reached' }] : [],
       });
       return;
     }
@@ -944,14 +1213,14 @@ export default async function accountGachaDataHandler(req, res) {
       resolveAliasMapOptional(
         resolvePoolAliasMap,
         dbClient,
-        rows.map(row => row?.pool_id),
+        rows.map((row) => row?.pool_id),
         'official_api',
         { optional: !useAdminFeatures }
       ),
       resolveAliasMapOptional(
         resolveCharacterAliasMap,
         dbClient,
-        rows.map(row => row?.character_id),
+        rows.map((row) => row?.character_id),
         'official_api',
         { optional: !useAdminFeatures }
       ),
@@ -969,9 +1238,7 @@ export default async function accountGachaDataHandler(req, res) {
         pageSize: PAGE_SIZE,
         truncated,
       },
-      warnings: truncated
-        ? [{ code: 'history_page_limit_reached' }]
-        : [],
+      warnings: truncated ? [{ code: 'history_page_limit_reached' }] : [],
     });
   } catch (error) {
     sendError(
