@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { rejectDisallowedBrowserOrigin } from '../../_lib/http.js';
+import { attachPoolSixStarRoster, buildPoolSixStarRosterMap } from '../../_lib/poolCatalogRoster.js';
 import {
   buildPublicCacheKey,
   PUBLIC_CACHE_CONTROL,
@@ -11,10 +12,7 @@ import {
 } from '../../_lib/publicCache.js';
 import { serverLogger } from '../../_lib/serverLogger.js';
 import { resolveSupabaseServerKey, resolveSupabaseUrl } from '../../_lib/supabaseEnv.js';
-import {
-  buildVersionCalendarPayload,
-  mergeVersionTimelineConfig,
-} from '../../_lib/versionCalendarSnapshot.js';
+import { buildVersionCalendarPayload, mergeVersionTimelineConfig } from '../../_lib/versionCalendarSnapshot.js';
 
 // 内存缓存
 const cache = {
@@ -171,6 +169,7 @@ function dedupeVisiblePoolRecords(records) {
 }
 
 function formatVisiblePoolRecord(record) {
+  const hasSixStarRoster = Array.isArray(record?.six_star_entities);
   return {
     id: record.pool_id,
     name: record.name,
@@ -189,6 +188,12 @@ function formatVisiblePoolRecord(record) {
     start_time: record.start_time || null,
     end_time: record.end_time || null,
     featured_characters: record.featured_characters || null,
+    ...(hasSixStarRoster
+      ? {
+          six_star_entities: record.six_star_entities,
+          six_star_roster_complete: record.six_star_roster_complete === true,
+        }
+      : {}),
   };
 }
 
@@ -345,6 +350,36 @@ async function fetchPublicProfilesMap(supabase, userIds = []) {
   return new Map((data || []).map((profile) => [profile.id, profile]));
 }
 
+async function fetchPoolSixStarRosterMap(supabase, poolIds = []) {
+  const normalizedPoolIds = [...new Set((poolIds || []).filter(Boolean).map(String))];
+  if (normalizedPoolIds.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await supabase
+    .from('pool_characters')
+    .select(
+      `
+      pool_id,
+      character_id,
+      is_up,
+      characters (
+        id,
+        name,
+        rarity,
+        type
+      )
+    `
+    )
+    .in('pool_id', normalizedPoolIds);
+
+  if (error) {
+    throw error;
+  }
+
+  return buildPoolSixStarRosterMap(data || [], normalizedPoolIds);
+}
+
 async function fetchPoolCatalog(supabase) {
   const { data, error } = await supabase
     .from('pools')
@@ -357,19 +392,40 @@ async function fetchPoolCatalog(supabase) {
   }
 
   const poolRows = data || [];
-  const profilesMap = await fetchPublicProfilesMap(
-    supabase,
-    poolRows.map((row) => row.user_id)
-  );
+  const poolIds = poolRows.map((row) => row.pool_id).filter(Boolean);
+  const [profilesMap, rosterResult] = await Promise.all([
+    fetchPublicProfilesMap(
+      supabase,
+      poolRows.map((row) => row.user_id)
+    ),
+    fetchPoolSixStarRosterMap(supabase, poolIds)
+      .then((rosterMap) => ({ rosterMap, error: null }))
+      .catch((rosterError) => ({
+        rosterMap: new Map(poolIds.map((poolId) => [poolId, []])),
+        error: rosterError,
+      })),
+  ]);
 
-  return poolRows
+  if (rosterResult.error) {
+    serverLogger.error('stats.pool_catalog.roster_unavailable', {
+      message: rosterResult.error?.message || String(rosterResult.error),
+    });
+  }
+
+  const records = poolRows
     .map((row) => ({
-      ...row,
+      ...attachPoolSixStarRoster(row, rosterResult.rosterMap),
       creator_username: profilesMap.get(row.user_id)?.username || null,
       creator_role: profilesMap.get(row.user_id)?.role || null,
     }))
     .sort(sortPoolCatalogRecords)
     .map(formatVisiblePoolRecord);
+
+  return {
+    data: records,
+    partial: Boolean(rosterResult.error),
+    error: rosterResult.error,
+  };
 }
 
 async function fetchVersionCalendarCharacters(supabase) {
@@ -416,11 +472,7 @@ async function fetchActiveVersionCalendar(supabase) {
     serverLogger.error('Failed to read version timeline config; using snapshots', error);
   }
 
-  const configuredSnapshots = mergeVersionTimelineConfig(
-    snapshots,
-    timelineConfig?.value,
-    timelineConfig?.updated_at,
-  );
+  const configuredSnapshots = mergeVersionTimelineConfig(snapshots, timelineConfig?.value, timelineConfig?.updated_at);
   const [visiblePools, characterRows] = await Promise.all([
     fetchVisiblePools(supabase),
     fetchVersionCalendarCharacters(supabase),
@@ -641,27 +693,37 @@ async function handlePoolCatalog(supabase, res, now, context) {
     cache.poolCatalog !== null &&
     isFreshTypeCache('pool_catalog', cache.poolCatalogLastFetch, now, context.cacheKey)
   ) {
+    const catalogMeta = getTypeMeta('pool_catalog');
     return sendStatsJson(res, 'pool_catalog', {
       cached: true,
+      partial: Boolean(catalogMeta?.partial),
       data: { pools: cache.poolCatalog },
       source: 'memory-cache',
       context,
       lastFetch: cache.poolCatalogLastFetch,
+      error: catalogMeta?.error || null,
     });
   }
 
-  const data = await fetchPoolCatalog(supabase);
+  const catalogResult = await fetchPoolCatalog(supabase);
+  const data = catalogResult.data;
 
   cache.poolCatalog = data || [];
   cache.poolCatalogLastFetch = now;
-  setTypeMeta('pool_catalog', context);
+  setTypeMeta('pool_catalog', {
+    ...context,
+    partial: catalogResult.partial,
+    error: catalogResult.partial ? 'pool_catalog_roster_unavailable' : null,
+  });
 
   return sendStatsJson(res, 'pool_catalog', {
     cached: false,
+    partial: catalogResult.partial,
     data: { pools: data || [] },
     source: 'origin',
     context,
     lastFetch: cache.poolCatalogLastFetch,
+    error: catalogResult.partial ? 'pool_catalog_roster_unavailable' : null,
   });
 }
 
@@ -866,10 +928,14 @@ async function handleAll(supabase, res, now, context) {
   }
 
   if (poolCatalogResult.status === 'fulfilled') {
-    result.poolCatalog = poolCatalogResult.value || [];
+    result.poolCatalog = poolCatalogResult.value.data || [];
     cache.poolCatalog = result.poolCatalog;
     cache.poolCatalogLastFetch = now;
-    setTypeMeta('pool_catalog', getAllChildContext(context, 'pool_catalog'));
+    setTypeMeta('pool_catalog', {
+      ...getAllChildContext(context, 'pool_catalog'),
+      partial: poolCatalogResult.value.partial,
+      error: poolCatalogResult.value.partial ? 'pool_catalog_roster_unavailable' : null,
+    });
   } else if (cache.poolCatalog !== null) {
     result.poolCatalog = cache.poolCatalog;
   }

@@ -1,8 +1,5 @@
 import { supabase } from '../supabaseClient.js';
-import {
-  fetchPublicApiJson,
-  shouldAllowPublicSupabaseFallback,
-} from '../services/publicResourceClient.js';
+import { fetchPublicApiJson, shouldAllowPublicSupabaseFallback } from '../services/publicResourceClient.js';
 import { characterCache, getLimitedCharacterPoolStatus } from './characterUtils.js';
 
 const POOL_ROSTER_API_CACHE_TTL = 5 * 60 * 1000;
@@ -10,6 +7,8 @@ const POOL_ROSTER_API_TIMEOUT_MS = 15000;
 
 const batchRecordsCache = new Map();
 const batchRecordsInFlight = new Map();
+const directBucketsCache = new Map();
+const directBucketsInFlight = new Map();
 
 function normalizeName(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -32,8 +31,8 @@ function isCharacterSupportedForPool(character, expectedType) {
     return false;
   }
 
-  const cachedCharacter = characterCache.searchByName(character.name, false)
-    || characterCache.searchByName(character.name, true);
+  const cachedCharacter =
+    characterCache.searchByName(character.name, false) || characterCache.searchByName(character.name, true);
 
   if (!cachedCharacter?.pool_config?.pools) {
     return true;
@@ -92,14 +91,17 @@ function ensureLeadingName(items = [], leadingName = null) {
   return [normalizedLeading, ...deduped.filter((item) => item !== normalizedLeading)];
 }
 
-export function buildBucketsFromPoolCharacters(records = [], { expectedType = 'character', currentUpName = null } = {}) {
+export function buildBucketsFromPoolCharacters(
+  records = [],
+  { expectedType = 'character', currentUpName = null } = {}
+) {
   const buckets = {
     up: [],
     offBanner: [],
     sixStar: [],
     fiveStar: [],
     fourStar: [],
-    items: []
+    items: [],
   };
 
   records.forEach((record) => {
@@ -121,7 +123,7 @@ export function buildBucketsFromPoolCharacters(records = [], { expectedType = 'c
       avatarUrl: character.avatar_url || character.avatarUrl || null,
       rarity: Number(character.rarity) || 0,
       type: character.type,
-      isUp
+      isUp,
     };
 
     buckets.items.push(entry);
@@ -152,7 +154,7 @@ export function buildBucketsFromPoolCharacters(records = [], { expectedType = 'c
     fiveStar: dedupeNames(buckets.fiveStar),
     fourStar: dedupeNames(buckets.fourStar),
     up: buckets.up,
-    offBanner: buckets.offBanner
+    offBanner: buckets.offBanner,
   };
 }
 
@@ -172,7 +174,7 @@ function buildBucketsFromCharacters(characters = [], { currentUpName = null } = 
         avatarUrl: character?.avatar_url || character?.avatarUrl || null,
         rarity: Number(character?.rarity) || 0,
         type: character?.type,
-        isUp
+        isUp,
       };
     })
     .filter(Boolean);
@@ -186,41 +188,41 @@ function buildBucketsFromCharacters(characters = [], { currentUpName = null } = 
       currentUpName
     ),
     fiveStar: dedupeNames(entries.filter((entry) => entry.rarity === 5).map((entry) => entry.name)),
-    fourStar: dedupeNames(entries.filter((entry) => entry.rarity === 4).map((entry) => entry.name))
+    fourStar: dedupeNames(entries.filter((entry) => entry.rarity === 4).map((entry) => entry.name)),
   };
 }
 
 function mergeRosterBuckets(primary, fallback, { currentUpName = null } = {}) {
   const primaryItems = Array.isArray(primary?.items) ? primary.items : [];
   const fallbackItems = Array.isArray(fallback?.items) ? fallback.items : [];
-  const mergedItems = dedupeEntries([
-    ...primaryItems,
-    ...fallbackItems
-  ]);
-  const mergedSixStar = ensureLeadingName([
-    ...(Array.isArray(primary?.sixStar) ? primary.sixStar : []),
-    ...(Array.isArray(fallback?.sixStar) ? fallback.sixStar : [])
-  ], currentUpName);
+  const mergedItems = dedupeEntries([...primaryItems, ...fallbackItems]);
+  const mergedSixStar = ensureLeadingName(
+    [
+      ...(Array.isArray(primary?.sixStar) ? primary.sixStar : []),
+      ...(Array.isArray(fallback?.sixStar) ? fallback.sixStar : []),
+    ],
+    currentUpName
+  );
 
   return {
     items: mergedItems,
     up: dedupeEntries([
       ...(Array.isArray(primary?.up) ? primary.up : []),
-      ...(Array.isArray(fallback?.up) ? fallback.up : [])
+      ...(Array.isArray(fallback?.up) ? fallback.up : []),
     ]),
     offBanner: dedupeEntries([
       ...(Array.isArray(primary?.offBanner) ? primary.offBanner : []),
-      ...(Array.isArray(fallback?.offBanner) ? fallback.offBanner : [])
+      ...(Array.isArray(fallback?.offBanner) ? fallback.offBanner : []),
     ]),
     sixStar: mergedSixStar,
     fiveStar: dedupeNames([
       ...(Array.isArray(primary?.fiveStar) ? primary.fiveStar : []),
-      ...(Array.isArray(fallback?.fiveStar) ? fallback.fiveStar : [])
+      ...(Array.isArray(fallback?.fiveStar) ? fallback.fiveStar : []),
     ]),
     fourStar: dedupeNames([
       ...(Array.isArray(primary?.fourStar) ? primary.fourStar : []),
-      ...(Array.isArray(fallback?.fourStar) ? fallback.fourStar : [])
-    ])
+      ...(Array.isArray(fallback?.fourStar) ? fallback.fourStar : []),
+    ]),
   };
 }
 
@@ -228,24 +230,30 @@ function mergeRosterBucketsByMissingRarity(primary, fallback, { currentUpName = 
   const usePrimarySixStar = Array.isArray(primary?.sixStar) && primary.sixStar.length > 0;
   const usePrimaryFiveStar = Array.isArray(primary?.fiveStar) && primary.fiveStar.length > 0;
   const usePrimaryFourStar = Array.isArray(primary?.fourStar) && primary.fourStar.length > 0;
-  const selectedNames = new Set([
-    ...(usePrimarySixStar ? primary.sixStar : (fallback?.sixStar || [])),
-    ...(usePrimaryFiveStar ? primary.fiveStar : (fallback?.fiveStar || [])),
-    ...(usePrimaryFourStar ? primary.fourStar : (fallback?.fourStar || []))
-  ].map(normalizeName).filter(Boolean));
+  const selectedNames = new Set(
+    [
+      ...(usePrimarySixStar ? primary.sixStar : fallback?.sixStar || []),
+      ...(usePrimaryFiveStar ? primary.fiveStar : fallback?.fiveStar || []),
+      ...(usePrimaryFourStar ? primary.fourStar : fallback?.fourStar || []),
+    ]
+      .map(normalizeName)
+      .filter(Boolean)
+  );
 
   const mergedItems = dedupeEntries([
     ...(Array.isArray(primary?.items) ? primary.items : []),
-    ...(Array.isArray(fallback?.items) ? fallback.items : []).filter((item) => selectedNames.has(normalizeName(item?.name)))
+    ...(Array.isArray(fallback?.items) ? fallback.items : []).filter((item) =>
+      selectedNames.has(normalizeName(item?.name))
+    ),
   ]);
 
   return {
     items: mergedItems,
-    up: dedupeEntries(usePrimarySixStar ? (primary?.up || []) : (fallback?.up || [])),
-    offBanner: dedupeEntries(usePrimarySixStar ? (primary?.offBanner || []) : (fallback?.offBanner || [])),
-    sixStar: ensureLeadingName(usePrimarySixStar ? (primary?.sixStar || []) : (fallback?.sixStar || []), currentUpName),
-    fiveStar: dedupeNames(usePrimaryFiveStar ? (primary?.fiveStar || []) : (fallback?.fiveStar || [])),
-    fourStar: dedupeNames(usePrimaryFourStar ? (primary?.fourStar || []) : (fallback?.fourStar || []))
+    up: dedupeEntries(usePrimarySixStar ? primary?.up || [] : fallback?.up || []),
+    offBanner: dedupeEntries(usePrimarySixStar ? primary?.offBanner || [] : fallback?.offBanner || []),
+    sixStar: ensureLeadingName(usePrimarySixStar ? primary?.sixStar || [] : fallback?.sixStar || [], currentUpName),
+    fiveStar: dedupeNames(usePrimaryFiveStar ? primary?.fiveStar || [] : fallback?.fiveStar || []),
+    fourStar: dedupeNames(usePrimaryFourStar ? primary?.fourStar || [] : fallback?.fourStar || []),
   };
 }
 
@@ -280,15 +288,15 @@ export function buildDynamicRosterBuckets({
   expectedType = 'character',
   currentUpName = null,
   poolType = 'limited',
-  poolInfo = null
+  poolInfo = null,
 } = {}) {
-  const fallbackCharacters = characterCache
-    .getAll({ type: expectedType })
-    .filter((character) => matchesFallbackPool(character, {
+  const fallbackCharacters = characterCache.getAll({ type: expectedType }).filter((character) =>
+    matchesFallbackPool(character, {
       expectedType,
       poolType,
-      poolInfo
-    }));
+      poolInfo,
+    })
+  );
 
   return buildBucketsFromCharacters(fallbackCharacters, { currentUpName });
 }
@@ -298,32 +306,57 @@ export async function fetchPoolRosterBuckets(poolId, { expectedType = 'character
     return null;
   }
 
-  const { data, error } = await supabase
-    .from('pool_characters')
-    .select(`
-      character_id,
-      is_up,
-      characters (
-        id,
-        name,
-        rarity,
-        type,
-        avatar_url,
-        is_limited,
-        aliases,
-        pool_config
-      )
-    `)
-    .eq('pool_id', poolId);
-
-  if (error || !Array.isArray(data) || data.length === 0) {
-    return null;
+  const cacheKey = [normalizePoolId(poolId), expectedType, normalizeName(currentUpName)].join('|');
+  const now = Date.now();
+  const cached = directBucketsCache.get(cacheKey);
+  if (cached && now - cached.lastFetch < POOL_ROSTER_API_CACHE_TTL) {
+    return cached.buckets;
   }
 
-  return buildBucketsFromPoolCharacters(data, {
-    expectedType,
-    currentUpName
+  if (directBucketsInFlight.has(cacheKey)) {
+    return directBucketsInFlight.get(cacheKey);
+  }
+
+  const request = (async () => {
+    const { data, error } = await supabase
+      .from('pool_characters')
+      .select(
+        `
+        character_id,
+        is_up,
+        characters (
+          id,
+          name,
+          rarity,
+          type,
+          avatar_url,
+          is_limited,
+          aliases,
+          pool_config
+        )
+      `
+      )
+      .eq('pool_id', poolId);
+
+    if (error || !Array.isArray(data) || data.length === 0) {
+      return null;
+    }
+
+    const buckets = buildBucketsFromPoolCharacters(data, {
+      expectedType,
+      currentUpName,
+    });
+    directBucketsCache.set(cacheKey, {
+      buckets,
+      lastFetch: Date.now(),
+    });
+    return buckets;
+  })().finally(() => {
+    directBucketsInFlight.delete(cacheKey);
   });
+
+  directBucketsInFlight.set(cacheKey, request);
+  return request;
 }
 
 function createBatchCacheKey(poolIds = []) {
@@ -335,9 +368,7 @@ function createBatchCacheKey(poolIds = []) {
 function normalizeBatchPayload(poolIds = [], payload = {}) {
   const requestedPoolIds = Array.from(new Set(poolIds.map(normalizePoolId).filter(Boolean)));
   const recordMap = new Map(requestedPoolIds.map((poolId) => [poolId, []]));
-  const poolRosters = payload?.poolRosters && typeof payload.poolRosters === 'object'
-    ? payload.poolRosters
-    : {};
+  const poolRosters = payload?.poolRosters && typeof payload.poolRosters === 'object' ? payload.poolRosters : {};
 
   Object.entries(poolRosters).forEach(([poolId, records]) => {
     const normalizedPoolId = normalizePoolId(poolId);
@@ -387,13 +418,15 @@ export async function fetchPoolRosterRecordsBatch(poolIds = [], { forceRefresh =
     const recordsByPoolId = normalizeBatchPayload(normalizedPoolIds, data?.data);
     batchRecordsCache.set(cacheKey, {
       recordsByPoolId,
-      lastFetch: Date.now()
+      lastFetch: Date.now(),
     });
 
     return recordsByPoolId;
-  })().catch(() => null).finally(() => {
-    batchRecordsInFlight.delete(cacheKey);
-  });
+  })()
+    .catch(() => null)
+    .finally(() => {
+      batchRecordsInFlight.delete(cacheKey);
+    });
 
   batchRecordsInFlight.set(cacheKey, request);
   return request;
@@ -407,14 +440,14 @@ export async function resolvePoolRosterBuckets({
   poolInfo = null,
   mergeStrategy = 'append',
   explicitRecords = null,
-  skipExplicitFetch = false
+  skipExplicitFetch = false,
 } = {}) {
   let explicitBuckets = null;
 
   if (Array.isArray(explicitRecords)) {
     explicitBuckets = buildBucketsFromPoolCharacters(explicitRecords, {
       expectedType,
-      currentUpName
+      currentUpName,
     });
   } else if (!skipExplicitFetch) {
     const batchRecords = await fetchPoolRosterRecordsBatch([poolId]).catch(() => null);
@@ -423,12 +456,12 @@ export async function resolvePoolRosterBuckets({
     if (batchRecords instanceof Map && batchRecords.has(normalizedPoolId)) {
       explicitBuckets = buildBucketsFromPoolCharacters(batchRecords.get(normalizedPoolId) || [], {
         expectedType,
-        currentUpName
+        currentUpName,
       });
     } else {
       explicitBuckets = await fetchPoolRosterBuckets(poolId, {
         expectedType,
-        currentUpName
+        currentUpName,
       });
     }
   }
@@ -437,7 +470,7 @@ export async function resolvePoolRosterBuckets({
     expectedType,
     currentUpName,
     poolType,
-    poolInfo
+    poolInfo,
   });
 
   if (explicitBuckets) {

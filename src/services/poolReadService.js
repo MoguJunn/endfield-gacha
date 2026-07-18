@@ -160,8 +160,29 @@ export function normalizeRemotePoolType(type, isLimitedWeaponFlag) {
   return type || 'standard';
 }
 
+function normalizeSixStarEntities(record) {
+  const input = record?.six_star_entities ?? record?.sixStarEntities;
+  if (!Array.isArray(input)) return [];
+
+  const seen = new Set();
+  return input.flatMap((entity) => {
+    const id = String(entity?.id || entity?.entity_id || entity?.entityId || '').trim();
+    const name = String(entity?.name || '').trim();
+    const type = entity?.type === 'weapon' ? 'weapon' : entity?.type === 'character' ? 'character' : null;
+    if (!id || !name || !type || seen.has(id)) return [];
+    seen.add(id);
+    return [{
+      id,
+      name,
+      type,
+      is_up: Boolean(entity?.is_up ?? entity?.isUp),
+    }];
+  });
+}
+
 export function formatVisiblePoolRecord(record) {
   const limitedWeaponFlag = record?.is_limited_weapon ?? record?.isLimitedWeapon;
+  const sixStarEntities = normalizeSixStarEntities(record);
 
   return {
     id: record.pool_id || record.id || null,
@@ -180,7 +201,12 @@ export function formatVisiblePoolRecord(record) {
     banner_url: record.banner_url || null,
     start_time: record.start_time || null,
     end_time: record.end_time || null,
-    featured_characters: record.featured_characters || record.featuredCharacters || null
+    featured_characters: record.featured_characters || record.featuredCharacters || null,
+    six_star_entities: sixStarEntities,
+    six_star_roster_complete: Boolean(
+      (record?.six_star_roster_complete ?? record?.sixStarRosterComplete) === true
+      && sixStarEntities.length > 0
+    )
   };
 }
 
