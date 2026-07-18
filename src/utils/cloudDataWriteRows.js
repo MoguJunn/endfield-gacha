@@ -22,16 +22,11 @@ function normalizeTimestamp(timestamp) {
 }
 
 function normalizeRecordId(record) {
-  let recordId = record.id || record.record_id;
+  const recordId = normalizeText(record.id ?? record.record_id);
+  if (recordId) return recordId;
 
-  if (typeof recordId === 'string') {
-    recordId = parseInt(recordId, 10);
-    if (Number.isNaN(recordId)) {
-      recordId = parseInt(record.seqId || record.seq_id, 10) || Date.now();
-    }
-  }
-
-  return recordId;
+  const seqId = normalizeText(record.seqId ?? record.seq_id);
+  return seqId || String(Date.now());
 }
 
 function normalizeText(value) {
@@ -97,6 +92,7 @@ export function serializeHistoryForUpsert(
     pity: clampHistoryPity(record.pity),
     is_new: Boolean(record.isNew || record.is_new),
     is_free: Boolean(record.isFree || record.is_free),
+    is_info_book: Boolean(record.isInfoBook || record.is_info_book),
     game_uid: record.gameUid || record.game_uid || null,
     nick_name: record.nickName || record.nick_name || null,
     server_id: serverId,
@@ -109,7 +105,7 @@ export function serializeHistoryForUpsert(
 export function detectMissingHistoryOptionalColumn(error) {
   const message = String(error?.message || '');
 
-  for (const column of ['character_id', 'server_id', 'server_scope', 'region']) {
+  for (const column of ['character_id', 'server_id', 'server_scope', 'region', 'is_info_book']) {
     if (
       message.includes(`history.${column} does not exist`)
       || message.includes(`Could not find the '${column}' column`)
@@ -152,7 +148,7 @@ export async function upsertHistoryRowsWithOptionalColumnFallback(rows, executeU
     },
     { rows: legacyRecords, onConflict: 'user_id,record_id' },
   ];
-  const supportedOptionalColumns = new Set(['character_id', 'server_id', 'server_scope', 'region']);
+  const supportedOptionalColumns = new Set(['character_id', 'server_id', 'server_scope', 'region', 'is_info_book']);
 
   for (const group of upsertGroups) {
     if (group.rows.length === 0) continue;
@@ -160,7 +156,7 @@ export async function upsertHistoryRowsWithOptionalColumnFallback(rows, executeU
     let onConflict = group.onConflict;
     let pendingRows = omitHistoryColumns(
       group.rows,
-      ['character_id', 'server_id', 'region'].filter(column => !supportedOptionalColumns.has(column))
+      ['character_id', 'server_id', 'region', 'is_info_book'].filter(column => !supportedOptionalColumns.has(column))
     );
 
     while (true) {
@@ -193,7 +189,7 @@ export async function upsertHistoryRowsWithOptionalColumnFallback(rows, executeU
         onConflict = 'user_id,game_uid,pool_id,seq_id';
       }
 
-      pendingRows = omitHistoryColumns(group.rows, ['character_id', 'server_id', 'region'].filter(
+      pendingRows = omitHistoryColumns(group.rows, ['character_id', 'server_id', 'region', 'is_info_book'].filter(
         column => !supportedOptionalColumns.has(column)
       ));
     }

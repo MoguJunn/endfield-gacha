@@ -9,7 +9,7 @@
  * 5. 后端直接写入 Supabase
  * 6. 前端通过轮询获取进度
  *
- * @version 1.0.0
+ * @version 1.6.1
  * @date 2026-02-24
  */
 
@@ -28,6 +28,17 @@ import {
 } from './lib/officialIdReconciliation.js';
 import { classifyCharacterIdSource } from './lib/canonicalEntityUtils.js';
 import { buildOfficialImportRecordKey } from './lib/officialImportIncremental.js';
+import {
+  normalizeOfficialImportRecord,
+  summarizeOfficialImportIssues,
+} from '../shared/officialImportRecordNormalizer.js';
+import { calculateHistoryPity } from '../shared/historyPity.js';
+import {
+  confirmOfficialImportTask,
+  getOfficialImportReview,
+  rejectOfficialImportTask,
+  stageOfficialImportTask,
+} from './lib/officialImportStaging.js';
 
 // Supabase Admin 客户端（需要 SUPABASE_SECRET_KEY；旧 service_role_key 仍兼容）
 let supabaseAdmin = null;
@@ -547,21 +558,6 @@ function buildImportPoolSummary(rawResults = []) {
   };
 }
 
-function getRecordTimestamp(record) {
-  if (record.gachaTs) {
-    const parsed = parseInt(record.gachaTs, 10);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-
-  if (record.timestamp) {
-    if (typeof record.timestamp === 'number') return record.timestamp;
-    const parsed = new Date(record.timestamp).getTime();
-    if (Number.isFinite(parsed)) return parsed;
-  }
-
-  return 0;
-}
-
 function assignBatchIds(records) {
   const timestampGroups = new Map();
 
@@ -736,62 +732,8 @@ function normalizeIsStandard(record, poolType, upCharacter) {
   return false;
 }
 
-/**
- * 计算 pity（与前端逻辑保持一致，排除免费十连）
- * pity 值钳制在 [0, 80] 范围内以满足数据库 CHECK 约束
- * 注意：API 原始数据使用驼峰命名 (rarity)，需要兼容
- * 免费十连的 pity 存储为 0（与前端 ImportManager.jsx 保持一致）
- */
 function calculatePity(records) {
-  const MAX_PITY = 80;
-  let pity = 0;
-  const processedRecords = [];
-
-  // 与旧前端一致：优先按时间升序，时间相同再按 seqId 升序
-  const sortedRecords = [...records].sort((a, b) => {
-    const timeA = getRecordTimestamp(a);
-    const timeB = getRecordTimestamp(b);
-    if (timeA !== timeB) {
-      return timeA - timeB;
-    }
-    const seqA = parseInt(a.seqId || a.seq_id || 0, 10);
-    const seqB = parseInt(b.seqId || b.seq_id || 0, 10);
-    return seqA - seqB;
-  });
-
-  for (const record of sortedRecords) {
-    const rarity = record.rarity || record.qualityLevel;
-
-    // 与旧前端保持一致：免费十连 pity 记为 0，但若该条是 6 星仍需重置计数器
-    if (record.isFree === true) {
-      processedRecords.push({
-        ...record,
-        pity: 0 // 免费十连不计入保底，存储 0 而不是 null
-      });
-      if (rarity === 6) {
-        pity = 0;
-      }
-      continue;
-    }
-
-    pity++;
-    
-    // 如果是 6 星，重置保底
-    if (rarity === 6) {
-      processedRecords.push({
-        ...record,
-        pity: Math.min(pity, MAX_PITY)
-      });
-      pity = 0;
-    } else {
-      processedRecords.push({
-        ...record,
-        pity: Math.min(pity, MAX_PITY)
-      });
-    }
-  }
-
-  return processedRecords;
+  return calculateHistoryPity(records);
 }
 
 /**
@@ -913,7 +855,7 @@ export async function savePoolsToServer(pools, userId) {
  * @param {string} userId - 用户 ID
  * @returns {Promise<Object>} 保存结果
  */
-async function saveHistoryToServer(records, userId) {
+export async function saveHistoryToServer(records, userId) {
   const supabase = getSupabaseAdmin();
   const batchSize = 100;  // 每批次处理 100 条
   const maxRetries = 3;   // 最大重试次数
@@ -1161,30 +1103,28 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
   const resolvedServerId = fallbackContext.serverId ? String(fallbackContext.serverId) : null;
   const resolvedRegion = fallbackContext.region || normalizeImportRegion(resolvedServerId, account, source);
   const processedRecords = [];
+  const stagedRecordMetadata = [];
   const supabase = getSupabaseAdmin();
   const sourcePoolIds = [];
   const sourceCharacterIds = [];
-  const officialCharacterRecords = [];
 
   for (const poolData of rawRecords.results) {
     const { type, poolType, records } = poolData;
 
     records.forEach((record) => {
-      sourcePoolIds.push(getOfficialPoolId(record, type, poolType));
-      const officialCharacterId = record.charId || record.weaponId || record.character_id || record.item_id || null;
+      const normalized = normalizeOfficialImportRecord(record, {
+        gameUid,
+        serverId: resolvedServerId,
+        region: resolvedRegion,
+        type,
+        poolType,
+        poolId: getOfficialPoolId(record, type, poolType),
+      });
+      sourcePoolIds.push(normalized.poolId);
+      const officialCharacterId = normalized.rawItemId;
       sourceCharacterIds.push(officialCharacterId);
-      if (officialCharacterId) {
-        officialCharacterRecords.push({
-          ...record,
-          id: officialCharacterId,
-          type: record.weaponId || type === 'weapon' ? 'weapon' : 'character',
-          name: record.charName || record.weaponName || record.character_name || record.item_name || record.name,
-        });
-      }
     });
   }
-
-  await reconcileOfficialCharacterIds(supabase, officialCharacterRecords);
 
   const [poolAliasMap, characterAliasMap] = await Promise.all([
     resolvePoolAliasMap(supabase, sourcePoolIds, 'official_api'),
@@ -1195,17 +1135,37 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
     const { type, poolType, records, currentUpCharacter } = poolData;
 
     // 计算 pity
-    const recordsWithPity = calculatePity(records);
+    const recordsWithPity = calculatePity(records.map((record) => {
+      const normalized = normalizeOfficialImportRecord(record, {
+        gameUid,
+        serverId: resolvedServerId,
+        region: resolvedRegion,
+        type,
+        poolType,
+        poolId: getOfficialPoolId(record, type, poolType),
+      });
+      return {
+        ...record,
+        rarity: normalized.quality,
+        itemName: normalized.itemName,
+        itemId: normalized.rawItemId,
+        itemType: normalized.itemType,
+        __officialNormalized: normalized,
+      };
+    }));
 
     for (let index = 0; index < recordsWithPity.length; index++) {
       const record = recordsWithPity[index];
+      const normalized = record.__officialNormalized;
       // 获取 seqId（兼容不同命名格式）
       const seqRaw = record.seqId || record.seq_id;
       const seqId = seqRaw !== undefined && seqRaw !== null ? String(seqRaw) : null;
-      const seqIdNum = seqId ? (parseInt(seqId, 10) || index) : index;
-      const rawPoolId = getOfficialPoolId(record, type, poolType);
+      const rawPoolId = normalized.poolId;
       const poolId = resolveAliasValue(poolAliasMap, rawPoolId);
       const poolHash = simpleStringHash(poolId || 'unknown');
+      const recordId = /^\d+$/.test(seqId || '')
+        ? (BigInt(poolHash) * 10000000n + BigInt(seqId)).toString()
+        : `${poolHash}:${seqId || index}`;
       const normalizedPoolType = getPoolTypeFromId(poolId, type, poolType);
       const uniqueKey = buildOfficialImportRecordKey({
         gameUid,
@@ -1213,7 +1173,7 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
         poolId,
         seqId,
       });
-      const rawCharacterId = record.charId || record.weaponId || record.character_id || record.item_id || null;
+      const rawCharacterId = normalized.rawItemId;
       const characterId = normalizeResolvedCharacterIdForStorage(
         rawCharacterId,
         resolveAliasValue(characterAliasMap, rawCharacterId)
@@ -1224,14 +1184,11 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
         continue;
       }
 
-      // 获取角色/武器名称（API 原始字段是 charName/weaponName）
-      const characterName = record.charName || record.weaponName || record.character_name || record.name || '未知';
-      
-      // 获取稀有度（API 原始字段是 rarity）
-      const rarity = record.rarity || record.qualityLevel || 4;
+      const characterName = normalized.itemName;
+      const rarity = normalized.quality;
       const normalizedRecord = {
         ...record,
-        rarity: parseInt(rarity, 10),
+        rarity,
         character_name: characterName,
         item_name: characterName,
         name: characterName
@@ -1241,13 +1198,7 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
       const isStandard = normalizeIsStandard(normalizedRecord, normalizedPoolType, currentUpCharacter);
       
       // 获取时间戳（API 原始字段是 gachaTs，是毫秒级字符串）
-      const timestamp = record.gachaTs 
-        ? new Date(parseInt(record.gachaTs, 10)).toISOString()
-        : record.timestamp 
-          ? (typeof record.timestamp === 'number' 
-              ? new Date(record.timestamp).toISOString() 
-              : new Date(record.timestamp).toISOString())
-          : new Date().toISOString();
+      const timestamp = normalized.timestamp;
 
       // 处理 pity 值：确保在 0-80 范围内（与前端 ImportManager.jsx 保持一致）
       // null/undefined 转换为 0，负数转 0，超过 80 截断为 80，避免字符串/NaN 造成约束错误
@@ -1261,14 +1212,14 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
 
       processedRecords.push({
         // 主键和关联字段
-        record_id: String(poolHash * 10000000 + seqIdNum),
+        record_id: recordId,
         pool_id: poolId,
         seq_id: seqId,
         game_uid: gameUid,
         nick_name: nickName,
         
         // 数据库必需字段（与前端 ImportManager.jsx 保持一致）
-        rarity: parseInt(rarity, 10),
+        rarity,
         character_name: characterName,
         item_name: characterName,
         character_id: characterId,
@@ -1276,8 +1227,9 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
         
         // 计算字段
         pity: pityValue,
-        is_free: Boolean(record.isFree),
-        is_new: Boolean(record.isNew),
+        is_free: normalized.isFree,
+        is_info_book: normalized.isInfoBook,
+        is_new: normalized.isNew,
         is_standard: isStandard,
         
         // 区服信息
@@ -1290,12 +1242,212 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
         
         // 时间戳
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+      });
+      stagedRecordMetadata.push({
+        normalized,
+        issues: normalized.issues,
+        rawMin: normalized.rawMin,
+        blocked: normalized.blocked,
       });
     }
   }
 
-  return assignBatchIds(processedRecords);
+  const records = assignBatchIds(processedRecords);
+  const normalizedRecords = stagedRecordMetadata.map((item) => item.normalized);
+
+  return {
+    records,
+    normalizedRecords,
+    stagedRecords: records.map((historyRecord, index) => ({
+      historyRecord,
+      ...stagedRecordMetadata[index],
+    })),
+    reviewSummary: summarizeOfficialImportIssues(normalizedRecords),
+  };
+}
+
+function sanitizeStagedHistoryRecord(record = {}) {
+  const allowedFields = [
+    'record_id',
+    'pool_id',
+    'seq_id',
+    'game_uid',
+    'nick_name',
+    'rarity',
+    'character_name',
+    'item_name',
+    'character_id',
+    'timestamp',
+    'pity',
+    'is_free',
+    'is_info_book',
+    'is_new',
+    'is_standard',
+    'server_id',
+    'region',
+    'batch_id',
+    'special_type',
+    'created_at',
+    'updated_at',
+  ];
+
+  return Object.fromEntries(
+    allowedFields
+      .filter((field) => Object.prototype.hasOwnProperty.call(record, field))
+      .map((field) => [field, record[field]])
+  );
+}
+
+function sanitizeStagedPool(pool = {}) {
+  const poolId = normalizeString(pool.pool_id || pool.id || pool.poolId, 200);
+  if (!poolId) return null;
+  const rawType = normalizeString(pool.type || pool.pool_type || pool.poolType, 80);
+  const type = rawType === 'limited_character'
+    ? 'limited'
+    : rawType === 'limited_weapon'
+      ? 'weapon'
+      : ['extra', 'limited', 'standard', 'weapon', 'beginner'].includes(rawType)
+        ? rawType
+        : 'standard';
+  return {
+    pool_id: poolId,
+    name: normalizeString(pool.name || pool.pool_name || pool.poolName, 300) || poolId,
+    type,
+    start_time: pool.start_time || pool.startTime || null,
+    end_time: pool.end_time || pool.endTime || null,
+    up_character: normalizeString(pool.up_character || pool.upCharacter, 300) || null,
+    featured_characters: Array.isArray(pool.featured_characters) ? pool.featured_characters : null,
+    created_at: pool.created_at || null,
+  };
+}
+
+async function commitStagedOfficialImport({ task, rows }) {
+  const supabase = getSupabaseAdmin();
+  const keptRows = Array.isArray(rows) ? rows : [];
+  if (keptRows.length === 0) {
+    return {
+      savedRecords: 0,
+      skippedRecords: Number(task?.summary?.newRecords || 0),
+      publicAnalyticsRefresh: { ok: true, skipped: true, reason: 'no_records_selected' },
+    };
+  }
+
+  const normalizedEntries = keptRows.map((row) => row?.normalized_record || {});
+  const officialCharacterRecords = normalizedEntries
+    .map((entry) => entry.normalized || {})
+    .filter((record) => record.rawItemId || record.itemId)
+    .map((record) => ({
+      id: record.rawItemId || record.itemId,
+      itemId: record.rawItemId || record.itemId,
+      itemName: record.itemName || null,
+      itemType: record.itemType || 'unknown',
+      quality: record.quality ?? null,
+      name: record.itemName || null,
+      type: record.itemType || 'unknown',
+      rarity: record.quality ?? null,
+    }));
+
+  await reconcileOfficialCharacterIds(supabase, officialCharacterRecords);
+  const characterAliasMap = await resolveCharacterAliasMap(
+    supabase,
+    officialCharacterRecords.map((record) => record.id),
+    'official_api'
+  );
+
+  const historyRecords = normalizedEntries.map((entry) => {
+    const historyRecord = sanitizeStagedHistoryRecord(entry.history || {});
+    const normalized = entry.normalized || {};
+    const rawCharacterId = normalized.rawItemId || normalized.itemId || null;
+    return {
+      ...historyRecord,
+      character_id: normalizeResolvedCharacterIdForStorage(
+        rawCharacterId,
+        resolveAliasValue(characterAliasMap, rawCharacterId)
+      ),
+    };
+  });
+
+  const pools = Array.from(new Map(
+    normalizedEntries
+      .map((entry) => entry.pool)
+      .filter((pool) => pool?.pool_id)
+      .map((pool) => [String(pool.pool_id), pool])
+  ).values()).map(sanitizeStagedPool).filter(Boolean);
+
+  const { data: atomicResult, error: atomicError } = await supabase.rpc(
+    'commit_official_import_records',
+    {
+      p_task_id: task.id,
+      p_user_id: task.user_id,
+      p_pools: pools,
+      p_history: historyRecords,
+    }
+  );
+  if (atomicError) {
+    throw new Error(`正式写入导入记录失败：${atomicError.message || atomicError}`);
+  }
+
+  const savedRecords = Number.isFinite(Number(atomicResult?.savedRecords))
+    ? Number(atomicResult.savedRecords)
+    : historyRecords.length;
+  let poolReconciliation = { ok: true };
+  try {
+    if (pools.length > 0) {
+      await reconcileOfficialPoolIds(supabase, pools, task.user_id);
+    }
+  } catch (error) {
+    poolReconciliation = {
+      ok: false,
+      warning: String(error?.message || error).slice(0, 500),
+    };
+    console.warn('[FullImportService] 卡池目录合并失败，正式历史已安全写入:', poolReconciliation.warning);
+  }
+  const publicAnalyticsRefresh = await refreshPublicAnalyticsAfterImport(supabase, {
+    savedRecords,
+    reason: `official-import-confirm:${task.source}:${task.import_mode}`,
+  });
+
+  return {
+    savedRecords,
+    skippedRecords: Number.isFinite(Number(atomicResult?.skippedRecords))
+      ? Number(atomicResult.skippedRecords)
+      : Math.max(0, Number(task?.summary?.newRecords || 0) - historyRecords.length),
+    createdPools: Number(atomicResult?.createdPools || 0),
+    atomicCommit: true,
+    poolReconciliation,
+    publicAnalyticsRefresh,
+    taskCommittedAtomically: true,
+  };
+}
+
+export async function loadFullImportReview({ taskId, accessKey, userId }) {
+  return getOfficialImportReview({
+    supabase: getSupabaseAdmin(),
+    taskId,
+    accessKey,
+    userId,
+  });
+}
+
+export async function confirmFullImportReview({ taskId, accessKey, userId, decisions = [] }) {
+  return confirmOfficialImportTask({
+    supabase: getSupabaseAdmin(),
+    taskId,
+    accessKey,
+    userId,
+    decisions,
+    commit: commitStagedOfficialImport,
+  });
+}
+
+export async function rejectFullImportReview({ taskId, accessKey, userId }) {
+  return rejectOfficialImportTask({
+    supabase: getSupabaseAdmin(),
+    taskId,
+    accessKey,
+    userId,
+  });
 }
 
 /**
@@ -1447,8 +1599,8 @@ export async function executeFullImport({
       source
     );
 
-    // 6. 保存卡池信息
-    updateProgress({ progress: 70, message: '正在保存卡池信息...' });
+    // 6. 整理卡池信息；正式卡池与历史均在用户确认后写入。
+    updateProgress({ progress: 70, message: '正在整理待确认内容...' });
     const pools = [];
     const seenPoolIds = new Set();
     for (const poolData of recordsResult.data.results) {
@@ -1473,15 +1625,13 @@ export async function executeFullImport({
       });
     }
 
-    await savePoolsToServer(pools, userId);
-
     // 7. 获取已存在的记录（用于去重）
     updateProgress({ progress: 75, message: '正在检查重复记录...' });
     existingSeqIds = await getExistingSeqIds(userId, account.gameUid, accountServerContext.serverId);
 
     // 8. 处理记录
     updateProgress({ progress: 80, message: '正在处理数据...' });
-    const processedRecords = await processRecords(
+    const processedResult = await processRecords(
       recordsResult.data,
       account,
       userId,
@@ -1489,49 +1639,79 @@ export async function executeFullImport({
       source,
       accountServerContext
     );
+    const processedRecords = processedResult.records;
 
-    // 9. 保存记录
-    updateProgress({ progress: 90, message: '正在保存数据...' });
-    const saveResult = await saveHistoryToServer(processedRecords, userId);
-    const savedRecords = Number.isFinite(Number(saveResult?.saved))
-      ? Number(saveResult.saved)
-      : processedRecords.length;
-
-    updateProgress({ progress: 95, message: '正在刷新公共统计...' });
-    const publicAnalyticsRefresh = await refreshPublicAnalyticsAfterImport(supabase, {
-      savedRecords,
-      reason: `official-import:${source}:${normalizedImportMode}`,
-    });
-    if (publicAnalyticsRefresh.ok === false) {
-      console.warn('[FullImportService] 公共统计刷新失败:', publicAnalyticsRefresh.error);
-    }
-
-    // 10. 完成
-    updateProgress({ progress: 100, message: '导入完成' });
+    // 9. 整批暂存，等待用户确认后再执行任何正式写入。
     const poolSummary = buildImportPoolSummary(recordsResult.data.results);
     const fetchStrategy = recordsResult.data.fetchStrategy || (
       normalizedImportMode === FULL_IMPORT_MODES.INCREMENTAL && existingSeqIds.size > 0
         ? 'incremental_official_fetch_with_context_guard'
         : 'full_official_fetch_with_dedupe'
     );
+    const commonSummary = {
+      importMode: normalizedImportMode,
+      fetchStrategy,
+      totalRecords: recordsResult.data.totalRecords,
+      newRecords: processedRecords.length,
+      savedRecords: 0,
+      duplicates: recordsResult.data.totalRecords - processedRecords.length,
+      byPool: poolSummary.byPool,
+      byPoolType: poolSummary.byPoolType,
+      earlyStoppedPools: recordsResult.data.earlyStopped || [],
+      partialPools: recordsResult.data.partial || [],
+      failedPools: recordsResult.data.failed || [],
+    };
+
+    if (processedRecords.length === 0) {
+      updateProgress({ progress: 100, message: '没有发现需要导入的新记录' });
+      return {
+        success: true,
+        data: {
+          ...commonSummary,
+          reviewRequired: false,
+          warnings: [],
+          account: {
+            gameUid: account.gameUid,
+            nickName: account.nickName,
+            serverId: accountServerContext.serverId || null,
+            region: accountServerContext.region || null,
+          },
+        },
+      };
+    }
+
+    updateProgress({ progress: 90, message: '正在创建导入审阅...' });
+    const staged = await stageOfficialImportTask({
+      supabase,
+      userId,
+      source,
+      importMode: normalizedImportMode,
+      account: {
+        gameUid: account.gameUid,
+        serverId: accountServerContext.serverId || null,
+        region: accountServerContext.region || null,
+      },
+      pools,
+      stagedRecords: processedResult.stagedRecords,
+      reviewSummary: processedResult.reviewSummary,
+      importSummary: commonSummary,
+    });
+
+    updateProgress({ progress: 100, message: '记录已暂存，请确认后写入' });
 
     return {
       success: true,
       data: {
-        importMode: normalizedImportMode,
-        fetchStrategy,
-        totalRecords: recordsResult.data.totalRecords,
-        newRecords: processedRecords.length,
-        savedRecords,
-        duplicates: recordsResult.data.totalRecords - processedRecords.length,
-        byPool: poolSummary.byPool,
-        byPoolType: poolSummary.byPoolType,
-        earlyStoppedPools: recordsResult.data.earlyStopped || [],
-        partialPools: recordsResult.data.partial || [],
-        failedPools: recordsResult.data.failed || [],
-        publicAnalyticsRefresh,
-        warnings: publicAnalyticsRefresh.ok === false
-          ? [`公共统计刷新失败：${publicAnalyticsRefresh.error || '未知错误'}`]
+        ...commonSummary,
+        reviewRequired: true,
+        review: processedResult.reviewSummary,
+        reviewTask: {
+          ...staged.task,
+          accessKey: staged.accessKey,
+        },
+        reviewRecords: staged.records,
+        warnings: processedResult.reviewSummary.issueRecords > 0
+          ? [`有 ${processedResult.reviewSummary.issueRecords} 条记录需要重点确认。`]
           : [],
         account: {
           gameUid: account.gameUid,

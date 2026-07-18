@@ -48,6 +48,7 @@ backend/lib/*
 !backend/lib/idAliasService.js
 !backend/lib/officialIdReconciliation.js
 !backend/lib/officialImportIncremental.js
+!backend/lib/officialImportStaging.js
 dev-proxy.js
 api/hg-proxy.js
 

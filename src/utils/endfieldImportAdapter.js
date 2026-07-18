@@ -1,4 +1,5 @@
 import { clampHistoryPity } from './historyRecordUtils';
+import { calculateHistoryPity } from '../../shared/historyPity.js';
 
 /**
  * 终末地抽卡记录导入适配器
@@ -308,29 +309,7 @@ export function deduplicateByTimestampName(newRecords, existingRecords) {
  * @returns {Array} 带有pity字段的记录数组
  */
 export function calculatePity(records, _poolType) {
-  let pityCount = 0;
-
-  // 按时间升序排序
-  const sortedRecords = [...records].sort((a, b) => a.timestamp - b.timestamp);
-
-  return sortedRecords.map(record => {
-    // 免费十连不计入保底进度
-    if (record.isFree !== true) {
-      pityCount++;
-    }
-
-    const recordWithPity = {
-      ...record,
-      pity: clampHistoryPity(pityCount)
-    };
-
-    // 如果抽到6星，重置保底计数
-    if (record.rarity === 6) {
-      pityCount = 0;
-    }
-
-    return recordWithPity;
-  });
+  return calculateHistoryPity(records);
 }
 
 /**

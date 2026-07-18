@@ -23,6 +23,8 @@ export default function OfficialAPIImport({
     progress,
     statusMessage,
     importSummary,
+    reviewRecords,
+    reviewDecisions,
     userInfo,
     error,
     autoDetected,
@@ -40,6 +42,7 @@ export default function OfficialAPIImport({
     handleAccountSelect,
     handleCancel,
     handleConfirmImport,
+    handleReviewDecision,
     handleReset,
   } = useOfficialImportController({
     onImportComplete,
@@ -76,6 +79,8 @@ export default function OfficialAPIImport({
       accountCompletionRequired={accountCompletionRequired}
       error={error}
       importSummary={importSummary}
+      reviewRecords={reviewRecords}
+      reviewDecisions={reviewDecisions}
       userInfo={userInfo}
       onSourceChange={handleSourceChange}
       onTokenChange={handleInputChange}
@@ -88,6 +93,7 @@ export default function OfficialAPIImport({
       onCancel={handleCancel}
       onReset={handleReset}
       onConfirmImport={handleConfirmImport}
+      onReviewDecision={handleReviewDecision}
     />
   );
 }

@@ -7,6 +7,10 @@ import {
   normalizeGameAccountRegion,
   normalizeGameAccountServerId,
 } from '../../utils/gameAccountMetadata.js';
+import {
+  normalizeOfficialImportRecord,
+  summarizeOfficialImportIssues,
+} from '../../../shared/officialImportRecordNormalizer.js';
 
 function resolveAliasValue(aliasMap, inputValue) {
   const normalized = typeof inputValue === 'string' ? inputValue.trim() : String(inputValue || '').trim();
@@ -81,7 +85,11 @@ function buildCanonicalPoolEntries(records, poolAliasMap = {}) {
   const entryMap = new Map();
 
   records.forEach((record) => {
-    const rawPoolId = record?.pool_id || record?.poolId;
+    const normalized = normalizeOfficialImportRecord(record, {
+      gameUid: record?.gameUid || record?.game_uid || 'catalog-only',
+      serverId: record?.serverId || record?.server_id || 'catalog-only',
+    });
+    const rawPoolId = normalized.poolId;
     const canonicalPoolId = resolveAliasValue(poolAliasMap, rawPoolId);
     if (!canonicalPoolId || entryMap.has(canonicalPoolId)) {
       return;
@@ -89,7 +97,7 @@ function buildCanonicalPoolEntries(records, poolAliasMap = {}) {
 
     entryMap.set(canonicalPoolId, {
       id: canonicalPoolId,
-      name: record.pool_name || record.poolName || canonicalPoolId,
+      name: normalized.poolName || canonicalPoolId,
       type: inferPoolTypeFromId(canonicalPoolId),
       locked: false,
     });
@@ -117,8 +125,14 @@ function buildImportedHistoryRecords({
   });
 
   return records.map((record, index) => {
-    const rawPoolId = record.pool_id || record.poolId;
-    const rawCharacterId = record.character_id || record.item_id || record.charId || record.weaponId;
+    const normalized = normalizeOfficialImportRecord(record, {
+      gameUid,
+      serverId: resolvedServerId,
+      region: resolvedRegion,
+      poolType: record?.pool || record?.recordType,
+    });
+    const rawPoolId = normalized.poolId;
+    const rawCharacterId = normalized.rawItemId;
     const canonicalPoolId = resolveAliasValue(poolAliasMap, rawPoolId);
     const canonicalCharacterId = normalizeCharacterIdForStorage(
       rawCharacterId,
@@ -126,8 +140,9 @@ function buildImportedHistoryRecords({
     );
 
     const poolHash = simpleStringHash(rawPoolId || 'unknown');
-    const seqNum = record.seqId ? parseInt(record.seqId, 10) : index;
-    const numericId = (poolHash * 10000000) + seqNum;
+    const recordId = /^\d+$/.test(normalized.seqId || '')
+      ? (BigInt(poolHash) * 10000000n + BigInt(normalized.seqId)).toString()
+      : `${poolHash}:${normalized.seqId || index}`;
     const poolType = poolTypeMap.get(rawPoolId)
       || poolTypeMap.get(canonicalPoolId)
       || inferPoolTypeFromId(canonicalPoolId || rawPoolId);
@@ -135,19 +150,21 @@ function buildImportedHistoryRecords({
     const isStandard = normalizeIsStandard(record, poolType, upCharacter);
 
     return {
-      id: numericId,
+      id: recordId,
       poolId: canonicalPoolId,
-      name: record.name,
-      character_name: record.name,
+      name: normalized.itemName,
+      character_name: normalized.itemName,
+      item_name: normalized.itemName,
       character_id: canonicalCharacterId,
-      rarity: record.rarity,
+      rarity: normalized.quality,
       isStandard,
       isLimited: record.isLimited,
       batchId: record.batchId,
-      seqId: record.seqId,
+      seqId: normalized.seqId,
       pity: clampHistoryPity(record.pity),
-      isNew: record.isNew || false,
-      isFree: record.isFree || false,
+      isNew: normalized.isNew,
+      isFree: normalized.isFree,
+      isInfoBook: normalized.isInfoBook,
       accountKey,
       account_key: accountKey,
       gameUid,
@@ -161,7 +178,10 @@ function buildImportedHistoryRecords({
       serverId: resolvedServerId,
       server_id: resolvedServerId,
       region: resolvedRegion,
-      timestamp: record.timestamp,
+      timestamp: normalized.timestamp,
+      importIssues: normalized.issues,
+      importBlocked: normalized.blocked,
+      sourceRawMin: normalized.rawMin,
       created_at: new Date().toISOString(),
     };
   });
@@ -198,6 +218,13 @@ export async function prepareOfficialImportPersistenceData({
   }
 
   const { poolUpCharacterMap, poolTypeMap } = buildPoolLookups(pools);
+  const normalizedRecords = records.map((record) => normalizeOfficialImportRecord(record, {
+    gameUid: currentGameUid,
+    serverId: currentServerId,
+    region: currentRegion,
+    poolType: record?.pool || record?.recordType,
+  }));
+  const reviewSummary = summarizeOfficialImportIssues(normalizedRecords);
 
   return {
     currentGameUid,
@@ -211,11 +238,16 @@ export async function prepareOfficialImportPersistenceData({
       poolUpCharacterMap,
       poolTypeMap,
     }),
+    normalizedRecords,
+    reviewSummary,
+    reviewRequired: reviewSummary.issueRecords > 0,
   };
 }
 
 export function filterImportedHistoryRecords(historyRecords, existingSeqIds) {
-  const newRecords = historyRecords.filter((record) => {
+  const safeRecords = historyRecords.filter((record) => record.importBlocked !== true);
+  const blockedCount = historyRecords.length - safeRecords.length;
+  const newRecords = safeRecords.filter((record) => {
     if (!record.seqId) {
       return true;
     }
@@ -226,6 +258,7 @@ export function filterImportedHistoryRecords(historyRecords, existingSeqIds) {
 
   return {
     newRecords,
-    duplicateCount: historyRecords.length - newRecords.length,
+    duplicateCount: safeRecords.length - newRecords.length,
+    blockedCount,
   };
 }

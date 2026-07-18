@@ -599,6 +599,84 @@ export async function fetchFullImportStatus(taskId, source = 'cn', options = {})
   return result.data;
 }
 
+export async function fetchFullImportReview(taskId, accessKey, source = 'cn') {
+  const proxyBase = getProxyBase(source);
+  const authHeaders = await getAuthHeaders(true, {
+    allowSiteSessionToken: true,
+    preferSiteSessionToken: true,
+  });
+  const url = `${proxyBase}?action=import-review&taskId=${encodeURIComponent(taskId)}&accessKey=${encodeURIComponent(accessKey)}&source=${encodeURIComponent(normalizeImportSource(source))}`;
+  const response = await fetchWithTimeout(url, { headers: authHeaders }, {
+    label: 'import-review',
+    timeoutMs: 20000,
+    retries: 1,
+  });
+  const result = await safeParseJSON(response, 'Import Review API');
+  if (!result.success) {
+    throw new AuthChainError(result.error || '读取导入审阅失败', 'import-review', result);
+  }
+  return result.data;
+}
+
+export async function confirmFullImportReviewOnBackend({ taskId, accessKey, decisions = [] }, source = 'cn') {
+  const proxyBase = getProxyBase(source);
+  const authHeaders = await getAuthHeaders(true, {
+    allowSiteSessionToken: true,
+    preferSiteSessionToken: true,
+  });
+  const response = await queuedFetch(`${proxyBase}?action=import-confirm`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders,
+    },
+    body: JSON.stringify({
+      taskId,
+      accessKey,
+      decisions,
+      source: normalizeImportSource(source),
+    }),
+  }, {
+    priority: 4,
+    maxRetries: 1,
+    timeout: 120000,
+  });
+  const result = await safeParseJSON(response, 'Import Confirm API');
+  if (!result.success) {
+    throw new AuthChainError(result.error || '确认导入失败', 'import-confirm', result);
+  }
+  return result.data;
+}
+
+export async function rejectFullImportReviewOnBackend({ taskId, accessKey }, source = 'cn') {
+  const proxyBase = getProxyBase(source);
+  const authHeaders = await getAuthHeaders(true, {
+    allowSiteSessionToken: true,
+    preferSiteSessionToken: true,
+  });
+  const response = await queuedFetch(`${proxyBase}?action=import-reject`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders,
+    },
+    body: JSON.stringify({
+      taskId,
+      accessKey,
+      source: normalizeImportSource(source),
+    }),
+  }, {
+    priority: 4,
+    maxRetries: 1,
+    timeout: 30000,
+  });
+  const result = await safeParseJSON(response, 'Import Reject API');
+  if (!result.success) {
+    throw new AuthChainError(result.error || '取消导入失败', 'import-reject', result);
+  }
+  return result.data;
+}
+
 async function pollFullImportUntilComplete(taskId, onProgress, maxWaitTime = 300000, source = 'cn') {
   const startTime = Date.now();
   const pollInterval = 2000;

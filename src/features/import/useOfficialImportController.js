@@ -8,7 +8,10 @@ import {
   fetchAllGachaRecords,
   fetchAllGachaRecordsConcurrent,
   fetchImportQueueStatus,
-  importAllRecordsFullyOnBackend
+  fetchFullImportReview,
+  importAllRecordsFullyOnBackend,
+  confirmFullImportReviewOnBackend,
+  rejectFullImportReviewOnBackend
 } from '../../utils/endfieldAuthChain';
 import { assignBatchIds, calculatePity, generateImportSummary } from '../../utils/endfieldImportAdapter';
 import {
@@ -26,6 +29,16 @@ import {
 } from './officialImportInput.js';
 import { useI18n } from '../../i18n/index.js';
 import appLogger from '../../utils/appLogger.js';
+import {
+  normalizeOfficialImportRecord,
+  summarizeOfficialImportIssues,
+} from '../../../shared/officialImportRecordNormalizer.js';
+import {
+  clearOfficialImportReviewSession,
+  loadOfficialImportReviewSession,
+  saveOfficialImportReviewSession,
+  shouldClearOfficialImportReviewSessionForError,
+} from './officialImportReviewSession.js';
 
 function getAuthDiagnosticMessage(reason) {
   switch (reason) {
@@ -91,37 +104,43 @@ function getSourceDisplayName(source, t) {
   return source === 'intl' ? t('import.source.intl.label') : t('import.source.cn.label');
 }
 
-function getLocalizedUnknown(t) {
-  return typeof t === 'function' ? t('common.unknown') : '未知';
-}
-
 function getServerRegionLabel(serverId, t) {
   return String(serverId || '1') === '1'
     ? getSourceDisplayName('cn', t)
     : getSourceDisplayName('intl', t);
 }
 
-function buildPreviewRecords(records, serverId, t) {
-  const resolvedServerId = String(serverId || '1');
-  const unknownLabel = getLocalizedUnknown(t);
+function buildPreviewRecords(records, userInfo, t) {
+  const resolvedServerId = String(userInfo?.serverId || '1');
   const convertedRecords = records.map((record) => {
     const poolType = record._poolType || 'unknown';
+    const normalized = normalizeOfficialImportRecord(record, {
+      gameUid: userInfo?.gameUid || userInfo?.hgUid,
+      serverId: resolvedServerId,
+      region: userInfo?.region,
+      poolType,
+    });
     return {
-      name: record.charName || record.weaponName || unknownLabel,
-      character_name: record.charName || record.weaponName || unknownLabel,
-      item_id: record.charId || record.weaponId || '',
-      rarity: record.rarity,
-      timestamp: parseInt(record.gachaTs, 10),
+      name: normalized.itemName,
+      character_name: normalized.itemName,
+      item_name: normalized.itemName,
+      item_id: normalized.itemId,
+      rarity: normalized.quality,
+      timestamp: normalized.timestamp ? new Date(normalized.timestamp).getTime() : null,
       pool: poolType,
-      pool_id: record.poolId,
-      pool_name: record.poolName,
-      isNew: record.isNew || false,
-      isFree: record.isFree || false,
+      pool_id: normalized.poolId,
+      pool_name: normalized.poolName,
+      isNew: normalized.isNew,
+      isFree: normalized.isFree,
+      isInfoBook: normalized.isInfoBook,
       isLimited: poolType === 'extra' || poolType === 'limited_character' || poolType === 'limited_weapon',
-      seqId: record.seqId,
-      recordType: record.charId ? 'character' : 'weapon',
+      seqId: normalized.seqId,
+      recordType: normalized.itemType,
       serverId: resolvedServerId,
       serverRegion: getServerRegionLabel(resolvedServerId, t),
+      importIssues: normalized.issues,
+      importBlocked: normalized.blocked,
+      sourceRawMin: normalized.rawMin,
     };
   });
 
@@ -139,7 +158,12 @@ function buildPreviewRecords(records, serverId, t) {
 
   processedRecords = assignBatchIds(processedRecords);
   processedRecords.sort((a, b) => b.timestamp - a.timestamp);
-  return processedRecords;
+  return {
+    records: processedRecords,
+    reviewSummary: summarizeOfficialImportIssues(convertedRecords.map((record) => ({
+      issues: record.importIssues,
+    }))),
+  };
 }
 
 export function useOfficialImportController({ onImportComplete, onFetchStatusChange, onSourceSwitch, userId, source = 'cn' }) {
@@ -161,8 +185,11 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
   const [inputDetection, setInputDetection] = useState(null);
   const [clipboardState, setClipboardState] = useState({ status: 'idle' });
   const [importMode, setImportModeState] = useState(OFFICIAL_IMPORT_MODES.INCREMENTAL);
+  const [backendReview, setBackendReview] = useState(null);
+  const [reviewDecisions, setReviewDecisions] = useState({});
   const cancelRef = useRef(false);
   const switchTimerRef = useRef(null);
+  const reviewRestoreRef = useRef('');
 
   useEffect(() => {
     onFetchStatusChange?.(status);
@@ -175,6 +202,87 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
       }
     };
   }, []);
+
+  useEffect(() => {
+    const restoreKey = `${String(userId || '')}:${source}`;
+    if (!userId || backendReview || reviewRestoreRef.current === restoreKey) {
+      return undefined;
+    }
+    reviewRestoreRef.current = restoreKey;
+    const savedReview = loadOfficialImportReviewSession({ userId, source });
+    if (!savedReview) return undefined;
+
+    let active = true;
+    setStatus(ImportStatus.PROCESSING);
+    setStatusMessage('正在恢复尚未确认的导入记录...');
+    fetchFullImportReview(savedReview.taskId, savedReview.accessKey, savedReview.source)
+      .then((review) => {
+        if (!active) return;
+        const task = review?.task || {};
+        if (task.status === 'committed') {
+          clearOfficialImportReviewSession({ userId, source: savedReview.source });
+          const commitResult = task.summary?.commitResult || {};
+          setImportSummary({ ...(task.summary || {}), ...commitResult });
+          setProgress(100);
+          setStatus(ImportStatus.SUCCESS);
+          setStatusMessage(t('import.official.backendDone'));
+          return;
+        }
+        if (task.status !== 'awaiting_confirmation') {
+          clearOfficialImportReviewSession({ userId, source: savedReview.source });
+          setStatus(ImportStatus.IDLE);
+          setStatusMessage('');
+          return;
+        }
+
+        const records = Array.isArray(review?.records) ? review.records : [];
+        setBackendReview({
+          task: { ...task, accessKey: savedReview.accessKey },
+          records,
+          source: savedReview.source,
+        });
+        setReviewDecisions(Object.fromEntries(
+          records.map((record) => [
+            String(record.ordinal),
+            (record.issues || []).some((issue) => issue?.severity === 'blocking')
+              ? 'skip'
+              : record.selectedAction || 'keep',
+          ])
+        ));
+        setImportSummary({
+          ...(task.summary || {}),
+          review: task.summary?.review || {},
+          savedRecords: 0,
+        });
+        setUserInfo((current) => ({
+          ...(current || {}),
+          gameUid: task.gameUid || current?.gameUid || null,
+          serverId: task.serverId || current?.serverId || null,
+          region: task.region || current?.region || null,
+          source: savedReview.source,
+        }));
+        setProgress(100);
+        setStatus(ImportStatus.REVIEW_REQUIRED);
+        setStatusMessage(`已恢复 ${records.length} 条尚未确认的导入记录`);
+      })
+      .catch((restoreError) => {
+        if (!active) return;
+        appLogger.warn('[OfficialAPIImport] 恢复导入审阅失败:', restoreError.message);
+        if (shouldClearOfficialImportReviewSessionForError(restoreError)) {
+          clearOfficialImportReviewSession({ userId, source: savedReview.source });
+          setStatus(ImportStatus.IDLE);
+          setStatusMessage('');
+          return;
+        }
+        setError(`尚未恢复上次待确认的导入记录：${restoreError?.message || '登录或网络暂时不可用'}。恢复后刷新页面即可继续。`);
+        setStatus(ImportStatus.ERROR);
+        setStatusMessage('上次导入审阅仍已保留');
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [backendReview, source, t, userId]);
 
   useEffect(() => {
     if (status !== ImportStatus.AUTHENTICATING && status !== ImportStatus.FETCHING) {
@@ -293,6 +401,7 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
   }, []);
 
   const handleReset = useCallback(() => {
+    clearOfficialImportReviewSession({ userId, source });
     setTokenInput('');
     setStatus(ImportStatus.IDLE);
     setProgress(0);
@@ -308,29 +417,97 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
     setInputDetection(null);
     setClipboardState({ status: 'idle' });
     setImportModeState(OFFICIAL_IMPORT_MODES.INCREMENTAL);
+    setBackendReview(null);
+    setReviewDecisions({});
     if (switchTimerRef.current) {
       clearTimeout(switchTimerRef.current);
       switchTimerRef.current = null;
     }
-  }, []);
+  }, [source, userId]);
 
-  const handleCancel = useCallback(() => {
+  const handleCancel = useCallback(async () => {
     cancelRef.current = true;
+    if (backendReview?.task?.id && backendReview?.task?.accessKey) {
+      try {
+        await rejectFullImportReviewOnBackend({
+          taskId: backendReview.task.id,
+          accessKey: backendReview.task.accessKey,
+        }, backendReview.source || source);
+      } catch (rejectError) {
+        appLogger.warn('[OfficialAPIImport] 取消暂存导入失败，将由任务自动过期:', rejectError.message);
+      }
+    }
     setStatus(ImportStatus.IDLE);
     setProgress(0);
     setStatusMessage('');
+    setBackendReview(null);
+    setReviewDecisions({});
+    clearOfficialImportReviewSession({ userId, source: backendReview?.source || source });
+  }, [backendReview, source, userId]);
+
+  const handleReviewDecision = useCallback((ordinal, action) => {
+    if (!['keep', 'skip'].includes(action)) return;
+    setReviewDecisions((current) => ({
+      ...current,
+      [String(ordinal)]: action,
+    }));
   }, []);
 
-  const handleConfirmImport = useCallback(() => {
+  const handleConfirmImport = useCallback(async () => {
+    if (backendReview?.task?.id && backendReview?.task?.accessKey) {
+      try {
+        setStatus(ImportStatus.CONFIRMING);
+        setStatusMessage('正在按你的选择写入记录...');
+        const decisions = backendReview.records.map((record) => ({
+          ordinal: record.ordinal,
+          action: reviewDecisions[String(record.ordinal)] || record.selectedAction || 'keep',
+        }));
+        const confirmed = await confirmFullImportReviewOnBackend({
+          taskId: backendReview.task.id,
+          accessKey: backendReview.task.accessKey,
+          decisions,
+        }, backendReview.source || source);
+        const savedRecords = Number(confirmed?.result?.savedRecords || 0);
+        const nextSummary = {
+          ...(importSummary || {}),
+          savedRecords,
+          skippedRecords: Number(confirmed?.result?.skippedRecords || 0),
+        };
+        setImportSummary(nextSummary);
+        setProgress(100);
+        setStatus(ImportStatus.SUCCESS);
+        setStatusMessage(t('import.official.backendDone'));
+        clearOfficialImportReviewSession({ userId, source: backendReview.source || source });
+        setBackendReview(null);
+        setReviewDecisions({});
+        onImportComplete?.({
+          success: true,
+          backendImported: true,
+          summary: nextSummary,
+          userInfo,
+          result: confirmed?.result || {},
+        });
+      } catch (confirmError) {
+        setError(normalizeImportError(confirmError, t));
+        setStatus(ImportStatus.REVIEW_REQUIRED);
+        setStatusMessage('写入失败，请检查选择后重试');
+      }
+      return;
+    }
+
     if (fetchedRecords.length === 0 || !onImportComplete) return;
+
+    const recordsToImport = fetchedRecords.filter((record, ordinal) => (
+      (reviewDecisions[String(ordinal)] || (record.importBlocked ? 'skip' : 'keep')) === 'keep'
+    ));
 
     onImportComplete({
       success: true,
-      records: fetchedRecords,
+      records: recordsToImport,
       summary: importSummary,
       userInfo
     });
-  }, [fetchedRecords, importSummary, onImportComplete, userInfo]);
+  }, [backendReview, fetchedRecords, importSummary, onImportComplete, reviewDecisions, source, t, userId, userInfo]);
 
   const continueImportWithAccount = useCallback(async (token, account, targetSource = source) => {
     try {
@@ -404,6 +581,53 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
             region: finalRegion,
           }) || resolvedUserInfo.serverTag
         };
+
+        setUserInfo(finalUserInfo);
+
+        if (backendResult?.reviewRequired && backendResult?.reviewTask?.id) {
+          const records = Array.isArray(backendResult.reviewRecords)
+            ? backendResult.reviewRecords
+            : [];
+          setBackendReview({
+            task: backendResult.reviewTask,
+            records,
+            source: targetSource,
+          });
+          saveOfficialImportReviewSession({
+            userId,
+            source: targetSource,
+            taskId: backendResult.reviewTask.id,
+            accessKey: backendResult.reviewTask.accessKey,
+          });
+          setReviewDecisions(Object.fromEntries(
+            records.map((record) => [
+              String(record.ordinal),
+              record.selectedAction || ((record.issues || []).some((issue) => issue?.severity === 'blocking') ? 'skip' : 'keep'),
+            ])
+          ));
+          setImportSummary({
+            total: backendResult?.totalRecords || 0,
+            newRecords: backendResult?.newRecords || 0,
+            duplicates: backendResult?.duplicates || 0,
+            byRarity: { 4: 0, 5: 0, 6: 0 },
+            byPool: backendResult?.byPool || {},
+            byPoolType: backendResult?.byPoolType || {},
+            sixStars: [],
+            fiveStars: [],
+            partialPools: backendResult?.partialPools || [],
+            failedPools: backendResult?.failedPools || [],
+            review: backendResult?.review || backendResult?.reviewTask?.summary?.review || {},
+            savedRecords: 0,
+          });
+          setProgress(100);
+          setStatus(ImportStatus.REVIEW_REQUIRED);
+          setStatusMessage(
+            Number(backendResult?.review?.issueRecords || 0) > 0
+              ? `已暂存 ${records.length} 条记录，其中 ${backendResult.review.issueRecords} 条需要重点确认`
+              : `已暂存 ${records.length} 条记录，请确认后写入`
+          );
+          return;
+        }
 
         if (onImportComplete) {
           onImportComplete({
@@ -493,14 +717,28 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
       setProgress(95);
       setStatusMessage(t('import.official.processingData'));
 
-      const processedRecords = buildPreviewRecords(records, accountServerId || requestServerId, t);
+      const preview = buildPreviewRecords(records, {
+        ...resolvedUserInfo,
+        serverId: accountServerId || requestServerId,
+      }, t);
+      const processedRecords = preview.records;
       const summary = generateImportSummary(processedRecords);
 
       setFetchedRecords(processedRecords);
-      setImportSummary(summary);
+      setImportSummary({ ...summary, review: preview.reviewSummary });
+      setReviewDecisions(Object.fromEntries(
+        processedRecords.map((record, ordinal) => [
+          String(ordinal),
+          record.importBlocked ? 'skip' : 'keep',
+        ])
+      ));
       setProgress(100);
-      setStatus(ImportStatus.SUCCESS);
-      setStatusMessage(t('import.official.ready'));
+      setStatus(preview.reviewSummary.issueRecords > 0
+        ? ImportStatus.REVIEW_REQUIRED
+        : ImportStatus.SUCCESS);
+      setStatusMessage(preview.reviewSummary.issueRecords > 0
+        ? `发现 ${preview.reviewSummary.issueRecords} 条需要确认的记录`
+        : t('import.official.ready'));
     } catch (err) {
       appLogger.error('[OfficialAPIImport] 导入失败:', err);
       if (cancelRef.current) return;
@@ -663,6 +901,19 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
     progress,
     statusMessage,
     importSummary,
+    reviewRecords: backendReview?.records || fetchedRecords.map((record, ordinal) => ({
+      ordinal,
+      poolId: record.pool_id || record.pool,
+      itemId: record.item_id || record.character_id || null,
+      itemName: record.item_name || record.character_name || record.name || null,
+      itemType: record.recordType || 'unknown',
+      quality: record.rarity ?? null,
+      timestamp: record.timestamp || null,
+      seqId: record.seqId || record.seq_id || null,
+      issues: record.importIssues || [],
+      selectedAction: record.importBlocked ? 'skip' : 'keep',
+    })),
+    reviewDecisions,
     userInfo,
     error,
     autoDetected,
@@ -680,6 +931,7 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
     handleAccountSelect,
     handleCancel,
     handleConfirmImport,
+    handleReviewDecision,
     handleReset,
   };
 }

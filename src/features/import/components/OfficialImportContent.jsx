@@ -108,6 +108,151 @@ const QueueStatusDisplay = ({ queueStatus, retryInfo, t }) => {
   );
 };
 
+export const ImportReviewPanel = ({
+  status,
+  importSummary,
+  reviewRecords = [],
+  reviewDecisions = {},
+  onReviewDecision,
+  onConfirmImport,
+  onCancel,
+}) => {
+  const issueRecords = Number(importSummary?.review?.issueRecords || 0);
+  const blockingRecords = Number(importSummary?.review?.blockingRecords || 0);
+  const selectedCounts = reviewRecords.reduce((counts, record) => {
+    const action = reviewDecisions[String(record.ordinal)] || record.selectedAction || 'keep';
+    counts[action] = (counts[action] || 0) + 1;
+    return counts;
+  }, { keep: 0, skip: 0 });
+  const hasBlockingKept = reviewRecords.some((record) => {
+    const blocked = (record.issues || []).some((issue) => issue?.severity === 'blocking');
+    const action = reviewDecisions[String(record.ordinal)] || record.selectedAction || 'keep';
+    return blocked && action === 'keep';
+  });
+  const confirming = status === ImportStatus.CONFIRMING;
+
+  return (
+    <div className="space-y-4">
+      <div className="border border-amber-300 bg-amber-50 p-4 dark:border-amber-700/70 dark:bg-amber-950/30">
+        <div className="flex items-start gap-3">
+          <AlertCircle className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" size={20} />
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold text-amber-800 dark:text-amber-200">导入尚未写入，请先确认</h3>
+            <p className="mt-1 text-xs leading-5 text-amber-800/80 dark:text-amber-200/75">
+              系统已暂存 {reviewRecords.length} 条新记录。{issueRecords > 0
+                ? `其中 ${issueRecords} 条存在字段缺失或格式异常，下面会逐条说明。`
+                : '当前没有发现字段异常，确认后才会写入记录和统计。'}
+              {blockingRecords > 0 ? ` ${blockingRecords} 条无法安全识别的记录已默认设为跳过。` : ''}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 text-center">
+        <div className="border border-zinc-200 bg-white px-2 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">待写入</div>
+          <div className="mt-1 font-mono text-xl font-bold text-emerald-600 dark:text-emerald-400">{selectedCounts.keep}</div>
+        </div>
+        <div className="border border-zinc-200 bg-white px-2 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">将跳过</div>
+          <div className="mt-1 font-mono text-xl font-bold text-zinc-600 dark:text-zinc-300">{selectedCounts.skip}</div>
+        </div>
+        <div className="border border-zinc-200 bg-white px-2 py-3 dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">需重点核对</div>
+          <div className="mt-1 font-mono text-xl font-bold text-amber-600 dark:text-amber-400">{issueRecords}</div>
+        </div>
+      </div>
+
+      <div className="max-h-[45vh] space-y-2 overflow-y-auto pr-1">
+        {reviewRecords.map((record) => {
+          const issues = Array.isArray(record.issues) ? record.issues : [];
+          const blocked = issues.some((issue) => issue?.severity === 'blocking');
+          const action = reviewDecisions[String(record.ordinal)] || record.selectedAction || (blocked ? 'skip' : 'keep');
+          const timestamp = record.timestamp
+            ? new Date(record.timestamp).toLocaleString('zh-CN', { hour12: false })
+            : '时间缺失';
+          return (
+            <div
+              key={record.ordinal}
+              className={`border p-3 ${blocked
+                ? 'border-red-300 bg-red-50/70 dark:border-red-800 dark:bg-red-950/25'
+                : issues.length > 0
+                  ? 'border-amber-300 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20'
+                  : 'border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900'}`}
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold text-slate-800 dark:text-white">{record.itemName || '物品名称缺失'}</span>
+                    <span className="text-xs font-bold text-yellow-700 dark:text-yellow-400">{record.quality ? `${record.quality}★` : '品质缺失'}</span>
+                    <span className="text-[10px] uppercase tracking-wider text-zinc-500">{record.itemType === 'weapon' ? '武器' : record.itemType === 'character' ? '角色' : '类型待确认'}</span>
+                  </div>
+                  <div className="mt-1 text-[11px] text-zinc-500">
+                    卡池 {record.poolId || '缺失'} · {timestamp} · 序号 {record.seqId || '缺失'}
+                  </div>
+                  {issues.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {issues.map((issue, index) => (
+                        <p key={`${issue.code || 'issue'}-${index}`} className={`text-xs ${issue.severity === 'blocking' ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'}`}>
+                          {issue.message || '这条记录需要确认'}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    type="button"
+                    disabled={blocked || confirming}
+                    onClick={() => onReviewDecision?.(record.ordinal, 'keep')}
+                    className={`px-3 py-1.5 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${action === 'keep'
+                      ? 'bg-emerald-500 text-black'
+                      : 'border border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300'}`}
+                  >
+                    保留
+                  </button>
+                  <button
+                    type="button"
+                    disabled={confirming}
+                    onClick={() => onReviewDecision?.(record.ordinal, 'skip')}
+                    className={`px-3 py-1.5 text-xs font-bold transition-colors disabled:opacity-40 ${action === 'skip'
+                      ? 'bg-zinc-700 text-white dark:bg-zinc-200 dark:text-black'
+                      : 'border border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300'}`}
+                  >
+                    跳过
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {hasBlockingKept && (
+        <p className="text-xs text-red-600 dark:text-red-400">仍有无法识别的记录被选为保留，请先改为跳过。</p>
+      )}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          disabled={confirming}
+          onClick={onCancel}
+          className="border border-zinc-300 bg-white py-3 text-xs font-bold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+        >
+          取消本次导入
+        </button>
+        <button
+          type="button"
+          disabled={confirming || hasBlockingKept}
+          onClick={onConfirmImport}
+          className="bg-yellow-500 py-3 text-xs font-bold text-black transition-colors hover:bg-yellow-400 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {confirming ? '正在写入...' : `确认写入 ${selectedCounts.keep} 条记录`}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 function getAccountAccent(account = {}) {
   const tag = account.serverTag || '';
 
@@ -174,6 +319,8 @@ export default function OfficialImportContent({
   accountCompletionRequired = false,
   error,
   importSummary,
+  reviewRecords,
+  reviewDecisions,
   userInfo,
   onSourceChange,
   onTokenChange,
@@ -185,7 +332,8 @@ export default function OfficialImportContent({
   onSelectAccount,
   onCancel,
   onReset,
-  onConfirmImport
+  onConfirmImport,
+  onReviewDecision
 }) {
   const { t, locale } = useI18n();
   const IMPORT_SOURCE_OPTIONS = [
@@ -604,6 +752,18 @@ export default function OfficialImportContent({
             </button>
           </div>
         </div>
+      )}
+
+      {(status === ImportStatus.REVIEW_REQUIRED || status === ImportStatus.CONFIRMING) && importSummary && (
+        <ImportReviewPanel
+          status={status}
+          importSummary={importSummary}
+          reviewRecords={reviewRecords}
+          reviewDecisions={reviewDecisions}
+          onReviewDecision={onReviewDecision}
+          onConfirmImport={onConfirmImport}
+          onCancel={onCancel}
+        />
       )}
 
       {status === ImportStatus.SUCCESS && importSummary && (
