@@ -1,6 +1,6 @@
 # Architecture
 
-本文档描述当前 `v4.4.0` 主线架构。历史计划、旧 backend server 和退役部署方式不再作为主路径记录。
+本文档描述当前 `v4.5.2` 主线架构。历史计划和退役部署方式不再作为主路径记录；独立 CN / INTL 后端仅保留官方数据获取与导入审阅暂存职责。
 
 ## 1. 系统边界
 
@@ -8,6 +8,9 @@
 flowchart LR
   Browser["Browser / Mobile Web"] --> PublicApi["Same-origin /api/*"]
   Browser --> SupabaseAuth["Supabase Auth client"]
+  Browser --> ImportBackend["Private CN / INTL import backend"]
+  ImportBackend --> ImportStaging["Official import staging"]
+  ImportStaging --> SupabaseDb
   PublicApi --> PublicCache["Serverless public cache"]
   PublicCache --> SupabaseDb["Supabase PostgreSQL"]
   Admin["Admin UI"] --> AdminApi["Protected admin API"]
@@ -21,7 +24,8 @@ flowchart LR
 - 公共数据：生产浏览器统一请求同源 `/api/*`，由 Serverless 层访问 Supabase。
 - 私有数据：用户抽卡历史、个人排行、工单、账号恢复和后台数据保持鉴权隔离与 `no-store`。
 - 管理与自动化：后台写入、cron 和手动 ops 共享服务端 helper，写入成功后 best-effort 刷新公共缓存版本。
-- 私有残留：`backend/` 只保留公开测试仍需要的兼容 helper，不代表完整私有后端。
+- 私有导入：CN / INTL 后端负责访问官方数据源、规范化、问题分类和审阅暂存；确认时通过数据库 RPC 原子提交。
+- 仓库边界：`backend/` 只公开测试与数据契约需要的兼容 helper，不代表完整私有部署包。
 
 ## 2. 前端层
 
@@ -32,7 +36,8 @@ flowchart LR
 | 移动端 | `src/mobile/MobileApp.jsx`、`src/mobile/layouts/MobileLayout.jsx` | 移动壳层、底栏、移动页面 |
 | 状态 | `src/stores/*` | auth、pool、history、app 公共状态 |
 | 公共读取 | `src/services/publicResourceClient.js` | 同源请求、公共版本、内存缓存、localStorage snapshot |
-| 私有写入 | `src/services/cloudWriteService.js`、`src/utils/cloudDataSync.js` | 抽卡历史、池信息、账号数据同步 |
+| 私有写入 | `src/services/accountGachaDataService.js`、`src/hooks/app/useCloudSync.js`、`src/utils/cloudDataSync.js` | 账号历史读取、精确变更、池信息和账号数据同步 |
+| 官方导入审阅 | `src/features/import/useOfficialImportController.js`、`src/features/import/officialImportReviewSession.js` | 暂存任务恢复、问题展示、逐条保留 / 跳过和确认 |
 
 当前仍需后续治理的前端复杂点：
 
@@ -48,6 +53,8 @@ flowchart LR
 | 后台 API | `api/_routes/root/admin.js` | 管理面板统一入口 |
 | 自动化 API | `api/_routes/root/ops-automation.js`、`api/_lib/runOpsAutomation.js` | cron、manual、job graph、review bundle |
 | BOT / 开发者 API | `api/_routes/dev/**/*`、`api/_routes/integrations/**/*` | 受保护只读接口和平台绑定 |
+| 账号历史 | `api/_routes/root/account-gacha-data.js` | 私有历史并行分页读取、精确编辑 / 删除和别名解析 |
+| 历史异常 | `api/_routes/root/history-anomalies.js`、`admin-history-anomalies.js` | 用户当前作用域提醒与超级管理员复核 |
 
 公共 API 的兼容响应字段保留 `success / data / cached / partial`，新增 `meta.source / meta.age / meta.partial / meta.stale / meta.cacheKey / meta.cacheVersion` 用于诊断。
 
@@ -71,6 +78,10 @@ Supabase 目录采用“baseline + 归档迁移 + 手工脚本”结构：
 - `supabase/manual/`：危险、回滚、回填和历史诊断脚本，不进默认部署链。
 
 DB-OPTIMIZE-001 的当前结论：线上 `history` 体积主要来自索引，字段或索引删除需要先完成查询计划、读写路径、回滚脚本和线上基准。本轮只整理迁移归档与 baseline，不直接改变生产 schema 语义。
+
+历史审阅与导入确认由迁移 152、153 提供：`history_anomalies` 记录待核对作用域，`history_change_log` 保存受控变更审计，`official_import_tasks` / `official_import_staged_records` 保存短期审阅任务，`commit_official_import_records()` 负责最终原子提交。迁移 155 为旧客户端的仅 ID 批量删除增加锁定快照与重复作用域拒绝，新的单条和整组删除仍使用完整记录作用域。私有历史响应始终 `no-store`，不得进入公共缓存或公开统计快照。
+
+账号历史读取先取得用户精确记录数，再以固定并发分页读取必要列；卡池目录、可见池和账号历史在前端同步阶段并行等待。该优化不改变完整作用域定位、审计或保底重算语义。
 
 ## 6. 运营自动化
 

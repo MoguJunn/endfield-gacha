@@ -7,6 +7,8 @@
 - [ ] `npm run lint`
 - [ ] `npm run test:unit`
 - [ ] `npm run build`
+- [ ] `npm run test:supabase-baseline:smoke`
+- [ ] `npm run test:history-batch-delete-guard`
 - [ ] `git diff --check`
 
 ## Git 历史与分支
@@ -41,6 +43,11 @@
 ## 部署
 
 - [ ] Supabase baseline / migration 状态已确认
+- [ ] 新迁移已按编号顺序执行；站点版本与 `public_cache_epoch` 已核对
+- [ ] CN / INTL 私有导入后端版本一致，`/health` 返回正确 `sourceMode`、版本和 `fullImport: true`
+- [ ] 官方导入已验证“获取 → 审阅 → 刷新恢复 → 跳过阻断记录 → 原子确认 → 重复确认幂等”
+- [ ] 历史编辑已验证乐观锁冲突、变更审计、受影响作用域保底重算，以及旧批量删除对跨账号重复 ID 的整笔拒绝
+- [ ] 异常回填先只读演练；仅在记录数和用户数精确校验值一致时执行 `--apply`
 - [ ] Vercel 部署已检查
 - [ ] 公共页面首屏未出现浏览器直连 Supabase
 - [ ] 公共缓存版本 / 失效链已验证

@@ -4,7 +4,8 @@
 
 ## 功能范围
 
-- 官方抽卡记录导入、去重、云同步和区服纠错。
+- 官方抽卡记录导入、去重、审阅暂存、确认后原子写入、云同步和区服纠错。
+- 私有历史记录按完整账号作用域精确编辑 / 删除，异常记录可由用户核对并由超级管理员集中复核。
 - 首页 bootstrap、公告、全服统计、卡池目录和阵容公开读取。
 - 桌面端 / 移动端双入口、抽卡模拟器、分享卡和后台管理。
 - 运营自动化：公告、卡池轮换、Wiki catalog 的 job graph、partial、review bundle 和审计。
@@ -32,6 +33,7 @@ npm run dev
 | `npm run test:public-api-boundary` | 首屏公共读取不直连 Supabase |
 | `npm run test:bootstrap-cache` | 公共 cache partial / stale 行为 |
 | `npm run test:supabase-baseline` | baseline 覆盖范围和首尾 marker |
+| `npm run test:history-batch-delete-guard` | 在临时 PostgreSQL 中验证旧批量删除的跨账号重复 ID 防护 |
 | `npm run test:mail-abuse-guards` | 自建邮件防刷 guard、预算桶、幂等和脱敏 |
 | `npm run test:mail-outbox-enqueue` | 自建邮件 outbox 入队、幂等、预算和 RPC 边界 |
 | `npm run test:mail-outbox-worker` | 自建邮件 outbox 队列处理器、provider adapter、演练 / 真实发送回写和脱敏 |
@@ -39,6 +41,7 @@ npm run dev
 | `npm run test:mail-service-entrypoints` | 网站侧邮件 worker endpoint、后台测试邮件入口和脱敏边界 |
 | `npm run test:ops-automation` | 运营自动化 job graph |
 | `npm run test:official-announcements-feed` | 官方公告 feed |
+| `npm run backfill:history-anomalies` | 只读扫描已知异常历史；正式写入还需要 `--apply` 和精确记录数 / 用户数确认变量 |
 
 ## 环境变量
 
@@ -124,6 +127,8 @@ TELEGRAM_OFFICIAL_BOT_LONG_POLL_SECONDS=20
 
 当前管理后台主链已收口到 Vercel Serverless `/api/admin`，并通过 `vercel.json` rewrite 兼容旧 `admin-*` 路径。不再要求额外部署同名 Supabase Edge Functions。
 
+官方导入的数据获取仍由独立 CN / INTL 私有后端承接。`v4.5.2` 对应后端版本为 `1.6.1`：后端先把规范化结果写入 `official_import_tasks` 与 `official_import_staged_records`，浏览器完成逐条审阅后，再通过 `commit_official_import_records()` 原子确认。私有后端镜像必须同时包含 `backend/lib/officialImportStaging.js`、`shared/historyPity.js` 和 `shared/officialImportRecordNormalizer.js`；两个地区部署后都要核对 `/health`、容器版本和一次真实导入审阅，不得只更新单一区域。
+
 邮件发送分为两层：认证邮件使用受控同源 `/api/auth-email-action`，支持注册验证、密码重置和邮件登录；通知类和人工恢复队列继续走 provider-independent outbox / 队列处理器。认证邮件入口必须同时启用 `AUTH_MAIL_ACTIONS_ENABLED=true`、`MAIL_OUTBOX_WORKER_ENABLED=true`，且未命中环境级紧急停发开关 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH` 才会调用 provider adapter；它会先做 origin、CAPTCHA、内存限流、账号存在性判断和脱敏审计，未知邮箱的重置 / 邮件登录仍返回通用状态。当前 `api/_lib/mailOutbox.js` 只允许服务端 service-role 经过防刷、suppression、幂等和 `enqueue_mail_outbox_event()` RPC 写入私有 `mail_outbox`；`api/_lib/mailOutboxWorker.js` 和 `api/_lib/mailProviderAdapter.js` 已提供 Stalwart-first 的队列处理器 / provider 边界。`api/_lib/mailTemplateRenderer.js` 是统一 HTML + plaintext 邮件模板入口，注册验证、邮件登录、密码重置、账号恢复队列处理器、开发者 API 审核通知、工单回复通知、管理员告警和后台测试邮件都应复用它。开发者 API 审核结果已可在 `DEVELOPER_API_REVIEW_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时写入 outbox；工单 staff 回复已通过 `/api/tickets/reply` 服务端路由写入回复，并可在 `TICKET_REPLY_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时为工单所有者写入 `ticket.reply` outbox；后台“邮件状态”页可在 `ADMIN_ALERT_MAIL_OUTBOX_ENABLED=true` 且队列处理器开启时把 `admin.alert` 受控入队给当前超级管理员自己的账号邮箱。通知类入队失败都不会阻断原业务操作，响应只回传 queued / deduped / disabled / skipped / blocked / error 等脱敏状态，不返回收件邮箱或 guard decision。`/api/mail-outbox-worker` 是内部队列处理 endpoint，同时接受 `MAIL_OUTBOX_WORKER_SECRET` 和 `CRON_SECRET` 鉴权；`vercel.json` 已配置每日一次 Vercel Cron 触发该 endpoint，外部 cron 或受控运维脚本可使用独立 worker secret，后台“邮件状态”页也能由超级管理员手动调用 `/api/admin?route=mail-outbox-drain` 处理到期队列。`/api/mail-delivery-feedback` 是内部投递反馈入口，用服务端 secret 接收单条 hard bounce / complaint / invalid recipient / domain pause，也能接收 Stalwart Telemetry Webhook `{ events: [...] }` 批量投递事件；永久失败会写入 `mail_suppression`，成功和临时失败只写入脱敏 `mail_delivery_events`。`/api/mail-inbound` 是内部入站邮件事件入口，用服务端 secret 接收 Stalwart Webhooks / MTA Hooks 或受控桥接脚本的入站摘要，并只写入脱敏 `mail_delivery_events`，不保存原始正文或自动生成工单。后台“站点健康”和“邮件状态”面板通过 `/api/admin?route=site-health` 汇总内容更新时间、公共缓存、自动化、邮件队列、入站事件、suppression、发送预算高水位和待处理事项；“邮件状态”页还提供超级管理员测试邮件入口，用当前 provider adapter 发送受控测试邮件，并只记录脱敏投递事件。邮件状态页可在线编辑 `mail_abuse_budget_config` 的窗口、上限和启用状态，并能展开查看最近失败 / suppressed outbox 的脱敏错误摘要。所有响应不返回原始邮箱、SMTP 密码、webhook secret、Stalwart 原始 event id / queue id 或预算 bucket hash。真实投递前必须先设置 `MAIL_ABUSE_HASH_SECRET`、保持环境级紧急停发开关可用，并确认 `docs/SELF_HOSTED_MAIL.md` 中的 DNS、suppression、预算和投递监控检查项完成。
 
 账号恢复现在优先走自助重置邮件：登录弹窗的“账号恢复”会先调用 `/api/auth-email-action` 发送密码重置邮件；只有多次收不到邮件、邮箱不可访问或需要注销旧账号时，才提交人工恢复申请。人工恢复申请仍只返回通用 `received` 状态；超管核验后可设置临时密码；临时密码过期时间由 `ACCOUNT_RECOVERY_TEMP_PASSWORD_TTL_HOURS` 控制；用户登录后会从私有 `account_security_states` 读取强制改密状态，并在设置页改密成功后清除。只有 `ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时，人工恢复申请中的 `password_reset` 才会写入 `mail_outbox` 并标记为 `mail_reset_queued`；防刷阻断、入队异常或状态回写失败时仍保留人工恢复 fallback。认证预检和恢复申请会写入私有 `auth_security_events`，只保存 hash、风险桶、CAPTCHA 摘要和脱敏 metadata。不要把强制改密状态放进公开 profile 字段，也不要在响应、日志或审计包中保存明文临时密码、原始邮箱、验证码 token 或 `game_uid`。
@@ -148,6 +153,8 @@ npm run generate:supabase-baseline
 npm run test:supabase-baseline
 ```
 
+迁移 152、153 增加历史异常 / 变更审计、官方导入暂存和原子确认 RPC；迁移 154 将运行时站点版本提升到 `v4.5.2` 并刷新公共缓存 epoch；迁移 155 加固旧客户端的仅 ID 批量删除，遇到跨游戏账号的重复 ID 会整笔拒绝。已有生产库按前向迁移顺序执行；新环境直接使用已覆盖到 155 的 baseline，不要再叠加重复执行。历史异常回填脚本默认只读，只有同时提供 `--apply` 与脚本打印的精确确认快照时才允许写入。
+
 数据库体积治理的现状：远端 `history` 体积主要来自索引。删除字段或索引前必须先做线上读写路径、RPC 查询计划、回滚脚本和实际基准验证；本轮只整理 baseline 和迁移归档，不直接改生产表结构。
 
 ## 静态资源维护
@@ -158,6 +165,14 @@ npm run test:supabase-baseline
 - 新增截图或大图后应运行 `npm run perf:report` 检查资源预算。
 
 ## Changelog 摘要
+
+### v4.5.2
+
+- 官方导入增加服务端暂存与前端逐条审阅，确认后通过数据库 RPC 原子写入；异常或无法识别记录可跳过，审阅会话可恢复。
+- 日志详情支持按用户、游戏账号、区服、卡池和序号精确编辑 / 删除，修改会写入审计并重算受影响卡池保底。
+- 增加用户异常提醒、超级管理员异常复核、旧批量删除歧义保护和受保护的生产异常回填脚本；生产迁移链与 baseline 覆盖到 155。
+- 优化卡池详情与本地登录后同步：隐藏日志按需挂载、复用时间线 / 阵容结果、延迟自定义分享统计，并以必要列并行分页读取账号历史。
+- 独立 CN / INTL 导入后端升级到 `1.6.1`。
 
 ### v4.4.0
 

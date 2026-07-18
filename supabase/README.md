@@ -28,7 +28,7 @@
 3. 仅当仓库里存在“编号高于 baseline 覆盖范围”的新迁移时，再补执行这些较新的 `migrations/` 文件
 4. 仅在明确场景下手工执行 `manual/` 中的脚本
 
-当前仓库内的 baseline 已覆盖到 `active/124_seed_mail_runtime_config.sql`，因此不要再把 `001~124` 这批标准迁移重复叠加执行在同版本 baseline 上。`supabase/migrations/` 目前仍保留 `113_update_home_roadmap_items.sql` 到 `125_refresh_home_roadmap_after_mail_rollout.sql` 作为生成 baseline 的 active 源文件；下一次新增迁移应从 `126_*.sql` 开始。
+当前仓库内的 baseline 已覆盖到 `active/155_guard_ambiguous_history_batch_delete.sql`，因此不要再把 `001~155` 这批标准迁移重复叠加执行在同版本 baseline 上。`supabase/migrations/` 保留当前 active 前向迁移源文件供审计与重新生成 baseline；下一次新增迁移应从 `156_*.sql` 开始。
 
 `site_config.public_cache_epoch` 是公共数据缓存版本源；公共 API / 首屏不应回退成浏览器直连 Supabase 读写。
 公共卡池统计读取 `public_pool_analytics_cache` 和 `public_pool_trend_cache`；受控刷新入口是 `refresh_public_analytics_cache()`，请求期不应扫描原始 `history` 生成趋势点。
@@ -36,6 +36,21 @@
 邮件 outbox 入队入口是 `enqueue_mail_outbox_event()`；该函数只授权给 `service_role`，用于原子检查预算桶、写入脱敏 `mail_outbox` 行并递增 `mail_abuse_budget_counters`，不负责真实发信。
 邮件登录使用 `email_login` 事件类型；该类型由 `123_add_email_login_mail_event_type.sql` 加入 `mail_outbox` 和 `mail_abuse_budget_config` 约束及默认预算。
 邮件运行期开关使用 `site_config.mail_runtime_config`；该配置由 `124_seed_mail_runtime_config.sql` 预置，只能作为运行期 lower gate 暂停或缩小发信范围，不保存 SMTP 密码、Webhook secret，也不能绕过环境变量硬闸门。
+
+历史审阅由 `152_add_history_review_and_import_staging.sql` 提供：
+
+- `history_anomalies`：按用户、游戏账号、区服、卡池和官方序号精确标记待核对记录；
+- `history_change_log`：记录受控编辑 / 删除审计；
+- `official_import_tasks`、`official_import_staged_records`：保存短期官方导入审阅任务；
+- 受控历史修改 RPC：校验完整记录作用域、编辑版本并重算受影响卡池保底。
+
+官方导入最终确认由 `153_commit_official_import_records_atomically.sql` 提供的 `commit_official_import_records()` 完成。它只提交用户已确认保留的暂存记录，并以数据库事务保证卡池、历史和任务状态一致。
+
+`154_bump_site_version_452.sql` 将运行时 `site_config.site_version` 提升到 `v4.5.2`，并更新 `public_cache_epoch` 使 bootstrap 与站点配置缓存失效。
+
+`155_guard_ambiguous_history_batch_delete.sql` 加固旧客户端的仅 ID 批量删除：先锁定并快照本次命中的完整记录，若同一 ID 横跨多个游戏账号作用域则整笔拒绝，避免误删其他账号的同 ID 记录。
+
+`scripts/backfill-history-anomalies.mjs` 是已知异常扫描 / 回填入口。默认模式只读；正式写入必须同时提供 `--apply` 和脚本要求的 `CONFIRM_HISTORY_ANOMALY_BACKFILL=<记录数>:<用户数>` 精确快照。记录数或用户数变化时应停止、重新审计候选范围，不得跳过 guard。
 
 ## 维护约束
 
