@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-07-18T18:22:08.794Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/155_guard_ambiguous_history_batch_delete.sql
+--   4. 生成时间: 2026-07-19T06:23:34.639Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/156_bump_site_version_453.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -24243,4 +24243,36 @@ GRANT EXECUTE ON FUNCTION public.delete_history_records_controlled(
   UUID, TEXT[], TEXT
 ) TO service_role;
 -- <<< END MIGRATION: active/155_guard_ambiguous_history_batch_delete.sql
+
+-- >>> BEGIN MIGRATION: active/156_bump_site_version_453.sql
+-- 156: bump public site version and invalidate public bootstrap caches for v4.5.3.
+
+UPDATE public.site_config
+SET
+  value = 'v4.5.3',
+  updated_at = NOW()
+WHERE key = 'site_version';
+
+INSERT INTO public.site_config (key, value, label, category, updated_at)
+SELECT
+  'site_version',
+  'v4.5.3',
+  '站点版本',
+  'general',
+  NOW()
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.site_config WHERE key = 'site_version'
+);
+
+UPDATE public.site_config
+SET
+  value = jsonb_build_object(
+    'version', ((extract(epoch from now()) * 1000)::bigint)::text,
+    'scope', 'site-config',
+    'reason', 'migration:156_bump_site_version_453',
+    'updatedAt', now()
+  )::text,
+  updated_at = NOW()
+WHERE key = 'public_cache_epoch';
+-- <<< END MIGRATION: active/156_bump_site_version_453.sql
 
