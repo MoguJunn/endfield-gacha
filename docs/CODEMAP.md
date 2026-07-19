@@ -34,7 +34,7 @@
 | 当前卡池上下文 | `src/hooks/app/useCurrentPoolData.js` |
 | 云同步 | `src/hooks/app/useCloudSync.js` |
 | 账号历史读取与精确变更 | `src/services/accountGachaDataService.js`、`src/hooks/app/useHistoryOperations.js` |
-| 官方导入审阅控制器 / 会话恢复 | `src/features/import/useOfficialImportController.js`、`src/features/import/officialImportReviewSession.js` |
+| 官方导入控制器 / 导入后异常入口 | `src/features/import/useOfficialImportController.js`、`src/features/import/ImportManager.jsx` |
 | 历史异常客户端 | `src/services/historyAnomalyService.js` |
 | 公共资源客户端 | `src/services/publicResourceClient.js` |
 | bootstrap / 卡池公开读取 | `src/services/bootstrapService.js`、`src/services/poolReadService.js` |
@@ -89,6 +89,7 @@
 | 官方导入原子确认 RPC | `supabase/migrations/153_commit_official_import_records_atomically.sql` |
 | v4.5.2 运行时版本与缓存失效 | `supabase/migrations/154_bump_site_version_452.sql` |
 | 旧批量删除歧义保护 | `supabase/migrations/155_guard_ambiguous_history_batch_delete.sql` |
+| v4.5.3 运行时版本与缓存失效 | `supabase/migrations/156_bump_site_version_453.sql` |
 | 静态头像 | `public/avatars/` |
 | 版本日历静态图 | `public/game-calendar/` |
 
@@ -102,8 +103,8 @@
 
 | 范围 | 文件 |
 |------|------|
-| 官方数据规范化、暂存和确认编排 | `backend/fullImportService.js` |
-| 审阅任务访问控制与状态机 | `backend/lib/officialImportStaging.js` |
+| 官方数据规范化、内部暂存、自动确认和异常标记编排 | `backend/fullImportService.js` |
+| 内部暂存任务访问控制与原子确认状态机 | `backend/lib/officialImportStaging.js` |
 | 前后端共享保底计算 | `shared/historyPity.js` |
 | 前后端共享官方记录规范化 | `shared/officialImportRecordNormalizer.js` |
 
