@@ -46,11 +46,11 @@ vi.mock('../../../services/historyAnomalyService.js', () => ({
 
 function makeRecord(overrides = {}) {
   return {
-    record_id: 'record-1',
-    seq_id: '10',
-    pool_id: 'pool-1',
-    game_uid: 'game-1',
-    server_scope: 'cn-1',
+    id: 'record-1',
+    seqId: '10',
+    poolId: 'pool-1',
+    gameUid: 'game-1',
+    serverScope: 'cn-1',
     rarity: 4,
     timestamp: '2026-07-11T10:00:00.000Z',
     ...overrides,
@@ -70,7 +70,7 @@ function makeAnomaly(overrides = {}) {
   };
 }
 
-function setPool(poolId = 'pool-1', record = makeRecord({ pool_id: poolId })) {
+function setPool(poolId = 'pool-1', record = makeRecord({ poolId })) {
   harness.poolData = {
     currentPool: { id: poolId, name: poolId, type: 'limited_character' },
     normalizedCurrentPoolHistory: [record],
@@ -127,11 +127,11 @@ describe('RecordsView history anomalies', () => {
       poolId === 'pool-a' ? firstResponse : secondResponse
     ));
 
-    setPool('pool-a', makeRecord({ record_id: 'record-a', pool_id: 'pool-a' }));
+    setPool('pool-a', makeRecord({ id: 'record-a', poolId: 'pool-a' }));
     const view = render(<RecordsView onEdit={vi.fn()} onDeleteItem={vi.fn()} onDeleteGroup={vi.fn()} />);
     await waitFor(() => expect(harness.loadHistoryAnomalies).toHaveBeenCalledWith(expect.objectContaining({ poolId: 'pool-a' })));
 
-    setPool('pool-b', makeRecord({ record_id: 'record-b', pool_id: 'pool-b' }));
+    setPool('pool-b', makeRecord({ id: 'record-b', poolId: 'pool-b' }));
     view.rerender(<RecordsView onEdit={vi.fn()} onDeleteItem={vi.fn()} onDeleteGroup={vi.fn()} />);
     await waitFor(() => expect(harness.loadHistoryAnomalies).toHaveBeenCalledWith(expect.objectContaining({ poolId: 'pool-b' })));
 

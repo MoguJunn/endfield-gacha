@@ -256,6 +256,68 @@ describe('official import staging', () => {
     expect(supabase.tables.official_import_staged_records[1].normalized_record).toBeTruthy();
   });
 
+  it('allows a locatable unknown item to be written for post-import review', async () => {
+    const supabase = createFakeSupabase();
+    const issues = [
+      { code: 'MISSING_ITEM_ID_AND_NAME', severity: 'blocking', message: '缺少物品身份' },
+      { code: 'MISSING_QUALITY', severity: 'blocking', message: '缺少品质' },
+    ];
+    const staged = await stageOfficialImportTask({
+      supabase,
+      userId: 'user-1',
+      source: 'cn',
+      importMode: 'incremental',
+      account: { gameUid: '10001', serverId: '1', region: 'cn' },
+      pools: [{ pool_id: 'special_test', name: '测试卡池', type: 'limited' }],
+      stagedRecords: [{
+        historyRecord: {
+          record_id: 'record-unknown',
+          pool_id: 'special_test',
+          seq_id: '42',
+          game_uid: '10001',
+          server_id: '1',
+          rarity: 4,
+          timestamp: '2026-07-16T00:00:00.000Z',
+        },
+        normalized: {
+          itemName: null,
+          itemType: 'character',
+          quality: null,
+          poolId: 'special_test',
+          seqId: '42',
+          gameUid: '10001',
+        },
+        issues,
+        blocked: true,
+      }],
+      reviewSummary: { totalRecords: 1, issueRecords: 1, blockingRecords: 1, issues },
+      importSummary: { newRecords: 1 },
+    });
+    const commit = vi.fn(async ({ rows }) => ({ savedRecords: rows.length }));
+
+    expect(staged.records[0]).toMatchObject({
+      selectedAction: 'keep',
+      quality: null,
+    });
+    const confirmed = await confirmOfficialImportTask({
+      supabase,
+      taskId: staged.task.id,
+      userId: 'user-1',
+      accessKey: staged.accessKey,
+      commit,
+    });
+
+    expect(confirmed.result.savedRecords).toBe(1);
+    expect(commit).toHaveBeenCalledWith(expect.objectContaining({
+      rows: [expect.objectContaining({
+        selected_action: 'keep',
+        normalized_record: expect.objectContaining({
+          history: expect.objectContaining({ rarity: 4 }),
+        }),
+      })],
+    }));
+  });
+
   it('accepts a task status committed by the atomic database callback', async () => {
     const supabase = createFakeSupabase();
     const staged = await createReview(supabase);

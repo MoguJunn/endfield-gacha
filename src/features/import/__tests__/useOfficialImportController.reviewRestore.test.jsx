@@ -43,20 +43,6 @@ vi.mock('../../../utils/appLogger.js', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
 }));
 
-const blockedRecord = {
-  ordinal: 0,
-  itemName: null,
-  selectedAction: 'keep',
-  issues: [{ severity: 'blocking', code: 'MISSING_ITEM_NAME' }],
-};
-
-const validRecord = {
-  ordinal: 1,
-  itemName: '余烬',
-  selectedAction: 'keep',
-  issues: [],
-};
-
 function saveReviewSession() {
   saveOfficialImportReviewSession({
     userId: 'user-a',
@@ -66,25 +52,14 @@ function saveReviewSession() {
   });
 }
 
-describe('useOfficialImportController review restore', () => {
+describe('useOfficialImportController legacy review cleanup', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sessionStorage.clear();
   });
 
-  it('刷新后恢复待确认任务，并强制阻断记录保持跳过', async () => {
+  it('新流程启动时清除旧版待确认会话，不再恢复逐条审阅页', async () => {
     saveReviewSession();
-    chainMocks.fetchFullImportReview.mockResolvedValue({
-      task: {
-        id: 'task-a',
-        status: 'awaiting_confirmation',
-        gameUid: 'game-1',
-        serverId: '1',
-        region: 'cn',
-        summary: { review: { issueRecords: 1, blockingRecords: 1 } },
-      },
-      records: [blockedRecord, validRecord],
-    });
 
     const { result } = renderHook(() => useOfficialImportController({
       userId: 'user-a',
@@ -92,46 +67,21 @@ describe('useOfficialImportController review restore', () => {
     }));
 
     await waitFor(() => {
-      expect(result.current.status).toBe(ImportStatus.REVIEW_REQUIRED);
-    });
-    expect(chainMocks.fetchFullImportReview).toHaveBeenCalledWith('task-a', 'review-key', 'cn');
-    expect(result.current.reviewRecords).toEqual([blockedRecord, validRecord]);
-    expect(result.current.reviewDecisions).toEqual({ 0: 'skip', 1: 'keep' });
-    expect(loadOfficialImportReviewSession({ userId: 'user-a', source: 'cn' })).not.toBeNull();
-  });
-
-  it('临时网络失败时保留恢复凭证', async () => {
-    saveReviewSession();
-    chainMocks.fetchFullImportReview.mockRejectedValue(new Error('network timeout'));
-
-    const { result } = renderHook(() => useOfficialImportController({
-      userId: 'user-a',
-      source: 'cn',
-    }));
-
-    await waitFor(() => {
-      expect(result.current.status).toBe(ImportStatus.ERROR);
-    });
-    expect(result.current.error).toContain('上次待确认的导入记录');
-    expect(loadOfficialImportReviewSession({ userId: 'user-a', source: 'cn' })).not.toBeNull();
-  });
-
-  it('任务确定过期时清除恢复凭证', async () => {
-    saveReviewSession();
-    const expiredError = Object.assign(new Error('review expired'), {
-      data: { code: 'REVIEW_TASK_EXPIRED' },
-    });
-    chainMocks.fetchFullImportReview.mockRejectedValue(expiredError);
-
-    const { result } = renderHook(() => useOfficialImportController({
-      userId: 'user-a',
-      source: 'cn',
-    }));
-
-    await waitFor(() => {
-      expect(chainMocks.fetchFullImportReview).toHaveBeenCalledTimes(1);
       expect(loadOfficialImportReviewSession({ userId: 'user-a', source: 'cn' })).toBeNull();
     });
+    expect(chainMocks.fetchFullImportReview).not.toHaveBeenCalled();
     expect(result.current.status).toBe(ImportStatus.IDLE);
+    expect(result.current.reviewRecords).toEqual([]);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('没有旧版会话时保持空闲状态', () => {
+    const { result } = renderHook(() => useOfficialImportController({
+      userId: 'user-a',
+      source: 'cn',
+    }));
+
+    expect(result.current.status).toBe(ImportStatus.IDLE);
+    expect(chainMocks.fetchFullImportReview).not.toHaveBeenCalled();
   });
 });

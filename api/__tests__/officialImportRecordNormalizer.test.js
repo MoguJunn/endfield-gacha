@@ -2,6 +2,8 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  hasActionableImportIdentityIssues,
+  hasWriteBlockingImportIssues,
   normalizeOfficialImportRecord,
   summarizeOfficialImportIssues,
 } from '../../shared/officialImportRecordNormalizer.js';
@@ -80,7 +82,7 @@ describe('officialImportRecordNormalizer', () => {
     expect(result.issues.map((issue) => issue.code)).toContain('MISSING_SEQ_ID');
   });
 
-  it('blocks missing item identity and quality instead of creating unknown four-star data', () => {
+  it('keeps an identifiable scope available for post-import anomaly handling', () => {
     const result = normalizeOfficialImportRecord({
       poolId: 'special_1_4_1',
       seqId: '1026',
@@ -98,6 +100,23 @@ describe('officialImportRecordNormalizer', () => {
       'MISSING_ITEM_ID_AND_NAME',
       'MISSING_QUALITY',
     ]));
+    expect(hasActionableImportIdentityIssues(result.issues)).toBe(true);
+    expect(hasWriteBlockingImportIssues(result.issues)).toBe(false);
+  });
+
+  it('still blocks records whose account scope cannot be safely located', () => {
+    const result = normalizeOfficialImportRecord({
+      seqId: '1026',
+      gachaTs: 1784173217803,
+    }, {
+      gameUid: '10001',
+      serverId: '1',
+      region: 'cn',
+    });
+
+    expect(hasActionableImportIdentityIssues(result.issues)).toBe(true);
+    expect(result.issues.map((issue) => issue.code)).toContain('MISSING_POOL_ID');
+    expect(hasWriteBlockingImportIssues(result.issues)).toBe(true);
   });
 
   it('summarizes blocking and review issues for the review screen', () => {

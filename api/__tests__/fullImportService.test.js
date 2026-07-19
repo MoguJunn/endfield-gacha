@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { hasWriteBlockingImportIssues } from '../../shared/officialImportRecordNormalizer.js';
 
 let mockSupabaseClient;
 
@@ -18,10 +19,51 @@ vi.mock('../../backend/lib/officialImportStaging.js', () => officialImportStagin
 
 beforeEach(() => {
   Object.values(officialImportStagingMocks).forEach((mock) => mock.mockReset());
-  officialImportStagingMocks.stageOfficialImportTask.mockResolvedValue({
-    task: { id: 'task-1', status: 'awaiting_confirmation' },
+  officialImportStagingMocks.stageOfficialImportTask.mockImplementation(async (payload) => ({
+    task: {
+      id: 'task-1',
+      status: 'awaiting_confirmation',
+      user_id: payload.userId,
+      source: payload.source,
+      import_mode: payload.importMode,
+      summary: payload.importSummary,
+    },
     accessKey: 'access-key',
-    records: [],
+    records: (payload.stagedRecords || []).map((record, ordinal) => ({
+      ordinal,
+      issues: record.issues || [],
+      selectedAction: hasWriteBlockingImportIssues(record.issues) ? 'skip' : 'keep',
+    })),
+  }));
+  officialImportStagingMocks.confirmOfficialImportTask.mockImplementation(async ({ commit, decisions = [] }) => {
+    const stagedPayload = officialImportStagingMocks.stageOfficialImportTask.mock.calls.at(-1)?.[0];
+    const decisionMap = new Map(decisions.map((decision) => [Number(decision.ordinal), decision.action]));
+    const poolById = new Map(
+      (stagedPayload.pools || []).map((pool) => [String(pool.pool_id), pool])
+    );
+    const rows = (stagedPayload.stagedRecords || []).map((record, ordinal) => ({
+      ordinal,
+      selected_action: decisionMap.get(ordinal)
+        || (hasWriteBlockingImportIssues(record.issues) ? 'skip' : 'keep'),
+      normalized_record: {
+        history: record.historyRecord,
+        normalized: record.normalized,
+        pool: poolById.get(String(record.historyRecord?.pool_id || record.normalized?.poolId)) || null,
+      },
+    }));
+    const task = {
+      id: 'task-1',
+      user_id: stagedPayload.userId,
+      source: stagedPayload.source,
+      import_mode: stagedPayload.importMode,
+      summary: stagedPayload.importSummary,
+    };
+    const result = await commit({
+      task,
+      rows: rows.filter((row) => row.selected_action === 'keep'),
+      allRows: rows,
+    });
+    return { task: { ...task, status: 'committed' }, result, idempotent: false };
   });
 });
 
@@ -43,37 +85,6 @@ function createHistoryRangeQuery(rangeHandler) {
     range: rangeHandler,
   };
   return query;
-}
-
-function mockConfirmationCommitFromLatestStaging() {
-  const stagedPayload = officialImportStagingMocks.stageOfficialImportTask.mock.calls.at(-1)?.[0];
-  if (!stagedPayload) {
-    throw new Error('Expected executeFullImport to stage records before confirmation');
-  }
-
-  officialImportStagingMocks.confirmOfficialImportTask.mockImplementation(async ({ commit }) => {
-    const poolById = new Map(
-      (stagedPayload.pools || []).map((pool) => [String(pool.pool_id), pool])
-    );
-    const rows = (stagedPayload.stagedRecords || []).map((record, ordinal) => ({
-      ordinal,
-      selected_action: 'keep',
-      normalized_record: {
-        history: record.historyRecord,
-        normalized: record.normalized,
-        pool: poolById.get(String(record.historyRecord?.pool_id || record.normalized?.poolId)) || null,
-      },
-    }));
-    const task = {
-      id: 'task-1',
-      user_id: stagedPayload.userId,
-      source: stagedPayload.source,
-      import_mode: stagedPayload.importMode,
-      summary: stagedPayload.importSummary,
-    };
-    const result = await commit({ task, rows });
-    return { task, result, idempotent: false };
-  });
 }
 
 describe('verifySupabaseAccessToken', () => {
@@ -363,7 +374,105 @@ describe('executeFullImport import mode metadata', () => {
     expect(normalizeFullImportMode(undefined)).toBe('incremental');
   });
 
-  it('stages the selected mode without changing full-fetch dedupe semantics, then commits on confirmation', async () => {
+  it('keeps anomaly metadata paired with its record when timestamps reorder the batch', async () => {
+    const { buildStagedRecordsWithMetadata } = await import('../../backend/fullImportService.js');
+    const result = buildStagedRecordsWithMetadata(
+      [
+        { record_id: 'late', timestamp: '2026-07-16T12:00:00.000Z' },
+        { record_id: 'early', timestamp: '2026-07-15T12:00:00.000Z' },
+      ],
+      [
+        { normalized: { itemName: '较晚记录' }, issues: [{ code: 'LATE' }] },
+        { normalized: { itemName: '较早记录' }, issues: [{ code: 'EARLY' }] },
+      ]
+    );
+
+    expect(result.records.map((record) => record.record_id)).toEqual(['early', 'late']);
+    expect(result.stagedRecords.map((record) => ({
+      recordId: record.historyRecord.record_id,
+      itemName: record.normalized.itemName,
+      issueCode: record.issues[0].code,
+    }))).toEqual([
+      { recordId: 'early', itemName: '较早记录', issueCode: 'EARLY' },
+      { recordId: 'late', itemName: '较晚记录', issueCode: 'LATE' },
+    ]);
+  });
+
+  it('writes a locatable unknown item with a four-star placeholder and creates a later-review marker', async () => {
+    const {
+      buildPostImportAnomalyRows,
+      resolveOfficialImportStorageQuality,
+      savePostImportAnomalies,
+    } = await import('../../backend/fullImportService.js');
+    const issues = [
+      { code: 'MISSING_ITEM_ID_AND_NAME', severity: 'blocking' },
+      { code: 'MISSING_QUALITY', severity: 'blocking' },
+    ];
+    const normalized = { quality: null, issues };
+    const historyRecord = {
+      record_id: 'record-unknown',
+      game_uid: '10001',
+      server_id: '1',
+      pool_id: 'special_test',
+      seq_id: '42',
+      rarity: 4,
+      timestamp: '2026-07-16T12:00:00.000Z',
+    };
+    const stagedRecords = [{ historyRecord, issues }];
+
+    expect(resolveOfficialImportStorageQuality(normalized)).toBe(4);
+    expect(buildPostImportAnomalyRows(stagedRecords, 'user-1')).toEqual([
+      expect.objectContaining({
+        user_id: 'user-1',
+        record_id: 'record-unknown',
+        game_uid: '10001',
+        server_scope: '1',
+        pool_id: 'special_test',
+        seq_id: '42',
+        issue_code: 'OFFICIAL_IMPORT_UNKNOWN_ITEM',
+        status: 'pending',
+        details: expect.objectContaining({
+          itemName: '未知角色或武器',
+          rarity: 4,
+          issueCodes: ['MISSING_ITEM_ID_AND_NAME', 'MISSING_QUALITY'],
+        }),
+      }),
+    ]);
+
+    const upsert = vi.fn(async () => ({ error: null }));
+    const supabase = {
+      from: vi.fn(() => ({ upsert })),
+    };
+    await expect(savePostImportAnomalies(supabase, stagedRecords, 'user-1')).resolves.toEqual({
+      anomalyRecords: 1,
+      anomalyPoolIds: ['special_test'],
+    });
+    expect(supabase.from).toHaveBeenCalledWith('history_anomalies');
+    expect(upsert).toHaveBeenCalledWith(
+      [expect.objectContaining({ record_id: 'record-unknown', status: 'pending' })],
+      {
+        onConflict: 'user_id,game_uid,server_scope,pool_id,seq_id,issue_code',
+        ignoreDuplicates: true,
+      }
+    );
+  });
+
+  it('does not fabricate records that lack a safe account or pool locator', async () => {
+    const {
+      buildPostImportAnomalyRows,
+      resolveOfficialImportStorageQuality,
+    } = await import('../../backend/fullImportService.js');
+    const issues = [
+      { code: 'MISSING_ITEM_ID_AND_NAME', severity: 'blocking' },
+      { code: 'MISSING_QUALITY', severity: 'blocking' },
+      { code: 'MISSING_POOL_ID', severity: 'blocking' },
+    ];
+
+    expect(resolveOfficialImportStorageQuality({ quality: null, issues })).toBeNull();
+    expect(buildPostImportAnomalyRows([{ historyRecord: {}, issues }], 'user-1')).toEqual([]);
+  });
+
+  it('writes the selected mode immediately without changing full-fetch dedupe semantics', async () => {
     const operations = [];
     const insertedPoolIds = new Set();
     let savedHistoryRows = [];
@@ -559,17 +668,12 @@ describe('executeFullImport import mode metadata', () => {
       fetchStrategy: 'full_official_fetch_with_dedupe',
       totalRecords: 1,
       newRecords: 1,
-      savedRecords: 0,
+      savedRecords: 1,
       duplicates: 0,
-      reviewRequired: true,
-      reviewTask: {
-        id: 'task-1',
-        status: 'awaiting_confirmation',
-        accessKey: 'access-key',
-      },
+      reviewRequired: false,
+      atomicCommit: true,
       warnings: [],
     });
-    expect(rpc).not.toHaveBeenCalled();
     expect(authChainFunctions.fetchAllRecordsConcurrent).toHaveBeenCalledWith(
       'u8-token',
       '1',
@@ -580,8 +684,13 @@ describe('executeFullImport import mode metadata', () => {
         existingRecordKeys: null,
       }
     );
-    expect(operations).toEqual([]);
-    expect(savedHistoryRows).toEqual([]);
+    expect(savedHistoryRows[0]).toMatchObject({
+      game_uid: '10000001',
+      nick_name: '测试账号',
+      server_id: '1',
+      region: 'cn',
+      is_info_book: true,
+    });
     expect(officialImportStagingMocks.stageOfficialImportTask).toHaveBeenCalledTimes(1);
     const stagedPayload = officialImportStagingMocks.stageOfficialImportTask.mock.calls[0][0];
     expect(stagedPayload).toMatchObject({
@@ -609,17 +718,8 @@ describe('executeFullImport import mode metadata', () => {
         is_info_book: true,
       },
     });
-    expect(updateProgress).toHaveBeenCalledWith({ progress: 100, message: '记录已暂存，请确认后写入' });
-
-    mockConfirmationCommitFromLatestStaging();
-    const { confirmFullImportReview } = await import('../../backend/fullImportService.js');
-    const confirmed = await confirmFullImportReview({
-      taskId: 'task-1',
-      accessKey: 'access-key',
-      userId: '00000000-0000-0000-0000-000000000001',
-    });
-
-    expect(confirmed.result).toMatchObject({
+    expect(updateProgress).toHaveBeenCalledWith({ progress: 100, message: '导入完成' });
+    expect(result.data).toMatchObject({
       savedRecords: 1,
       atomicCommit: true,
       publicAnalyticsRefresh: {
@@ -646,13 +746,6 @@ describe('executeFullImport import mode metadata', () => {
       { tableName: 'pools', action: 'upsert', count: 1 },
       { tableName: 'pool_id_aliases', action: 'upsert', count: 2 },
     ]));
-    expect(savedHistoryRows[0]).toMatchObject({
-      game_uid: '10000001',
-      nick_name: '测试账号',
-      server_id: '1',
-      region: 'cn',
-      is_info_book: true,
-    });
   });
 
   it('preserves existing international EU/NA server when bindings omit sub-server', async () => {
@@ -841,16 +934,14 @@ describe('executeFullImport import mode metadata', () => {
       region: 'intl',
     });
     expect(result.data).toMatchObject({
-      savedRecords: 0,
-      reviewRequired: true,
-      reviewTask: {
-        id: 'task-1',
-        accessKey: 'access-key',
-      },
+      savedRecords: 1,
+      reviewRequired: false,
     });
-    expect(operations).toEqual([]);
     expect(savedHistoryRows).toEqual([]);
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith(
+      'commit_official_import_records',
+      expect.objectContaining({ p_user_id: '00000000-0000-0000-0000-000000000001' })
+    );
     const stagedPayload = officialImportStagingMocks.stageOfficialImportTask.mock.calls[0][0];
     expect(stagedPayload.account).toEqual({
       gameUid: '20000001',
@@ -1053,12 +1144,13 @@ describe('executeFullImport import mode metadata', () => {
     expect(result.success).toBe(true);
     expect(result.data).toMatchObject({
       newRecords: 1,
-      savedRecords: 0,
-      reviewRequired: true,
+      savedRecords: 1,
+      reviewRequired: false,
     });
 
     const stagedRecord = officialImportStagingMocks.stageOfficialImportTask.mock.calls[0][0]
       .stagedRecords[0].historyRecord;
+    operations.length = 0;
     const saved = await saveHistoryToServer(
       [stagedRecord],
       '00000000-0000-0000-0000-000000000001'
@@ -1270,12 +1362,13 @@ describe('executeFullImport import mode metadata', () => {
     expect(result.success).toBe(true);
     expect(result.data).toMatchObject({
       newRecords: 1,
-      savedRecords: 0,
-      reviewRequired: true,
+      savedRecords: 1,
+      reviewRequired: false,
     });
 
     const stagedRecord = officialImportStagingMocks.stageOfficialImportTask.mock.calls[0][0]
       .stagedRecords[0].historyRecord;
+    operations.length = 0;
     const saved = await saveHistoryToServer(
       [stagedRecord],
       '00000000-0000-0000-0000-000000000001'
@@ -1517,13 +1610,15 @@ describe('executeFullImport import mode metadata', () => {
       fetchStrategy: 'incremental_official_fetch_with_context_guard',
       totalRecords: 2,
       newRecords: 1,
-      savedRecords: 0,
+      savedRecords: 1,
       duplicates: 1,
       earlyStoppedPools: earlyStopped,
-      reviewRequired: true,
+      reviewRequired: false,
     });
-    expect(rpc).not.toHaveBeenCalled();
-    expect(operations).toEqual([]);
+    expect(rpc).toHaveBeenCalledWith(
+      'commit_official_import_records',
+      expect.objectContaining({ p_history: expect.any(Array) })
+    );
     const stagedPayload = officialImportStagingMocks.stageOfficialImportTask.mock.calls[0][0];
     expect(stagedPayload.importSummary).toMatchObject({
       importMode: 'incremental',
@@ -1862,22 +1957,8 @@ describe('executeFullImport import mode metadata', () => {
     expect(result.success).toBe(true);
     expect(result.data).toMatchObject({
       newRecords: 1,
-      savedRecords: 0,
-      reviewRequired: true,
-    });
-    expect(rpc).not.toHaveBeenCalled();
-    expect(operations).toEqual([]);
-
-    mockConfirmationCommitFromLatestStaging();
-    const { confirmFullImportReview } = await import('../../backend/fullImportService.js');
-    const confirmed = await confirmFullImportReview({
-      taskId: 'task-1',
-      accessKey: 'access-key',
-      userId: '00000000-0000-0000-0000-000000000001',
-    });
-
-    expect(confirmed.result).toMatchObject({
       savedRecords: 1,
+      reviewRequired: false,
       atomicCommit: true,
       publicAnalyticsRefresh: {
         ok: false,
