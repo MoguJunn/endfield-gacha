@@ -233,7 +233,7 @@ const RecordsView = ({
       && String(record?.poolId || record?.pool_id || '') === String(anomaly?.pool_id || '')
       && String(record?.gameUid || record?.game_uid || '') === String(anomaly?.game_uid || '')
       && String(record?.serverScope || record?.server_scope || record?.serverId || record?.server_id || '') === String(anomaly?.server_scope || '')
-      && String(record?.recordId || record?.record_id || '') === String(anomaly?.record_id || '')
+      && String(record?.id ?? record?.recordId ?? record?.record_id ?? '') === String(anomaly?.record_id || '')
     )) || null
   ), [normalizedCurrentPoolHistory]);
 
