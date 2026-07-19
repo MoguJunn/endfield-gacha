@@ -37,16 +37,16 @@
 邮件登录使用 `email_login` 事件类型；该类型由 `123_add_email_login_mail_event_type.sql` 加入 `mail_outbox` 和 `mail_abuse_budget_config` 约束及默认预算。
 邮件运行期开关使用 `site_config.mail_runtime_config`；该配置由 `124_seed_mail_runtime_config.sql` 预置，只能作为运行期 lower gate 暂停或缩小发信范围，不保存 SMTP 密码、Webhook secret，也不能绕过环境变量硬闸门。
 
-历史审阅由 `152_add_history_review_and_import_staging.sql` 提供：
+历史异常核对、变更审计与官方导入内部暂存基础由 `152_add_history_review_and_import_staging.sql` 提供：
 
 - `history_anomalies`：按用户、游戏账号、区服、卡池和官方序号精确标记待核对记录；
 - `history_change_log`：记录受控编辑 / 删除审计；
 - `official_import_tasks`、`official_import_staged_records`：保存短期官方导入内部暂存任务；
 - 受控历史修改 RPC：校验完整记录作用域、编辑版本并重算受影响卡池保底。
 
-官方导入最终确认由 `153_commit_official_import_records_atomically.sql` 提供的 `commit_official_import_records()` 完成。`v4.5.3` 的服务端导入路径先完成安全分类，再自动提交标记为保留的暂存记录，并以数据库事务保证卡池、历史和任务状态一致；旧的逐条审阅接口只保留兼容。
+官方导入最终原子提交由 `153_commit_official_import_records_atomically.sql` 提供的 `commit_official_import_records()` 完成。`v4.5.3` 中浏览器提交 `import-full` 后只轮询 `import-status`；服务端先完成安全分类，再自动提交标记为保留的暂存记录，并以数据库事务保证卡池、历史和任务状态一致。浏览器不再调用同步 `import-confirm`，旧逐条审阅接口只保留兼容。
 
-`154_bump_site_version_452.sql` 将运行时 `site_config.site_version` 提升到 `v4.5.2`，并更新 `public_cache_epoch` 使 bootstrap 与站点配置缓存失效。
+历史版本迁移 `154_bump_site_version_452.sql` 将当时的运行时 `site_config.site_version` 提升到 `v4.5.2`，并更新 `public_cache_epoch` 使 bootstrap 与站点配置缓存失效。
 
 `155_guard_ambiguous_history_batch_delete.sql` 加固旧客户端的仅 ID 批量删除：先锁定并快照本次命中的完整记录，若同一 ID 横跨多个游戏账号作用域则整笔拒绝，避免误删其他账号的同 ID 记录。
 

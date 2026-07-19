@@ -1,4 +1,6 @@
-# Release Checklist
+# Release Checklist（可复用发布模板）
+
+本文件的未勾选项是下一次发布时复用的模板，不代表当前 `v4.5.3` 尚未完成。`v4.5.3` 已在 `99296c2 chore:发布v4.5.3` 收口：migration 156 已执行，CN / INTL 后端 `1.6.2` 健康，GitHub 触发的 Vercel Production 部署 Ready，完整验证链和真实双区导入均通过。
 
 ## 代码
 
@@ -7,7 +9,7 @@
 - [ ] `npm run lint`
 - [ ] `npm run test:unit`
 - [ ] `npm run build`
-- [ ] `npm run test:supabase-baseline:smoke`
+- [ ] `npm run test:supabase-baseline:smoke`（baseline 小范围真实执行）
 - [ ] `npm run test:history-batch-delete-guard`
 - [ ] `git diff --check`
 
@@ -45,10 +47,10 @@
 - [ ] Supabase baseline / migration 状态已确认
 - [ ] 新迁移已按编号顺序执行；站点版本与 `public_cache_epoch` 已核对
 - [ ] CN / INTL 私有导入后端版本一致，`/health` 返回正确 `sourceMode`、版本和 `fullImport: true`
-- [ ] 官方导入已验证“获取 → 内部暂存 → 自动原子写入 → 异常标记 → 现在 / 稍后处理”；缺少安全归属字段的记录会跳过，重复确认保持幂等
+- [ ] 官方导入已验证“`import-full` → 后台获取 / 内部暂存 → 自动原子写入 → `import-status` 轮询 → 异常标记 → 现在 / 稍后处理”；缺少安全归属字段的记录会跳过，任务重试保持幂等，浏览器不调用同步 `import-confirm`
 - [ ] 历史编辑已验证乐观锁冲突、变更审计、受影响作用域保底重算，以及旧批量删除对跨账号重复 ID 的整笔拒绝
 - [ ] 异常回填先只读演练；仅在记录数和用户数精确校验值一致时执行 `--apply`
-- [ ] Vercel 部署已检查
+- [ ] GitHub push 触发的 Vercel Production 部署已检查并 Ready；正常流程没有直接运行 `vercel deploy --prod`
 - [ ] 公共页面首屏未出现浏览器直连 Supabase
 - [ ] 公共缓存版本 / 失效链已验证
 

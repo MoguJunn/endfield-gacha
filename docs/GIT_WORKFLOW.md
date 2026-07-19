@@ -77,6 +77,9 @@ chore:发布v4.4.1
 6. 合入 `main`。
 7. 打 `vX.Y.Z` tag。
 8. 推送 `main`、`release/vX.Y.Z`、需要保留的 `feat/*` / `fix/*` 分支和 tag。
+9. 等待 GitHub-connected Vercel 自动创建 Production 部署，确认状态为 Ready、生产 alias 指向新部署，并核对站点版本与公共缓存版本。
+
+主站正常发布不直接运行 `vercel deploy --prod`。只有用户明确批准紧急回滚、promotion 或切换已有部署时，才使用 Vercel CLI；操作前必须说明目标部署 URL / ID，操作后必须重新核对生产 alias。独立状态页等其他 Vercel 项目是不同部署目标，不得与主站发布混用。
 
 发布收口提交建议固定为：
 
@@ -106,5 +109,7 @@ git diff --check
 3. 确认改写前后的最终文件树一致，或明确列出差异。
 4. 使用 `--force-with-lease` 推送，避免覆盖远端新提交。
 5. 同步更新 `todo` 和 `SESSION_HANDOFF.md`。
+
+根目录 `todo` 与 `SESSION_HANDOFF.md` 位于主仓库外层，不会随 `gacha-analyzer` 提交自动进入 Git。发布交接时必须单独检查它们是否已经同步，仓库内文档提交不要假定会包含这两个文件。
 
 历史改写只适合本练习项目或已明确允许的仓库。协作仓库默认用新增修复提交解决问题。

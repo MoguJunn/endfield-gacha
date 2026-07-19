@@ -48,7 +48,7 @@ npm run test:official-announcements-feed
 ## 提交建议
 
 - 单个 PR 聚焦一个主题，避免把功能、修复、依赖和文档整理混在一起。
-- 从 `v4.5.0` 起按 [Git Workflow](docs/GIT_WORKFLOW.md) 执行：功能走 `feat/vX.Y-*`，修复走 `fix/vX.Y-*`，版本收口走 `release/vX.Y.Z`。
+- 从 `v4.4.1` 起按 [Git Workflow](docs/GIT_WORKFLOW.md) 执行：功能走 `feat/vX.Y-*`，修复走 `fix/vX.Y-*`，版本收口走 `release/vX.Y.Z`。
 - 提交信息保持简洁明确，优先使用 `feat:`、`fix:`、`perf:`、`docs:`、`test:`、`chore:`。
 - 功能分支合入发布分支前整理为 1 个主题清晰的提交；修复分支按问题保持小提交。
 - 如果改动只影响文档，也请说明测试未运行或为何不需要运行。

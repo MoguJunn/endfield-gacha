@@ -86,10 +86,10 @@
 | 邮件 outbox 原子入队 RPC | `supabase/migrations/120_add_mail_outbox_enqueue_rpc.sql` |
 | 邮件登录事件与运行期开关 | `supabase/migrations/123_add_email_login_mail_event_type.sql`、`supabase/migrations/124_seed_mail_runtime_config.sql` |
 | 历史异常、审计与导入暂存 | `supabase/migrations/152_add_history_review_and_import_staging.sql` |
-| 官方导入原子确认 RPC | `supabase/migrations/153_commit_official_import_records_atomically.sql` |
-| v4.5.2 运行时版本与缓存失效 | `supabase/migrations/154_bump_site_version_452.sql` |
+| 官方导入自动原子提交 RPC | `supabase/migrations/153_commit_official_import_records_atomically.sql` |
+| 历史 v4.5.2 运行时版本与缓存失效 | `supabase/migrations/154_bump_site_version_452.sql` |
 | 旧批量删除歧义保护 | `supabase/migrations/155_guard_ambiguous_history_batch_delete.sql` |
-| v4.5.3 运行时版本与缓存失效 | `supabase/migrations/156_bump_site_version_453.sql` |
+| 当前 v4.5.3 运行时版本与缓存失效 | `supabase/migrations/156_bump_site_version_453.sql` |
 | 静态头像 | `public/avatars/` |
 | 版本日历静态图 | `public/game-calendar/` |
 
@@ -103,8 +103,8 @@
 
 | 范围 | 文件 |
 |------|------|
-| 官方数据规范化、内部暂存、自动确认和异常标记编排 | `backend/fullImportService.js` |
-| 内部暂存任务访问控制与原子确认状态机 | `backend/lib/officialImportStaging.js` |
+| 官方数据规范化、`import-full` 后台任务、内部暂存、自动原子提交和异常标记编排 | `backend/fullImportService.js` |
+| 内部暂存任务访问控制与自动提交状态机 | `backend/lib/officialImportStaging.js` |
 | 前后端共享保底计算 | `shared/historyPity.js` |
 | 前后端共享官方记录规范化 | `shared/officialImportRecordNormalizer.js` |
 

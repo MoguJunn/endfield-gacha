@@ -12,7 +12,7 @@
 ## 当前约束
 
 - 数据库按自建站点数据库处理，不描述为官方数据库。
-- 当前账号恢复默认仍是人工审核链路；`AUTH-002` 已把恢复申请响应统一成 `received`，避免邮箱枚举。
+- 当前账号恢复优先走受控同源自助密码重置邮件；风控命中、邮件不可用、投递失败、邮箱不可访问或用户需要人工核验时，再回退到人工审核链路。人工恢复申请始终返回通用 `received`，避免邮箱枚举。
 - `AUTH-003` 已补 provider-independent 降级闭环：超管设置临时密码后写入私有 `account_security_states`，用户登录后在设置页看到强制改密提示，改密成功后清除该状态。
 - `AUTH-003` 已补受控同源 Auth 邮件入口：`/api/auth-email-action` 支持注册验证、密码重置和邮件登录，必须启用 `AUTH_MAIL_ACTIONS_ENABLED=true`、`MAIL_OUTBOX_WORKER_ENABLED=true` 且未命中 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH` 才会真实调用 provider adapter。
 - `AUTH-003` 也支持在 `ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时，把密码重置申请写入 `mail_outbox`。入队被防刷阻断、异常或状态回写失败时，申请仍保留人工恢复 fallback。

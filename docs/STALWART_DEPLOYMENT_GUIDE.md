@@ -1,6 +1,6 @@
-# Stalwart 自建邮件部署指南
+# Stalwart 自建邮件部署模板
 
-本文档用于把项目的邮件方向从“只做 outbox / 演练模式”推进到 Stalwart-first 的可部署方案。当前代码仍默认 `MAIL_WORKER_DRY_RUN=true`（演练模式），不会真实发信；本指南先用于本地和运维准备，不等于立即上线。
+本文档用于把项目的邮件方向从“只做 outbox / 演练模式”推进到 Stalwart-first 的可公开部署模板。当前代码仍默认 `MAIL_WORKER_DRY_RUN=true`（演练模式），不会真实发信；本指南只保留部署、验证、回滚和运维方法，不记录任何现有生产设施或人员信息。
 
 ## 结论
 
@@ -9,19 +9,19 @@
 - Cloudflare Email Routing 可以做免费收信转发；Cloudflare Email Sending 可以通过 Workers / external servers REST API 发信，但发信需要 Workers Paid，额度为每月 3,000 封，超出后 $0.35 / 1,000 封。它可以作为后续 fallback adapter，不替代 Stalwart 主线。
 - 应用只写 `mail_outbox`，由受控 worker 拉取并调用 provider。前端和公开 API 不直接调用 Stalwart 或 Cloudflare。
 
-## 当前服务器评估
+## 部署前服务器评估模板
 
-`ssh.secret` 中标注为 `INTL backend & personal Supabase` 的服务器只读检查结果：
+先从私有资产清单读取目标服务器规格，并把评估结果记录在受限运维系统中。公开文档只保留以下判断口径：
 
-| 项目 | 当前服务器 | Stalwart 参考需求 | 判断 |
+| 项目 | 待部署服务器 | Stalwart 参考需求 | 判断 |
 | --- | --- | --- | --- |
-| CPU | 4 cores | 低流量约 1 core 可运行 | 满足 |
-| 内存 | 5.8GiB total，约 2.6GiB available | idle 约 100MB；5-10 用户约 1GB RAM | 可同机低频部署 |
-| Swap | 2GiB total，已用约 1.5GiB | 无硬性要求 | 有内存压力，需要限流和监控 |
-| 磁盘 | 98G total，约 34G available | 取决于邮件数据 / 日志 / retention | 可测试，生产需限制 retention |
-| Docker | Docker 28.5.1，Compose v2.40.0 | Docker 部署可用 | 满足 |
-| 出站 25 | open | 发信需要 | 满足 |
-| 现有服务 | Supabase、1Panel、MySQL、PostgreSQL、OpenResty、Vaultwarden、后端等 | Stalwart 建议按实际负载调参 | 同机可行，但不宜开放完整高流量邮箱 |
+| CPU | `<cpu-capacity>` | 低流量约 1 core 可运行 | `<assessment>` |
+| 内存 | `<memory-capacity>` | idle 约 100MB；5-10 用户约 1GB RAM | `<assessment>` |
+| Swap | `<swap-capacity>` | 无硬性要求 | `<assessment>` |
+| 磁盘 | `<disk-capacity>` | 取决于邮件数据 / 日志 / retention | `<assessment>` |
+| Docker | `<docker-version>` / `<compose-version>` | Docker 部署可用 | `<assessment>` |
+| 出站 SMTP | `<open-or-blocked>` | 直接投递时需要 | `<assessment>` |
+| 现有服务 | `<co-located-services>` | Stalwart 建议按实际负载调参 | `<assessment>` |
 
 同机部署边界：
 
@@ -31,39 +31,39 @@
 - 保持 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH=true`（环境级紧急停发）到真实发信链路验证完成。
 - 生产前要限制连接数、日志保留、队列重试和 Stalwart 存储增长。
 
-## 当前部署状态
+## 部署状态记录模板
 
-已在 `INTL backend & personal Supabase` 服务器完成 Stalwart 初始部署：
+以下字段用于私有运维记录；公开副本必须只保留占位符：
 
-- Compose 目录：`/opt/stalwart`
-- 配置挂载：`/opt/stalwart/etc`
-- 数据挂载：`/opt/stalwart/data`
-- Compose 文件：`/opt/stalwart/docker-compose.yml`
-- recovery 凭据文件：`/root/stalwart-recovery-admin.secret`
+- Compose 目录：`<stalwart-compose-dir>`
+- 配置挂载：`<stalwart-config-dir>`
+- 数据挂载：`<stalwart-data-dir>`
+- Compose 文件：`<stalwart-compose-file>`
+- recovery 凭据来源：`<private-credential-path>`，只允许由私有密码管理器或服务器受限 secret store 注入
 - 容器名：`stalwart`
 - 镜像：`stalwartlabs/stalwart:v0.16`
-- 管理端：仅绑定服务器本机 `127.0.0.1:8088 -> 8080`
-- 当前状态：容器 `healthy`
-- 公开管理入口：`https://mail.leevident.com/admin`
-- 公开邮件端口：`25 / 465 / 587 / 993`
-- 备份文件：开放端口前已生成 `/opt/stalwart/docker-compose.yml.bak.20260526214925`
+- 管理端：仅绑定 `<loopback-address>:<local-admin-port> -> <container-admin-port>`
+- 当前状态：`<container-health>`
+- 管理入口：`https://<mail-host>/<admin-path>`，应配合访问控制，不在公开记录中保留真实入口
+- 公网端口：`<public-mail-ports>`
+- 回滚备份：`<private-backup-path>`
 
-当前已完成的生产前置检查：
+生产前置检查记录模板：
 
-- `mail.leevident.com A -> 23.80.80.193`
-- `leevident.com MX -> mail.leevident.com`
+- `<mail-host> A -> <mail-server-ip>`
+- `<mail-domain> MX -> <mail-host>`
 - `SPF / DKIM / DMARC` 均已通过公网 DNS 解析。
-- `PTR / rDNS`: `23.80.80.193 -> mail.leevident.com`
-- `465 / 993` 已切到 Let's Encrypt production 证书：
-  - Subject: `CN=mail.leevident.com`
+- `PTR / rDNS`: `<mail-server-ip> -> <mail-host>`
+- TLS 服务已切到 Let's Encrypt production 证书：
+  - Subject: `CN=<mail-host>`
   - Issuer: `Let's Encrypt E8`
-  - SAN: `DNS:mail.leevident.com`
-  - 有效期：`2026-05-26 -> 2026-08-24`
-- `587` submission listener 已创建并在容器重启后生效；STARTTLS 使用同一张 Let's Encrypt production 证书。
+  - SAN: `DNS:<mail-host>`
+  - 有效期：`<certificate-validity-window>`
+- submission listener 已创建并在容器重启后生效；STARTTLS 使用同一张 Let's Encrypt production 证书。
 - 未认证 open relay 探针通过：外发第三方域收件人返回 `550 5.1.2 Relay not allowed.`
-- `587` 未认证 submission 探针通过：未认证 `MAIL FROM` 返回 `503 5.5.1 You must authenticate first.`
-- `no-reply@leevident.com` SMTP AUTH 测试通过；本域内测试邮件 `no-reply@leevident.com -> postmaster@leevident.com` 已成功入库投递。
-- 外部投递测试邮件已完成：`no-reply@leevident.com -> mogujun233@outlook.com` 被 Outlook 服务器接受，返回 `250 2.1.5 Queued mail for delivery`。
+- 未认证 submission 探针通过：未认证 `MAIL FROM` 返回 `503 5.5.1 You must authenticate first.`
+- `<sender@example.com>` SMTP AUTH 测试通过；本域内测试邮件 `<sender@example.com> -> <postmaster@example.com>` 已成功入库投递。
+- 外部投递测试邮件已完成：`<sender@example.com> -> <external-test-recipient@example.com>` 被目标服务器接受并进入投递队列。
 
 当前仍未完成：
 
@@ -74,66 +74,53 @@
 访问 WebUI 的推荐方式：
 
 ```bash
-ssh -i ./id_ed25519_1panel -L 8088:127.0.0.1:8088 root@<server-ip>
+ssh -i <ssh-private-key> -L <local-admin-port>:<loopback-address>:<remote-admin-port> <admin-user>@<mail-server-ip>
 ```
 
 随后在本机浏览器打开：
 
 ```text
-http://127.0.0.1:8088/admin
+http://<loopback-host>:<local-admin-port>/<admin-path>
 ```
 
-登录信息在服务器：
-
-```bash
-cat /root/stalwart-recovery-admin.secret
-```
-
-完成 WebUI 初始化、创建永久管理员后，应移除 `STALWART_RECOVERY_ADMIN`：
-
-```bash
-cd /opt/stalwart
-cp .env .env.bak.$(date +%Y%m%d%H%M%S)
-sed -i '/^STALWART_RECOVERY_ADMIN=/d' .env
-docker compose restart stalwart
-```
+登录凭据必须从私有密码管理器或服务器受限 secret store 临时注入，禁止在文档或命令中直接读取真实凭据。完成 WebUI 初始化并创建永久管理员后，撤销 bootstrap 凭据、重启容器并确认旧凭据不再有效。
 
 真实发信前不要直接把生产环境变量切到 `MAIL_WORKER_DRY_RUN=false`。当前应用代码已支持 Stalwart SMTP 真实传输，但仍受 `MAIL_OUTBOX_WORKER_ENABLED`、`MAIL_WORKER_DRY_RUN`（演练模式）、`MAIL_OUTBOX_GLOBAL_KILL_SWITCH`（环境级紧急停发）、`site_config.mail_runtime_config` 运行期开关和 SMTP 凭据共同控制。运行期开关只能进一步暂停或缩小发信范围，不能绕过环境变量硬闸门，也不能保存 SMTP 密码或 Webhook secret。
 
 ### 账号与投递状态
 
-Stalwart 已能对公网提供 SMTP / SMTPS / IMAPS，ACME / Cloudflare DNS-01 已签发 Let's Encrypt production 证书，`587` submission listener 已可用。项目专用账号已经创建；不要使用管理员账号作为应用发信账号。
+Stalwart 部署完成后应仅按规划提供 SMTP / SMTPS / IMAPS，使用 ACME / Cloudflare DNS-01 签发 production 证书，并验证 `<submission-port>` listener 可用。项目必须创建专用发信账号；不要使用管理员账号作为应用发信账号。
 
-当前账号规划：
+账号规划模板：
 
 | 邮箱 | 用途 |
 | --- | --- |
-| `postmaster@leevident.com` | RFC/投递问题联系与 DMARC/TLS-RPT 报告收件人 |
-| `abuse@leevident.com` | 滥用投诉联系 |
-| `no-reply@leevident.com` | 项目事务邮件发信账号 |
-| `support@leevident.com` | 可选，后续工单收信或转发入口 |
+| `<postmaster@example.com>` | RFC/投递问题联系与 DMARC/TLS-RPT 报告收件人 |
+| `<abuse@example.com>` | 滥用投诉联系 |
+| `<sender@example.com>` | 项目事务邮件发信账号 |
+| `<support@example.com>` | 可选，后续工单收信或转发入口 |
 
 账号要求：
 
-- `no-reply@leevident.com` 使用单独强密码，只授予 SMTP submission 所需能力。
+- `<sender@example.com>` 使用单独强密码，只授予 SMTP submission 所需能力。
 - 不把管理员账号密码配置进项目环境变量。
 - 真实发信灰度前仍保持项目侧 `MAIL_WORKER_DRY_RUN=true`（演练模式）和 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH=true`（环境级紧急停发）。
 
 ### 当前下一步：投递信誉与认证审计
 
-当前账号创建、本域内投递测试、Outlook 外部投递测试邮件和应用侧 Stalwart SMTP 真实传输已完成。Outlook 已接受测试邮件并返回 `250 2.1.5 Queued mail for delivery`，用户侧确认邮件已收到，但进入垃圾邮件夹。这不是 SMTP 链路失败，而是冷启动域名 / IP 信誉和内容信誉需要继续验证。
+账号创建、本域内投递、外部投递测试邮件和应用侧 Stalwart SMTP 真实传输均应纳入验收。如果目标邮箱服务已接受测试邮件、收件侧也确认收到，但邮件进入垃圾邮件夹，这通常不是 SMTP 链路失败，而是冷启动域名 / IP 信誉和内容信誉需要继续验证。
 
-首封 Outlook 邮件头审计结果：
+首封外部测试邮件的审计记录模板：
 
-- `SPF`: pass，`smtp.mailfrom=leevident.com`，发信 IP `23.80.80.193` 被授权。
-- `DKIM`: RSA 签名 pass，`header.d=leevident.com`；Ed25519 签名被 Outlook 标为 `signature syntax error`。
-- `DMARC`: pass，`header.from=leevident.com`。
+- `SPF`: pass，`smtp.mailfrom=<mail-domain>`，发信 IP `<mail-server-ip>` 被授权。
+- `DKIM`: RSA 签名 pass，`header.d=<mail-domain>`；Ed25519 签名被目标服务标为 `signature syntax error`。
+- `DMARC`: pass，`header.from=<mail-domain>`。
 - `compauth`: pass。
 - `SCL`: 5，`X-Microsoft-Antispam-Mailbox-Delivery` 显示 `dest:J` / `RF:JunkEmail`，因此进入垃圾邮件夹。
 
-结论：当前不是认证主链失败。为了减少兼容性负信号，建议在 Stalwart 中先只保留 RSA-SHA256 DKIM 签名用于外发，暂停 Ed25519 DKIM 签名；然后用真实事务邮件内容重新低频测试。
+历史观察结论（Ed25519 退役前）：这不是认证主链失败。为了减少兼容性负信号，当时的处置建议是只保留 RSA-SHA256 DKIM 外发签名、暂停 Ed25519，并用真实事务邮件内容低频复测。
 
-Ed25519 退役后的复测结果：
+当前记录状态（Ed25519 已退役后的复测结果）：
 
 - Stalwart 的 Ed25519 DKIM signature 已进入 pending deletion / retired 状态。
 - 新邮件头只剩 `DKIM-Signature: a=rsa-sha256`。
@@ -146,26 +133,24 @@ Ed25519 退役后的复测结果：
 
 1. 保持 Ed25519 DKIM 退役，只保留 RSA-SHA256 DKIM 外发签名。
 2. 改用真实事务邮件内容低频测试，不再使用“测试”主题和过短正文。
-3. 检查 `From`、`Return-Path`、`Message-ID`、`HELO/EHLO` 是否与 `leevident.com` / `mail.leevident.com` 边界一致。
-4. 让管理员账号在 Outlook 中把 `no-reply@leevident.com` 标记为“非垃圾邮件”，并加入联系人或安全发件人列表；这只能改善该用户侧信任，不代表全局信誉已建立。
+3. 检查 `From`、`Return-Path`、`Message-ID`、`HELO/EHLO` 是否与 `<mail-domain>` / `<mail-host>` 边界一致。
+4. 让测试收件账号在目标邮箱服务中把 `<sender@example.com>` 标记为“非垃圾邮件”，并加入联系人或安全发件人列表；这只能改善该用户侧信任，不代表全局信誉已建立。
 5. 保留低频人工测试邮件，不做批量测试；新域名 / 新 IP 先用真实事务类内容慢速预热。
 6. 在 Stalwart 管理端配置真实 Telemetry Webhook 并完成真实事件复测后，再考虑打开 `MAIL_WORKER_DRY_RUN=false`。项目侧 `/api/mail-delivery-feedback` 已能接收 Stalwart 批量投递事件，`/api/mail-inbound` 已能接收入站摘要；真实事件来源仍需在 Stalwart Webhooks、MTA Hooks 或受控日志轮询中配置。
 7. 即使 SMTP live transport 已可用，账号恢复邮件仍保持 `ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=false`，直到投递监控和人工恢复 fallback 都验证完成。
 
-### 587 Submission listener 状态
+### Submission listener 配置模板
 
-`587` 已完成；以下记录保留为复建参考。
-
-官方文档说明：SMTP 服务由 `NetworkListener` 对象启用；端口 `587` 需要单独创建一个 protocol 为 `smtp`、bind 到 `[::]:587` 的 listener。只在 Docker Compose 里映射 `587:587` 不会自动让 Stalwart 监听该端口。
+官方文档说明：SMTP 服务由 `NetworkListener` 对象启用；submission 端口需要单独创建一个 protocol 为 `smtp`、bind 到 `[::]:<submission-port>` 的 listener。只在 Docker Compose 里映射端口不会自动让 Stalwart 监听该端口。
 
 WebUI 操作：
 
-1. 打开 `https://mail.leevident.com/admin`。
+1. 打开 `https://<mail-host>/<admin-path>`。
 2. 进入 `Settings -> Network -> Listeners`。
 3. 新建 listener：
    - Name: `submission`
    - Protocol: `smtp`
-   - Bind: `[::]:587`
+   - Bind: `[::]:<submission-port>`
    - `tlsImplicit`: `false`
    - TLS / STARTTLS 使用默认开启状态；保存后通过 `STARTTLS` 升级。
 4. 保存后重启或等待配置热加载。
@@ -173,7 +158,7 @@ WebUI 操作：
 验证：
 
 ```bash
-openssl s_client -starttls smtp -connect mail.leevident.com:587 -servername mail.leevident.com -brief
+openssl s_client -starttls smtp -connect <mail-host>:<submission-port> -servername <mail-host> -brief
 ```
 
 期望结果：能建立 TLSv1.2/TLSv1.3 连接，证书 issuer 为 Let's Encrypt production。
@@ -183,31 +168,31 @@ openssl s_client -starttls smtp -connect mail.leevident.com:587 -servername mail
 可选方案：
 
 1. **推荐：Stalwart 内置 ACME + Cloudflare DNS-01**
-   - 适合当前 `443` 由 OpenResty / 1Panel 反代占用的服务器。
+   - 适合 HTTPS 端口已由 OpenResty / 1Panel 反代占用的服务器。
    - 不要求 Stalwart 独占 `80 / 443`。
-   - 需要创建 Cloudflare API token，权限限定为 `Zone.DNS:Edit`，只给 `leevident.com` zone。
+   - 需要创建 Cloudflare API token，权限限定为 `Zone.DNS:Edit`，只给 `<mail-domain>` zone。
 2. **备选：复用现有 OpenResty / 1Panel 证书**
-   - 把 `mail.leevident.com` 的证书和私钥以只读方式挂载给 Stalwart。
+   - 把 `<mail-host>` 的证书和私钥以只读方式挂载给 Stalwart。
    - 风险是证书续期后需要同步 reload / restart Stalwart，自动化边界更复杂。
 
-生产证书已完成，可用以下命令复核：
+生产证书签发后，可用以下命令复核：
 
 ```bash
-openssl s_client -connect mail.leevident.com:465 -servername mail.leevident.com -brief
-openssl s_client -connect mail.leevident.com:993 -servername mail.leevident.com -brief
+openssl s_client -connect <mail-host>:<smtps-port> -servername <mail-host> -brief
+openssl s_client -connect <mail-host>:<imaps-port> -servername <mail-host> -brief
 ```
 
-期望结果：Issuer 不包含 `(STAGING)`，当前为 Let's Encrypt `E8`。
+期望结果：Issuer 不包含 `(STAGING)`，并与预期的 Let's Encrypt production 证书链一致。
 
 #### Cloudflare DNS-01 配置步骤
 
 不要把 Cloudflare API token 粘贴到聊天或 Git 文件中。直接在 Stalwart WebUI 填写：
 
-1. 打开 `https://mail.leevident.com/admin`。
+1. 打开 `https://<mail-host>/<admin-path>`。
 2. 进入 `Settings -> Network -> DNS -> DNS Providers`。
 3. 新建 DNS Provider / DnsServer：
    - Type: `Cloudflare`
-   - Description: `Cloudflare leevident.com`
+   - Description: `Cloudflare <mail-domain>`
    - Secret: 粘贴 Cloudflare API token
    - TTL: `5m`
    - Polling interval: `15s`
@@ -216,16 +201,16 @@ openssl s_client -connect mail.leevident.com:993 -servername mail.leevident.com 
 5. 新建 ACME Provider，先用 staging 验证：
    - Directory: `https://acme-staging-v02.api.letsencrypt.org/directory`
    - Challenge type: `Dns01` 或 `DnsPersist01`
-   - Contact: 管理员邮箱，例如 `postmaster@leevident.com`
+   - Contact: 管理员邮箱，例如 `<postmaster@example.com>`
    - Renew before: `R23`
-6. 进入 `Management -> Domains -> Domains`，编辑 `leevident.com`。
+6. 进入 `Management -> Domains -> Domains`，编辑 `<mail-domain>`。
 7. 把 `DNS management` 改为 `Automatic`：
    - DNS server: 选择第 3 步创建的 Cloudflare DNS Provider
-   - Origin: `leevident.com`
+   - Origin: `<mail-domain>`
    - Publish records: 如果已经手动配置了邮件 DNS，先只允许最小必要记录，避免覆盖不想让 Stalwart 管的记录；如果 UI 不允许精细选择，则保存前先确认 Cloudflare 记录备份。
 8. 同一个 Domain 上把 `Certificate management` 改为 `Automatic`：
    - ACME provider: 选择第 5 步创建的 ACME Provider
-   - Subject Alternative Names: 至少确认包含 `mail.leevident.com`。如果当前 Domain 是 `leevident.com` 且 UI 没有自动把 `mail.leevident.com` 加入 SAN，需要手动添加。
+   - Subject Alternative Names: 至少确认包含 `<mail-host>`。如果当前 Domain 是 `<mail-domain>` 且 UI 没有自动把 `<mail-host>` 加入 SAN，需要手动添加。
 9. 保存 Domain 后，到 `Management -> Tasks -> Scheduled / Failed` 查看 `DnsManagement` 与 `AcmeRenewal` 任务结果。
 10. staging 成功后，把 ACME Provider 的 Directory 改成生产：
    - `https://acme-v02.api.letsencrypt.org/directory`
@@ -257,10 +242,10 @@ openssl s_client -connect mail.leevident.com:993 -servername mail.leevident.com 
 ### 1. 部署前检查
 
 1. 备份当前服务器重要配置。
-2. 确认 25 / 465 / 587 / 443 / 8080 的端口规划不会和 1Panel / OpenResty / Supabase 冲突。
+2. 确认 `<smtp-port> / <smtps-port> / <submission-port> / <https-port> / <admin-port>` 的端口规划不会和 1Panel / OpenResty / Supabase 冲突。
 3. 确认 Cloudflare / DNS 能把 `mail.example.com` 指向这台服务器。
 4. 确认云厂商 PTR / rDNS 能设置为 `mail.example.com`。
-5. 确认出站 25 可用。
+5. 确认规划的出站 SMTP 端口可用。
 
 同机部署时推荐只暴露必要端口：
 
@@ -278,9 +263,9 @@ openssl s_client -connect mail.leevident.com:993 -servername mail.leevident.com 
 建议不要直接使用匿名 volume，便于备份和迁移：
 
 ```bash
-mkdir -p /opt/stalwart/etc
-mkdir -p /opt/stalwart/data
-chmod 700 /opt/stalwart/etc /opt/stalwart/data
+mkdir -p <stalwart-config-dir>
+mkdir -p <stalwart-data-dir>
+chmod 700 <stalwart-config-dir> <stalwart-data-dir>
 ```
 
 ### 3. 启动 Stalwart
@@ -296,15 +281,15 @@ services:
     container_name: stalwart
     restart: unless-stopped
     environment:
-      STALWART_RECOVERY_ADMIN: "admin:replace-with-long-random-password"
+      STALWART_RECOVERY_ADMIN: "${STALWART_RECOVERY_ADMIN}"
     ports:
       - "25:25"
       - "587:587"
       - "465:465"
-      - "127.0.0.1:8080:8080"
+      - "<loopback-address>:<admin-port>:8080"
     volumes:
-      - /opt/stalwart/etc:/etc/stalwart
-      - /opt/stalwart/data:/var/lib/stalwart
+      - <stalwart-config-dir>:/etc/stalwart
+      - <stalwart-data-dir>:/var/lib/stalwart
     logging:
       driver: json-file
       options:
@@ -319,12 +304,12 @@ docker compose up -d
 docker logs stalwart --tail=100
 ```
 
-如果需要通过 443 访问管理端，优先用现有 OpenResty / 1Panel 反代到 `127.0.0.1:8080`，并在 Stalwart 设置公开 URL。不要让 bootstrap HTTP 管理端长期裸露公网。
+如果需要通过 HTTPS 访问管理端，优先用现有 OpenResty / 1Panel 反代到 `<loopback-address>:<admin-port>`，并在 Stalwart 设置公开 URL。不要让 bootstrap HTTP 管理端长期裸露公网。
 
 ### 4. 完成 WebUI 初始化
 
-1. 访问 `http://server-ip:8080/admin` 或反代后的 `https://mail.example.com/admin`。
-2. 使用 `STALWART_RECOVERY_ADMIN` 登录。
+1. 访问 `http://<mail-server-ip>:<admin-port>/<admin-path>` 或反代后的 `https://mail.example.com/<admin-path>`。
+2. 从私有密码管理器或服务器受限 secret store 临时注入 `STALWART_RECOVERY_ADMIN` 后登录，不在命令行或文档中打印其值。
 3. 设置 server hostname，例如 `mail.example.com`。
 4. 设置 default email domain，例如 `example.com` 或 `notify.example.com`。
 5. 存储首期使用默认本地 RocksDB。
@@ -365,11 +350,11 @@ MAIL_SENDING_DOMAIN=mail.example.com
 STALWART_SMTP_HOST=mail.example.com
 STALWART_SMTP_PORT=587
 STALWART_SMTP_USERNAME=no-reply@example.com
-STALWART_SMTP_PASSWORD=replace-me
+STALWART_SMTP_PASSWORD=<injected-secret>
 STALWART_JMAP_URL=https://mail.example.com
-STALWART_WEBHOOK_SECRET=replace-me
-MAIL_DELIVERY_WEBHOOK_SECRET=replace-me
-MAIL_INBOUND_WEBHOOK_SECRET=replace-me
+STALWART_WEBHOOK_SECRET=<injected-secret>
+MAIL_DELIVERY_WEBHOOK_SECRET=<injected-secret>
+MAIL_INBOUND_WEBHOOK_SECRET=<injected-secret>
 
 ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=false
 MAIL_OUTBOX_WORKER_ENABLED=false
@@ -388,7 +373,7 @@ MAIL_OUTBOX_GLOBAL_KILL_SWITCH=true
 
 `MAIL_SENDING_DOMAIN` 用于 SMTP `EHLO` 和 `Message-ID` 域名，优先填写有 A / PTR / rDNS 对齐的邮件主机名，例如 `mail.example.com`。不要把它随意填成没有 PTR 的营销子域。
 
-这些必须放在本地 `.env.local`、私有 worker 环境或 Vercel sensitive env 中，不写入 Git。
+这些值必须从私有密码管理器或服务器受限 secret store 注入到私有 worker 环境或托管平台的敏感环境变量中，不通过本地凭据文件分发，也不写入 Git。
 
 ### 6.1 配置 Stalwart 投递 Webhook
 
