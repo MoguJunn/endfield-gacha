@@ -1,4 +1,9 @@
 const ISSUE_SEVERITIES = new Set(['blocking', 'review', 'info']);
+const ACTIONABLE_IDENTITY_ISSUE_CODES = new Set([
+  'MISSING_ITEM_ID_AND_NAME',
+  'MISSING_ITEM_ID',
+  'MISSING_ITEM_NAME',
+]);
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
@@ -43,6 +48,20 @@ function createIssue(code, severity, message, details = {}) {
 
 export function hasBlockingImportIssues(issues) {
   return (Array.isArray(issues) ? issues : []).some((issue) => issue?.severity === 'blocking');
+}
+
+export function hasWriteBlockingImportIssues(issues) {
+  const normalizedIssues = Array.isArray(issues) ? issues : [];
+  const canUseUnknownItemPlaceholder = hasActionableImportIdentityIssues(normalizedIssues);
+  return normalizedIssues.some((issue) => (
+    issue?.severity === 'blocking'
+    && !ACTIONABLE_IDENTITY_ISSUE_CODES.has(issue?.code)
+    && !(canUseUnknownItemPlaceholder && issue?.code === 'MISSING_QUALITY')
+  ));
+}
+
+export function hasActionableImportIdentityIssues(issues) {
+  return (Array.isArray(issues) ? issues : []).some((issue) => ACTIONABLE_IDENTITY_ISSUE_CODES.has(issue?.code));
 }
 
 export function normalizeOfficialImportRecord(record = {}, context = {}) {
@@ -204,7 +223,9 @@ export function summarizeOfficialImportIssues(records) {
 }
 
 export default {
+  hasActionableImportIdentityIssues,
   hasBlockingImportIssues,
+  hasWriteBlockingImportIssues,
   normalizeOfficialImportRecord,
   summarizeOfficialImportIssues,
 };

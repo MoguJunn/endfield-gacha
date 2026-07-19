@@ -8,7 +8,6 @@ import {
   fetchAllGachaRecords,
   fetchAllGachaRecordsConcurrent,
   fetchImportQueueStatus,
-  fetchFullImportReview,
   importAllRecordsFullyOnBackend,
   confirmFullImportReviewOnBackend,
   rejectFullImportReviewOnBackend
@@ -37,7 +36,6 @@ import {
   clearOfficialImportReviewSession,
   loadOfficialImportReviewSession,
   saveOfficialImportReviewSession,
-  shouldClearOfficialImportReviewSessionForError,
 } from './officialImportReviewSession.js';
 
 function getAuthDiagnosticMessage(reason) {
@@ -189,7 +187,6 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
   const [reviewDecisions, setReviewDecisions] = useState({});
   const cancelRef = useRef(false);
   const switchTimerRef = useRef(null);
-  const reviewRestoreRef = useRef('');
 
   useEffect(() => {
     onFetchStatusChange?.(status);
@@ -204,85 +201,12 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
   }, []);
 
   useEffect(() => {
-    const restoreKey = `${String(userId || '')}:${source}`;
-    if (!userId || backendReview || reviewRestoreRef.current === restoreKey) {
-      return undefined;
-    }
-    reviewRestoreRef.current = restoreKey;
+    if (!userId) return;
     const savedReview = loadOfficialImportReviewSession({ userId, source });
-    if (!savedReview) return undefined;
-
-    let active = true;
-    setStatus(ImportStatus.PROCESSING);
-    setStatusMessage('正在恢复尚未确认的导入记录...');
-    fetchFullImportReview(savedReview.taskId, savedReview.accessKey, savedReview.source)
-      .then((review) => {
-        if (!active) return;
-        const task = review?.task || {};
-        if (task.status === 'committed') {
-          clearOfficialImportReviewSession({ userId, source: savedReview.source });
-          const commitResult = task.summary?.commitResult || {};
-          setImportSummary({ ...(task.summary || {}), ...commitResult });
-          setProgress(100);
-          setStatus(ImportStatus.SUCCESS);
-          setStatusMessage(t('import.official.backendDone'));
-          return;
-        }
-        if (task.status !== 'awaiting_confirmation') {
-          clearOfficialImportReviewSession({ userId, source: savedReview.source });
-          setStatus(ImportStatus.IDLE);
-          setStatusMessage('');
-          return;
-        }
-
-        const records = Array.isArray(review?.records) ? review.records : [];
-        setBackendReview({
-          task: { ...task, accessKey: savedReview.accessKey },
-          records,
-          source: savedReview.source,
-        });
-        setReviewDecisions(Object.fromEntries(
-          records.map((record) => [
-            String(record.ordinal),
-            (record.issues || []).some((issue) => issue?.severity === 'blocking')
-              ? 'skip'
-              : record.selectedAction || 'keep',
-          ])
-        ));
-        setImportSummary({
-          ...(task.summary || {}),
-          review: task.summary?.review || {},
-          savedRecords: 0,
-        });
-        setUserInfo((current) => ({
-          ...(current || {}),
-          gameUid: task.gameUid || current?.gameUid || null,
-          serverId: task.serverId || current?.serverId || null,
-          region: task.region || current?.region || null,
-          source: savedReview.source,
-        }));
-        setProgress(100);
-        setStatus(ImportStatus.REVIEW_REQUIRED);
-        setStatusMessage(`已恢复 ${records.length} 条尚未确认的导入记录`);
-      })
-      .catch((restoreError) => {
-        if (!active) return;
-        appLogger.warn('[OfficialAPIImport] 恢复导入审阅失败:', restoreError.message);
-        if (shouldClearOfficialImportReviewSessionForError(restoreError)) {
-          clearOfficialImportReviewSession({ userId, source: savedReview.source });
-          setStatus(ImportStatus.IDLE);
-          setStatusMessage('');
-          return;
-        }
-        setError(`尚未恢复上次待确认的导入记录：${restoreError?.message || '登录或网络暂时不可用'}。恢复后刷新页面即可继续。`);
-        setStatus(ImportStatus.ERROR);
-        setStatusMessage('上次导入审阅仍已保留');
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [backendReview, source, t, userId]);
+    if (savedReview) {
+      clearOfficialImportReviewSession({ userId, source: savedReview.source || source });
+    }
+  }, [source, userId]);
 
   useEffect(() => {
     if (status !== ImportStatus.AUTHENTICATING && status !== ImportStatus.FETCHING) {
@@ -630,19 +554,30 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
         }
 
         if (onImportComplete) {
+          const savedRecords = Number(backendResult?.savedRecords ?? backendResult?.newRecords ?? 0);
+          const skippedRecords = Number(backendResult?.skippedRecords || 0);
+          const duplicateRecords = Number(backendResult?.duplicates || 0);
           onImportComplete({
             success: true,
             backendImported: true,
             summary: {
               total: backendResult?.totalRecords || 0,
-              newRecords: backendResult?.newRecords || 0,
-              duplicates: backendResult?.duplicates || 0,
+              newRecords: savedRecords,
+              discoveredRecords: backendResult?.newRecords || 0,
+              duplicates: duplicateRecords + skippedRecords,
+              duplicateRecords,
               byPool: backendResult?.byPool || {},
               byPoolType: backendResult?.byPoolType || {},
               partialPools: backendResult?.partialPools || [],
               failedPools: backendResult?.failedPools || [],
               importMode: backendResult?.importMode || importMode,
-              savedRecords: backendResult?.savedRecords ?? backendResult?.newRecords ?? 0
+              savedRecords,
+              skippedRecords,
+              anomalyRecords: Number(backendResult?.anomalyRecords || 0),
+              anomalyPoolIds: Array.isArray(backendResult?.anomalyPoolIds)
+                ? backendResult.anomalyPoolIds
+                : [],
+              warnings: Array.isArray(backendResult?.warnings) ? backendResult.warnings : [],
             },
             userInfo: finalUserInfo,
             result: backendResult

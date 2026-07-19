@@ -29,6 +29,8 @@ import {
 import { classifyCharacterIdSource } from './lib/canonicalEntityUtils.js';
 import { buildOfficialImportRecordKey } from './lib/officialImportIncremental.js';
 import {
+  hasActionableImportIdentityIssues,
+  hasWriteBlockingImportIssues,
   normalizeOfficialImportRecord,
   summarizeOfficialImportIssues,
 } from '../shared/officialImportRecordNormalizer.js';
@@ -591,6 +593,94 @@ function assignBatchIds(records) {
   });
 
   return result;
+}
+
+export function buildStagedRecordsWithMetadata(processedRecords = [], stagedRecordMetadata = []) {
+  if (processedRecords.length !== stagedRecordMetadata.length) {
+    throw new Error('导入记录与异常信息数量不一致');
+  }
+
+  const recordsWithMetadataIndex = processedRecords.map((record, index) => ({
+    ...record,
+    __stagingMetadataIndex: index,
+  }));
+  const records = [];
+  const stagedRecords = [];
+
+  assignBatchIds(recordsWithMetadataIndex).forEach((recordWithIndex) => {
+    const { __stagingMetadataIndex: metadataIndex, ...historyRecord } = recordWithIndex;
+    records.push(historyRecord);
+    stagedRecords.push({
+      historyRecord,
+      ...stagedRecordMetadata[metadataIndex],
+    });
+  });
+
+  return { records, stagedRecords };
+}
+
+export function buildPostImportAnomalyRows(stagedRecords = [], userId) {
+  return (Array.isArray(stagedRecords) ? stagedRecords : [])
+    .filter((record) => (
+      hasActionableImportIdentityIssues(record?.issues)
+      && !hasWriteBlockingImportIssues(record?.issues)
+    ))
+    .map((record) => {
+      const history = record.historyRecord || {};
+      const serverScope = normalizeString(history.server_id, 160) || 'legacy';
+      const issueCodes = (record.issues || [])
+        .map((issue) => issue?.code)
+        .filter(Boolean);
+      return {
+        user_id: userId,
+        record_id: String(history.record_id),
+        game_uid: String(history.game_uid),
+        server_scope: serverScope,
+        pool_id: String(history.pool_id),
+        seq_id: String(history.seq_id),
+        issue_code: 'OFFICIAL_IMPORT_UNKNOWN_ITEM',
+        status: 'pending',
+        details: {
+          message: '本次官方导入没有完整识别这条记录的角色或武器，请确认它是否正确。',
+          itemName: history.item_name || history.character_name || '未知角色或武器',
+          rarity: history.rarity ?? null,
+          timestamp: history.timestamp ?? null,
+          pity: history.pity ?? null,
+          serverId: history.server_id ?? null,
+          region: history.region ?? null,
+          issueCodes,
+        },
+      };
+    });
+}
+
+export function resolveOfficialImportStorageQuality(normalized = {}) {
+  if (
+    normalized.quality === null
+    && hasActionableImportIdentityIssues(normalized.issues)
+    && !hasWriteBlockingImportIssues(normalized.issues)
+  ) {
+    return 4;
+  }
+  return normalized.quality;
+}
+
+export async function savePostImportAnomalies(supabase, stagedRecords, userId) {
+  const anomalyRows = buildPostImportAnomalyRows(stagedRecords, userId);
+  for (let index = 0; index < anomalyRows.length; index += 200) {
+    const { error } = await supabase
+      .from('history_anomalies')
+      .upsert(anomalyRows.slice(index, index + 200), {
+        onConflict: 'user_id,game_uid,server_scope,pool_id,seq_id,issue_code',
+        ignoreDuplicates: true,
+      });
+    if (error) throw error;
+  }
+
+  return {
+    anomalyRecords: anomalyRows.length,
+    anomalyPoolIds: [...new Set(anomalyRows.map((row) => row.pool_id))],
+  };
 }
 
 function splitHistoryUpsertGroups(records) {
@@ -1185,7 +1275,7 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
       }
 
       const characterName = normalized.itemName;
-      const rarity = normalized.quality;
+      const rarity = resolveOfficialImportStorageQuality(normalized);
       const normalizedRecord = {
         ...record,
         rarity,
@@ -1253,16 +1343,14 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
     }
   }
 
-  const records = assignBatchIds(processedRecords);
+  const alignedRecords = buildStagedRecordsWithMetadata(processedRecords, stagedRecordMetadata);
+  const records = alignedRecords.records;
   const normalizedRecords = stagedRecordMetadata.map((item) => item.normalized);
 
   return {
     records,
     normalizedRecords,
-    stagedRecords: records.map((historyRecord, index) => ({
-      historyRecord,
-      ...stagedRecordMetadata[index],
-    })),
+    stagedRecords: alignedRecords.stagedRecords,
     reviewSummary: summarizeOfficialImportIssues(normalizedRecords),
   };
 }
@@ -1641,7 +1729,7 @@ export async function executeFullImport({
     );
     const processedRecords = processedResult.records;
 
-    // 9. 整批暂存，等待用户确认后再执行任何正式写入。
+    // 9. 暂存后立即由后端完成安全写入。用户只在导入完成后处理身份异常记录。
     const poolSummary = buildImportPoolSummary(recordsResult.data.results);
     const fetchStrategy = recordsResult.data.fetchStrategy || (
       normalizedImportMode === FULL_IMPORT_MODES.INCREMENTAL && existingSeqIds.size > 0
@@ -1680,7 +1768,7 @@ export async function executeFullImport({
       };
     }
 
-    updateProgress({ progress: 90, message: '正在创建导入审阅...' });
+    updateProgress({ progress: 90, message: '正在写入抽卡记录...' });
     const staged = await stageOfficialImportTask({
       supabase,
       userId,
@@ -1697,22 +1785,57 @@ export async function executeFullImport({
       importSummary: commonSummary,
     });
 
-    updateProgress({ progress: 100, message: '记录已暂存，请确认后写入' });
+    const confirmed = await confirmOfficialImportTask({
+      supabase,
+      taskId: staged.task.id,
+      userId,
+      accessKey: staged.accessKey,
+      commit: commitStagedOfficialImport,
+    });
+    const writtenOrdinals = new Set(
+      staged.records
+        .filter((record) => !hasWriteBlockingImportIssues(record.issues))
+        .map((record) => Number(record.ordinal))
+    );
+    const writtenStagedRecords = processedResult.stagedRecords.filter((_record, ordinal) => writtenOrdinals.has(ordinal));
+    let anomalyResult = { anomalyRecords: 0, anomalyPoolIds: [] };
+    let anomalyWarning = null;
+    try {
+      anomalyResult = await savePostImportAnomalies(supabase, writtenStagedRecords, userId);
+    } catch (anomalyError) {
+      anomalyWarning = `记录已写入，但异常提醒创建失败：${String(anomalyError?.message || anomalyError).slice(0, 300)}`;
+      console.warn('[FullImportService] 导入后异常提醒创建失败:', anomalyWarning);
+    }
+
+    const commitResult = confirmed?.result || {};
+    const skippedRecords = Number(commitResult.skippedRecords || 0);
+    updateProgress({
+      progress: 100,
+      message: anomalyResult.anomalyRecords > 0
+        ? `导入完成，发现 ${anomalyResult.anomalyRecords} 条记录需要后续核对`
+        : '导入完成',
+    });
 
     return {
       success: true,
       data: {
         ...commonSummary,
-        reviewRequired: true,
+        ...commitResult,
+        reviewRequired: false,
         review: processedResult.reviewSummary,
-        reviewTask: {
-          ...staged.task,
-          accessKey: staged.accessKey,
-        },
-        reviewRecords: staged.records,
-        warnings: processedResult.reviewSummary.issueRecords > 0
-          ? [`有 ${processedResult.reviewSummary.issueRecords} 条记录需要重点确认。`]
-          : [],
+        savedRecords: Number(commitResult.savedRecords || 0),
+        skippedRecords,
+        anomalyRecords: anomalyResult.anomalyRecords,
+        anomalyPoolIds: anomalyResult.anomalyPoolIds,
+        warnings: [
+          ...(anomalyResult.anomalyRecords > 0
+            ? [`有 ${anomalyResult.anomalyRecords} 条已导入记录需要后续核对。`]
+            : []),
+          ...(skippedRecords > 0
+            ? [`有 ${skippedRecords} 条记录缺少卡池、账号、序号、时间或有效品质，无法安全写入。`]
+            : []),
+          ...(anomalyWarning ? [anomalyWarning] : []),
+        ],
         account: {
           gameUid: account.gameUid,
           nickName: account.nickName,

@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { hasWriteBlockingImportIssues } from '../../shared/officialImportRecordNormalizer.js';
 
 const STAGED_RECORD_BATCH_SIZE = 500;
 const DEFAULT_REVIEW_TTL_MS = 30 * 60 * 1000;
@@ -63,6 +64,7 @@ function publicTask(task = {}) {
 function normalizeStagedRecord(record = {}, ordinal, poolById) {
   const historyRecord = record.historyRecord || {};
   const normalized = record.normalized || {};
+  const normalizedQuality = normalized.quality;
   const poolId = normalizeText(historyRecord.pool_id || normalized.poolId, 200) || null;
   const pool = poolById.get(poolId) || null;
 
@@ -72,7 +74,12 @@ function normalizeStagedRecord(record = {}, ordinal, poolById) {
     item_id: normalizeText(normalized.rawItemId || normalized.itemId, 200) || null,
     item_name: normalizeText(normalized.itemName, 300) || null,
     item_type: normalizeText(normalized.itemType, 80) || 'unknown',
-    quality: Number.isFinite(Number(normalized.quality)) ? Number(normalized.quality) : null,
+    quality: normalizedQuality !== null
+      && normalizedQuality !== undefined
+      && normalizedQuality !== ''
+      && Number.isFinite(Number(normalizedQuality))
+      ? Number(normalizedQuality)
+      : null,
     timestamp: normalized.timestamp || historyRecord.timestamp || null,
     seq_id: normalizeText(historyRecord.seq_id || normalized.seqId, 200) || null,
     normalized_record: {
@@ -98,7 +105,7 @@ function normalizeStagedRecord(record = {}, ordinal, poolById) {
     },
     raw_min: record.rawMin || normalized.rawMin || {},
     issues: Array.isArray(record.issues) ? record.issues : [],
-    selected_action: record.blocked === true ? 'skip' : 'keep',
+    selected_action: hasWriteBlockingImportIssues(record.issues) ? 'skip' : 'keep',
   };
 }
 
@@ -329,7 +336,7 @@ export async function confirmOfficialImportTask({ supabase, taskId, userId, acce
     selected_action: decisionMap.get(row.ordinal) || row.selected_action || 'keep',
   }));
   const blockedKeptRows = selectedRows.filter(
-    (row) => row.selected_action === 'keep' && (row.issues || []).some((issue) => issue?.severity === 'blocking')
+    (row) => row.selected_action === 'keep' && hasWriteBlockingImportIssues(row.issues)
   );
 
   if (blockedKeptRows.length > 0) {
