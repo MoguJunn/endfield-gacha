@@ -1,4 +1,5 @@
-import React, { Suspense, lazy, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { ChevronDown, Download, History, LogIn, Lock, Upload } from 'lucide-react';
 import EditItemModal from '../modals/EditItemModal';
 import DataExportOptionsModal from '../modals/DataExportOptionsModal.jsx';
@@ -204,6 +205,7 @@ export default function DesktopDashboardWorkspace({
   handleExportEndgachaKwerTopPlainTXT,
 }) {
   const { isEnglish, locale, t } = useI18n();
+  const location = useLocation();
   const tt = (zh, en) => (isEnglish ? en : zh);
   const pools = usePoolStore((state) => state.pools);
   const currentPoolId = usePoolStore((state) => state.currentPoolId);
@@ -248,6 +250,21 @@ export default function DesktopDashboardWorkspace({
       [key]: value,
     }));
   };
+
+  useEffect(() => {
+    if (location.state?.openHistoryAnomalies !== true) {
+      return undefined;
+    }
+
+    const timer = setTimeout(() => {
+      setRecordsOpen(true);
+      document.getElementById('guide-export-section')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [location.state]);
   const resetQuickExportOptions = () => setQuickExportOptions(buildDefaultExportOptions());
   const buildQuickExportOptions = () => ({
     poolFilter: quickExportOptions.poolFilter,

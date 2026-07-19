@@ -198,12 +198,17 @@ function MobileDashboardView() {
     if (state.dashboardCharViewMode === 'waterfall') {
       setCharViewMode('waterfall');
     }
-    if (!state.scrollTo) {
+    if (state.openHistoryAnomalies === true) {
+      setShowDetailedLogs(true);
+    }
+    const scrollTargetId = state.scrollTo
+      || (state.openHistoryAnomalies === true ? 'mobile-detailed-logs' : '');
+    if (!scrollTargetId) {
       return undefined;
     }
 
     const timer = setTimeout(() => {
-      const target = document.getElementById(state.scrollTo);
+      const target = document.getElementById(scrollTargetId);
       if (!target) {
         return;
       }
@@ -1455,7 +1460,7 @@ function MobileDashboardView() {
         )}
       </MobileChartContainer>
       {/* 详细日志 Accordion */}
-      <div className="mobile-ux-card relative z-10 mt-8 mx-4 mb-40 scroll-mb-40 overflow-hidden">
+      <div id="mobile-detailed-logs" className="mobile-ux-card relative z-10 mt-8 mx-4 mb-40 scroll-mb-40 overflow-hidden">
         <button
           type="button"
           onClick={() => setShowDetailedLogs((value) => !value)}

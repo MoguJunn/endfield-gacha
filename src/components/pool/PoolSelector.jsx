@@ -529,9 +529,13 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
           isOpen={isImportManagerOpen}
           onClose={closeImportManager}
           onOpenFileImport={handleOpenFileImport}
-          onImportComplete={() => {
+          onImportComplete={(result) => {
             closeImportManager();
-            navigate(getDesktopPathForTab('dashboard'));
+            navigate(getDesktopPathForTab('dashboard'), {
+              state: {
+                openHistoryAnomalies: Number(result?.summary?.anomalyRecords || 0) > 0,
+              },
+            });
           }}
         />
       )}

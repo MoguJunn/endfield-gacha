@@ -300,6 +300,9 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
       const importedAt = new Date().toISOString();
       const importedGameUid = result.userInfo?.gameUid || result.userInfo?.hgUid || null;
       const importedAccountKey = buildGameAccountKey(result.userInfo) || importedGameUid;
+      const anomalyPoolIds = Array.isArray(result.summary?.anomalyPoolIds)
+        ? result.summary.anomalyPoolIds
+        : [];
 
       if (result.userInfo) {
         saveGameAccountMetadata(result.userInfo);
@@ -311,7 +314,7 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
           setPools,
           switchPool,
           setHistory,
-          preferredPoolId: currentPoolId,
+          preferredPoolId: anomalyPoolIds[0] || currentPoolId,
           preferredGameUid: importedAccountKey || importedGameUid
         });
 
@@ -485,6 +488,12 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
   }, [handleClose, navigate]);
 
   const handleViewImportedData = useCallback(() => {
+    const anomalyPoolId = Array.isArray(importResult?.summary?.anomalyPoolIds)
+      ? importResult.summary.anomalyPoolIds[0]
+      : null;
+    if (anomalyPoolId) {
+      switchPool(anomalyPoolId);
+    }
     if (importResult?.userInfo?.gameUid || importResult?.userInfo?.hgUid) {
       switchGameAccount(buildGameAccountKey(importResult.userInfo) || importResult.userInfo.gameUid || importResult.userInfo.hgUid);
     }
@@ -494,7 +503,7 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
     }
 
     handleClose();
-  }, [handleClose, importResult, onImportComplete, switchGameAccount]);
+  }, [handleClose, importResult, onImportComplete, switchGameAccount, switchPool]);
 
   const importResultDetails = useMemo(() => {
     if (!importResult) {
@@ -507,6 +516,7 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
       syncedToCloud: true,
     }, { locale });
   }, [importResult, locale]);
+  const importAnomalyCount = Number(importResult?.summary?.anomalyRecords || 0);
 
   if (!isOpen) return null;
 
@@ -760,6 +770,22 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
                 </div>
               )}
 
+              {importAnomalyCount > 0 && (
+                <div className="border border-amber-400 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/35">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <div>
+                      <p className="text-sm font-bold text-amber-800 dark:text-amber-200">
+                        {t('import.anomaly.title', { count: formatNumber(importAnomalyCount) })}
+                      </p>
+                      <p className="mt-1 text-xs leading-5 text-amber-700 dark:text-amber-300/80">
+                        {t('import.anomaly.desc')}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* 结果提示 */}
               {importResult.summary?.newRecords > 0 && (
                 <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 p-4 flex items-start gap-3 transition-colors" style={{ clipPath: 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%)' }}>
@@ -773,19 +799,28 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
 
               {/* 按钮组 */}
               <div className="flex gap-4">
-                <button
-                  onClick={handleReset}
-                  className="flex-1 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-transparent hover:bg-slate-50 dark:hover:bg-zinc-700 text-slate-700 dark:text-white font-bold py-3 text-sm tracking-wider transition-colors"
-                >
-                  {t('import.continue')}
-                </button>
+                {importAnomalyCount > 0 ? (
+                  <button
+                    onClick={handleClose}
+                    className="flex-1 border border-zinc-300 bg-white py-3 text-sm font-bold tracking-wider text-slate-700 transition-colors hover:bg-slate-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:hover:bg-zinc-700"
+                  >
+                    {t('import.anomaly.later')}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleReset}
+                    className="flex-1 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-transparent hover:bg-slate-50 dark:hover:bg-zinc-700 text-slate-700 dark:text-white font-bold py-3 text-sm tracking-wider transition-colors"
+                  >
+                    {t('import.continue')}
+                  </button>
+                )}
                 {importResult.summary?.newRecords > 0 ? (
                   <button
                     onClick={handleViewImportedData}
                     className="flex-1 bg-amber-500 hover:bg-amber-600 dark:bg-yellow-500 dark:hover:bg-yellow-400 text-white dark:text-black font-bold py-3 text-sm tracking-wider transition-colors flex items-center justify-center gap-2"
                   >
                     <RefreshCw className="w-4 h-4" />
-                    {t('import.viewData')}
+                    {importAnomalyCount > 0 ? t('import.anomaly.now') : t('import.viewData')}
                   </button>
                 ) : (
                   <button

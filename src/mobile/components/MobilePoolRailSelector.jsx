@@ -443,7 +443,20 @@ export default function MobilePoolRailSelector() {
         </div>
       )}
 
-      {showImportManager ? <ImportManager isOpen={showImportManager} onClose={() => setShowImportManager(false)} onImportComplete={() => { setShowImportManager(false); navigate(getMobilePathForTab('details')); }} /> : null}
+      {showImportManager ? (
+        <ImportManager
+          isOpen={showImportManager}
+          onClose={() => setShowImportManager(false)}
+          onImportComplete={(result) => {
+            setShowImportManager(false);
+            navigate(getMobilePathForTab('details'), {
+              state: {
+                openHistoryAnomalies: Number(result?.summary?.anomalyRecords || 0) > 0,
+              },
+            });
+          }}
+        />
+      ) : null}
     </div>
   );
 }
