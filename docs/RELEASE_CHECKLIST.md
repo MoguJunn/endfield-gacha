@@ -1,6 +1,6 @@
 # Release Checklist（可复用发布模板）
 
-本文件的未勾选项是下一次发布时复用的模板，不代表当前 `v4.5.3` 尚未完成。`v4.5.3` 已在 `99296c2 chore:发布v4.5.3` 收口：migration 156 已执行，CN / INTL 后端 `1.6.2` 健康，GitHub 触发的 Vercel Production 部署 Ready，完整验证链和真实双区导入均通过。
+本文件的未勾选项是下一次发布时复用的模板，不代表当前 `v4.5.4` 尚未完成。`v4.5.4` 已在 `78f5ed1 chore:发布v4.5.4` 收口：迁移 157 / 158 已执行且没有主动修改异常记录，CN / INTL 后端 `1.6.3` 健康，GitHub CI 全部通过，GitHub 触发的 Vercel Production 部署 Ready，生产首页、移动入口、bootstrap 版本、双区公网健康和 CORS 预检均通过。
 
 ## 代码
 
