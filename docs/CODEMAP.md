@@ -34,8 +34,9 @@
 | 当前卡池上下文 | `src/hooks/app/useCurrentPoolData.js` |
 | 云同步 | `src/hooks/app/useCloudSync.js` |
 | 账号历史读取与精确变更 | `src/services/accountGachaDataService.js`、`src/hooks/app/useHistoryOperations.js` |
-| 官方导入控制器 / 导入后异常入口 | `src/features/import/useOfficialImportController.js`、`src/features/import/ImportManager.jsx` |
+| 官方导入控制器 / 完成策略 / 导入后异常入口 | `src/features/import/useOfficialImportController.js`、`src/features/import/importCompletionPolicy.js`、`src/features/import/ImportManager.jsx` |
 | 历史异常客户端 | `src/services/historyAnomalyService.js` |
+| 桌面 / 移动共用异常核对面板 | `src/components/records/HistoryAnomalyReview.jsx` |
 | 公共资源客户端 | `src/services/publicResourceClient.js` |
 | bootstrap / 卡池公开读取 | `src/services/bootstrapService.js`、`src/services/poolReadService.js` |
 | 全服统计归一化 | `src/services/statsService.js` |
@@ -89,7 +90,9 @@
 | 官方导入自动原子提交 RPC | `supabase/migrations/153_commit_official_import_records_atomically.sql` |
 | 历史 v4.5.2 运行时版本与缓存失效 | `supabase/migrations/154_bump_site_version_452.sql` |
 | 旧批量删除歧义保护 | `supabase/migrations/155_guard_ambiguous_history_batch_delete.sql` |
-| 当前 v4.5.3 运行时版本与缓存失效 | `supabase/migrations/156_bump_site_version_453.sql` |
+| 历史 v4.5.3 运行时版本与缓存失效 | `supabase/migrations/156_bump_site_version_453.sql` |
+| 官方非寻访事件旧占位精确修复 RPC | `supabase/migrations/157_repair_official_non_pull_artifact.sql` |
+| 当前 v4.5.4 运行时版本与缓存失效 | `supabase/migrations/158_bump_site_version_454.sql` |
 | 静态头像 | `public/avatars/` |
 | 版本日历静态图 | `public/game-calendar/` |
 

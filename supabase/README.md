@@ -28,7 +28,7 @@
 3. 仅当仓库里存在“编号高于 baseline 覆盖范围”的新迁移时，再补执行这些较新的 `migrations/` 文件
 4. 仅在明确场景下手工执行 `manual/` 中的脚本
 
-当前仓库内的 baseline 已覆盖到 `active/156_bump_site_version_453.sql`，因此不要再把 `001~156` 这批标准迁移重复叠加执行在同版本 baseline 上。`supabase/migrations/` 保留当前 active 前向迁移源文件供审计与重新生成 baseline；下一次新增迁移应从 `157_*.sql` 开始。
+当前仓库内的 baseline 已覆盖到 `active/158_bump_site_version_454.sql`，因此不要再把 `001~158` 这批标准迁移重复叠加执行在同版本 baseline 上。`supabase/migrations/` 保留当前 active 前向迁移源文件供审计与重新生成 baseline；下一次新增迁移应从 `159_*.sql` 开始。
 
 `site_config.public_cache_epoch` 是公共数据缓存版本源；公共 API / 首屏不应回退成浏览器直连 Supabase 读写。
 公共卡池统计读取 `public_pool_analytics_cache` 和 `public_pool_trend_cache`；受控刷新入口是 `refresh_public_analytics_cache()`，请求期不应扫描原始 `history` 生成趋势点。
@@ -44,13 +44,17 @@
 - `official_import_tasks`、`official_import_staged_records`：保存短期官方导入内部暂存任务；
 - 受控历史修改 RPC：校验完整记录作用域、编辑版本并重算受影响卡池保底。
 
-官方导入最终原子提交由 `153_commit_official_import_records_atomically.sql` 提供的 `commit_official_import_records()` 完成。`v4.5.3` 中浏览器提交 `import-full` 后只轮询 `import-status`；服务端先完成安全分类，再自动提交标记为保留的暂存记录，并以数据库事务保证卡池、历史和任务状态一致。浏览器不再调用同步 `import-confirm`，旧逐条审阅接口只保留兼容。
+官方导入最终原子提交由 `153_commit_official_import_records_atomically.sql` 提供的 `commit_official_import_records()` 完成。`v4.5.4` 中浏览器提交 `import-full` 后只轮询 `import-status`；服务端先过滤情报书等非寻访事件并完成安全分类，再自动提交标记为保留的暂存记录，并以数据库事务保证卡池、历史和任务状态一致。浏览器不再调用同步 `import-confirm`，旧逐条审阅接口只保留兼容。
 
 历史版本迁移 `154_bump_site_version_452.sql` 将当时的运行时 `site_config.site_version` 提升到 `v4.5.2`，并更新 `public_cache_epoch` 使 bootstrap 与站点配置缓存失效。
 
 `155_guard_ambiguous_history_batch_delete.sql` 加固旧客户端的仅 ID 批量删除：先锁定并快照本次命中的完整记录，若同一 ID 横跨多个游戏账号作用域则整笔拒绝，避免误删其他账号的同 ID 记录。
 
 `156_bump_site_version_453.sql` 将运行时 `site_config.site_version` 提升到 `v4.5.3`，并更新 `public_cache_epoch` 使 bootstrap 与站点配置缓存失效；它不增加业务表或接口。
+
+`157_repair_official_non_pull_artifact.sql` 提供仅限 `service_role` 的精确修复 RPC：只有历史记录与待处理异常在用户、游戏账号、区服、卡池、官方序号、时间及四星未知占位条件全部吻合时，才原子删除旧错误占位、写入变更审计并重算对应卡池保底。该迁移不会主动扫描或批量修改生产记录。
+
+`158_bump_site_version_454.sql` 将运行时 `site_config.site_version` 提升到 `v4.5.4`，并更新 `public_cache_epoch` 使 bootstrap 与站点配置缓存失效；它不增加业务表或接口。
 
 `scripts/backfill-history-anomalies.mjs` 是已知异常扫描 / 回填入口。默认模式只读；正式写入必须同时提供 `--apply` 和脚本要求的 `CONFIRM_HISTORY_ANOMALY_BACKFILL=<记录数>:<用户数>` 精确快照。记录数或用户数变化时应停止、重新审计候选范围，不得跳过 guard。
 

@@ -2,7 +2,7 @@
   "name": "endfield-gacha-analyzer",
   "description": "终末地抽卡分析器 - 《明日方舟：终末地》抽卡记录分析工具",
   "private": true,
-  "version": "4.5.3",
+  "version": "4.5.4",
   "type": "module",
   "packageManager": "npm@11.2.0",
   "engines": {

@@ -193,7 +193,7 @@ function isBlockedPublicRequest(url) {
 }
 
 async function visitPublicEntry(page, url) {
-  await page.goto(url, { waitUntil: 'networkidle' });
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2500);
 }
 
