@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CalendarRange, CheckCircle, Clock3, Filter, Pencil, RotateCcw, Trash2 } from 'lucide-react';
+import React, { useCallback, useMemo, useState } from 'react';
+import { CalendarRange, Filter, RotateCcw } from 'lucide-react';
 import { useHistoryStore, useAuthStore } from '../../stores';
 import { useCurrentPoolData, useCurrentPoolGroupedHistory } from '../../hooks';
 import BatchCard from '../BatchCard';
@@ -10,7 +10,7 @@ import {
   isGiftHistoryPull,
   isInfoBookHistoryPull,
 } from '../../utils/historyInfoBook.js';
-import { loadHistoryAnomalies, updateHistoryAnomaly } from '../../services/historyAnomalyService.js';
+import HistoryAnomalyReview from './HistoryAnomalyReview.jsx';
 
 const DEFAULT_RECORD_FILTERS = {
   dateFrom: '',
@@ -171,84 +171,6 @@ const RecordsView = ({
     return map;
   }, [locale, poolsArray]);
   const [recordFilters, setRecordFilters] = useState(DEFAULT_RECORD_FILTERS);
-  const [poolAnomalies, setPoolAnomalies] = useState([]);
-  const [anomalyError, setAnomalyError] = useState('');
-  const [anomalyActionId, setAnomalyActionId] = useState(null);
-  const anomalyRequestIdRef = useRef(0);
-  const anomalySample = normalizedCurrentPoolHistory[0] || {};
-  const anomalyPoolId = currentPool?.id || currentPool?.pool_id || anomalySample.poolId || anomalySample.pool_id || '';
-  const anomalyGameUid = anomalySample.gameUid || anomalySample.game_uid || '';
-  const anomalyServerScope = anomalySample.serverScope || anomalySample.server_scope || anomalySample.serverId || anomalySample.server_id || '';
-  const anomalyHistoryRevision = normalizedCurrentPoolHistory.reduce(
-    (total, record) => total + Number(record?.editVersion || record?.edit_version || 1),
-    normalizedCurrentPoolHistory.length
-  );
-  const currentAnomalyScope = useMemo(() => {
-    if (!user || isAllPoolsOverview || currentPool?.isGroupMode) return null;
-    if (!anomalyPoolId) return null;
-    return {
-      poolId: String(anomalyPoolId),
-      gameUid: anomalyGameUid,
-      serverScope: anomalyServerScope,
-      historyRevision: anomalyHistoryRevision,
-    };
-  }, [anomalyGameUid, anomalyHistoryRevision, anomalyPoolId, anomalyServerScope, currentPool?.isGroupMode, isAllPoolsOverview, user]);
-
-  const reloadPoolAnomalies = useCallback(async () => {
-    const requestId = anomalyRequestIdRef.current + 1;
-    anomalyRequestIdRef.current = requestId;
-    if (!currentAnomalyScope) {
-      setPoolAnomalies([]);
-      setAnomalyError('');
-      return;
-    }
-    setPoolAnomalies([]);
-    try {
-      setAnomalyError('');
-      const anomalies = await loadHistoryAnomalies({
-        poolId: currentAnomalyScope.poolId,
-        gameUid: currentAnomalyScope.gameUid,
-        serverScope: currentAnomalyScope.serverScope,
-      });
-      if (anomalyRequestIdRef.current === requestId) {
-        setPoolAnomalies(anomalies);
-      }
-    } catch (loadError) {
-      if (anomalyRequestIdRef.current === requestId) {
-        setAnomalyError(loadError?.message || '待核对记录读取失败');
-      }
-    }
-  }, [currentAnomalyScope]);
-
-  useEffect(() => {
-    reloadPoolAnomalies();
-    return () => {
-      anomalyRequestIdRef.current += 1;
-    };
-  }, [reloadPoolAnomalies]);
-
-  const findAnomalyRecord = useCallback((anomaly) => (
-    normalizedCurrentPoolHistory.find((record) => (
-      String(record?.seqId || record?.seq_id || '') === String(anomaly?.seq_id || '')
-      && String(record?.poolId || record?.pool_id || '') === String(anomaly?.pool_id || '')
-      && String(record?.gameUid || record?.game_uid || '') === String(anomaly?.game_uid || '')
-      && String(record?.serverScope || record?.server_scope || record?.serverId || record?.server_id || '') === String(anomaly?.server_scope || '')
-      && String(record?.id ?? record?.recordId ?? record?.record_id ?? '') === String(anomaly?.record_id || '')
-    )) || null
-  ), [normalizedCurrentPoolHistory]);
-
-  const handleAnomalyStatus = useCallback(async (anomaly, action) => {
-    setAnomalyActionId(anomaly.id);
-    setAnomalyError('');
-    try {
-      await updateHistoryAnomaly({ anomalyId: anomaly.id, action });
-      setPoolAnomalies((current) => current.filter((item) => item.id !== anomaly.id));
-    } catch (actionError) {
-      setAnomalyError(actionError?.message || '待核对记录更新失败');
-    } finally {
-      setAnomalyActionId(null);
-    }
-  }, []);
   const effectiveRecordFilters = useMemo(() => (
     isAllPoolsOverview ? recordFilters : { ...recordFilters, poolType: 'all' }
   ), [isAllPoolsOverview, recordFilters]);
@@ -373,57 +295,14 @@ const RecordsView = ({
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-none shadow-sm border border-zinc-200 dark:border-zinc-800 overflow-hidden animate-fade-in relative">
-      {anomalyError && poolAnomalies.length === 0 && (
-        <div className="border-b border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700 dark:border-red-900/70 dark:bg-red-950/25 dark:text-red-300">
-          待核对记录读取失败：{anomalyError}
-        </div>
-      )}
-      {poolAnomalies.length > 0 && (
-        <div className="border-b border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/25">
-          <div className="flex items-start gap-3">
-            <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
-            <div className="min-w-0 flex-1">
-              <h3 className="text-sm font-bold text-amber-800 dark:text-amber-200">这个卡池有 {poolAnomalies.length} 条记录需要你核对</h3>
-              <p className="mt-1 text-xs leading-5 text-amber-800/75 dark:text-amber-200/70">
-                这些记录在旧版官方导入中缺少角色或武器字段。它们暂时仍保留在日志中，你可以确认无误、重新编辑，或删除不属于你的记录。
-              </p>
-              <div className="mt-3 space-y-2">
-                {poolAnomalies.map((anomaly) => {
-                  const record = findAnomalyRecord(anomaly);
-                  const details = anomaly.details || {};
-                  const busy = anomalyActionId === anomaly.id;
-                  return (
-                    <div key={anomaly.id} className="border border-amber-200 bg-white p-3 dark:border-amber-900/70 dark:bg-zinc-950">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="min-w-0 text-xs text-zinc-600 dark:text-zinc-300">
-                          <span className="font-bold text-zinc-800 dark:text-white">{details.itemName || record?.name || record?.character_name || '未知角色或武器'}</span>
-                          <span className="ml-2 font-mono text-zinc-500">序号 {anomaly.seq_id}</span>
-                          <p className="mt-1 text-zinc-500">{details.message || '官方记录缺少可识别的物品字段，系统无法判断这条记录实际是什么。'}</p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button type="button" disabled={busy} onClick={() => handleAnomalyStatus(anomaly, 'confirm')} className="inline-flex items-center gap-1 border border-emerald-400 px-2.5 py-1.5 text-xs font-bold text-emerald-700 disabled:opacity-40 dark:text-emerald-300">
-                            <CheckCircle size={13} /> 确认无误
-                          </button>
-                          <button type="button" disabled={busy || !record} onClick={() => onEdit?.(record)} className="inline-flex items-center gap-1 border border-yellow-500 px-2.5 py-1.5 text-xs font-bold text-yellow-700 disabled:opacity-40 dark:text-yellow-300">
-                            <Pencil size={13} /> 编辑记录
-                          </button>
-                          <button type="button" disabled={busy || !record} onClick={() => onDeleteItem?.(record)} className="inline-flex items-center gap-1 border border-red-400 px-2.5 py-1.5 text-xs font-bold text-red-600 disabled:opacity-40 dark:text-red-300">
-                            <Trash2 size={13} /> 不是我的，删除
-                          </button>
-                          <button type="button" disabled={busy} onClick={() => handleAnomalyStatus(anomaly, 'postpone')} className="inline-flex items-center gap-1 border border-zinc-300 px-2.5 py-1.5 text-xs font-bold text-zinc-600 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300">
-                            <Clock3 size={13} /> 24 小时后提醒
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {anomalyError && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{anomalyError}</p>}
-            </div>
-          </div>
-        </div>
-      )}
+      <HistoryAnomalyReview
+        history={normalizedCurrentPoolHistory}
+        currentPool={currentPool}
+        user={user}
+        onEdit={onEdit}
+        onDeleteItem={onDeleteItem}
+        className="border-x-0 border-t-0"
+      />
       <div className="border-b border-zinc-100 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-500">

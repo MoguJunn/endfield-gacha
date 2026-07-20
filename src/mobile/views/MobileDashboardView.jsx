@@ -17,7 +17,9 @@ import AveragePullStatsPanel from '../../components/dashboard/AveragePullStatsPa
 import PoolTimelinePanel from '../../components/dashboard/PoolTimelinePanel';
 import DashboardShareCard from '../../components/dashboard/DashboardShareCard';
 import ShareActionStatus from '../../components/share/ShareActionStatus';
-import { Toast } from '../../components/ui';
+import EditItemModal from '../../components/modals/EditItemModal.jsx';
+import HistoryAnomalyReview from '../../components/records/HistoryAnomalyReview.jsx';
+import { ConfirmDialog, Toast } from '../../components/ui';
 import { calculateCurrentProbability } from '../../utils';
 import { buildOverviewPoolAnalysisPityMap, getPoolAnalysisPityState } from '../../utils/poolAnalysisPity';
 import { buildDashboardTimelineSections } from '../../utils/dashboardTimelineSections';
@@ -42,6 +44,7 @@ import useShareActionFeedback from '../../hooks/useShareActionFeedback';
 import { useI18n } from '../../i18n/index.js';
 import { compareHistoryTimelineDesc } from '../../utils/historyTimelineSort.js';
 import { localizeEntityName, localizeHistoryItemName, localizePoolFeaturedList, localizePoolFeaturedName, localizePoolName } from '../../utils/gameDataI18n.js';
+import appLogger from '../../utils/appLogger.js';
 import {
   MobileStatusBadge
 } from '../components/ux/MobilePrimitives.jsx';
@@ -49,7 +52,12 @@ import MobileAuthRequiredView from '../components/MobileAuthRequiredView.jsx';
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from '../../utils/storageUtils.js';
 import { localizeDashboardChartItems } from '../../utils/dashboardChartLabels.js';
 import { normalizeShareThemeMode, resolveShareThemeMode } from '../../utils/shareThemeMode.js';
-import { usePoolStore } from '../../stores';
+import { useHistoryStore, usePoolStore } from '../../stores';
+import {
+  deleteAccountGachaRecord,
+  loadAccountGachaData,
+  updateAccountGachaRecord,
+} from '../../services/accountGachaDataService.js';
 
 const PIE_LABEL_MIN_PERCENT = 0.05;
 const PIE_LABEL_RADIAN = Math.PI / 180;
@@ -114,6 +122,16 @@ function getDistributionVariant(poolType) {
   return 'character';
 }
 
+function buildHistoryRecordLocator(item = {}) {
+  return {
+    recordId: item.id ?? item.record_id,
+    gameUid: item.gameUid || item.game_uid,
+    serverScope: item.serverScope || item.server_scope || item.serverId || item.server_id || 'legacy',
+    currentPoolId: item.poolId || item.pool_id,
+    seqId: item.seqId || item.seq_id,
+  };
+}
+
 /**
  * 移动端卡池分析视图 - 工业风重构版 (中文)
  */
@@ -121,6 +139,8 @@ function MobileDashboardView() {
   const location = useLocation();
   const currentPoolId = usePoolStore(state => state.currentPoolId);
   const switchPool = usePoolStore(state => state.switchPool);
+  const pools = usePoolStore(state => state.pools);
+  const setHistory = useHistoryStore(state => state.setHistory);
   const { isDark } = useTheme();
   const { t, formatNumber, isEnglish, locale, formatDateTime } = useI18n();
   const { toasts, showToast, removeToast } = useToast();
@@ -132,6 +152,10 @@ function MobileDashboardView() {
     clipboard: { key: null, blob: null, promise: null }
   });
   const [showDetailedLogs, setShowDetailedLogs] = React.useState(false);
+  const [editAnomalyRecord, setEditAnomalyRecord] = React.useState(null);
+  const [deleteAnomalyRecord, setDeleteAnomalyRecord] = React.useState(null);
+  const [anomalyMutationBusy, setAnomalyMutationBusy] = React.useState(false);
+  const anomalyMutationInFlightRef = React.useRef(false);
   const {
     feedback: shareActionFeedback,
     isBusy: isShareActionBusy,
@@ -295,6 +319,83 @@ function MobileDashboardView() {
         isFree: item.isFree === true || item.is_free === true
       }))
   ), [formatDateTime, locale, normalizedPoolHistory, t]);
+  const reloadMobileHistory = React.useCallback(async () => {
+    const result = await loadAccountGachaData();
+    setHistory(Array.isArray(result?.history) ? result.history : []);
+  }, [setHistory]);
+  const handleMobileAnomalyUpdate = React.useCallback(async (itemOrId, changes, reason = '') => {
+    const record = typeof itemOrId === 'object'
+      ? itemOrId
+      : (normalizedPoolHistory || []).find((item) => item.id === itemOrId);
+    if (!record || anomalyMutationInFlightRef.current) {
+      return false;
+    }
+
+    anomalyMutationInFlightRef.current = true;
+    setAnomalyMutationBusy(true);
+    try {
+      try {
+        await updateAccountGachaRecord({
+          ...buildHistoryRecordLocator(record),
+          editVersion: Number(record.editVersion || record.edit_version || 1),
+          changes,
+          reason,
+        });
+      } catch (error) {
+        appLogger.error('[MobileDashboardView] 更新待核对记录失败:', error);
+        showToast(t('records.anomaly.editFailed'), 'error');
+        return false;
+      }
+
+      setEditAnomalyRecord(null);
+      try {
+        await reloadMobileHistory();
+      } catch (error) {
+        appLogger.error('[MobileDashboardView] 更新成功后刷新历史失败:', error);
+        showToast(t('records.anomaly.refreshAfterMutationFailed'), 'warning');
+        return true;
+      }
+      showToast(t('records.anomaly.editSuccess'), 'success');
+      return true;
+    } finally {
+      anomalyMutationInFlightRef.current = false;
+      setAnomalyMutationBusy(false);
+    }
+  }, [normalizedPoolHistory, reloadMobileHistory, showToast, t]);
+  const confirmMobileAnomalyDelete = React.useCallback(async () => {
+    if (!deleteAnomalyRecord || anomalyMutationInFlightRef.current) {
+      return;
+    }
+
+    anomalyMutationInFlightRef.current = true;
+    setAnomalyMutationBusy(true);
+    try {
+      try {
+        await deleteAccountGachaRecord({
+          ...buildHistoryRecordLocator(deleteAnomalyRecord),
+          reason: '用户确认该异常记录不应保留',
+        });
+      } catch (error) {
+        appLogger.error('[MobileDashboardView] 删除待核对记录失败:', error);
+        showToast(t('records.anomaly.deleteFailed'), 'error');
+        return;
+      }
+
+      setDeleteAnomalyRecord(null);
+      setEditAnomalyRecord(null);
+      try {
+        await reloadMobileHistory();
+      } catch (error) {
+        appLogger.error('[MobileDashboardView] 删除成功后刷新历史失败:', error);
+        showToast(t('records.anomaly.refreshAfterMutationFailed'), 'warning');
+        return;
+      }
+      showToast(t('records.anomaly.deleteSuccess'), 'success');
+    } finally {
+      anomalyMutationInFlightRef.current = false;
+      setAnomalyMutationBusy(false);
+    }
+  }, [deleteAnomalyRecord, reloadMobileHistory, showToast, t]);
   const dashboardSharePayload = React.useMemo(() => buildDashboardSharePayload({
     currentPool,
     normalizedPoolType,
@@ -1473,6 +1574,14 @@ function MobileDashboardView() {
         </button>
         {showDetailedLogs ? (
           <div className="relative z-10 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <HistoryAnomalyReview
+              history={normalizedPoolHistory}
+              currentPool={currentPool}
+              user={user}
+              onEdit={setEditAnomalyRecord}
+              onDeleteItem={setDeleteAnomalyRecord}
+              className="mb-3"
+            />
             {detailedLogEntries.length > 0 ? (
               <div className="space-y-2">
                 {detailedLogEntries.map((entry) => (
@@ -1511,6 +1620,31 @@ function MobileDashboardView() {
 
       {/* 底部留白 */}
       <div className="h-20" />
+
+      {editAnomalyRecord ? (
+        <EditItemModal
+          item={editAnomalyRecord}
+          pools={pools}
+          onClose={() => setEditAnomalyRecord(null)}
+          onUpdate={handleMobileAnomalyUpdate}
+          onDelete={(record) => {
+            setEditAnomalyRecord(null);
+            setDeleteAnomalyRecord(record);
+          }}
+        />
+      ) : null}
+
+      <ConfirmDialog
+        isOpen={Boolean(deleteAnomalyRecord)}
+        type="danger"
+        title={t('records.anomaly.deleteConfirmTitle')}
+        message={t('records.anomaly.deleteConfirmDesc')}
+        confirmText={anomalyMutationBusy ? t('common.loading') : t('records.anomaly.delete')}
+        onCancel={() => {
+          if (!anomalyMutationBusy) setDeleteAnomalyRecord(null);
+        }}
+        onConfirm={confirmMobileAnomalyDelete}
+      />
 
       <Toast toasts={toasts} onRemove={removeToast} />
     </div>

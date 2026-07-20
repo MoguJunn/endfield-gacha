@@ -29,6 +29,7 @@ import {
 import { useI18n } from '../../i18n/index.js';
 import appLogger from '../../utils/appLogger.js';
 import {
+  filterOfficialImportPullRecords,
   normalizeOfficialImportRecord,
   summarizeOfficialImportIssues,
 } from '../../../shared/officialImportRecordNormalizer.js';
@@ -110,7 +111,7 @@ function getServerRegionLabel(serverId, t) {
 
 function buildPreviewRecords(records, userInfo, t) {
   const resolvedServerId = String(userInfo?.serverId || '1');
-  const convertedRecords = records.map((record) => {
+  const convertedRecords = filterOfficialImportPullRecords(records).map((record) => {
     const poolType = record._poolType || 'unknown';
     const normalized = normalizeOfficialImportRecord(record, {
       gameUid: userInfo?.gameUid || userInfo?.hgUid,
@@ -577,6 +578,11 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
               anomalyPoolIds: Array.isArray(backendResult?.anomalyPoolIds)
                 ? backendResult.anomalyPoolIds
                 : [],
+              anomalyItems: Array.isArray(backendResult?.anomalyItems)
+                ? backendResult.anomalyItems
+                : [],
+              ignoredNonPullRecords: Number(backendResult?.ignoredNonPullRecords || 0),
+              repairedNonPullArtifacts: Number(backendResult?.repairedNonPullArtifacts || 0),
               warnings: Array.isArray(backendResult?.warnings) ? backendResult.warnings : [],
             },
             userInfo: finalUserInfo,

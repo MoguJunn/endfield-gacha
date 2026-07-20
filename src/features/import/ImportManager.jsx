@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Save, RefreshCw, HelpCircle, X, AlertCircle, CheckCircle, User, Cloud, CloudOff, Layers, Clock } from 'lucide-react';
@@ -31,6 +31,15 @@ import { getPoolName } from './importShared.js';
 import { useI18n } from '../../i18n/index.js';
 import appLogger from '../../utils/appLogger.js';
 import { buildImportResultSummary } from '../../utils/importResultSummary.js';
+import {
+  getImportAnomalyCount,
+  getImportAnomalyDisplayName,
+  getImportAnomalyMessage,
+  getImportAnomalyItems,
+  getVisibleImportWarnings,
+  hasImportPoolFetchIssues,
+  shouldAutoCloseSuccessfulImport,
+} from './importCompletionPolicy.js';
 
 /**
  * 导入状态枚举
@@ -116,6 +125,65 @@ function getSyncStatusDetail(syncStatus, t) {
   };
 }
 
+function ImportWarningList({ warnings, t }) {
+  if (warnings.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/35">
+      <div className="flex items-start gap-3">
+        <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-amber-800 dark:text-amber-200">
+            {t('import.warning.title')}
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5 text-amber-800/80 dark:text-amber-200/75">
+            {warnings.map((warning, index) => (
+              <li key={`${index}-${warning}`}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ImportPoolFetchIssueList({ summary = {}, t, locale }) {
+  const partialPools = Array.isArray(summary.partialPools) ? summary.partialPools : [];
+  const failedPools = Array.isArray(summary.failedPools) ? summary.failedPools : [];
+  const showRawError = String(locale || '').toLowerCase().startsWith('zh');
+  if (partialPools.length === 0 && failedPools.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 p-4 space-y-2 transition-colors" style={{ clipPath: 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%)' }}>
+      <div className="flex items-start gap-3">
+        <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-500 mt-0.5 shrink-0" />
+        <div>
+          <p className="text-amber-700 dark:text-amber-400 text-sm font-bold uppercase tracking-widest">{t('import.partialTitle')}</p>
+          <p className="text-slate-600 dark:text-zinc-500 text-xs mt-1">
+            {t('import.partialDesc')}
+          </p>
+        </div>
+      </div>
+
+      {partialPools.map((pool, index) => (
+        <div key={`partial-${pool.poolType || pool.type || index}`} className="text-xs text-slate-600 dark:text-zinc-400">
+          {t('import.partialSuccess')}: {getPoolName(pool.poolType || pool.type, t)} · {pool.records || 0} · {showRawError && pool.error ? pool.error : t('import.partialFallback')}
+        </div>
+      ))}
+
+      {failedPools.map((pool, index) => (
+        <div key={`failed-${pool.poolType || pool.type || index}`} className="text-xs text-red-600 dark:text-red-400">
+          {t('import.partialFailed')}: {getPoolName(pool.poolType || pool.type, t)} · {showRawError && pool.error ? pool.error : t('import.failedFallback')}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 async function resolveImportAliasMaps(records) {
   const poolIds = [...new Set((Array.isArray(records) ? records : [])
     .map(record => record?.pool_id || record?.poolId)
@@ -149,7 +217,9 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
   const [saveProgress, setSaveProgress] = useState({ current: 0, total: 0 });
   const [errorMessage, setErrorMessage] = useState('');
   const [fetchStatus, setFetchStatus] = useState('idle'); // 追踪子组件的获取状态
+  const [completionPending, setCompletionPending] = useState(false);
   const [accountSecuritySnapshot, setAccountSecuritySnapshot] = useState(null);
+  const completionGenerationRef = useRef(0);
 
   // 从 stores 获取数据
   const user = useAuthStore(state => state.user);
@@ -198,6 +268,10 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
       cancelled = true;
     };
   }, [isOpen, user?.id]);
+
+  useEffect(() => () => {
+    completionGenerationRef.current += 1;
+  }, []);
 
   // 处理子组件的获取状态变化
   const handleFetchStatusChange = useCallback((status) => {
@@ -290,13 +364,20 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
    * 处理 API 导入完成
    */
   const handleAPIImportComplete = useCallback(async (result) => {
+    const completionGeneration = completionGenerationRef.current + 1;
+    completionGenerationRef.current = completionGeneration;
+    const isCompletionStale = () => completionGenerationRef.current !== completionGeneration;
+
     if (!result?.success) {
-      setImportStatus(ImportStatus.ERROR);
-      setErrorMessage(result?.error || t('import.errorTitle'));
+      if (!isCompletionStale()) {
+        setImportStatus(ImportStatus.ERROR);
+        setErrorMessage(result?.error || t('import.errorTitle'));
+      }
       return;
     }
 
     if (result.backendImported) {
+      setCompletionPending(true);
       const importedAt = new Date().toISOString();
       const importedGameUid = result.userInfo?.gameUid || result.userInfo?.hgUid || null;
       const importedAccountKey = buildGameAccountKey(result.userInfo) || importedGameUid;
@@ -308,8 +389,12 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
         saveGameAccountMetadata(result.userInfo);
       }
 
+      let cloudRefreshError = null;
       try {
         const refreshedCloudData = await loadCloudData(user);
+        if (isCompletionStale()) {
+          return;
+        }
         applyCloudDataToStores(refreshedCloudData, {
           setPools,
           switchPool,
@@ -336,6 +421,10 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
           importSource: 'official_api'
         });
       } catch (refreshError) {
+        if (isCompletionStale()) {
+          return;
+        }
+        cloudRefreshError = refreshError;
         appLogger.error('[ImportManager] 刷新导入后的云端数据失败:', refreshError);
         persistImportedAccountMetadata({
           accounts: result.userInfo ? [result.userInfo] : [],
@@ -345,15 +434,45 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
         });
       }
 
-      setImportResult(result);
+      if (isCompletionStale()) {
+        return;
+      }
+
+      const completionResult = cloudRefreshError
+        ? {
+            ...result,
+            summary: {
+              ...(result.summary || {}),
+              warnings: [
+                ...(Array.isArray(result.summary?.warnings) ? result.summary.warnings : []),
+                t('import.refreshFailedAfterSave'),
+              ],
+            },
+          }
+        : result;
+
+      void notifyBotImportUpdated({
+        summary: completionResult.summary,
+        userInfo: completionResult.userInfo,
+      });
+
+      if (shouldAutoCloseSuccessfulImport(completionResult)) {
+        setCompletionPending(false);
+        setImportResult(null);
+        setImportStatus(ImportStatus.IDLE);
+        setSaveProgress({ current: 0, total: 0 });
+        setFetchStatus('idle');
+        onImportComplete?.(completionResult);
+        onClose?.();
+        return;
+      }
+
+      setCompletionPending(false);
+      setImportResult(completionResult);
       setImportStatus(ImportStatus.SUCCESS);
       setSaveProgress({
-        current: result.summary?.newRecords || 0,
-        total: result.summary?.total || 0
-      });
-      void notifyBotImportUpdated({
-        summary: result.summary,
-        userInfo: result.userInfo,
+        current: completionResult.summary?.newRecords || 0,
+        total: completionResult.summary?.total || 0
       });
       return;
     }
@@ -467,9 +586,11 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
       setImportStatus(ImportStatus.ERROR);
       setErrorMessage(error.message || t('import.errorTitle'));
     }
-  }, [currentPoolId, getExistingSeqIds, loadCloudData, notifyBotImportUpdated, persistImportedAccountMetadata, pools, saveHistoryToServer, savePoolsToServer, setHistory, setPools, switchGameAccount, switchPool, t, user]);
+  }, [currentPoolId, getExistingSeqIds, loadCloudData, notifyBotImportUpdated, onClose, onImportComplete, persistImportedAccountMetadata, pools, saveHistoryToServer, savePoolsToServer, setHistory, setPools, switchGameAccount, switchPool, t, user]);
 
   const handleReset = useCallback(() => {
+    completionGenerationRef.current += 1;
+    setCompletionPending(false);
     setImportStatus(ImportStatus.IDLE);
     setImportResult(null);
     setErrorMessage('');
@@ -478,9 +599,16 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
   }, []);
 
   const handleClose = useCallback(() => {
+    if (
+      completionPending
+      || importStatus === ImportStatus.SAVING
+      || ['authenticating', 'fetching', 'processing'].includes(fetchStatus)
+    ) {
+      return;
+    }
     handleReset();
     onClose();
-  }, [handleReset, onClose]);
+  }, [completionPending, fetchStatus, handleReset, importStatus, onClose]);
 
   const handleOpenSettings = useCallback(() => {
     handleClose();
@@ -516,7 +644,23 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
       syncedToCloud: true,
     }, { locale });
   }, [importResult, locale]);
-  const importAnomalyCount = Number(importResult?.summary?.anomalyRecords || 0);
+  const importAnomalyItems = getImportAnomalyItems(importResult);
+  const importAnomalyCount = getImportAnomalyCount(importResult);
+  const hasPoolFetchIssues = hasImportPoolFetchIssues(importResult);
+  const primaryImportAnomaly = importAnomalyItems[0] || null;
+  const primaryAnomalyPool = primaryImportAnomaly?.poolId
+    ? pools.find((pool) => String(pool?.id || pool?.pool_id || '') === String(primaryImportAnomaly.poolId))
+    : null;
+  const primaryAnomalyPoolName = primaryAnomalyPool?.name
+    || primaryAnomalyPool?.display_name
+    || primaryImportAnomaly?.poolId
+    || t('common.unknown');
+  const primaryImportAnomalyMessage = getImportAnomalyMessage(primaryImportAnomaly, t);
+  const primaryImportAnomalyName = getImportAnomalyDisplayName(primaryImportAnomaly, t);
+  const importWarnings = getVisibleImportWarnings(importResult, t);
+  const isImportBusy = completionPending
+    || importStatus === ImportStatus.SAVING
+    || ['authenticating', 'fetching', 'processing'].includes(fetchStatus);
 
   if (!isOpen) return null;
 
@@ -554,10 +698,12 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
               <HelpCircle className="w-5 h-5" />
             </button>
             <button
+              type="button"
+              aria-label={t('common.close')}
               onClick={handleClose}
               className="p-2 border border-transparent hover:border-red-500 hover:bg-red-500/10 text-slate-400 dark:text-zinc-500 hover:text-red-600 dark:hover:text-red-500 transition-all duration-200"
               style={{ clipPath: 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)' }}
-              disabled={importStatus === ImportStatus.SAVING}
+              disabled={isImportBusy}
             >
               <X className="w-6 h-6" />
             </button>
@@ -650,8 +796,90 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
             </div>
           )}
 
-          {/* 导入成功 */}
-          {importStatus === ImportStatus.SUCCESS && importResult && (
+          {/* 仅在出现可定位的异常记录时展示异常提示，不再列出整批正常记录。 */}
+          {importStatus === ImportStatus.SUCCESS && importResult && importAnomalyCount > 0 && (
+            <div className="space-y-5">
+              <div className="border border-amber-400 bg-amber-50 p-5 dark:border-amber-800 dark:bg-amber-950/35">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="mt-0.5 h-6 w-6 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-black text-amber-900 dark:text-amber-100">
+                      {t('import.anomaly.title', { count: formatNumber(importAnomalyCount) })}
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-amber-800/80 dark:text-amber-200/75">
+                      {t('import.anomaly.desc')}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                  {t('import.anomaly.recordLabel')}
+                </div>
+                <div className="mt-2 text-base font-black text-slate-900 dark:text-white">
+                  {primaryImportAnomalyName}
+                </div>
+                <div className="mt-3 grid gap-2 text-xs text-slate-600 dark:text-zinc-400 sm:grid-cols-2">
+                  <div>
+                    <span className="font-bold text-slate-800 dark:text-zinc-200">{t('import.anomaly.poolLabel')}：</span>
+                    {primaryAnomalyPoolName}
+                  </div>
+                  <div>
+                    <span className="font-bold text-slate-800 dark:text-zinc-200">{t('import.anomaly.seqLabel')}：</span>
+                    {primaryImportAnomaly?.seqId || t('common.unknown')}
+                  </div>
+                  <div className="sm:col-span-2">
+                    <span className="font-bold text-slate-800 dark:text-zinc-200">{t('import.anomaly.timeLabel')}：</span>
+                    {primaryImportAnomaly?.timestamp
+                      ? formatDateTime(primaryImportAnomaly.timestamp, { includeYear: true })
+                      : t('common.unknown')}
+                  </div>
+                </div>
+                {primaryImportAnomalyMessage && (
+                  <p className="mt-3 border-l-2 border-amber-400 pl-3 text-xs leading-5 text-amber-800 dark:text-amber-300">
+                    {primaryImportAnomalyMessage}
+                  </p>
+                )}
+                {importAnomalyCount > 1 && (
+                  <p className="mt-3 text-[11px] text-zinc-500">
+                    {t('import.anomaly.showingFirst', { count: formatNumber(importAnomalyCount) })}
+                  </p>
+                )}
+              </div>
+
+              {hasPoolFetchIssues && (
+                <ImportPoolFetchIssueList summary={importResult.summary} t={t} locale={locale} />
+              )}
+
+              <ImportWarningList warnings={importWarnings} t={t} />
+
+              <p className="text-xs leading-5 text-slate-600 dark:text-zinc-400">
+                {t('import.anomaly.actionHint')}
+              </p>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="border border-zinc-300 bg-white py-3 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:hover:bg-zinc-700"
+                >
+                  {t('import.anomaly.later')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleViewImportedData}
+                  className="flex items-center justify-center gap-2 bg-amber-500 py-3 text-sm font-bold text-white transition-colors hover:bg-amber-600 dark:bg-yellow-500 dark:text-black dark:hover:bg-yellow-400"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  {t('import.anomaly.openDetails')}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 只有部分获取、跳过或其他非记录异常时保留结果页；正常成功会自动关闭。 */}
+          {importStatus === ImportStatus.SUCCESS && importResult && importAnomalyCount === 0 && (
             <div className="space-y-6">
               <div className="bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/30 p-6 text-center transition-colors">
                 <div className="flex justify-center mb-4">
@@ -744,47 +972,11 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
                 </div>
               )}
 
-              {((importResult.summary?.partialPools?.length || 0) > 0 || (importResult.summary?.failedPools?.length || 0) > 0) && (
-                <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 p-4 space-y-2 transition-colors" style={{ clipPath: 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%)' }}>
-                  <div className="flex items-start gap-3">
-                      <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-500 mt-0.5 shrink-0" />
-                      <div>
-                      <p className="text-amber-700 dark:text-amber-400 text-sm font-bold uppercase tracking-widest">{t('import.partialTitle')}</p>
-                      <p className="text-slate-600 dark:text-zinc-500 text-xs mt-1">
-                        {t('import.partialDesc')}
-                      </p>
-                    </div>
-                  </div>
-
-                  {(importResult.summary?.partialPools || []).map(pool => (
-                    <div key={`partial-${pool.poolType || pool.type}`} className="text-xs text-slate-600 dark:text-zinc-400">
-                      {t('import.partialSuccess')}: {getPoolName(pool.poolType || pool.type, t)} · {pool.records || 0} · {pool.error || t('import.partialFallback')}
-                    </div>
-                  ))}
-
-                  {(importResult.summary?.failedPools || []).map(pool => (
-                    <div key={`failed-${pool.poolType || pool.type}`} className="text-xs text-red-600 dark:text-red-400">
-                      {t('import.partialFailed')}: {getPoolName(pool.poolType || pool.type, t)} · {pool.error || t('import.failedFallback')}
-                    </div>
-                  ))}
-                </div>
+              {hasPoolFetchIssues && (
+                <ImportPoolFetchIssueList summary={importResult.summary} t={t} locale={locale} />
               )}
 
-              {importAnomalyCount > 0 && (
-                <div className="border border-amber-400 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/35">
-                  <div className="flex items-start gap-3">
-                    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
-                    <div>
-                      <p className="text-sm font-bold text-amber-800 dark:text-amber-200">
-                        {t('import.anomaly.title', { count: formatNumber(importAnomalyCount) })}
-                      </p>
-                      <p className="mt-1 text-xs leading-5 text-amber-700 dark:text-amber-300/80">
-                        {t('import.anomaly.desc')}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <ImportWarningList warnings={importWarnings} t={t} />
 
               {/* 结果提示 */}
               {importResult.summary?.newRecords > 0 && (
@@ -799,28 +991,19 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
 
               {/* 按钮组 */}
               <div className="flex gap-4">
-                {importAnomalyCount > 0 ? (
-                  <button
-                    onClick={handleClose}
-                    className="flex-1 border border-zinc-300 bg-white py-3 text-sm font-bold tracking-wider text-slate-700 transition-colors hover:bg-slate-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white dark:hover:bg-zinc-700"
-                  >
-                    {t('import.anomaly.later')}
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleReset}
-                    className="flex-1 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-transparent hover:bg-slate-50 dark:hover:bg-zinc-700 text-slate-700 dark:text-white font-bold py-3 text-sm tracking-wider transition-colors"
-                  >
-                    {t('import.continue')}
-                  </button>
-                )}
+                <button
+                  onClick={handleReset}
+                  className="flex-1 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-transparent hover:bg-slate-50 dark:hover:bg-zinc-700 text-slate-700 dark:text-white font-bold py-3 text-sm tracking-wider transition-colors"
+                >
+                  {t('import.continue')}
+                </button>
                 {importResult.summary?.newRecords > 0 ? (
                   <button
                     onClick={handleViewImportedData}
                     className="flex-1 bg-amber-500 hover:bg-amber-600 dark:bg-yellow-500 dark:hover:bg-yellow-400 text-white dark:text-black font-bold py-3 text-sm tracking-wider transition-colors flex items-center justify-center gap-2"
                   >
                     <RefreshCw className="w-4 h-4" />
-                    {importAnomalyCount > 0 ? t('import.anomaly.now') : t('import.viewData')}
+                    {t('import.viewData')}
                   </button>
                 ) : (
                   <button

@@ -400,6 +400,7 @@ describe('executeFullImport import mode metadata', () => {
 
   it('writes a locatable unknown item with a four-star placeholder and creates a later-review marker', async () => {
     const {
+      buildPostImportAnomalyItems,
       buildPostImportAnomalyRows,
       resolveOfficialImportStorageQuality,
       savePostImportAnomalies,
@@ -421,7 +422,8 @@ describe('executeFullImport import mode metadata', () => {
     const stagedRecords = [{ historyRecord, issues }];
 
     expect(resolveOfficialImportStorageQuality(normalized)).toBe(4);
-    expect(buildPostImportAnomalyRows(stagedRecords, 'user-1')).toEqual([
+    const anomalyRows = buildPostImportAnomalyRows(stagedRecords, 'user-1');
+    expect(anomalyRows).toEqual([
       expect.objectContaining({
         user_id: 'user-1',
         record_id: 'record-unknown',
@@ -438,6 +440,18 @@ describe('executeFullImport import mode metadata', () => {
         }),
       }),
     ]);
+    expect(buildPostImportAnomalyItems(anomalyRows)).toEqual([
+      expect.objectContaining({
+        recordId: 'record-unknown',
+        gameUid: '10001',
+        serverScope: '1',
+        poolId: 'special_test',
+        seqId: '42',
+        itemName: '未知角色或武器',
+        rarity: 4,
+        timestamp: '2026-07-16T12:00:00.000Z',
+      }),
+    ]);
 
     const upsert = vi.fn(async () => ({ error: null }));
     const supabase = {
@@ -446,6 +460,11 @@ describe('executeFullImport import mode metadata', () => {
     await expect(savePostImportAnomalies(supabase, stagedRecords, 'user-1')).resolves.toEqual({
       anomalyRecords: 1,
       anomalyPoolIds: ['special_test'],
+      anomalyItems: [expect.objectContaining({
+        recordId: 'record-unknown',
+        poolId: 'special_test',
+        seqId: '42',
+      })],
     });
     expect(supabase.from).toHaveBeenCalledWith('history_anomalies');
     expect(upsert).toHaveBeenCalledWith(
@@ -455,6 +474,135 @@ describe('executeFullImport import mode metadata', () => {
         ignoreDuplicates: true,
       }
     );
+  });
+
+  it('recognizes only an exact unknown four-star artifact at the official non-pull locator', async () => {
+    const { isLegacyOfficialNonPullArtifact } = await import('../../backend/fullImportService.js');
+    const marker = {
+      poolId: 'special_test',
+      seqId: '42',
+      timestamp: '2026-07-16T12:00:00.000Z',
+      serverId: '1',
+    };
+    const artifact = {
+      pool_id: 'special_test',
+      seq_id: '42',
+      timestamp: '2026-07-16T12:00:00.000Z',
+      server_id: '1',
+      rarity: 4,
+      character_id: null,
+      character_name: '未知',
+      item_name: '未知',
+    };
+
+    expect(isLegacyOfficialNonPullArtifact(artifact, marker)).toBe(true);
+    expect(isLegacyOfficialNonPullArtifact({ ...artifact, character_name: '测试角色' }, marker)).toBe(false);
+    expect(isLegacyOfficialNonPullArtifact({ ...artifact, rarity: 5 }, marker)).toBe(false);
+    expect(isLegacyOfficialNonPullArtifact({
+      ...artifact,
+      timestamp: '2026-07-16T12:00:01.000Z',
+    }, marker)).toBe(false);
+  });
+
+  it('detects a server-scoped pending four-star placeholder before incremental early stop', async () => {
+    const { hasPendingOfficialNonPullRepairCandidates } = await import('../../backend/fullImportService.js');
+    const range = vi.fn(async () => ({
+      data: [{
+        id: 'anomaly-42',
+        details: { rarity: 4, itemName: '未知角色或武器' },
+      }],
+      error: null,
+    }));
+    const query = createHistoryRangeQuery(range);
+    const supabase = {
+      from: vi.fn(() => ({
+        select: vi.fn(() => query),
+      })),
+    };
+
+    await expect(hasPendingOfficialNonPullRepairCandidates({
+      supabase,
+      userId: 'user-1',
+      gameUid: 'game-1',
+      serverScope: '3',
+    })).resolves.toBe(true);
+    expect(query.eq).toHaveBeenCalledWith('server_scope', '3');
+    expect(range).toHaveBeenCalledWith(0, 999);
+  });
+
+  it('repairs a pending legacy placeholder only when the official response identifies the exact Intel Book event', async () => {
+    const { repairLegacyOfficialNonPullArtifacts } = await import('../../backend/fullImportService.js');
+    const artifact = {
+      record_id: 'record-42',
+      game_uid: 'game-1',
+      server_scope: '1',
+      server_id: '1',
+      pool_id: 'special_test',
+      seq_id: '42',
+      timestamp: '2026-07-16T12:00:00.000Z',
+      rarity: 4,
+      character_id: null,
+      character_name: '未知',
+      item_name: '未知',
+    };
+    const rpc = vi.fn(async () => ({ data: { repaired: 1 }, error: null }));
+    let historyQuery = null;
+    const createQuery = (rows) => {
+      const query = {
+        eq: vi.fn(() => query),
+        in: vi.fn(async () => ({ data: rows, error: null })),
+        range: vi.fn(async () => ({ data: rows, error: null })),
+      };
+      return query;
+    };
+    const supabase = {
+      rpc,
+      from: vi.fn((tableName) => ({
+        select: vi.fn(() => {
+          if (tableName === 'pool_id_aliases') return createQuery([]);
+          if (tableName === 'history') {
+            historyQuery = createQuery([artifact]);
+            return historyQuery;
+          }
+          if (tableName === 'history_anomalies') {
+            return createQuery([{ id: 'anomaly-42', status: 'pending' }]);
+          }
+          throw new Error(`Unexpected table: ${tableName}`);
+        }),
+      })),
+    };
+
+    await expect(repairLegacyOfficialNonPullArtifacts({
+      supabase,
+      userId: 'user-1',
+      account: { gameUid: 'game-1' },
+      accountServerContext: { serverId: '1', region: 'cn' },
+      rawResults: [{
+        type: 'char',
+        poolType: 'E_CharacterGachaPoolType_Special',
+        records: [{
+          kind: 'gift_intel_book',
+          poolId: 'special_test',
+          seqId: '42',
+          gachaTs: String(new Date('2026-07-16T12:00:00.000Z').getTime()),
+        }],
+      }],
+    })).resolves.toEqual({
+      repairedRecords: 1,
+      failures: 0,
+      warnings: [],
+    });
+    expect(rpc).toHaveBeenCalledWith('repair_official_non_pull_artifact', {
+      p_user_id: 'user-1',
+      p_record_id: 'record-42',
+      p_game_uid: 'game-1',
+      p_server_scope: '1',
+      p_pool_id: 'special_test',
+      p_seq_id: '42',
+      p_marker_timestamp: '2026-07-16T12:00:00.000Z',
+    });
+    expect(historyQuery.eq).toHaveBeenCalledWith('server_scope', '1');
+    expect(historyQuery.range).toHaveBeenCalledWith(0, 0);
   });
 
   it('does not fabricate records that lack a safe account or pool locator', async () => {
@@ -628,7 +776,7 @@ describe('executeFullImport import mode metadata', () => {
       fetchAllRecordsConcurrent: vi.fn(async () => ({
         success: true,
         data: {
-          totalRecords: 1,
+          totalRecords: 2,
           partial: [],
           failed: [],
           results: [{
@@ -646,6 +794,13 @@ describe('executeFullImport import mode metadata', () => {
               isFree: false,
               isInfoBook: true,
               isNew: true,
+            }, {
+              kind: 'gift_intel_book',
+              nameText: '寻访情报书',
+              poolId: 'special_1_2_1',
+              poolName: '测试限定池',
+              seqId: '2',
+              gachaTs: '1767225600000',
             }],
           }],
         },
@@ -667,6 +822,7 @@ describe('executeFullImport import mode metadata', () => {
       importMode: 'full',
       fetchStrategy: 'full_official_fetch_with_dedupe',
       totalRecords: 1,
+      ignoredNonPullRecords: 1,
       newRecords: 1,
       savedRecords: 1,
       duplicates: 0,
@@ -1475,6 +1631,14 @@ describe('executeFullImport import mode metadata', () => {
           };
         }
 
+        if (tableName === 'history_anomalies') {
+          return {
+            select() {
+              return createHistoryRangeQuery(async () => ({ data: [], error: null }));
+            },
+          };
+        }
+
         if (tableName === 'characters') {
           return {
             select() {
@@ -1698,6 +1862,14 @@ describe('executeFullImport import mode metadata', () => {
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });
               return { error: null };
+            },
+          };
+        }
+
+        if (tableName === 'history_anomalies') {
+          return {
+            select() {
+              return createHistoryRangeQuery(async () => ({ data: [], error: null }));
             },
           };
         }
@@ -2068,6 +2240,36 @@ describe('official import incremental guards', () => {
         isFree: false,
       }))
     )).toBe(true);
+    expect(hasSufficientIncrementalPityContext([
+      ...Array.from({ length: 72 }, (_, index) => ({
+        kind: 'draw',
+        seqId: String(index + 1),
+        rarity: 5,
+        isFree: false,
+      })),
+      ...Array.from({ length: 8 }, (_, index) => ({
+        kind: 'gift_intel_book',
+        seqId: String(100 + index),
+      })),
+    ])).toBe(false);
+    expect(analyzeIncrementalPage({
+      records: [
+        ...shortExistingPage,
+        {
+          kind: 'gift_intel_book',
+          poolId: 'special_1_2_1',
+          seqId: 'gift-marker',
+        },
+      ],
+      gameUid: '10000001',
+      existingRecordKeys,
+      getPoolId: (record) => record.poolId,
+    })).toMatchObject({
+      checked: 20,
+      existing: 20,
+      missingKey: 0,
+      allExisting: true,
+    });
 
     const stopGuard = createIncrementalImportStopGuard({
       gameUid: '10000001',

@@ -6,6 +6,7 @@ import {
 import { usePoolStore, useHistoryStore, useAuthStore } from '../../stores';
 import { isPoolGroupId, POOL_GROUP_PREFIX } from '../../stores/usePoolStore';
 import ImportManager from '../../features/import/ImportManager';
+import { getImportAnomalyCount } from '../../features/import/importCompletionPolicy.js';
 import {
   formatFreshnessAbsolute,
   formatFreshnessRelative,
@@ -671,9 +672,12 @@ function MobilePoolSelector() {
           onClose={() => {
             setShowImportManager(false);
           }}
-          onImportComplete={() => {
-            setShowImportManager(false);
-            navigate(getMobilePathForTab('dashboard'));
+          onImportComplete={(result) => {
+            navigate(getMobilePathForTab('details'), {
+              state: {
+                openHistoryAnomalies: getImportAnomalyCount(result) > 0,
+              },
+            });
           }}
         />
       )}

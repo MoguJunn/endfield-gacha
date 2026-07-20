@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore, useHistoryStore, usePoolStore } from '../../stores';
 import { POOL_GROUP_PREFIX, isPoolGroupId } from '../../stores/usePoolStore';
 import ImportManager from '../../features/import/ImportManager';
+import { getImportAnomalyCount } from '../../features/import/importCompletionPolicy.js';
 import { getMobilePathForTab } from '../../constants/appRoutes';
 import { useI18n } from '../../i18n/index.js';
 import {
@@ -448,10 +449,9 @@ export default function MobilePoolRailSelector() {
           isOpen={showImportManager}
           onClose={() => setShowImportManager(false)}
           onImportComplete={(result) => {
-            setShowImportManager(false);
             navigate(getMobilePathForTab('details'), {
               state: {
-                openHistoryAnomalies: Number(result?.summary?.anomalyRecords || 0) > 0,
+                openHistoryAnomalies: getImportAnomalyCount(result) > 0,
               },
             });
           }}

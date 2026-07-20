@@ -9,8 +9,8 @@
  * 5. 后端直接写入 Supabase
  * 6. 前端通过轮询获取进度
  *
- * @version 1.6.2
- * @date 2026-02-24
+ * @version 1.6.3
+ * @date 2026-07-19
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -29,8 +29,10 @@ import {
 import { classifyCharacterIdSource } from './lib/canonicalEntityUtils.js';
 import { buildOfficialImportRecordKey } from './lib/officialImportIncremental.js';
 import {
+  filterOfficialImportPullRecords,
   hasActionableImportIdentityIssues,
   hasWriteBlockingImportIssues,
+  isOfficialImportNonPullRecord,
   normalizeOfficialImportRecord,
   summarizeOfficialImportIssues,
 } from '../shared/officialImportRecordNormalizer.js';
@@ -544,7 +546,7 @@ function buildImportPoolSummary(rawResults = []) {
   (Array.isArray(rawResults) ? rawResults : []).forEach((poolData) => {
     const { type, poolType, records } = poolData || {};
 
-    (Array.isArray(records) ? records : []).forEach((record) => {
+    filterOfficialImportPullRecords(records).forEach((record) => {
       const poolId = getOfficialPoolId(record, type, poolType);
       const normalizedPoolType = getPoolTypeFromId(poolId, type, poolType);
       const poolName = record.poolName || record.pool_name || getDefaultPoolName(poolId, normalizedPoolType);
@@ -557,6 +559,206 @@ function buildImportPoolSummary(rawResults = []) {
   return {
     byPool,
     byPoolType,
+  };
+}
+
+function countOfficialImportPullRecords(rawResults = []) {
+  return (Array.isArray(rawResults) ? rawResults : []).reduce(
+    (total, poolData) => total + filterOfficialImportPullRecords(poolData?.records).length,
+    0
+  );
+}
+
+const LEGACY_NON_PULL_PLACEHOLDER_NAMES = new Set([
+  '',
+  '未知',
+  'unknown',
+  '未知目标',
+  '未知角色或武器',
+]);
+
+function isLegacyNonPullPlaceholderName(value) {
+  return LEGACY_NON_PULL_PLACEHOLDER_NAMES.has(normalizeString(value, 160).toLowerCase());
+}
+
+export function isLegacyOfficialNonPullArtifact(historyRecord = {}, marker = {}) {
+  const historyTimestamp = new Date(historyRecord.timestamp);
+  const markerTimestamp = new Date(marker.timestamp);
+  const timestampsMatch = !Number.isNaN(historyTimestamp.getTime())
+    && !Number.isNaN(markerTimestamp.getTime())
+    && historyTimestamp.toISOString() === markerTimestamp.toISOString();
+  const markerServerId = normalizeString(marker.serverId, 160);
+  const serverMatches = !markerServerId
+    || normalizeString(historyRecord.server_id, 160) === markerServerId
+    || normalizeString(historyRecord.server_scope, 160) === markerServerId;
+
+  return Number(historyRecord.rarity) === 4
+    && !normalizeString(historyRecord.character_id, 200)
+    && isLegacyNonPullPlaceholderName(historyRecord.character_name)
+    && isLegacyNonPullPlaceholderName(historyRecord.item_name)
+    && normalizeString(historyRecord.pool_id, 160) === normalizeString(marker.poolId, 160)
+    && normalizeString(historyRecord.seq_id, 200) === normalizeString(marker.seqId, 200)
+    && serverMatches
+    && timestampsMatch;
+}
+
+function collectOfficialNonPullMarkers(rawResults = [], account = {}, accountServerContext = {}) {
+  const markers = [];
+  (Array.isArray(rawResults) ? rawResults : []).forEach((poolData) => {
+    const { type, poolType, records } = poolData || {};
+    (Array.isArray(records) ? records : []).forEach((record) => {
+      if (!isOfficialImportNonPullRecord(record)) {
+        return;
+      }
+      const normalized = normalizeOfficialImportRecord(record, {
+        gameUid: account.gameUid,
+        serverId: accountServerContext.serverId,
+        region: accountServerContext.region,
+        type,
+        poolType,
+        poolId: getOfficialPoolId(record, type, poolType),
+      });
+      if (normalized.poolId && normalized.seqId && normalized.timestamp) {
+        markers.push({
+          poolId: normalized.poolId,
+          seqId: normalized.seqId,
+          timestamp: normalized.timestamp,
+          serverId: accountServerContext.serverId || null,
+        });
+      }
+    });
+  });
+
+  return Array.from(new Map(markers.map((marker) => [
+    `${marker.poolId}\u0000${marker.seqId}`,
+    marker,
+  ])).values());
+}
+
+export async function hasPendingOfficialNonPullRepairCandidates({
+  supabase,
+  userId,
+  gameUid,
+  serverScope,
+} = {}) {
+  if (!supabase || !userId || !gameUid) {
+    return false;
+  }
+
+  try {
+    const normalizedServerScope = normalizeString(serverScope, 160);
+    for (let from = 0; ; from += HISTORY_PAGE_SIZE) {
+      let query = supabase
+        .from('history_anomalies')
+        .select('id,details')
+        .eq('user_id', userId)
+        .eq('game_uid', gameUid)
+        .eq('issue_code', 'OFFICIAL_IMPORT_UNKNOWN_ITEM')
+        .eq('status', 'pending');
+
+      if (normalizedServerScope) {
+        query = query.eq('server_scope', normalizedServerScope);
+      }
+
+      const { data, error } = await query.range(from, from + HISTORY_PAGE_SIZE - 1);
+      if (error) throw error;
+
+      const rows = Array.isArray(data) ? data : [];
+      if (rows.some((row) => (
+        Number(row?.details?.rarity) === 4
+        && isLegacyNonPullPlaceholderName(row?.details?.itemName)
+      ))) {
+        return true;
+      }
+      if (rows.length < HISTORY_PAGE_SIZE) {
+        return false;
+      }
+    }
+  } catch (error) {
+    // 查询失败时采用完整获取，避免增量提前停止掩盖可修复的旧占位。
+    console.warn('[FullImportService] 查询情报书旧占位候选失败，将完整获取官方记录:', error?.message || error);
+    return true;
+  }
+}
+
+export async function repairLegacyOfficialNonPullArtifacts({
+  supabase,
+  userId,
+  account,
+  accountServerContext,
+  rawResults,
+} = {}) {
+  const markers = collectOfficialNonPullMarkers(rawResults, account, accountServerContext);
+  if (!supabase || !userId || !account?.gameUid || markers.length === 0) {
+    return { repairedRecords: 0, failures: 0, warnings: [] };
+  }
+
+  let poolAliasMap;
+  try {
+    poolAliasMap = await resolvePoolAliasMap(
+      supabase,
+      markers.map((marker) => marker.poolId),
+      'official_api'
+    );
+  } catch (error) {
+    console.warn('[FullImportService] 情报书旧占位卡池映射失败:', error?.message || error);
+    return {
+      repairedRecords: 0,
+      failures: markers.length,
+      warnings: [{ code: 'OFFICIAL_IMPORT_NON_PULL_REPAIR_FAILED', count: markers.length }],
+    };
+  }
+
+  let repairedRecords = 0;
+  let failures = 0;
+  for (const marker of markers) {
+    const resolvedMarker = {
+      ...marker,
+      poolId: resolveAliasValue(poolAliasMap, marker.poolId),
+    };
+    try {
+      let historyQuery = supabase
+        .from('history')
+        .select('record_id,game_uid,server_scope,server_id,pool_id,seq_id,timestamp,rarity,character_id,character_name,item_name')
+        .eq('user_id', userId)
+        .eq('game_uid', account.gameUid)
+        .eq('pool_id', resolvedMarker.poolId)
+        .eq('seq_id', resolvedMarker.seqId);
+      if (resolvedMarker.serverId) {
+        historyQuery = historyQuery.eq('server_scope', resolvedMarker.serverId);
+      }
+      const { data: historyRows, error: historyError } = await historyQuery.range(0, 0);
+      if (historyError) throw historyError;
+
+      const artifact = (Array.isArray(historyRows) ? historyRows : [])
+        .find((row) => isLegacyOfficialNonPullArtifact(row, resolvedMarker));
+      if (!artifact) {
+        continue;
+      }
+
+      const { data: repairResult, error: repairError } = await supabase.rpc('repair_official_non_pull_artifact', {
+        p_user_id: userId,
+        p_record_id: String(artifact.record_id),
+        p_game_uid: String(artifact.game_uid),
+        p_server_scope: String(artifact.server_scope),
+        p_pool_id: String(artifact.pool_id),
+        p_seq_id: String(artifact.seq_id),
+        p_marker_timestamp: resolvedMarker.timestamp,
+      });
+      if (repairError) throw repairError;
+      repairedRecords += Number(repairResult?.repaired || 0);
+    } catch (error) {
+      failures += 1;
+      console.warn('[FullImportService] 情报书旧占位自动修复失败:', error?.message || error);
+    }
+  }
+
+  return {
+    repairedRecords,
+    failures,
+    warnings: failures > 0
+      ? [{ code: 'OFFICIAL_IMPORT_NON_PULL_REPAIR_FAILED', count: failures }]
+      : [],
   };
 }
 
@@ -654,6 +856,22 @@ export function buildPostImportAnomalyRows(stagedRecords = [], userId) {
     });
 }
 
+export function buildPostImportAnomalyItems(anomalyRows = []) {
+  return (Array.isArray(anomalyRows) ? anomalyRows : []).map((row) => ({
+    recordId: row.record_id,
+    gameUid: row.game_uid,
+    serverScope: row.server_scope,
+    poolId: row.pool_id,
+    seqId: row.seq_id,
+    issueCode: row.issue_code,
+    itemName: row.details?.itemName || '未知角色或武器',
+    rarity: row.details?.rarity ?? null,
+    timestamp: row.details?.timestamp ?? null,
+    pity: row.details?.pity ?? null,
+    message: row.details?.message || '这条记录需要核对。',
+  }));
+}
+
 export function resolveOfficialImportStorageQuality(normalized = {}) {
   if (
     normalized.quality === null
@@ -680,6 +898,7 @@ export async function savePostImportAnomalies(supabase, stagedRecords, userId) {
   return {
     anomalyRecords: anomalyRows.length,
     anomalyPoolIds: [...new Set(anomalyRows.map((row) => row.pool_id))],
+    anomalyItems: buildPostImportAnomalyItems(anomalyRows),
   };
 }
 
@@ -1201,7 +1420,7 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
   for (const poolData of rawRecords.results) {
     const { type, poolType, records } = poolData;
 
-    records.forEach((record) => {
+    filterOfficialImportPullRecords(records).forEach((record) => {
       const normalized = normalizeOfficialImportRecord(record, {
         gameUid,
         serverId: resolvedServerId,
@@ -1223,9 +1442,10 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
 
   for (const poolData of rawRecords.results) {
     const { type, poolType, records, currentUpCharacter } = poolData;
+    const pullRecords = filterOfficialImportPullRecords(records);
 
     // 计算 pity
-    const recordsWithPity = calculatePity(records.map((record) => {
+    const recordsWithPity = calculatePity(pullRecords.map((record) => {
       const normalized = normalizeOfficialImportRecord(record, {
         gameUid,
         serverId: resolvedServerId,
@@ -1634,9 +1854,16 @@ export async function executeFullImport({
     const u8Token = u8Result.data.token;
 
     let existingSeqIds = null;
+    let needsCompleteNonPullRepairScan = false;
     if (normalizedImportMode === FULL_IMPORT_MODES.INCREMENTAL) {
       updateProgress({ progress: 35, message: '正在准备增量导入游标...' });
       existingSeqIds = await getExistingSeqIds(userId, account.gameUid, accountServerContext.serverId);
+      needsCompleteNonPullRepairScan = await hasPendingOfficialNonPullRepairCandidates({
+        supabase,
+        userId,
+        gameUid: account.gameUid,
+        serverScope: accountServerContext.serverId,
+      });
     }
 
     // 5. 获取抽卡记录
@@ -1650,7 +1877,7 @@ export async function executeFullImport({
       account.nickName,
       {
         importMode: normalizedImportMode,
-        existingRecordKeys: existingSeqIds
+        existingRecordKeys: needsCompleteNonPullRepairScan ? null : existingSeqIds
       }
     );
 
@@ -1687,14 +1914,23 @@ export async function executeFullImport({
       source
     );
 
-    // 6. 整理卡池信息；正式卡池与历史均在用户确认后写入。
-    updateProgress({ progress: 70, message: '正在整理待确认内容...' });
+    updateProgress({ progress: 68, message: '正在核对历史情报书记录...' });
+    const nonPullRepairResult = await repairLegacyOfficialNonPullArtifacts({
+      supabase,
+      userId,
+      account,
+      accountServerContext,
+      rawResults: recordsResult.data.results,
+    });
+
+    // 6. 整理真实抽卡记录所属的卡池；官方非抽卡事件不会参与建池或写入。
+    updateProgress({ progress: 70, message: '正在整理导入内容...' });
     const pools = [];
     const seenPoolIds = new Set();
     for (const poolData of recordsResult.data.results) {
       const { type, poolType, records, currentUpCharacter } = poolData;
 
-      records.forEach(record => {
+      filterOfficialImportPullRecords(records).forEach(record => {
         const poolId = getOfficialPoolId(record, type, poolType);
         if (seenPoolIds.has(poolId)) {
           return;
@@ -1731,6 +1967,11 @@ export async function executeFullImport({
 
     // 9. 暂存后立即由后端完成安全写入。用户只在导入完成后处理身份异常记录。
     const poolSummary = buildImportPoolSummary(recordsResult.data.results);
+    const officialPullRecords = countOfficialImportPullRecords(recordsResult.data.results);
+    const ignoredNonPullRecords = Math.max(
+      0,
+      Number(recordsResult.data.totalRecords || 0) - officialPullRecords
+    );
     const fetchStrategy = recordsResult.data.fetchStrategy || (
       normalizedImportMode === FULL_IMPORT_MODES.INCREMENTAL && existingSeqIds.size > 0
         ? 'incremental_official_fetch_with_context_guard'
@@ -1739,10 +1980,12 @@ export async function executeFullImport({
     const commonSummary = {
       importMode: normalizedImportMode,
       fetchStrategy,
-      totalRecords: recordsResult.data.totalRecords,
+      totalRecords: officialPullRecords,
+      ignoredNonPullRecords,
+      repairedNonPullArtifacts: nonPullRepairResult.repairedRecords,
       newRecords: processedRecords.length,
       savedRecords: 0,
-      duplicates: recordsResult.data.totalRecords - processedRecords.length,
+      duplicates: officialPullRecords - processedRecords.length,
       byPool: poolSummary.byPool,
       byPoolType: poolSummary.byPoolType,
       earlyStoppedPools: recordsResult.data.earlyStopped || [],
@@ -1751,13 +1994,18 @@ export async function executeFullImport({
     };
 
     if (processedRecords.length === 0) {
+      const publicAnalyticsRefresh = await refreshPublicAnalyticsAfterImport(supabase, {
+        savedRecords: nonPullRepairResult.repairedRecords,
+        reason: `official-import-repair:${source}:${normalizedImportMode}`,
+      });
       updateProgress({ progress: 100, message: '没有发现需要导入的新记录' });
       return {
         success: true,
         data: {
           ...commonSummary,
           reviewRequired: false,
-          warnings: [],
+          warnings: nonPullRepairResult.warnings,
+          publicAnalyticsRefresh,
           account: {
             gameUid: account.gameUid,
             nickName: account.nickName,
@@ -1798,7 +2046,7 @@ export async function executeFullImport({
         .map((record) => Number(record.ordinal))
     );
     const writtenStagedRecords = processedResult.stagedRecords.filter((_record, ordinal) => writtenOrdinals.has(ordinal));
-    let anomalyResult = { anomalyRecords: 0, anomalyPoolIds: [] };
+    let anomalyResult = { anomalyRecords: 0, anomalyPoolIds: [], anomalyItems: [] };
     let anomalyWarning = null;
     try {
       anomalyResult = await savePostImportAnomalies(supabase, writtenStagedRecords, userId);
@@ -1827,7 +2075,9 @@ export async function executeFullImport({
         skippedRecords,
         anomalyRecords: anomalyResult.anomalyRecords,
         anomalyPoolIds: anomalyResult.anomalyPoolIds,
+        anomalyItems: anomalyResult.anomalyItems,
         warnings: [
+          ...nonPullRepairResult.warnings,
           ...(anomalyResult.anomalyRecords > 0
             ? [`有 ${anomalyResult.anomalyRecords} 条已导入记录需要后续核对。`]
             : []),

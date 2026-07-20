@@ -1,9 +1,6 @@
 const ISSUE_SEVERITIES = new Set(['blocking', 'review', 'info']);
-const ACTIONABLE_IDENTITY_ISSUE_CODES = new Set([
-  'MISSING_ITEM_ID_AND_NAME',
-  'MISSING_ITEM_ID',
-  'MISSING_ITEM_NAME',
-]);
+const ACTIONABLE_IDENTITY_ISSUE_CODES = new Set(['MISSING_ITEM_ID_AND_NAME', 'MISSING_ITEM_ID', 'MISSING_ITEM_NAME']);
+const NON_PULL_RECORD_KINDS = new Set(['gift_intel_book']);
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
@@ -11,6 +8,18 @@ function firstDefined(...values) {
 
 function normalizeText(value) {
   return value === undefined || value === null ? '' : String(value).trim();
+}
+
+export function getOfficialImportRecordKind(record = {}) {
+  return normalizeText(firstDefined(record.kind, record.recordKind, record.record_kind)).toLowerCase();
+}
+
+export function isOfficialImportNonPullRecord(record = {}) {
+  return NON_PULL_RECORD_KINDS.has(getOfficialImportRecordKind(record));
+}
+
+export function filterOfficialImportPullRecords(records = []) {
+  return (Array.isArray(records) ? records : []).filter((record) => !isOfficialImportNonPullRecord(record));
 }
 
 function normalizeItemType(value, fallback = '') {
@@ -53,11 +62,12 @@ export function hasBlockingImportIssues(issues) {
 export function hasWriteBlockingImportIssues(issues) {
   const normalizedIssues = Array.isArray(issues) ? issues : [];
   const canUseUnknownItemPlaceholder = hasActionableImportIdentityIssues(normalizedIssues);
-  return normalizedIssues.some((issue) => (
-    issue?.severity === 'blocking'
-    && !ACTIONABLE_IDENTITY_ISSUE_CODES.has(issue?.code)
-    && !(canUseUnknownItemPlaceholder && issue?.code === 'MISSING_QUALITY')
-  ));
+  return normalizedIssues.some(
+    (issue) =>
+      issue?.severity === 'blocking' &&
+      !ACTIONABLE_IDENTITY_ISSUE_CODES.has(issue?.code) &&
+      !(canUseUnknownItemPlaceholder && issue?.code === 'MISSING_QUALITY')
+  );
 }
 
 export function hasActionableImportIdentityIssues(issues) {
@@ -223,9 +233,12 @@ export function summarizeOfficialImportIssues(records) {
 }
 
 export default {
+  filterOfficialImportPullRecords,
+  getOfficialImportRecordKind,
   hasActionableImportIdentityIssues,
   hasBlockingImportIssues,
   hasWriteBlockingImportIssues,
+  isOfficialImportNonPullRecord,
   normalizeOfficialImportRecord,
   summarizeOfficialImportIssues,
 };

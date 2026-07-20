@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Download, Upload, User, Search, X, ChevronDown, HelpCircle } from 'lucide-react';
 import { usePoolStore, useAuthStore, useHistoryStore } from '../../stores';
 import ImportManager from '../../features/import/ImportManager';
+import { getImportAnomalyCount } from '../../features/import/importCompletionPolicy.js';
 import PoolGroupCardRail from './PoolGroupCardRail';
 import { buildPoolSelectorGroups, getPoolGroupId } from '../../utils/poolSelectorDisplay';
 import { getPreferredPool } from '../../utils/poolSelectionUtils';
@@ -530,10 +531,9 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
           onClose={closeImportManager}
           onOpenFileImport={handleOpenFileImport}
           onImportComplete={(result) => {
-            closeImportManager();
             navigate(getDesktopPathForTab('dashboard'), {
               state: {
-                openHistoryAnomalies: Number(result?.summary?.anomalyRecords || 0) > 0,
+                openHistoryAnomalies: getImportAnomalyCount(result) > 0,
               },
             });
           }}

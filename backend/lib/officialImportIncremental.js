@@ -1,3 +1,5 @@
+import { filterOfficialImportPullRecords } from '../../shared/officialImportRecordNormalizer.js';
+
 export const INCREMENTAL_PITY_CONTEXT_PAID_LIMIT = 80;
 
 export function normalizeRecordSeqId(record) {
@@ -32,7 +34,7 @@ export function analyzeIncrementalPage({
   existingRecordKeys,
   getPoolId
 } = {}) {
-  const list = Array.isArray(records) ? records : [];
+  const list = filterOfficialImportPullRecords(records);
   const keySet = existingRecordKeys instanceof Set ? existingRecordKeys : new Set();
   let checked = 0;
   let existing = 0;
@@ -71,7 +73,7 @@ export function analyzeIncrementalPage({
 export function hasSufficientIncrementalPityContext(records, {
   paidLimit = INCREMENTAL_PITY_CONTEXT_PAID_LIMIT
 } = {}) {
-  const list = Array.isArray(records) ? records : [];
+  const list = filterOfficialImportPullRecords(records);
   if (list.length === 0) {
     return false;
   }
@@ -133,8 +135,9 @@ export function createIncrementalImportStopGuard({
       };
     }
 
+    const pullRecords = filterOfficialImportPullRecords(records);
     const page = analyzeIncrementalPage({
-      records,
+      records: pullRecords,
       gameUid,
       serverId,
       existingRecordKeys,
@@ -146,7 +149,7 @@ export function createIncrementalImportStopGuard({
     state.existing += page.existing;
     state.missingKey += page.missingKey;
     state.contextRecords = page.allExisting
-      ? state.contextRecords.concat(Array.isArray(records) ? records : [])
+      ? state.contextRecords.concat(pullRecords)
       : [];
 
     const shouldStop = Boolean(

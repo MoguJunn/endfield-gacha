@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertCircle, Layers, Save, Search, Swords, Trash2, UserRound, X } from 'lucide-react';
 import { characterCache } from '../../utils/characterUtils.js';
+import { useI18n } from '../../i18n/index.js';
 
 /**
  * 编辑记录弹窗组件
@@ -36,22 +37,28 @@ const buildDraft = (item) => ({
 });
 
 const getPoolId = (pool) => String(pool?.id || pool?.pool_id || '');
-const getPoolName = (pool) => pool?.name || pool?.display_name || getPoolId(pool) || '未命名卡池';
+const getPoolName = (pool, t) => pool?.name || pool?.display_name || getPoolId(pool) || t('records.editor.unnamedPool');
 
-const getPoolTypeLabel = (pool) => {
-  if (isWeaponPool(pool)) return '武器卡池';
+const getPoolTypeLabel = (pool, t) => {
+  if (isWeaponPool(pool)) return t('records.editor.poolTypeWeapon');
   const type = String(pool?.type || pool?.pool_type || '').toLowerCase();
-  if (type.includes('limited')) return '限定角色';
-  if (type.includes('extra')) return '附加寻访';
-  if (type.includes('beginner')) return '启程寻访';
-  return '角色卡池';
+  if (type.includes('limited')) return t('records.editor.poolTypeLimited');
+  if (type.includes('extra')) return t('records.editor.poolTypeExtra');
+  if (type.includes('beginner')) return t('records.editor.poolTypeBeginner');
+  return t('records.editor.poolTypeCharacter');
 };
 
-function PoolChoiceCard({ pool, selected, onSelect }) {
+function getItemTypeLabel(type, t) {
+  return type === 'weapon'
+    ? t('records.editor.weapon')
+    : t('records.editor.character');
+}
+
+function PoolChoiceCard({ pool, selected, onSelect, t }) {
   const weaponPool = isWeaponPool(pool);
   const PoolIcon = weaponPool ? Swords : Layers;
   const poolId = getPoolId(pool);
-  const poolName = getPoolName(pool);
+  const poolName = getPoolName(pool, t);
 
   return (
     <button
@@ -71,17 +78,17 @@ function PoolChoiceCard({ pool, selected, onSelect }) {
         <span className={`flex h-7 w-7 items-center justify-center border ${selected ? 'border-yellow-500 bg-yellow-500 text-black' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400'}`}>
           <PoolIcon size={14} />
         </span>
-        {selected && <span className="bg-yellow-500 px-1.5 py-0.5 text-[9px] font-black tracking-widest text-black">当前</span>}
+        {selected && <span className="bg-yellow-500 px-1.5 py-0.5 text-[9px] font-black tracking-widest text-black">{t('records.editor.current')}</span>}
       </div>
       <div className={`mt-3 line-clamp-2 text-xs font-black leading-4 ${selected ? 'text-yellow-700 dark:text-yellow-400' : 'text-zinc-800 dark:text-zinc-100'}`}>
         {poolName}
       </div>
-      <div className="mt-1 text-[9px] font-bold uppercase tracking-widest text-zinc-400">{getPoolTypeLabel(pool)}</div>
+      <div className="mt-1 text-[9px] font-bold uppercase tracking-widest text-zinc-400">{getPoolTypeLabel(pool, t)}</div>
     </button>
   );
 }
 
-function CatalogAvatar({ item }) {
+function CatalogAvatar({ item, t }) {
   const [failed, setFailed] = useState(false);
   const ItemIcon = item?.type === 'weapon' ? Swords : UserRound;
   if (!item?.avatar_url || failed) {
@@ -95,7 +102,7 @@ function CatalogAvatar({ item }) {
   return (
     <img
       src={item.avatar_url}
-      alt={item.name || item.id || (item.type === 'weapon' ? '武器图片' : '角色头像')}
+      alt={item.name || item.id || (item.type === 'weapon' ? t('records.editor.weaponImage') : t('records.editor.characterImage'))}
       loading="lazy"
       onError={() => setFailed(true)}
       className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
@@ -103,12 +110,16 @@ function CatalogAvatar({ item }) {
   );
 }
 
-function CatalogItemCard({ item, selected, onSelect }) {
-  const label = `${item?.name || item?.id || '未命名'}（${item?.rarity || '?'}星）`;
+function CatalogItemCard({ item, selected, onSelect, t }) {
+  const itemName = item?.name || item?.id || t('records.editor.unnamedItem');
+  const label = t('records.editor.itemAriaLabel', {
+    name: itemName,
+    rarity: item?.rarity || '?',
+  });
   return (
     <button
       type="button"
-      aria-label={`选择${label}`}
+      aria-label={t('records.editor.selectItemAria', { label })}
       aria-pressed={selected}
       onClick={() => onSelect(item.id)}
       className={`group relative overflow-hidden border text-left transition-all ${
@@ -119,7 +130,7 @@ function CatalogItemCard({ item, selected, onSelect }) {
       style={{ clipPath: 'polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%)' }}
     >
       <div className="aspect-square w-full overflow-hidden bg-zinc-100 dark:bg-zinc-800">
-        <CatalogAvatar item={item} />
+        <CatalogAvatar item={item} t={t} />
       </div>
       <div className="p-2">
         <div className="truncate text-xs font-black text-zinc-800 dark:text-zinc-100">{item.name || item.id}</div>
@@ -128,12 +139,13 @@ function CatalogItemCard({ item, selected, onSelect }) {
           <span className="truncate font-mono text-zinc-400">{item.id}</span>
         </div>
       </div>
-      {selected && <span className="absolute right-0 top-0 bg-yellow-500 px-2 py-1 text-[9px] font-black text-black">已选择</span>}
+      {selected && <span className="absolute right-0 top-0 bg-yellow-500 px-2 py-1 text-[9px] font-black text-black">{t('records.editor.selected')}</span>}
     </button>
   );
 }
 
 const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [] }) => {
+  const { t, locale } = useI18n();
   const [catalogItems, setCatalogItems] = useState(() => characterCache.getAll());
   const [search, setSearch] = useState('');
   const [activeItemType, setActiveItemType] = useState('character');
@@ -179,7 +191,7 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
       return [catalogItem.id, catalogItem.name, ...aliases]
         .some((value) => String(value || '').toLowerCase().includes(normalizedSearch));
     })
-    .sort((left, right) => Number(right.rarity || 0) - Number(left.rarity || 0) || String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN'));
+    .sort((left, right) => Number(right.rarity || 0) - Number(left.rarity || 0) || String(left.name || '').localeCompare(String(right.name || ''), locale));
   const selectedItem = catalogItems.find((catalogItem) => String(catalogItem.id) === String(draft.characterId));
   const selectedItemMatchesPool = selectedItem?.type === expectedItemType;
   const isLimitedOrWeapon = ['limited', 'limited_character', 'weapon', 'limited_weapon'].includes(
@@ -221,15 +233,17 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
 
   const handleSave = async () => {
     if (!draft.timestamp || Number.isNaN(new Date(draft.timestamp).getTime())) {
-      setError('请填写有效的抽卡时间。');
+      setError(t('records.editor.validationTime'));
       return;
     }
     if (!draft.poolId || !selectedPool) {
-      setError('请选择这条记录所属的卡池。');
+      setError(t('records.editor.validationPool'));
       return;
     }
     if (!draft.characterId || !selectedItem || !selectedItemMatchesPool) {
-      setError(`请选择对应的${expectedItemType === 'weapon' ? '武器' : '角色'}。`);
+      setError(t('records.editor.validationItem', {
+        type: getItemTypeLabel(expectedItemType, t),
+      }));
       return;
     }
 
@@ -245,10 +259,10 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
         specialType: Number(selectedItem.rarity) === 6 ? draft.specialType || null : null,
       }, draft.reason);
       if (success === false) {
-        setError('保存失败，记录可能已在其他页面修改。请刷新后重试。');
+        setError(t('records.editor.saveConflict'));
       }
-    } catch (saveError) {
-      setError(saveError?.message || '保存失败，请稍后重试。');
+    } catch {
+      setError(t('records.editor.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -259,10 +273,10 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
       <div className="max-h-[92vh] w-full max-w-6xl overflow-y-auto bg-white shadow-2xl animate-scale-up dark:bg-zinc-900" onClick={e => e.stopPropagation()}>
         <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex justify-between items-center">
           <div>
-            <h3 className="font-bold text-slate-700 dark:text-zinc-300">编辑详细日志</h3>
-            <p className="mt-1 text-xs text-zinc-500">保存后会重新计算受影响卡池的保底和批次。</p>
+            <h3 className="font-bold text-slate-700 dark:text-zinc-300">{t('records.editor.title')}</h3>
+            <p className="mt-1 text-xs text-zinc-500">{t('records.editor.subtitle')}</p>
           </div>
-          <button type="button" aria-label="关闭编辑窗口" disabled={saving} onClick={onClose} className="text-slate-400 transition-colors hover:text-slate-600 disabled:opacity-40 dark:text-zinc-500 dark:hover:text-zinc-400">
+          <button type="button" aria-label={t('records.editor.close')} disabled={saving} onClick={onClose} className="text-slate-400 transition-colors hover:text-slate-600 disabled:opacity-40 dark:text-zinc-500 dark:hover:text-zinc-400">
             <X size={20} />
           </button>
         </div>
@@ -271,7 +285,7 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
           <section className="space-y-6 border-b border-zinc-200 p-5 dark:border-zinc-800 sm:p-6 lg:border-b-0 lg:border-r">
             <div className="space-y-5">
               <label className="block space-y-2 text-xs font-bold text-zinc-500">
-                抽卡时间
+                {t('records.editor.timestamp')}
                 <input
                   type="datetime-local"
                   step="1"
@@ -282,12 +296,12 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
               </label>
 
               <div className="space-y-2">
-                <div className="text-xs font-bold text-zinc-500">抽取方式</div>
+                <div className="text-xs font-bold text-zinc-500">{t('records.editor.drawMethod')}</div>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    ['normal', '普通抽取'],
-                    ['free', '免费抽取'],
-                    ['info_book', '情报书'],
+                    ['normal', t('records.editor.drawNormal')],
+                    ['free', t('records.editor.drawFree')],
+                    ['info_book', t('records.editor.drawInfoBook')],
                   ].map(([value, label]) => (
                     <button
                       key={value}
@@ -307,31 +321,31 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
               {Number(selectedItem?.rarity || item.rarity) === 6 && (
                 <div className="grid gap-4 border-y border-zinc-200 py-4 dark:border-zinc-800 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                   <div className="space-y-2">
-                    <div className="text-xs font-bold text-zinc-500">UP / 常驻标记</div>
+                    <div className="text-xs font-bold text-zinc-500">{t('records.editor.sixStarSource')}</div>
                     <div className="grid grid-cols-2 gap-2">
-                      <button type="button" disabled={!isLimitedOrWeapon} onClick={() => updateDraft('isStandard', false)} className={`border py-2 text-xs font-bold disabled:opacity-40 ${!draft.isStandard ? 'border-fuchsia-500 bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-950/30 dark:text-fuchsia-300' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700'}`}>UP</button>
-                      <button type="button" onClick={() => updateDraft('isStandard', true)} className={`border py-2 text-xs font-bold ${draft.isStandard ? 'border-red-500 bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700'}`}>常驻 / 歪</button>
+                      <button type="button" disabled={!isLimitedOrWeapon} onClick={() => updateDraft('isStandard', false)} className={`border py-2 text-xs font-bold disabled:opacity-40 ${!draft.isStandard ? 'border-fuchsia-500 bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-950/30 dark:text-fuchsia-300' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700'}`}>{t('records.editor.up')}</button>
+                      <button type="button" onClick={() => updateDraft('isStandard', true)} className={`border py-2 text-xs font-bold ${draft.isStandard ? 'border-red-500 bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300' : 'border-zinc-300 text-zinc-500 dark:border-zinc-700'}`}>{t('records.editor.standardOffrate')}</button>
                     </div>
                   </div>
                   <label className="space-y-2 text-xs font-bold text-zinc-500">
-                    特殊标记
+                    {t('records.editor.special')}
                     <select value={draft.specialType} onChange={(event) => updateDraft('specialType', event.target.value)} className="w-full border border-zinc-300 bg-white px-3 py-2 text-sm font-normal text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
-                      <option value="">正常获取</option>
-                      <option value="guaranteed">120 抽保底</option>
-                      <option value="gift">额外赠送</option>
+                      <option value="">{t('records.editor.specialNormal')}</option>
+                      <option value="guaranteed">{t('records.editor.specialGuaranteed')}</option>
+                      <option value="gift">{t('records.editor.specialGift')}</option>
                     </select>
                   </label>
                 </div>
               )}
 
               <label className="block space-y-2 text-xs font-bold text-zinc-500">
-                修改说明（可选）
+                {t('records.editor.reason')}
                 <textarea
                   value={draft.reason}
                   onChange={(event) => updateDraft('reason', event.target.value)}
                   maxLength={500}
                   rows={3}
-                  placeholder="例如：官方导入把这条记录识别错了"
+                  placeholder={t('records.editor.reasonPlaceholder')}
                   className="w-full resize-none border border-zinc-300 bg-white px-3 py-2 text-sm font-normal text-zinc-800 outline-none focus:border-yellow-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
                 />
               </label>
@@ -340,10 +354,10 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
             <div className="border-t border-zinc-200 pt-5 dark:border-zinc-800">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
-                  <div id="edit-history-pool-label" className="text-xs font-black text-zinc-700 dark:text-zinc-200">所属卡池</div>
-                  <div className="mt-1 text-[10px] text-zinc-400">选择卡池后，右侧会切换到对应目录。</div>
+                  <div id="edit-history-pool-label" className="text-xs font-black text-zinc-700 dark:text-zinc-200">{t('records.editor.pool')}</div>
+                  <div className="mt-1 text-[10px] text-zinc-400">{t('records.editor.poolHint')}</div>
                 </div>
-                <span className="font-mono text-[10px] text-zinc-400">{poolOptions.length} POOLS</span>
+                <span className="font-mono text-[10px] text-zinc-400">{t('records.editor.poolCount', { count: poolOptions.length })}</span>
               </div>
               <div role="radiogroup" aria-labelledby="edit-history-pool-label" className="pool-card-rail-scrollbar flex gap-2 overflow-x-auto pb-2">
                 {poolOptions.map((pool) => (
@@ -352,11 +366,12 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
                     pool={pool}
                     selected={getPoolId(pool) === String(draft.poolId)}
                     onSelect={handlePoolChange}
+                    t={t}
                   />
                 ))}
                 {poolOptions.length === 0 && (
                   <div className="w-full border border-dashed border-zinc-300 px-4 py-8 text-center text-xs text-zinc-400 dark:border-zinc-700">
-                    当前没有可选择的卡池
+                    {t('records.editor.noPools')}
                   </div>
                 )}
               </div>
@@ -366,22 +381,22 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
           <section className="min-w-0 space-y-4 p-5 sm:p-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <div className="text-xs font-black text-zinc-700 dark:text-zinc-200">对应角色或武器</div>
+                <div className="text-xs font-black text-zinc-700 dark:text-zinc-200">{t('records.editor.target')}</div>
                 <div className="mt-1 text-[10px] text-zinc-400">
-                  当前卡池需要选择{expectedItemType === 'weapon' ? '武器' : '角色'}。
+                  {t('records.editor.targetHint', { type: getItemTypeLabel(expectedItemType, t) })}
                 </div>
               </div>
               {selectedItem && (
                 <div className="text-xs text-zinc-500">
-                  已选择：<span className="font-bold text-zinc-800 dark:text-zinc-100">{selectedItem.name}</span>（{selectedItem.rarity}★）
+                  {t('records.editor.selectedItemPrefix')}<span className="font-bold text-zinc-800 dark:text-zinc-100">{selectedItem.name}</span>{t('records.editor.selectedItemMeta', { rarity: selectedItem.rarity })}
                 </div>
               )}
             </div>
 
-            <div role="tablist" aria-label="目录类型" className="grid grid-cols-2 border border-zinc-300 dark:border-zinc-700">
+            <div role="tablist" aria-label={t('records.editor.catalogType')} className="grid grid-cols-2 border border-zinc-300 dark:border-zinc-700">
               {[
-                ['character', '角色'],
-                ['weapon', '武器'],
+                ['character', t('records.editor.character')],
+                ['weapon', t('records.editor.weapon')],
               ].map(([value, label]) => (
                 <button
                   key={value}
@@ -409,7 +424,9 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder={`搜索${activeItemType === 'weapon' ? '武器' : '角色'}名称或 ID`}
+                placeholder={t('records.editor.searchPlaceholder', {
+                  type: getItemTypeLabel(activeItemType, t),
+                })}
                 className="w-full border border-zinc-300 bg-white py-2.5 pl-9 pr-3 text-sm outline-none focus:border-yellow-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
               />
             </div>
@@ -417,7 +434,10 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
             {selectedItem && !selectedItemMatchesPool && (
               <div className="flex items-start gap-2 border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
                 <AlertCircle size={15} className="mt-0.5 shrink-0" />
-                当前选择的是{selectedItem.type === 'weapon' ? '武器' : '角色'}，与左侧卡池类型不一致。请更换卡池或重新选择目标。
+                {t('records.editor.typeMismatch', {
+                  selectedType: getItemTypeLabel(selectedItem.type, t),
+                  targetType: getItemTypeLabel(expectedItemType, t),
+                })}
               </div>
             )}
 
@@ -430,12 +450,13 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
                       item={catalogItem}
                       selected={String(catalogItem.id) === String(draft.characterId)}
                       onSelect={(characterId) => updateDraft('characterId', characterId)}
+                      t={t}
                     />
                   ))}
                 </div>
               ) : (
                 <div className="border border-dashed border-zinc-300 px-4 py-16 text-center text-xs text-zinc-400 dark:border-zinc-700">
-                  没有找到符合条件的{activeItemType === 'weapon' ? '武器' : '角色'}
+                  {t('records.editor.noMatches', { type: getItemTypeLabel(activeItemType, t) })}
                 </div>
               )}
             </div>
@@ -456,12 +477,12 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
             onClick={() => onDelete?.(item)}
             className="flex items-center justify-center gap-1 px-3 py-2 text-sm font-medium text-red-500 transition-colors hover:bg-red-50 hover:text-red-700 disabled:opacity-40"
           >
-            <Trash2 size={16}/> 删除异常记录
+            <Trash2 size={16}/> {t('records.editor.delete')}
           </button>
           <div className="flex gap-2">
-            <button type="button" disabled={saving} onClick={onClose} className="flex-1 border border-zinc-300 px-5 py-2 text-sm font-bold text-zinc-600 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300">取消</button>
+            <button type="button" disabled={saving} onClick={onClose} className="flex-1 border border-zinc-300 px-5 py-2 text-sm font-bold text-zinc-600 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300">{t('common.cancel')}</button>
             <button type="button" disabled={saving} onClick={handleSave} className="flex flex-1 items-center justify-center gap-2 bg-yellow-500 px-6 py-2 text-sm font-bold text-black transition-colors hover:bg-yellow-400 disabled:opacity-50">
-              <Save size={16} /> {saving ? '保存中...' : '保存修改'}
+              <Save size={16} /> {saving ? t('records.editor.saving') : t('records.editor.save')}
             </button>
           </div>
         </div>
