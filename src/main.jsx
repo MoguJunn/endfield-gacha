@@ -26,7 +26,10 @@ function syncDeviceRedirect() {
     ? preference === 'mobile'
     : (mqMobile || window.innerWidth <= 768 || uaMobile);
 
-  const redirectTarget = getDeviceRedirectTarget(pathname, shouldUseMobile);
+  const redirectTarget = getDeviceRedirectTarget(pathname, shouldUseMobile, {
+    search: window.location.search,
+    hash: window.location.hash,
+  });
   if (redirectTarget) {
     window.location.replace(window.location.origin + redirectTarget);
   }

@@ -61,13 +61,15 @@ async function postAccountEmailAction(body, {
 
 export function isUserEmailVerified(user, {
   emailVerificationRequired = false,
+  emailVerificationVerifiedAt = null,
 } = {}) {
   if (emailVerificationRequired) {
     return false;
   }
 
   return Boolean(
-    user?.email_confirmed_at
+    emailVerificationVerifiedAt
+    || user?.email_confirmed_at
     || user?.confirmed_at
     || user?.user_metadata?.email_verified
     || user?.identities?.some?.((identity) => identity?.identity_data?.email_verified === true)

@@ -19,7 +19,22 @@ export function shouldBypassDeviceRedirect(pathname) {
   ));
 }
 
-export function getDeviceRedirectTarget(pathname, shouldUseMobile) {
+function appendLocationState(pathname, {
+  search = '',
+  hash = '',
+} = {}) {
+  const normalizedSearch = String(search || '').trim();
+  const normalizedHash = String(hash || '').trim();
+  const searchSuffix = normalizedSearch
+    ? (normalizedSearch.startsWith('?') ? normalizedSearch : `?${normalizedSearch}`)
+    : '';
+  const hashSuffix = normalizedHash
+    ? (normalizedHash.startsWith('#') ? normalizedHash : `#${normalizedHash}`)
+    : '';
+  return `${pathname}${searchSuffix}${hashSuffix}`;
+}
+
+export function getDeviceRedirectTarget(pathname, shouldUseMobile, locationState = {}) {
   const normalizedPath = normalizePathname(pathname);
   if (shouldBypassDeviceRedirect(normalizedPath)) {
     return null;
@@ -27,11 +42,11 @@ export function getDeviceRedirectTarget(pathname, shouldUseMobile) {
 
   const isMobilePath = normalizedPath.startsWith('/m');
   if (shouldUseMobile && !isMobilePath) {
-    return resolvePlatformPath(normalizedPath, 'mobile');
+    return appendLocationState(resolvePlatformPath(normalizedPath, 'mobile'), locationState);
   }
 
   if (!shouldUseMobile && isMobilePath) {
-    return resolvePlatformPath(normalizedPath, 'desktop');
+    return appendLocationState(resolvePlatformPath(normalizedPath, 'desktop'), locationState);
   }
 
   return null;

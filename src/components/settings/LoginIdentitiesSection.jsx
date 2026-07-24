@@ -80,7 +80,10 @@ function getProviderPendingHint(providerKey, t) {
   return t('settings.authIdentity.providerPendingHint');
 }
 
-export default function LoginIdentitiesSection({ variant = 'desktop' }) {
+export default function LoginIdentitiesSection({
+  variant = 'desktop',
+  emailVerified: emailVerifiedOverride = null,
+}) {
   const { t, formatDateTime } = useI18n();
   const location = useLocation();
   const user = useAuthStore((state) => state.user);
@@ -95,7 +98,12 @@ export default function LoginIdentitiesSection({ variant = 'desktop' }) {
 
   const returnTo = `${location.pathname}${location.search}${location.hash}`;
   const groupedIdentities = useMemo(() => groupAuthIdentities(identities), [identities]);
-  const emailVerified = useMemo(() => isUserEmailVerified(user), [user]);
+  const emailVerified = useMemo(
+    () => typeof emailVerifiedOverride === 'boolean'
+      ? emailVerifiedOverride
+      : isUserEmailVerified(user),
+    [emailVerifiedOverride, user]
+  );
   const identityCount = identities.length + (user?.email && !groupedIdentities.has('email') ? 1 : 0);
 
   const refresh = useCallback(async ({ silent = false } = {}) => {

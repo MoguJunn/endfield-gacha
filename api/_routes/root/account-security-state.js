@@ -10,6 +10,8 @@ import {
   buildClearedPasswordChangeState,
 } from '../../../src/utils/accountRecoveryFlow.js';
 
+const SYNTHETIC_OAUTH_EMAIL_SUFFIX = '@oauth.local.invalid';
+
 function parseRequestBody(req) {
   if (!req.body) {
     return {};
@@ -53,6 +55,21 @@ function isAuthEmailConfirmed(user) {
   return Boolean(user?.email_confirmed_at || user?.confirmed_at);
 }
 
+function isSyntheticOAuthEmail(value) {
+  return String(value || '').trim().toLowerCase().endsWith(SYNTHETIC_OAUTH_EMAIL_SUFFIX);
+}
+
+function isMatchingConfirmedEmail(user, expectedEmail) {
+  const userEmail = normalizeEmail(user?.email);
+  return Boolean(
+    expectedEmail
+    && userEmail
+    && !isSyntheticOAuthEmail(userEmail)
+    && userEmail === expectedEmail
+    && isAuthEmailConfirmed(user)
+  );
+}
+
 function isSuperAdminUser(user, profile = null) {
   return user?.app_metadata?.role === 'super_admin'
     || user?.profile_role === 'super_admin'
@@ -94,12 +111,16 @@ function normalizeEffectiveSecurityState(row, {
   const next = { ...row };
   const superAdmin = isSuperAdminUser(currentUser, profile);
   const profileEmail = normalizeEmail(profile?.email);
-  const authEmail = normalizeEmail(authUser?.email || currentUser?.email);
-  const hasUsableEmail = Boolean(profileEmail || authEmail);
+  const authEmail = normalizeEmail(authUser?.email);
+  const currentEmail = normalizeEmail(currentUser?.email);
+  const effectiveEmail = profileEmail
+    || (!isSyntheticOAuthEmail(authEmail) ? authEmail : '')
+    || (!isSyntheticOAuthEmail(currentEmail) ? currentEmail : '');
+  const hasUsableEmail = Boolean(effectiveEmail);
   const emailVerified = Boolean(
-    row.email_verification_verified_at
-    || isAuthEmailConfirmed(authUser)
-    || isAuthEmailConfirmed(currentUser)
+    (row.email_verification_required !== true && row.email_verification_verified_at)
+    || isMatchingConfirmedEmail(authUser, effectiveEmail)
+    || isMatchingConfirmedEmail(currentUser, effectiveEmail)
   );
   const emailReason = String(row.email_verification_reason || '');
   const passwordReason = String(row.password_change_reason || '');
@@ -234,8 +255,9 @@ export default async function handler(req, res) {
       authUser,
     });
 
+    const fallbackEmail = normalizeEmail(profile?.email || currentUser?.email);
     const fallbackEmailVerificationRequired = !effectiveStateRow
-      && !isAuthEmailConfirmed(currentUser)
+      && !isMatchingConfirmedEmail(currentUser, fallbackEmail)
       && !isSuperAdminUser(currentUser, profile);
 
     return res.status(200).json({

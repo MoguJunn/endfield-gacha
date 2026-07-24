@@ -138,6 +138,19 @@ describe('accountEmailService', () => {
     })).toBe(false);
   });
 
+  it('accepts a completed app-level email verification for OAuth site sessions', () => {
+    expect(isUserEmailVerified({
+      email: 'site-user@example.com',
+      email_confirmed_at: null,
+      user_metadata: {
+        email_verified: false,
+      },
+    }, {
+      emailVerificationRequired: false,
+      emailVerificationVerifiedAt: '2026-07-24T01:02:03.000Z',
+    })).toBe(true);
+  });
+
   it('detects verified email from Supabase user fields and identity data', () => {
     expect(isUserEmailVerified({
       confirmed_at: '2026-06-01T00:00:00.000Z',

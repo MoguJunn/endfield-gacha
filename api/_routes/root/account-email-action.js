@@ -155,7 +155,7 @@ async function loadAccountSecurityState(adminClient, userId) {
 
   const { data, error } = await adminClient
     .from('account_security_states')
-    .select('email_verification_required, email_verification_requested_at, email_verification_verified_at, password_change_required, password_change_reason')
+    .select('email_verification_required, email_verification_reason, email_verification_requested_at, email_verification_verified_at, password_change_required, password_change_reason')
     .eq('user_id', userId)
     .maybeSingle();
 
@@ -183,6 +183,7 @@ async function storeAccountEmailVerificationToken(adminClient, userId, {
       email_verification_required: true,
       email_verification_reason: reason,
       email_verification_requested_at: now.toISOString(),
+      email_verification_verified_at: null,
       email_verification_token_hash: tokenHash,
       email_verification_token_expires_at: tokenExpiresAt.toISOString(),
       email_verification_code_hash: codeHash,
@@ -492,10 +493,25 @@ export default async function handler(req, res) {
     const accountSecurityState = await loadAccountSecurityState(adminClient, currentUser.id);
     const isSuperAdmin = currentUser?.app_metadata?.role === 'super_admin'
       || currentUser?.profile_role === 'super_admin';
-    const emailVerificationRequired = Boolean(accountSecurityState?.email_verification_required)
-      || (!accountSecurityState && !isEmailConfirmed(currentUser) && !isSuperAdmin);
-    const isOAuthEmailSetup = Boolean(accountSecurityState?.password_change_required)
-      && String(accountSecurityState?.password_change_reason || '').startsWith('oauth_password_setup_required');
+    const stateRequiresEmailVerification = Boolean(accountSecurityState?.email_verification_required);
+    const stateEmailVerified = !stateRequiresEmailVerification
+      && Boolean(accountSecurityState?.email_verification_verified_at);
+    const emailVerified = !stateRequiresEmailVerification && Boolean(
+      stateEmailVerified
+      || isEmailConfirmed(currentUser)
+      || (!accountSecurityState && isSuperAdmin)
+    );
+    const emailVerificationRequired = !emailVerified;
+    const isOAuthEmailSetup = Boolean(
+      (
+        stateRequiresEmailVerification
+        && String(accountSecurityState?.email_verification_reason || '').startsWith('oauth_email_setup_required')
+      )
+      || (
+        accountSecurityState?.password_change_required
+        && String(accountSecurityState?.password_change_reason || '').startsWith('oauth_password_setup_required')
+      )
+    );
     const currentEmail = getNormalizedEmail(currentUser.email);
     if (!currentEmail && (action !== ACTIONS.CHANGE_EMAIL || !isOAuthEmailSetup)) {
       return res.status(400).json({
@@ -506,7 +522,7 @@ export default async function handler(req, res) {
     }
 
     if (action === ACTIONS.RESEND_VERIFICATION) {
-      if (isEmailConfirmed(currentUser) && !emailVerificationRequired) {
+      if (!emailVerificationRequired) {
         return sendAccountEmailResponse(res, {
           status: 'already_verified',
           nextStep: 'none',
@@ -523,49 +539,23 @@ export default async function handler(req, res) {
         });
       }
 
-      let actionLink = '';
-      let tokenPayload = {};
-      let verificationCode = '';
-      if (emailVerificationRequired) {
-        const token = createEmailVerificationToken();
-        verificationCode = createEmailVerificationCode();
-        const storedToken = await storeAccountEmailVerificationToken(adminClient, currentUser.id, {
-          token,
-          code: verificationCode,
-          now,
-          reason: accountSecurityState?.email_verification_requested_at
-            ? 'user_requested'
-            : 'mail_verification_rollout_2026_05',
-        });
-        actionLink = buildAccountEmailVerificationUrl(env, req, token);
-        tokenPayload = {
-          verificationMode: 'account_security_state',
-          tokenExpiresAt: storedToken.tokenExpiresAt.toISOString(),
-          codeEntry: true,
-          codeExpiresAt: storedToken.codeExpiresAt.toISOString(),
-        };
-      } else {
-        const linkResult = await generateAuthActionLink(adminClient, {
-          type: 'magiclink',
-          email: currentEmail,
-          options: {
-            redirectTo,
-          },
-        });
-
-        if (!linkResult.ok) {
-          return res.status(500).json({
-            success: false,
-            error: 'Unable to create email verification link',
-            code: linkResult.code,
-          });
-        }
-
-        actionLink = linkResult.actionLink;
-        tokenPayload = {
-          verificationMode: 'auth_magiclink',
-        };
-      }
+      const token = createEmailVerificationToken();
+      const verificationCode = createEmailVerificationCode();
+      const storedToken = await storeAccountEmailVerificationToken(adminClient, currentUser.id, {
+        token,
+        code: verificationCode,
+        now,
+        reason: accountSecurityState?.email_verification_requested_at
+          ? 'user_requested'
+          : 'mail_verification_rollout_2026_05',
+      });
+      const actionLink = buildAccountEmailVerificationUrl(env, req, token);
+      const tokenPayload = {
+        verificationMode: 'account_security_state',
+        tokenExpiresAt: storedToken.tokenExpiresAt.toISOString(),
+        codeEntry: true,
+        codeExpiresAt: storedToken.codeExpiresAt.toISOString(),
+      };
 
       const mailResult = await sendAccountMail({
         adminClient,
@@ -595,7 +585,7 @@ export default async function handler(req, res) {
 
       return sendAccountEmailResponse(res, {
         status: providerResult.dryRun ? 'dry_run' : 'sent',
-        nextStep: emailVerificationRequired ? 'enter_verification_code' : 'verify_email',
+        nextStep: 'enter_verification_code',
         dryRun: Boolean(providerResult.dryRun),
         sent: { current: true },
       });

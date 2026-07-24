@@ -11,7 +11,10 @@ function DeviceRedirectGuard({ children }) {
   const { shouldUseMobile } = useDeviceDetection();
 
   useEffect(() => {
-    const target = getDeviceRedirectTarget(location.pathname, shouldUseMobile);
+    const target = getDeviceRedirectTarget(location.pathname, shouldUseMobile, {
+      search: location.search,
+      hash: location.hash,
+    });
     if (!target) return;
 
     const now = Date.now();
@@ -20,7 +23,7 @@ function DeviceRedirectGuard({ children }) {
 
     sessionStorage.setItem(REDIRECT_TS_KEY, String(now));
     window.location.replace(window.location.origin + target);
-  }, [shouldUseMobile, location.pathname]);
+  }, [shouldUseMobile, location.hash, location.pathname, location.search]);
 
   return children;
 }

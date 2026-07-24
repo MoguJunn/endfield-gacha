@@ -497,7 +497,53 @@ describe('api/account-email-action handler', () => {
     expect(mocks.createMailProviderAdapter).not.toHaveBeenCalled();
   }));
 
-  it('sends an app-level verification link when rollout verification is required', withAuthMailEnv(async () => {
+  it('recognizes a completed app-level verification for an OAuth site session', withAuthMailEnv(async () => {
+    const adminClient = createAdminClient({
+      accountSecurityState: {
+        email_verification_required: false,
+        email_verification_reason: 'oauth_email_setup_required',
+        email_verification_requested_at: '2026-07-24T00:00:00.000Z',
+        email_verification_verified_at: '2026-07-24T00:05:00.000Z',
+        password_change_required: true,
+        password_change_reason: 'oauth_password_setup_required',
+      },
+    });
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    mocks.createSupabaseAccessTokenClient.mockReturnValue(createCallerClient({
+      user: {
+        id: 'user-1',
+        email: 'site-user@example.com',
+        email_confirmed_at: null,
+        confirmed_at: null,
+      },
+    }));
+
+    const req = createRequest({
+      body: {
+        action: 'resend_verification',
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await accountEmailActionHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      data: {
+        status: 'already_verified',
+        nextStep: 'none',
+        sent: {
+          current: false,
+        },
+      },
+    });
+    expect(adminClient.__mocks.generateLink).not.toHaveBeenCalled();
+    expect(adminClient.__mocks.securityUpsert).not.toHaveBeenCalled();
+    expect(mocks.createMailProviderAdapter).not.toHaveBeenCalled();
+  }));
+
+  it('sends an app-level verification code when rollout verification is required', withAuthMailEnv(async () => {
     const adminClient = createAdminClient({
       accountSecurityState: {
         email_verification_required: true,
@@ -536,6 +582,7 @@ describe('api/account-email-action handler', () => {
         user_id: 'user-1',
         email_verification_required: true,
         email_verification_reason: 'user_requested',
+        email_verification_verified_at: null,
         email_verification_token_hash: expect.any(String),
         email_verification_token_expires_at: expect.any(String),
         email_verification_code_hash: expect.any(String),
@@ -562,7 +609,16 @@ describe('api/account-email-action handler', () => {
   }));
 
   it('sends an app-level verification code for an unconfirmed current email', withAuthMailEnv(async () => {
-    const adminClient = createAdminClient();
+    const adminClient = createAdminClient({
+      accountSecurityState: {
+        email_verification_required: false,
+        email_verification_reason: 'oauth_email_setup_required',
+        email_verification_requested_at: '2026-07-24T00:00:00.000Z',
+        email_verification_verified_at: null,
+        password_change_required: true,
+        password_change_reason: 'oauth_password_setup_required',
+      },
+    });
     const adapter = createMailAdapter();
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     mocks.createSupabaseAccessTokenClient.mockReturnValue(createCallerClient({

@@ -203,6 +203,50 @@ describe('api/account-security-state handler', () => {
     });
   });
 
+  it('does not treat a confirmed synthetic OAuth address as the verified site email', async () => {
+    const adminClient = createAdminClient({
+      profileRow: {
+        id: 'user-1',
+        email: 'site-user@example.com',
+        role: 'user',
+      },
+      stateRow: {
+        password_change_required: true,
+        password_change_reason: 'oauth_password_setup_required:github',
+        password_change_source: 'oauth',
+        password_change_requested_at: '2026-07-24T00:00:00.000Z',
+        password_change_expires_at: null,
+        password_change_recovery_request_id: null,
+        email_verification_required: true,
+        email_verification_reason: 'oauth_email_setup_required',
+        email_verification_requested_at: '2026-07-24T00:00:00.000Z',
+        email_verification_verified_at: '2026-07-23T00:00:00.000Z',
+      },
+    });
+    mocks.loadAuthUserById.mockResolvedValue({
+      id: 'user-1',
+      email: 'github.abcdef1234567890@oauth.local.invalid',
+      email_confirmed_at: '2026-06-04T00:00:00.000Z',
+      encrypted_password: null,
+      user_metadata: {
+        synthetic_oauth_email: true,
+      },
+    });
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+
+    const req = createRequest();
+    const res = createJsonResponseRecorder();
+
+    await accountSecurityStateHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.state).toMatchObject({
+      passwordChangeRequired: true,
+      emailVerificationRequired: true,
+      emailVerificationReason: 'oauth_email_setup_required',
+    });
+  });
+
   it('does not keep blocking OAuth import when email and password setup are already complete', async () => {
     const adminClient = createAdminClient({
       profileRow: {

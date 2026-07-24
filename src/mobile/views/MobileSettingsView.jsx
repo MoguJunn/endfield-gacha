@@ -227,8 +227,11 @@ function MobileSettingsView() {
   const currentUsernameHandle = useMemo(() => buildUsernameHandle(user), [user]);
   const emailVerificationRequired = userRole !== 'super_admin' && Boolean(accountSecurityState?.emailVerificationRequired);
   const emailVerified = useMemo(
-    () => isUserEmailVerified(user, { emailVerificationRequired }),
-    [emailVerificationRequired, user]
+    () => isUserEmailVerified(user, {
+      emailVerificationRequired,
+      emailVerificationVerifiedAt: accountSecurityState?.emailVerificationVerifiedAt,
+    }),
+    [accountSecurityState?.emailVerificationVerifiedAt, emailVerificationRequired, user]
   );
   const pendingEmailChange = user?.new_email || null;
   const passwordChangeRequired = Boolean(accountSecurityState?.passwordChangeRequired);
@@ -504,7 +507,13 @@ function MobileSettingsView() {
       const result = await requestCurrentEmailVerification({ locale });
       const status = result?.data?.status;
       setEmailVerificationCode('');
-      if (status !== 'already_verified') {
+      if (status === 'already_verified') {
+        setAccountSecurityState((prev) => ({
+          ...(prev || {}),
+          emailVerificationRequired: false,
+          emailVerificationVerifiedAt: prev?.emailVerificationVerifiedAt || new Date().toISOString(),
+        }));
+      } else {
         setEmailVerificationSendCount((prev) => prev + 1);
         setEmailVerificationDeferred(false);
       }
@@ -584,6 +593,21 @@ function MobileSettingsView() {
         currentPassword: emailCurrentPassword,
         locale,
       });
+      if (result?.data?.nextStep === 'enter_verification_code' && result?.data?.sent?.new) {
+        const normalizedNewEmail = newEmail.trim().toLowerCase();
+        setUser({
+          ...user,
+          email: normalizedNewEmail,
+        });
+        setAccountSecurityState((prev) => ({
+          ...(prev || {}),
+          emailVerificationRequired: true,
+          emailVerificationVerifiedAt: null,
+        }));
+        setEmailVerificationCode('');
+        setEmailVerificationSendCount((prev) => prev + 1);
+        setEmailVerificationDeferred(false);
+      }
       const successMessage = result?.data?.dryRun
         ? t('settings.success.emailChangeDryRun')
         : t('settings.success.emailChangeRequested');
@@ -902,7 +926,7 @@ function MobileSettingsView() {
 
       <MobileSettingsSection title={t('settings.authIdentity.title')} icon={KeyRound}>
         <div className="p-4">
-          <LoginIdentitiesSection variant="mobile" />
+          <LoginIdentitiesSection variant="mobile" emailVerified={emailVerified} />
         </div>
       </MobileSettingsSection>
 
