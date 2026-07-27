@@ -76,6 +76,10 @@
     {
       "path": "/api/mail-outbox-worker",
       "schedule": "20 2 * * *"
+    },
+    {
+      "path": "/api/summer-lottery-contact-retention",
+      "schedule": "35 3 * * *"
     }
   ],
   "rewrites": [

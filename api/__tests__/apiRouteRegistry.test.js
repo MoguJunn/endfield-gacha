@@ -26,6 +26,7 @@ const INTERNAL_OPERATION_PATHS = [
   '/api/admin-pool-push',
   '/api/admin-pools',
   '/api/admin-site-health',
+  '/api/admin-summer-lottery-contacts',
   '/api/admin-user-data',
   '/api/mail-delivery-feedback',
   '/api/mail-inbound',
@@ -33,6 +34,7 @@ const INTERNAL_OPERATION_PATHS = [
   '/api/status-admin',
   '/api/status-endpoint-probe',
   '/api/status-probe',
+  '/api/summer-lottery-contact-retention',
 ];
 
 const AUTH_OPERATION_PATHS = [

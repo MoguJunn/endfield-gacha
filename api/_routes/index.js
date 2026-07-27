@@ -8,6 +8,7 @@ import accountProfileHandler from './root/account-profile.js';
 import accountSecurityStateHandler from './root/account-security-state.js';
 import adminHandler from './root/admin.js';
 import adminHistoryAnomaliesHandler from './root/admin-history-anomalies.js';
+import adminSummerLotteryContactsHandler from './root/admin-summer-lottery-contacts.js';
 import adminCharactersHandler from './root/admin-characters.js';
 import adminPoolPushHandler from './root/admin-pool-push.js';
 import adminPoolsHandler from './root/admin-pools.js';
@@ -44,6 +45,7 @@ import statusProbeHandler from './root/status-probe.js';
 import siteStatusHandler from './root/site-status.js';
 import statsHandler from './root/stats.js';
 import summerLotteryBackendHandler from './root/summer-lottery-backend.js';
+import summerLotteryContactRetentionHandler from './root/summer-lottery-contact-retention.js';
 import summerLotterySsoStartHandler from './root/summer-lottery-sso.js';
 import ticketReplyHandler from './root/ticket-reply.js';
 import ticketsHandler from './root/tickets.js';
@@ -106,6 +108,7 @@ export const API_ROUTE_ENTRIES = [
   ['/api/account-security-state', accountSecurityStateHandler],
   ['/api/admin', adminHandler],
   ['/api/admin-history-anomalies', adminHistoryAnomaliesHandler],
+  ['/api/admin-summer-lottery-contacts', adminSummerLotteryContactsHandler],
   ['/api/admin-account-recovery', adminHandler],
   ['/api/admin-announcements', adminHandler],
   ['/api/admin-characters', adminCharactersHandler],
@@ -156,6 +159,7 @@ export const API_ROUTE_ENTRIES = [
   ['/api/site-status', siteStatusHandler],
   ['/api/stats', statsHandler],
   ['/api/summer-lottery-backend', summerLotteryBackendHandler],
+  ['/api/summer-lottery-contact-retention', summerLotteryContactRetentionHandler],
   ['/api/summer-lottery-sso/start', summerLotterySsoStartHandler],
   ['/api/tickets', ticketsHandler],
   ['/api/tickets/reply', ticketReplyHandler],
