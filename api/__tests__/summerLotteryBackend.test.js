@@ -1,6 +1,5 @@
 // @vitest-environment node
 
-import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { decryptLotteryContact, isLotteryContactEnvelope } from '../_lib/lotteryContactCrypto.js';
 
@@ -192,14 +191,15 @@ describe('summer lottery private backend gateway', () => {
 
   it('fetches only the precommitted drand round and verifies it before drawing', async () => {
     const chain = '52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971';
-    const randomness = createHash('sha256').update(Buffer.from('00', 'hex')).digest('hex');
+    const randomness = 'fe290beca10872ef2fb164d2aa4442de4566183ec51c56ff3cd603d930e54fdd';
+    const signature = 'b44679b9a59af2ec876b1a6b1ad52ea9b1615fc3982b19576350f93447cb1125e342b73a8dd2bacbe47e4b6b63ed5e39';
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: vi.fn().mockResolvedValue({ round: 31618612, randomness, signature: '00' }),
+      json: vi.fn().mockResolvedValue({ round: 1000, randomness, signature }),
     }));
     const rpc = vi.fn().mockResolvedValue({ data: { campaignId: 'community-lottery' }, error: null });
     const maybeSingle = vi.fn().mockResolvedValue({
-      data: { public_randomness_chain: chain, public_randomness_round: 31618612 },
+      data: { public_randomness_chain: chain, public_randomness_round: 1000 },
       error: null,
     });
     mocks.getSupabaseAdminClient.mockReturnValue({
@@ -211,15 +211,43 @@ describe('summer lottery private backend gateway', () => {
     await summerLotteryBackendHandler(request('draw', { seed: 'private-seed' }, ADMIN_SECRET), response);
 
     expect(fetch).toHaveBeenCalledWith(
-      `https://drand.cloudflare.com/${chain}/public/31618612`,
+      `https://drand.cloudflare.com/${chain}/public/1000`,
       expect.objectContaining({ headers: { Accept: 'application/json' } }),
     );
     expect(rpc).toHaveBeenCalledWith('draw_summer_lottery', expect.objectContaining({
       p_seed: 'private-seed',
-      p_beacon_round: 31618612,
+      p_beacon_round: 1000,
       p_beacon_randomness: randomness,
-      p_beacon_signature: '00',
+      p_beacon_signature: signature,
     }));
     expect(response.statusCode).toBe(200);
+  });
+
+  it('rejects a forged drand signature before the draw RPC', async () => {
+    const chain = '52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        round: 1000,
+        randomness: 'fe290beca10872ef2fb164d2aa4442de4566183ec51c56ff3cd603d930e54fdd',
+        signature: 'a44679b9a59af2ec876b1a6b1ad52ea9b1615fc3982b19576350f93447cb1125e342b73a8dd2bacbe47e4b6b63ed5e39',
+      }),
+    }));
+    const rpc = vi.fn();
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: { public_randomness_chain: chain, public_randomness_round: 1000 },
+      error: null,
+    });
+    mocks.getSupabaseAdminClient.mockReturnValue({
+      from: vi.fn(() => ({ select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle })) })) })),
+      rpc,
+    });
+    const response = responseRecorder();
+
+    await summerLotteryBackendHandler(request('draw', { seed: 'private-seed' }, ADMIN_SECRET), response);
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body.error.code).toBe('public_randomness_invalid');
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

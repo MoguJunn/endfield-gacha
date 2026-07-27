@@ -1,8 +1,9 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { getSupabaseAdminClient } from '../../_lib/authAdmin.js';
 import { verifyAuthCaptcha } from '../../_lib/authSecurityGuards.js';
 import { checkMemoryRateLimit, getRequesterKey } from '../../_lib/http.js';
 import { encryptLotteryContact } from '../../_lib/lotteryContactCrypto.js';
+import { QUICKNET_CHAIN_INFO, verifyQuicknetBeacon } from '../../_lib/drandVerification.js';
 
 const CAMPAIGN_ID = normalizeString(process.env.LOTTERY_CAMPAIGN_ID || 'community-lottery', 100);
 const LOTTERY_CAPTCHA_ACTION = 'lottery_enter';
@@ -301,7 +302,7 @@ async function fetchPublicRandomness(adminClient) {
   if (error) throw error;
   const chain = normalizeString(campaign?.public_randomness_chain, 64);
   const round = Number(campaign?.public_randomness_round);
-  if (!HASH_PATTERN.test(chain) || !Number.isSafeInteger(round) || round <= 0) {
+  if (chain !== QUICKNET_CHAIN_INFO.hash || !Number.isSafeInteger(round) || round <= 0) {
     throw Object.assign(new Error('public_randomness_config_invalid'), { code: 'public_randomness_config_invalid' });
   }
   let response;
@@ -316,10 +317,13 @@ async function fetchPublicRandomness(adminClient) {
   const beacon = await response.json().catch(() => null);
   const randomness = normalizeString(beacon?.randomness, 64).toLowerCase();
   const signature = normalizeString(beacon?.signature, 512).toLowerCase();
-  const signatureHash = /^[0-9a-f]+$/u.test(signature) && signature.length % 2 === 0
-    ? createHash('sha256').update(Buffer.from(signature, 'hex')).digest('hex')
-    : '';
-  if (!response.ok || Number(beacon?.round) !== round || !HASH_PATTERN.test(randomness) || signatureHash !== randomness) {
+  const signatureValid = response.ok && await verifyQuicknetBeacon({
+    chainHash: chain,
+    round: beacon?.round,
+    randomness,
+    signature,
+  });
+  if (!signatureValid || Number(beacon?.round) !== round) {
     throw Object.assign(new Error('public_randomness_invalid'), { code: 'public_randomness_invalid' });
   }
   return { round, randomness, signature };

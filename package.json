@@ -102,6 +102,7 @@
     "@vercel/speed-insights": "^2.0.0",
     "canvas-confetti": "^1.9.4",
     "dompurify": "^3.4.5",
+    "drand-client": "^1.4.2",
     "fflate": "^0.8.3",
     "https-proxy-agent": "^7.0.6",
     "lucide-react": "^0.555.0",
