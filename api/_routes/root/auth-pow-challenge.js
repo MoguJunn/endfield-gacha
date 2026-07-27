@@ -11,6 +11,7 @@ const ALLOWED_ACTIONS = new Set([
   'register',
   'password_reset',
   'account_recovery',
+  'lottery_enter',
 ]);
 
 function parseRequestBody(req) {

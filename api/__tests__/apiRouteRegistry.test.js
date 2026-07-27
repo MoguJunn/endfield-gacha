@@ -47,6 +47,8 @@ const AUTH_OPERATION_PATHS = [
   '/api/auth/identities/unlink',
   '/api/auth/session',
   '/api/auth/session/logout',
+  '/api/summer-lottery-backend',
+  '/api/summer-lottery-sso/start',
 ];
 
 const USER_OPERATION_PATHS = [

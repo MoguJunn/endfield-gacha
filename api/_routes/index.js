@@ -43,6 +43,8 @@ import statusEndpointProbeHandler from './root/status-endpoint-probe.js';
 import statusProbeHandler from './root/status-probe.js';
 import siteStatusHandler from './root/site-status.js';
 import statsHandler from './root/stats.js';
+import summerLotteryBackendHandler from './root/summer-lottery-backend.js';
+import summerLotterySsoStartHandler from './root/summer-lottery-sso.js';
 import ticketReplyHandler from './root/ticket-reply.js';
 import ticketsHandler from './root/tickets.js';
 import wikiAssetProxyHandler from './root/wiki-asset-proxy.js';
@@ -153,6 +155,8 @@ export const API_ROUTE_ENTRIES = [
   ['/api/status-probe', statusProbeHandler],
   ['/api/site-status', siteStatusHandler],
   ['/api/stats', statsHandler],
+  ['/api/summer-lottery-backend', summerLotteryBackendHandler],
+  ['/api/summer-lottery-sso/start', summerLotterySsoStartHandler],
   ['/api/tickets', ticketsHandler],
   ['/api/tickets/reply', ticketReplyHandler],
   ['/api/wiki-asset-proxy', wikiAssetProxyHandler],
