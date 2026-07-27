@@ -25,6 +25,7 @@ import { useDurableNotifications } from '../../hooks';
 import { useScrollToHighlight } from '../../hooks/app/useScrollToHighlight';
 import { useI18n } from '../../i18n/index.js';
 import { useOAuthCallbackNotice } from '../../hooks/auth/useOAuthCallbackNotice.js';
+import { useSummerLotterySsoContinuation } from '../../hooks/auth/useSummerLotterySsoContinuation.js';
 
 const DeveloperApiDocsPage = lazy(() => import('../../components/docs/DeveloperApiDocsPage'));
 
@@ -42,7 +43,8 @@ function MobileRouteFallback({ label }) {
 function MobileLayout({ onOAuthSessionSynced }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, userRole, authResolved, showAuthModal, closeAuthModal, setUser } = useAuthStore();
+  const { user, userRole, authResolved, showAuthModal, openAuthModal, closeAuthModal, setUser } = useAuthStore();
+  useSummerLotterySsoContinuation({ user, authResolved, openAuthModal });
   const { t } = useI18n();
   const activeTab = getMobileTabFromPath(location.pathname);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
