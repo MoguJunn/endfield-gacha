@@ -3,12 +3,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  consumeLotteryRateLimit: vi.fn(),
   getSupabaseAdminClient: vi.fn(),
   loadSiteSession: vi.fn(),
 }));
 
 vi.mock('../_lib/authAdmin.js', () => ({
   getSupabaseAdminClient: mocks.getSupabaseAdminClient,
+}));
+
+vi.mock('../_lib/lotteryRateLimit.js', () => ({
+  consumeLotteryRateLimit: mocks.consumeLotteryRateLimit,
 }));
 
 vi.mock('../_lib/siteSession.js', async () => {
@@ -49,6 +54,13 @@ describe('summer lottery SSO start', () => {
     process.env.VITE_APP_URL = 'https://main.example.com';
     process.env.LOTTERY_SITE_URL = 'https://lottery.example.com';
     process.env.LOTTERY_SSO_AUDIENCE = 'summer-lottery-2026';
+    process.env.LOTTERY_BACKEND_SECRET = 's'.repeat(43);
+    mocks.consumeLotteryRateLimit.mockReset();
+    mocks.consumeLotteryRateLimit.mockResolvedValue({
+      allowed: true,
+      remaining: 19,
+      retryAfter: 0,
+    });
     mocks.getSupabaseAdminClient.mockReset();
     mocks.loadSiteSession.mockReset();
   });
@@ -57,6 +69,7 @@ describe('summer lottery SSO start', () => {
     delete process.env.VITE_APP_URL;
     delete process.env.LOTTERY_SITE_URL;
     delete process.env.LOTTERY_SSO_AUDIENCE;
+    delete process.env.LOTTERY_BACKEND_SECRET;
   });
 
   it('returns malformed state to the activity page without reading a main-site session', async () => {
@@ -80,6 +93,24 @@ describe('summer lottery SSO start', () => {
     expect(response.headers['Set-Cookie']).toContain(`__Host-eg_summer_lottery_sso=${state}`);
     expect(response.headers['Set-Cookie']).toContain('HttpOnly');
     expect(response.headers['Set-Cookie']).toContain('Secure');
+  });
+
+  it('shares SSO rate-limit state across server instances', async () => {
+    const state = 'R'.repeat(43);
+    mocks.getSupabaseAdminClient.mockReturnValue({ from: vi.fn() });
+    mocks.consumeLotteryRateLimit.mockResolvedValue({
+      allowed: false,
+      remaining: 0,
+      retryAfter: 41,
+    });
+    const response = createResponse();
+
+    await summerLotterySsoStartHandler(createRequest({ state }), response);
+
+    expect(response.statusCode).toBe(303);
+    expect(response.headers.Location).toBe('https://lottery.example.com/?auth=rate_error');
+    expect(response.headers['Retry-After']).toBe('41');
+    expect(mocks.loadSiteSession).not.toHaveBeenCalled();
   });
 
   it('issues only hashed ticket data and redirects with a non-request fragment', async () => {

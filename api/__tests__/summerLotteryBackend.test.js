@@ -3,8 +3,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { decryptLotteryContact, isLotteryContactEnvelope } from '../_lib/lotteryContactCrypto.js';
 
-const mocks = vi.hoisted(() => ({ getSupabaseAdminClient: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  consumeLotteryRateLimit: vi.fn(),
+  getSupabaseAdminClient: vi.fn(),
+}));
 vi.mock('../_lib/authAdmin.js', () => ({ getSupabaseAdminClient: mocks.getSupabaseAdminClient }));
+vi.mock('../_lib/lotteryRateLimit.js', () => ({
+  consumeLotteryRateLimit: mocks.consumeLotteryRateLimit,
+}));
 
 import summerLotteryBackendHandler from '../_routes/root/summer-lottery-backend.js';
 
@@ -43,6 +49,12 @@ describe('summer lottery private backend gateway', () => {
     process.env.LOTTERY_CONTACT_ENCRYPTION_ACTIVE_KEY_ID = 'test-current';
     process.env.LOTTERY_CONTACT_ENCRYPTION_KEYS_JSON = JSON.stringify({ 'test-current': CONTACT_KEY });
     process.env.AUTH_CAPTCHA_MODE = 'off';
+    mocks.consumeLotteryRateLimit.mockReset();
+    mocks.consumeLotteryRateLimit.mockResolvedValue({
+      allowed: true,
+      remaining: 10,
+      retryAfter: 0,
+    });
     mocks.getSupabaseAdminClient.mockReset();
   });
 
@@ -79,6 +91,27 @@ describe('summer lottery private backend gateway', () => {
     expect(mocks.getSupabaseAdminClient).not.toHaveBeenCalled();
   });
 
+  it('blocks over-budget requests using the shared database limiter', async () => {
+    mocks.consumeLotteryRateLimit.mockResolvedValue({
+      allowed: false,
+      remaining: 0,
+      retryAfter: 37,
+    });
+    const rpc = vi.fn();
+    mocks.getSupabaseAdminClient.mockReturnValue({ rpc });
+    const response = responseRecorder();
+
+    await summerLotteryBackendHandler(request('health'), response);
+
+    expect(mocks.consumeLotteryRateLimit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'gateway_health' }),
+    );
+    expect(response.statusCode).toBe(429);
+    expect(response.headers['Retry-After']).toBe('37');
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it('only forwards hashed SSO material to the atomic exchange RPC', async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: { userId: 'user-1', lotterySessionId: 'lottery-session-1' },
@@ -94,9 +127,17 @@ describe('summer lottery private backend gateway', () => {
       sessionTokenHash: HASH,
       csrfTokenHash: HASH,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      requesterIp: '203.0.113.40',
     }), response);
 
     expect(response.statusCode).toBe(200);
+    expect(mocks.consumeLotteryRateLimit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'gateway_exchange',
+        identifiers: ['203.0.113.40'],
+      }),
+    );
     expect(rpc).toHaveBeenCalledWith('exchange_summer_lottery_sso_ticket', expect.objectContaining({
       p_ticket_hash: HASH,
       p_state_hash: HASH,
@@ -153,9 +194,17 @@ describe('summer lottery private backend gateway', () => {
       contactType: 'qq',
       contactValue: '123456789',
       notificationConfirmed: true,
+      requesterIp: '203.0.113.41',
     }), response);
 
     expect(response.statusCode).toBe(200);
+    expect(mocks.consumeLotteryRateLimit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'gateway_enter',
+        identifiers: [HASH],
+      }),
+    );
     const rpcPayload = rpc.mock.calls[0][1];
     expect(rpc).toHaveBeenCalledWith('enter_summer_lottery', expect.objectContaining({
       p_contact_type: 'qq',

@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { getSupabaseAdminClient } from '../../_lib/authAdmin.js';
-import { checkMemoryRateLimit, getRequesterKey } from '../../_lib/http.js';
+import { getRequesterKey } from '../../_lib/http.js';
+import { consumeLotteryRateLimit } from '../../_lib/lotteryRateLimit.js';
 import {
   appendSetCookieHeader,
   isSecureRequest,
@@ -98,10 +99,16 @@ export default async function summerLotterySsoStartHandler(req, res) {
   if (!adminClient) {
     return redirectLotteryError(res, lotteryOrigin, 'service_error');
   }
-  const rateLimit = checkMemoryRateLimit(`summer-lottery-sso:${getRequesterKey(req)}`, {
-    windowMs: 60_000,
-    max: 20,
-  });
+  let rateLimit;
+  try {
+    rateLimit = await consumeLotteryRateLimit(adminClient, {
+      action: 'sso_start',
+      identifiers: [getRequesterKey(req)],
+      secret: process.env.LOTTERY_BACKEND_SECRET,
+    });
+  } catch {
+    return redirectLotteryError(res, lotteryOrigin, 'service_error');
+  }
   if (!rateLimit.allowed) {
     res.setHeader('Retry-After', String(rateLimit.retryAfter));
     return redirectLotteryError(res, lotteryOrigin, 'rate_error');

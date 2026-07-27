@@ -1,9 +1,10 @@
 import { timingSafeEqual } from 'node:crypto';
 import { getSupabaseAdminClient } from '../../_lib/authAdmin.js';
 import { verifyAuthCaptcha } from '../../_lib/authSecurityGuards.js';
-import { checkMemoryRateLimit, getRequesterKey } from '../../_lib/http.js';
+import { getRequesterKey } from '../../_lib/http.js';
 import { encryptLotteryContact } from '../../_lib/lotteryContactCrypto.js';
 import { QUICKNET_CHAIN_INFO, verifyQuicknetBeacon } from '../../_lib/drandVerification.js';
+import { consumeLotteryRateLimit } from '../../_lib/lotteryRateLimit.js';
 
 const CAMPAIGN_ID = normalizeString(process.env.LOTTERY_CAMPAIGN_ID || 'community-lottery', 100);
 const LOTTERY_CAPTCHA_ACTION = 'lottery_enter';
@@ -337,6 +338,7 @@ function normalizeRpcError(error) {
     'campaign_has_no_entries', 'seed_commitment_mismatch', 'lottery_session_invalid',
     'source_main_session_invalid', 'invalid_lottery_session_material',
     'public_randomness_unavailable', 'public_randomness_invalid', 'public_randomness_config_invalid',
+    'lottery_rate_limit_not_configured', 'lottery_rate_limit_unavailable',
     'invalid_contact_value', 'notification_confirmation_required',
     'lottery_contact_encryption_not_configured', 'lottery_contact_encryption_context_invalid',
     'captcha_required', 'captcha_failed', 'captcha_not_configured', 'captcha_verify_error',
@@ -467,24 +469,40 @@ export default async function summerLotteryBackendHandler(req, res) {
   if (!safeEqual(getBearerToken(req), expectedSecret)) {
     return sendError(res, 401, 'lottery_backend_unauthorized', 'Unauthorized.');
   }
-  const rateLimit = checkMemoryRateLimit(`summer-lottery:${getRequesterKey(req)}`, {
-    windowMs: 60_000,
-    max: 240,
-  });
-  if (!rateLimit.allowed) {
-    res.setHeader('Retry-After', String(rateLimit.retryAfter));
-    return sendError(res, 429, 'rate_limited', 'Too many requests.');
-  }
   const adminClient = getSupabaseAdminClient();
   if (!adminClient) {
     return sendError(res, 503, 'supabase_admin_not_configured', 'Supabase admin client is not configured.');
   }
   try {
-    const data = await runAction(adminClient, action, req.body?.payload || {});
+    const payload = req.body?.payload || {};
+    const suppliedSubject = normalizeString(
+      payload.sessionTokenHash || payload.ticketHash,
+      64,
+    );
+    const requesterIdentifier = normalizeString(payload.requesterIp, 128)
+      || getRequesterKey(req);
+    const sessionScopedAction = action === 'enter' || action === 'logout';
+    const rateLimitIdentifiers = sessionScopedAction && HASH_PATTERN.test(suppliedSubject)
+      ? [suppliedSubject]
+      : [requesterIdentifier];
+    const rateLimit = await consumeLotteryRateLimit(adminClient, {
+      action: `gateway_${action}`,
+      identifiers: rateLimitIdentifiers,
+      secret: expectedSecret,
+    });
+    if (!rateLimit.allowed) {
+      res.setHeader('Retry-After', String(rateLimit.retryAfter));
+      return sendError(res, 429, 'rate_limited', 'Too many requests.');
+    }
+    const data = await runAction(adminClient, action, payload);
     return sendJson(res, 200, { success: true, data });
   } catch (error) {
     const normalized = normalizeRpcError(error);
-    const status = normalized.code === 'lottery_contact_encryption_not_configured'
+    const status = [
+      'lottery_contact_encryption_not_configured',
+      'lottery_rate_limit_not_configured',
+      'lottery_rate_limit_unavailable',
+    ].includes(normalized.code)
       ? 503
       : ['lottery_session_invalid', 'sso_ticket_invalid', 'source_main_session_invalid'].includes(normalized.code)
       ? 401
