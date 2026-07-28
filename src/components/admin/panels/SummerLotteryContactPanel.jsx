@@ -1,9 +1,20 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff, RefreshCw, ShieldAlert, Trash2, Trophy } from 'lucide-react';
+import {
+  Eye,
+  EyeOff,
+  Play,
+  RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
+  Trash2,
+  Trophy,
+} from 'lucide-react';
 import {
   loadSummerLotteryContactTargets,
+  loadSummerLotteryOperationStatus,
   purgeSummerLotteryContact,
   readSummerLotteryContact,
+  runSummerLotteryOperation,
 } from '../../../services/admin/summerLotteryContactService.js';
 
 const REVEAL_TTL_MS = 60_000;
@@ -16,6 +27,9 @@ function formatDate(value) {
 
 export default function SummerLotteryContactPanel({ showToast }) {
   const [campaign, setCampaign] = useState(null);
+  const [operationStatus, setOperationStatus] = useState(null);
+  const [operationConfirmation, setOperationConfirmation] = useState('');
+  const [operationAction, setOperationAction] = useState('');
   const [targets, setTargets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionEntryId, setActionEntryId] = useState('');
@@ -34,12 +48,17 @@ export default function SummerLotteryContactPanel({ showToast }) {
     setLoading(true);
     clearRevealedContact();
     try {
-      const result = await loadSummerLotteryContactTargets();
-      setCampaign(result.campaign);
-      setTargets(result.targets);
+      const [contactResult, statusResult] = await Promise.all([
+        loadSummerLotteryContactTargets(),
+        loadSummerLotteryOperationStatus(),
+      ]);
+      setCampaign(contactResult.campaign);
+      setTargets(contactResult.targets);
+      setOperationStatus(statusResult);
     } catch (error) {
       setCampaign(null);
       setTargets([]);
+      setOperationStatus(null);
       showToastRef.current?.(error.message || '中奖联系方式状态读取失败', 'error');
     } finally {
       setLoading(false);
@@ -95,8 +114,90 @@ export default function SummerLotteryContactPanel({ showToast }) {
     }
   };
 
+  const handleOperation = async (action) => {
+    const campaignId = operationStatus?.campaignId || 'community-lottery';
+    const expected = `${action.toUpperCase()} ${campaignId}`;
+    if (operationConfirmation.trim() !== expected) {
+      showToastRef.current?.(`请输入完整确认词：${expected}`, 'error');
+      return;
+    }
+    const confirmed = window.confirm(
+      action === 'draw'
+        ? '确定立即执行真实开奖吗？候选清单和中奖结果将被事务化固定。'
+        : '确定固定当前主站私有种子的承诺吗？产生参与记录后将不能更换。',
+    );
+    if (!confirmed) return;
+    setOperationAction(action);
+    clearRevealedContact();
+    try {
+      const status = await runSummerLotteryOperation({
+        action,
+        campaignId,
+        confirmation: expected,
+      });
+      setOperationStatus(status);
+      setOperationConfirmation('');
+      showToastRef.current?.(
+        action === 'draw' ? '开奖完成并写入管理员操作审计' : '开奖承诺已固定并写入管理员操作审计',
+        'success',
+      );
+      await loadTargets();
+    } catch (error) {
+      showToastRef.current?.(error.message || '抽奖操作未执行', 'error');
+    } finally {
+      setOperationAction('');
+    }
+  };
+
   return (
     <div className="space-y-4">
+      <section className="border border-zinc-300 p-4 dark:border-zinc-700">
+        <div className="flex items-start gap-3">
+          <ShieldCheck size={18} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-300" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-bold text-zinc-900 dark:text-white">短期管理员会话操作</h3>
+            <p className="mt-1 text-xs text-zinc-500">
+              准备和开奖只在当前主站管理员会话中执行；活动站不再接受长期 Bearer 凭据。成功操作会在数据库事务内追加审计。
+            </p>
+            <div className="mt-3 grid gap-2 text-xs text-zinc-600 sm:grid-cols-2 dark:text-zinc-300">
+              <span>阶段：<strong>{operationStatus?.phase || '未知'}</strong></span>
+              <span>私有种子：<strong>{operationStatus?.seedConfigured ? '主站已配置' : '未配置'}</strong></span>
+              <span>开奖时间：{formatDate(operationStatus?.drawsAt)}</span>
+              <span>公共随机轮次：{operationStatus?.publicRandomnessRound || '未配置'}</span>
+            </div>
+            <p className="mt-2 break-all font-mono text-[11px] text-zinc-500">
+              承诺：{operationStatus?.seedCommitment || '尚未固定'}
+            </p>
+            <div className="mt-4 flex flex-col gap-2 lg:flex-row">
+              <input
+                value={operationConfirmation}
+                onChange={(event) => setOperationConfirmation(event.target.value)}
+                placeholder={`输入 PREPARE 或 DRAW + 空格 + ${operationStatus?.campaignId || 'community-lottery'}`}
+                autoComplete="off"
+                spellCheck={false}
+                className="min-w-0 flex-1 border border-zinc-300 bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-sky-500 dark:border-zinc-700"
+              />
+              <button
+                type="button"
+                disabled={Boolean(operationAction) || !operationStatus?.seedConfigured || operationStatus?.phase === 'drawn'}
+                onClick={() => handleOperation('prepare')}
+                className="inline-flex items-center justify-center gap-1 border border-sky-400 px-3 py-2 text-xs font-bold text-sky-700 disabled:opacity-40 dark:text-sky-300"
+              >
+                <ShieldCheck size={13} /> {operationAction === 'prepare' ? '正在固定…' : '固定开奖承诺'}
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(operationAction) || !operationStatus?.seedConfigured || operationStatus?.phase !== 'ready_to_draw'}
+                onClick={() => handleOperation('draw')}
+                className="inline-flex items-center justify-center gap-1 border border-red-400 px-3 py-2 text-xs font-bold text-red-700 disabled:opacity-40 dark:text-red-300"
+              >
+                <Play size={13} /> {operationAction === 'draw' ? '正在开奖…' : '执行真实开奖'}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-sm text-zinc-600 dark:text-zinc-300">

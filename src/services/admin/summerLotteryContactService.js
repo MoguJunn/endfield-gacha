@@ -42,6 +42,46 @@ export async function loadSummerLotteryContactTargets(campaignId = 'community-lo
   };
 }
 
+export async function loadSummerLotteryOperationStatus(campaignId = 'community-lottery') {
+  const params = new URLSearchParams({ campaignId });
+  const { response, data } = await fetchJsonWithTimeout(
+    `/api/admin-summer-lottery-operations?${params.toString()}`,
+    {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: await buildHeaders(),
+    },
+    { label: 'admin-lottery-operation-status', retries: 1 },
+  );
+  if (!response.ok || data?.success === false) {
+    throwRequestError(response, data, '抽奖操作状态读取失败', 'lottery_operation_status_failed');
+  }
+  return data?.status || null;
+}
+
+export async function runSummerLotteryOperation({
+  action,
+  campaignId = 'community-lottery',
+  confirmation,
+}) {
+  const { response, data } = await fetchJsonWithTimeout(
+    '/api/admin-summer-lottery-operations',
+    {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: await buildHeaders(true),
+      body: JSON.stringify({ action, campaignId, confirmation }),
+    },
+    { label: `admin-lottery-${action}`, retries: 0 },
+  );
+  if (!response.ok || data?.success === false) {
+    throwRequestError(response, data, '抽奖操作未执行', 'lottery_operation_failed');
+  }
+  return data?.status || null;
+}
+
 export async function readSummerLotteryContact({ entryId, reason }) {
   const { response, data } = await fetchJsonWithTimeout('/api/admin-summer-lottery-contacts', {
     method: 'POST',
@@ -72,6 +112,8 @@ export async function purgeSummerLotteryContact(entryId) {
 
 export default {
   loadSummerLotteryContactTargets,
+  loadSummerLotteryOperationStatus,
   purgeSummerLotteryContact,
   readSummerLotteryContact,
+  runSummerLotteryOperation,
 };

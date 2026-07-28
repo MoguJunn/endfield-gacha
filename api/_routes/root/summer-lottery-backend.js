@@ -3,15 +3,13 @@ import { getSupabaseAdminClient } from '../../_lib/authAdmin.js';
 import { verifyAuthCaptcha } from '../../_lib/authSecurityGuards.js';
 import { getRequesterKey } from '../../_lib/http.js';
 import { encryptLotteryContact } from '../../_lib/lotteryContactCrypto.js';
-import { QUICKNET_CHAIN_INFO, verifyQuicknetBeacon } from '../../_lib/drandVerification.js';
 import { consumeLotteryRateLimit } from '../../_lib/lotteryRateLimit.js';
 
 const CAMPAIGN_ID = normalizeString(process.env.LOTTERY_CAMPAIGN_ID || 'community-lottery', 100);
 const LOTTERY_CAPTCHA_ACTION = 'lottery_enter';
 const LOTTERY_GATEWAY_CONTRACT_VERSION = 1;
 const HASH_PATTERN = /^[0-9a-f]{64}$/u;
-const ALLOWED_ACTIONS = new Set(['snapshot', 'exchange', 'enter', 'logout', 'prepare', 'draw', 'health']);
-const DRAND_RELAY = 'https://drand.cloudflare.com';
+const ALLOWED_ACTIONS = new Set(['snapshot', 'exchange', 'enter', 'logout', 'health']);
 
 function normalizeString(value, maxLength = 8192) {
   return String(value || '').trim().slice(0, maxLength);
@@ -294,42 +292,6 @@ async function loadSnapshot(adminClient, sessionTokenHash = '') {
   };
 }
 
-async function fetchPublicRandomness(adminClient) {
-  const { data: campaign, error } = await adminClient
-    .from('summer_lottery_campaigns')
-    .select('public_randomness_chain,public_randomness_round')
-    .eq('id', CAMPAIGN_ID)
-    .maybeSingle();
-  if (error) throw error;
-  const chain = normalizeString(campaign?.public_randomness_chain, 64);
-  const round = Number(campaign?.public_randomness_round);
-  if (chain !== QUICKNET_CHAIN_INFO.hash || !Number.isSafeInteger(round) || round <= 0) {
-    throw Object.assign(new Error('public_randomness_config_invalid'), { code: 'public_randomness_config_invalid' });
-  }
-  let response;
-  try {
-    response = await fetch(`${DRAND_RELAY}/${chain}/public/${round}`, {
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(10_000),
-    });
-  } catch {
-    throw Object.assign(new Error('public_randomness_unavailable'), { code: 'public_randomness_unavailable' });
-  }
-  const beacon = await response.json().catch(() => null);
-  const randomness = normalizeString(beacon?.randomness, 64).toLowerCase();
-  const signature = normalizeString(beacon?.signature, 512).toLowerCase();
-  const signatureValid = response.ok && await verifyQuicknetBeacon({
-    chainHash: chain,
-    round: beacon?.round,
-    randomness,
-    signature,
-  });
-  if (!signatureValid || Number(beacon?.round) !== round) {
-    throw Object.assign(new Error('public_randomness_invalid'), { code: 'public_randomness_invalid' });
-  }
-  return { round, randomness, signature };
-}
-
 function normalizeRpcError(error) {
   const message = normalizeString(error?.message, 120);
   const businessCodes = new Set([
@@ -412,28 +374,6 @@ async function runAction(adminClient, action, payload) {
     }
     return { revoked: true };
   }
-  if (action === 'prepare') {
-    const { data, error } = await adminClient.rpc('prepare_summer_lottery', {
-      p_campaign_id: CAMPAIGN_ID,
-      p_seed_commitment: requireHash(payload.seedCommitment, 'seed_commitment'),
-    });
-    if (error) throw error;
-    return data;
-  }
-  if (action === 'draw') {
-    const seed = normalizeString(payload.seed, 8192);
-    if (!seed) throw Object.assign(new Error('draw_seed_invalid'), { code: 'draw_seed_invalid' });
-    const beacon = await fetchPublicRandomness(adminClient);
-    const { data, error } = await adminClient.rpc('draw_summer_lottery', {
-      p_campaign_id: CAMPAIGN_ID,
-      p_seed: seed,
-      p_beacon_round: beacon.round,
-      p_beacon_randomness: beacon.randomness,
-      p_beacon_signature: beacon.signature,
-    });
-    if (error) throw error;
-    return data;
-  }
   if (action === 'health') {
     const { data, error } = await adminClient
       .from('summer_lottery_campaigns')
@@ -458,11 +398,7 @@ export default async function summerLotteryBackendHandler(req, res) {
   if (!ALLOWED_ACTIONS.has(action)) {
     return sendError(res, 400, 'action_not_allowed', 'Action not allowed.');
   }
-  const adminAction = action === 'prepare' || action === 'draw';
-  const expectedSecret = normalizeString(
-    adminAction ? process.env.LOTTERY_ADMIN_BACKEND_SECRET : process.env.LOTTERY_BACKEND_SECRET,
-    8192,
-  );
+  const expectedSecret = normalizeString(process.env.LOTTERY_BACKEND_SECRET, 8192);
   if (expectedSecret.length < 43 || expectedSecret.includes('replace-')) {
     return sendError(res, 503, 'lottery_backend_not_configured', 'Lottery backend is not configured.');
   }

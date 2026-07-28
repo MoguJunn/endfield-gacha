@@ -15,7 +15,6 @@ vi.mock('../_lib/lotteryRateLimit.js', () => ({
 import summerLotteryBackendHandler from '../_routes/root/summer-lottery-backend.js';
 
 const SECRET = 'backend-secret-which-is-at-least-forty-three-characters-long';
-const ADMIN_SECRET = 'admin-backend-secret-which-is-at-least-forty-three-characters';
 const HASH = 'a'.repeat(64);
 const CONTACT_KEY = Buffer.from('0123456789abcdef0123456789abcdef').toString('base64url');
 
@@ -45,7 +44,6 @@ function request(action, payload = {}, token = SECRET) {
 describe('summer lottery private backend gateway', () => {
   beforeEach(() => {
     process.env.LOTTERY_BACKEND_SECRET = SECRET;
-    process.env.LOTTERY_ADMIN_BACKEND_SECRET = ADMIN_SECRET;
     process.env.LOTTERY_CONTACT_ENCRYPTION_ACTIVE_KEY_ID = 'test-current';
     process.env.LOTTERY_CONTACT_ENCRYPTION_KEYS_JSON = JSON.stringify({ 'test-current': CONTACT_KEY });
     process.env.AUTH_CAPTCHA_MODE = 'off';
@@ -61,7 +59,6 @@ describe('summer lottery private backend gateway', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     delete process.env.LOTTERY_BACKEND_SECRET;
-    delete process.env.LOTTERY_ADMIN_BACKEND_SECRET;
     delete process.env.LOTTERY_CONTACT_ENCRYPTION_ACTIVE_KEY_ID;
     delete process.env.LOTTERY_CONTACT_ENCRYPTION_KEYS_JSON;
     delete process.env.AUTH_CAPTCHA_MODE;
@@ -77,7 +74,7 @@ describe('summer lottery private backend gateway', () => {
     expect(mocks.getSupabaseAdminClient).not.toHaveBeenCalled();
   });
 
-  it('rejects unsupported contract versions and user secrets on admin actions', async () => {
+  it('rejects unsupported contract versions and removed bearer admin actions', async () => {
     const versionResponse = responseRecorder();
     const versionRequest = request('health');
     versionRequest.body.version = 2;
@@ -85,9 +82,10 @@ describe('summer lottery private backend gateway', () => {
     expect(versionResponse.statusCode).toBe(400);
     expect(versionResponse.body.error.code).toBe('gateway_contract_version_unsupported');
 
-    const adminResponse = responseRecorder();
-    await summerLotteryBackendHandler(request('draw', { seed: 'private-seed' }, SECRET), adminResponse);
-    expect(adminResponse.statusCode).toBe(401);
+    const removedAdminResponse = responseRecorder();
+    await summerLotteryBackendHandler(request('draw', { seed: 'private-seed' }), removedAdminResponse);
+    expect(removedAdminResponse.statusCode).toBe(400);
+    expect(removedAdminResponse.body.error.code).toBe('action_not_allowed');
     expect(mocks.getSupabaseAdminClient).not.toHaveBeenCalled();
   });
 
@@ -238,65 +236,4 @@ describe('summer lottery private backend gateway', () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  it('fetches only the precommitted drand round and verifies it before drawing', async () => {
-    const chain = '52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971';
-    const randomness = 'fe290beca10872ef2fb164d2aa4442de4566183ec51c56ff3cd603d930e54fdd';
-    const signature = 'b44679b9a59af2ec876b1a6b1ad52ea9b1615fc3982b19576350f93447cb1125e342b73a8dd2bacbe47e4b6b63ed5e39';
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: vi.fn().mockResolvedValue({ round: 1000, randomness, signature }),
-    }));
-    const rpc = vi.fn().mockResolvedValue({ data: { campaignId: 'community-lottery' }, error: null });
-    const maybeSingle = vi.fn().mockResolvedValue({
-      data: { public_randomness_chain: chain, public_randomness_round: 1000 },
-      error: null,
-    });
-    mocks.getSupabaseAdminClient.mockReturnValue({
-      from: vi.fn(() => ({ select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle })) })) })),
-      rpc,
-    });
-    const response = responseRecorder();
-
-    await summerLotteryBackendHandler(request('draw', { seed: 'private-seed' }, ADMIN_SECRET), response);
-
-    expect(fetch).toHaveBeenCalledWith(
-      `https://drand.cloudflare.com/${chain}/public/1000`,
-      expect.objectContaining({ headers: { Accept: 'application/json' } }),
-    );
-    expect(rpc).toHaveBeenCalledWith('draw_summer_lottery', expect.objectContaining({
-      p_seed: 'private-seed',
-      p_beacon_round: 1000,
-      p_beacon_randomness: randomness,
-      p_beacon_signature: signature,
-    }));
-    expect(response.statusCode).toBe(200);
-  });
-
-  it('rejects a forged drand signature before the draw RPC', async () => {
-    const chain = '52db9ba70e0cc0f6eaf7803dd07447a1f5477735fd3f661792ba94600c84e971';
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        round: 1000,
-        randomness: 'fe290beca10872ef2fb164d2aa4442de4566183ec51c56ff3cd603d930e54fdd',
-        signature: 'a44679b9a59af2ec876b1a6b1ad52ea9b1615fc3982b19576350f93447cb1125e342b73a8dd2bacbe47e4b6b63ed5e39',
-      }),
-    }));
-    const rpc = vi.fn();
-    const maybeSingle = vi.fn().mockResolvedValue({
-      data: { public_randomness_chain: chain, public_randomness_round: 1000 },
-      error: null,
-    });
-    mocks.getSupabaseAdminClient.mockReturnValue({
-      from: vi.fn(() => ({ select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle })) })) })),
-      rpc,
-    });
-    const response = responseRecorder();
-
-    await summerLotteryBackendHandler(request('draw', { seed: 'private-seed' }, ADMIN_SECRET), response);
-
-    expect(response.statusCode).toBe(409);
-    expect(response.body.error.code).toBe('public_randomness_invalid');
-    expect(rpc).not.toHaveBeenCalled();
-  });
 });
