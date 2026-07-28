@@ -137,7 +137,12 @@ const AdminPanel = React.memo(({ user, userRole, showToast, addDurableNotificati
         return <HistoryAnomalyReviewPanel showToast={showToast} />;
 
       case 'summerLotteryContacts':
-        return <SummerLotteryContactPanel showToast={showToast} />;
+        return (
+          <SummerLotteryContactPanel
+            showToast={showToast}
+            showPermissionManager
+          />
+        );
 
       case 'pools':
         return <PoolManagement showToast={showToast} />;

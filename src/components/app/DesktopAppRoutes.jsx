@@ -7,6 +7,7 @@ const HomePage = lazy(() => import('../home/HomePage'));
 const GachaSimulator = lazy(() => import('../../features/simulator/GachaSimulator'));
 const SummaryView = lazy(() => import('../SummaryView'));
 const AdminPanel = lazy(() => import('../AdminPanel'));
+const SummerLotteryOperatorPage = lazy(() => import('../admin/SummerLotteryOperatorPage'));
 const SettingsPanel = lazy(() => import('../SettingsPanel'));
 const DeveloperApiDocsPage = lazy(() => import('../docs/DeveloperApiDocsPage'));
 const AboutPanel = lazy(() => import('../AboutPanel'));
@@ -140,6 +141,20 @@ export default function DesktopAppRoutes({
               addDurableNotification={addDurableNotification}
             />
           </Suspense>
+        }
+      />
+      <Route
+        path="lottery-contacts"
+        element={
+          isResolvingRole ? (
+            <TabPanelFallback label={tt('正在校验兑奖权限...', 'Checking lottery access...')} />
+          ) : user ? (
+            <Suspense fallback={<TabPanelFallback label={tt('正在加载兑奖工作台...', 'Loading lottery workspace...')} />}>
+              <SummerLotteryOperatorPage showToast={showToast} />
+            </Suspense>
+          ) : (
+            <Navigate to="/" replace />
+          )
         }
       />
       <Route

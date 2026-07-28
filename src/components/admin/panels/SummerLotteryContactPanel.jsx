@@ -2,19 +2,24 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Eye,
   EyeOff,
+  KeyRound,
   Play,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
   Trash2,
   Trophy,
+  UserMinus,
+  UserPlus,
 } from 'lucide-react';
 import {
   loadSummerLotteryContactTargets,
+  loadSummerLotteryOperatorGrants,
   loadSummerLotteryOperationStatus,
   purgeSummerLotteryContact,
   readSummerLotteryContact,
   runSummerLotteryOperation,
+  setSummerLotteryOperatorCapability,
 } from '../../../services/admin/summerLotteryContactService.js';
 
 const REVEAL_TTL_MS = 60_000;
@@ -25,13 +30,25 @@ function formatDate(value) {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN');
 }
 
-export default function SummerLotteryContactPanel({ showToast }) {
+export default function SummerLotteryContactPanel({
+  showToast,
+  showOperationControls = true,
+  showPermissionManager = false,
+}) {
   const [campaign, setCampaign] = useState(null);
   const [operationStatus, setOperationStatus] = useState(null);
   const [operationConfirmation, setOperationConfirmation] = useState('');
   const [operationAction, setOperationAction] = useState('');
+  const [operatorGrants, setOperatorGrants] = useState([]);
+  const [operatorUserId, setOperatorUserId] = useState('');
+  const [permissionAction, setPermissionAction] = useState('');
   const [targets, setTargets] = useState([]);
+  const [contactPermissions, setContactPermissions] = useState({
+    canRead: false,
+    canPurge: false,
+  });
   const [loading, setLoading] = useState(true);
+  const [contactAccessDenied, setContactAccessDenied] = useState(false);
   const [actionEntryId, setActionEntryId] = useState('');
   const [revealedContact, setRevealedContact] = useState(null);
   const revealTimerRef = useRef(null);
@@ -47,23 +64,58 @@ export default function SummerLotteryContactPanel({ showToast }) {
   const loadTargets = useCallback(async () => {
     setLoading(true);
     clearRevealedContact();
-    try {
-      const [contactResult, statusResult] = await Promise.all([
-        loadSummerLotteryContactTargets(),
-        loadSummerLotteryOperationStatus(),
-      ]);
-      setCampaign(contactResult.campaign);
-      setTargets(contactResult.targets);
-      setOperationStatus(statusResult);
-    } catch (error) {
+    const [contactResult, statusResult, grantsResult] = await Promise.allSettled([
+      loadSummerLotteryContactTargets(),
+      showOperationControls
+        ? loadSummerLotteryOperationStatus()
+        : Promise.resolve(null),
+      showPermissionManager
+        ? loadSummerLotteryOperatorGrants()
+        : Promise.resolve(null),
+    ]);
+
+    if (contactResult.status === 'fulfilled') {
+      setCampaign(contactResult.value.campaign);
+      setTargets(contactResult.value.targets);
+      setContactPermissions(contactResult.value.permissions || {
+        canRead: false,
+        canPurge: false,
+      });
+      setContactAccessDenied(false);
+    } else {
       setCampaign(null);
       setTargets([]);
-      setOperationStatus(null);
-      showToastRef.current?.(error.message || '中奖联系方式状态读取失败', 'error');
-    } finally {
-      setLoading(false);
+      setContactPermissions({ canRead: false, canPurge: false });
+      setContactAccessDenied(contactResult.reason?.status === 403);
+      if (contactResult.reason?.status !== 403) {
+        showToastRef.current?.(
+          contactResult.reason?.message || '中奖联系方式状态读取失败',
+          'error',
+        );
+      }
     }
-  }, [clearRevealedContact]);
+
+    if (statusResult.status === 'fulfilled') {
+      setOperationStatus(statusResult.value);
+    } else {
+      setOperationStatus(null);
+      showToastRef.current?.(
+        statusResult.reason?.message || '抽奖操作状态读取失败',
+        'error',
+      );
+    }
+
+    if (grantsResult.status === 'fulfilled') {
+      setOperatorGrants(grantsResult.value || []);
+    } else {
+      setOperatorGrants([]);
+      showToastRef.current?.(
+        grantsResult.reason?.message || '兑奖授权读取失败',
+        'error',
+      );
+    }
+    setLoading(false);
+  }, [clearRevealedContact, showOperationControls, showPermissionManager]);
 
   useEffect(() => {
     loadTargets();
@@ -85,7 +137,11 @@ export default function SummerLotteryContactPanel({ showToast }) {
     setActionEntryId(target.entryId);
     clearRevealedContact();
     try {
-      const contact = await readSummerLotteryContact({ entryId: target.entryId, reason });
+      const contact = await readSummerLotteryContact({
+        entryId: target.entryId,
+        reason,
+        campaignId: campaign?.campaignId || 'community-lottery',
+      });
       setRevealedContact(contact);
       revealTimerRef.current = window.setTimeout(clearRevealedContact, REVEAL_TTL_MS);
       showToastRef.current?.('联系方式已读取并写入访问审计，60 秒后自动隐藏', 'success');
@@ -104,13 +160,58 @@ export default function SummerLotteryContactPanel({ showToast }) {
     setActionEntryId(target.entryId);
     clearRevealedContact();
     try {
-      await purgeSummerLotteryContact(target.entryId);
+      await purgeSummerLotteryContact(
+        target.entryId,
+        campaign?.campaignId || 'community-lottery',
+      );
       showToastRef.current?.('联系方式密文已删除，公开中奖记录保持不变', 'success');
       await loadTargets();
     } catch (error) {
       showToastRef.current?.(error.message || '中奖联系方式删除失败', 'error');
     } finally {
       setActionEntryId('');
+    }
+  };
+
+  const handlePermission = async ({ targetUserId, capability, enabled }) => {
+    const campaignId = operationStatus?.campaignId
+      || campaign?.campaignId
+      || 'community-lottery';
+    const actionLabel = enabled ? '授予' : '撤销';
+    const capabilityLabel = capability === 'contact_read'
+      ? '查看与单条读取'
+      : '隐私删除';
+    const confirmed = window.confirm(
+      `${actionLabel}用户 ${targetUserId} 的“${capabilityLabel}”权限吗？\n\n权限只作用于活动 ${campaignId}，变更会写入不可修改审计。`,
+    );
+    if (!confirmed) return;
+
+    setPermissionAction(`${targetUserId}:${capability}`);
+    clearRevealedContact();
+    try {
+      const result = await setSummerLotteryOperatorCapability({
+        campaignId,
+        targetUserId,
+        capability,
+        enabled,
+      });
+      if (Array.isArray(result.grants)) {
+        setOperatorGrants(result.grants);
+      } else {
+        setOperatorGrants(await loadSummerLotteryOperatorGrants(campaignId));
+      }
+      if (enabled) setOperatorUserId('');
+      showToastRef.current?.(
+        result.result?.changed
+          ? `已${actionLabel}兑奖最小权限并写入审计`
+          : `兑奖权限已是目标状态，无需重复修改`,
+        'success',
+      );
+      await loadTargets();
+    } catch (error) {
+      showToastRef.current?.(error.message || '兑奖授权未修改', 'error');
+    } finally {
+      setPermissionAction('');
     }
   };
 
@@ -151,7 +252,8 @@ export default function SummerLotteryContactPanel({ showToast }) {
 
   return (
     <div className="space-y-4">
-      <section className="border border-zinc-300 p-4 dark:border-zinc-700">
+      {showOperationControls && (
+        <section className="border border-zinc-300 p-4 dark:border-zinc-700">
         <div className="flex items-start gap-3">
           <ShieldCheck size={18} className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-300" />
           <div className="min-w-0 flex-1">
@@ -196,7 +298,93 @@ export default function SummerLotteryContactPanel({ showToast }) {
             </div>
           </div>
         </div>
-      </section>
+        </section>
+      )}
+
+      {showPermissionManager && (
+        <section className="border border-indigo-300 p-4 dark:border-indigo-800">
+          <div className="flex items-start gap-3">
+            <KeyRound size={18} className="mt-0.5 shrink-0 text-indigo-600 dark:text-indigo-300" />
+            <div className="min-w-0 flex-1">
+              <h3 className="text-sm font-bold text-zinc-900 dark:text-white">兑奖最小权限</h3>
+              <p className="mt-1 text-xs text-zinc-500">
+                全局管理员角色不会自动获得联系方式权限。按活动分别授予“单条读取”和“隐私删除”，每次变更都会写入不可修改审计。
+              </p>
+              <div className="mt-3 flex flex-col gap-2 xl:flex-row">
+                <input
+                  value={operatorUserId}
+                  onChange={(event) => setOperatorUserId(event.target.value.trim())}
+                  placeholder="目标用户 UUID"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="min-w-0 flex-1 border border-zinc-300 bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-indigo-500 dark:border-zinc-700"
+                />
+                <button
+                  type="button"
+                  disabled={!operatorUserId || Boolean(permissionAction)}
+                  onClick={() => handlePermission({
+                    targetUserId: operatorUserId,
+                    capability: 'contact_read',
+                    enabled: true,
+                  })}
+                  className="inline-flex items-center justify-center gap-1 border border-indigo-400 px-3 py-2 text-xs font-bold text-indigo-700 disabled:opacity-40 dark:text-indigo-300"
+                >
+                  <UserPlus size={13} /> 授予单条读取
+                </button>
+                <button
+                  type="button"
+                  disabled={!operatorUserId || Boolean(permissionAction)}
+                  onClick={() => handlePermission({
+                    targetUserId: operatorUserId,
+                    capability: 'contact_purge',
+                    enabled: true,
+                  })}
+                  className="inline-flex items-center justify-center gap-1 border border-rose-400 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-40 dark:text-rose-300"
+                >
+                  <UserPlus size={13} /> 授予隐私删除
+                </button>
+              </div>
+              <div className="mt-4 space-y-2">
+                {operatorGrants.length === 0 ? (
+                  <p className="text-xs text-zinc-500">当前活动尚未授予兑奖权限。</p>
+                ) : operatorGrants.map((operatorGrant) => {
+                  const grantKey = `${operatorGrant.userId}:${operatorGrant.capability}`;
+                  const capabilityLabel = operatorGrant.capability === 'contact_read'
+                    ? '单条读取'
+                    : '隐私删除';
+                  return (
+                    <div
+                      key={grantKey}
+                      className="flex flex-col gap-2 border border-zinc-200 p-3 text-xs sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-bold text-zinc-800 dark:text-zinc-200">
+                          {operatorGrant.username || '未命名用户'} · {capabilityLabel}
+                        </div>
+                        <div className="mt-1 break-all font-mono text-[11px] text-zinc-500">
+                          {operatorGrant.userId}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={Boolean(permissionAction)}
+                        onClick={() => handlePermission({
+                          targetUserId: operatorGrant.userId,
+                          capability: operatorGrant.capability,
+                          enabled: false,
+                        })}
+                        className="inline-flex shrink-0 items-center justify-center gap-1 border border-zinc-300 px-3 py-1.5 font-bold text-zinc-600 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                      >
+                        <UserMinus size={13} /> 撤销
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -239,6 +427,10 @@ export default function SummerLotteryContactPanel({ showToast }) {
 
       {loading ? (
         <div className="flex items-center justify-center py-16 text-zinc-500"><RefreshCw size={20} className="mr-2 animate-spin" /> 正在读取</div>
+      ) : contactAccessDenied ? (
+        <div className="border border-rose-300 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/20 dark:text-rose-200">
+          当前账号没有此活动的兑奖读取权限。请由超级管理员在抽奖后台按用户 UUID 显式授权。
+        </div>
       ) : targets.length === 0 ? (
         <div className="border border-dashed border-zinc-300 py-16 text-center text-sm text-zinc-500 dark:border-zinc-700">当前活动没有可管理的中奖记录</div>
       ) : (
@@ -263,13 +455,13 @@ export default function SummerLotteryContactPanel({ showToast }) {
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">
-                    <button type="button" disabled={busy || !target.contactAvailable} onClick={() => handleRead(target, 'winner_notification')} className="inline-flex items-center gap-1 border border-sky-400 px-3 py-1.5 text-xs font-bold text-sky-700 disabled:opacity-40 dark:text-sky-300">
+                    <button type="button" disabled={busy || !contactPermissions.canRead || !target.contactAvailable} onClick={() => handleRead(target, 'winner_notification')} className="inline-flex items-center gap-1 border border-sky-400 px-3 py-1.5 text-xs font-bold text-sky-700 disabled:opacity-40 dark:text-sky-300">
                       <Eye size={13} /> 通知中奖
                     </button>
-                    <button type="button" disabled={busy || !target.contactAvailable} onClick={() => handleRead(target, 'claim_follow_up')} className="inline-flex items-center gap-1 border border-emerald-400 px-3 py-1.5 text-xs font-bold text-emerald-700 disabled:opacity-40 dark:text-emerald-300">
+                    <button type="button" disabled={busy || !contactPermissions.canRead || !target.contactAvailable} onClick={() => handleRead(target, 'claim_follow_up')} className="inline-flex items-center gap-1 border border-emerald-400 px-3 py-1.5 text-xs font-bold text-emerald-700 disabled:opacity-40 dark:text-emerald-300">
                       <Eye size={13} /> 兑奖跟进
                     </button>
-                    <button type="button" disabled={busy || !target.contactAvailable} onClick={() => handlePurge(target)} className="inline-flex items-center gap-1 border border-red-400 px-3 py-1.5 text-xs font-bold text-red-700 disabled:opacity-40 dark:text-red-300">
+                    <button type="button" disabled={busy || !contactPermissions.canPurge || !target.contactAvailable} onClick={() => handlePurge(target)} className="inline-flex items-center gap-1 border border-red-400 px-3 py-1.5 text-xs font-bold text-red-700 disabled:opacity-40 dark:text-red-300">
                       <Trash2 size={13} /> 隐私请求删除
                     </button>
                   </div>
