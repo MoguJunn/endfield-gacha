@@ -28,6 +28,7 @@ const INTERNAL_OPERATION_PATHS = [
   '/api/admin-site-health',
   '/api/admin-summer-lottery-contacts',
   '/api/admin-summer-lottery-operations',
+  '/api/admin-summer-lottery-permissions',
   '/api/admin-user-data',
   '/api/mail-delivery-feedback',
   '/api/mail-inbound',

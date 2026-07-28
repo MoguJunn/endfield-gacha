@@ -1,7 +1,11 @@
 import { getSupabaseAdminClient } from '../../_lib/authAdmin.js';
 import { decryptLotteryContact } from '../../_lib/lotteryContactCrypto.js';
 import { rejectDisallowedBrowserOrigin } from '../../_lib/http.js';
-import { requireSuperAdminUser } from '../../_lib/siteAuth.js';
+import {
+  LOTTERY_CONTACT_PURGE_CAPABILITY,
+  LOTTERY_CONTACT_READ_CAPABILITY,
+  requireLotteryOperatorCapability,
+} from '../../_lib/lotteryOperatorAuth.js';
 
 const DEFAULT_CAMPAIGN_ID = 'community-lottery';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -46,8 +50,8 @@ function normalizeReason(value, allowedReasons) {
   return allowedReasons.has(normalized) ? REASON_LABELS[normalized] : '';
 }
 
-function requireBrowserOriginForSiteSession(req, auth) {
-  return auth.source !== 'site_session' || Boolean(req.headers?.origin);
+function hasRequiredBrowserOrigin(req) {
+  return Boolean(req.headers?.origin);
 }
 
 function mapRpcError(error) {
@@ -59,6 +63,7 @@ function mapRpcError(error) {
     contact_retention_expired: [410, 'lottery_contact_expired'],
     invalid_contact_access_request: [400, 'invalid_lottery_contact_request'],
     invalid_contact_purge_request: [400, 'invalid_lottery_contact_request'],
+    lottery_operator_capability_required: [403, 'lottery_operator_capability_required'],
   };
   for (const [needle, [status, code]] of Object.entries(mappings)) {
     if (message.includes(needle)) return { status, code };
@@ -75,10 +80,18 @@ function mapDecryptError(error) {
   return { status: 422, code: 'lottery_contact_read_failed' };
 }
 
-async function listTargets(adminClient, campaignId, res) {
-  const { data, error } = await adminClient.rpc('list_summer_lottery_contact_targets', {
-    p_campaign_id: campaignId,
-  });
+async function listTargets(adminClient, campaignId, actorUserId, res) {
+  const [{ data, error }, purgeCapability] = await Promise.all([
+    adminClient.rpc('list_summer_lottery_contact_targets', {
+      p_campaign_id: campaignId,
+      p_actor_user_id: actorUserId,
+    }),
+    adminClient.rpc('has_summer_lottery_operator_capability', {
+      p_campaign_id: campaignId,
+      p_user_id: actorUserId,
+      p_capability: LOTTERY_CONTACT_PURGE_CAPABILITY,
+    }),
+  ]);
   if (error) {
     const mapped = mapRpcError(error);
     return sendError(res, mapped.status, '无法读取中奖联系方式状态', mapped.code);
@@ -89,6 +102,10 @@ async function listTargets(adminClient, campaignId, res) {
       campaignId: data?.campaignId || campaignId,
       contactRetentionUntil: data?.contactRetentionUntil || null,
       contactsClearedAt: data?.contactsClearedAt || null,
+    },
+    permissions: {
+      canRead: true,
+      canPurge: !purgeCapability.error && purgeCapability.data === true,
     },
     targets: Array.isArray(data?.targets) ? data.targets : [],
   });
@@ -179,27 +196,40 @@ export default async function adminSummerLotteryContactsHandler(req, res) {
   if (!adminClient) {
     return sendError(res, 503, 'Supabase admin client is not configured', 'supabase_admin_not_configured');
   }
-  const auth = await requireSuperAdminUser(req, { adminClient });
+  const body = req.method === 'GET' ? {} : parseBody(req);
+  const requestUrl = new URL(
+    req.url || '/api/admin-summer-lottery-contacts',
+    'http://localhost',
+  );
+  const campaignId = normalizeCampaignId(
+    body.campaignId || requestUrl.searchParams.get('campaignId'),
+  );
+  if (!campaignId) return sendError(res, 400, '活动 ID 无效', 'invalid_campaign_id');
+
+  const capability = req.method === 'DELETE'
+    ? LOTTERY_CONTACT_PURGE_CAPABILITY
+    : LOTTERY_CONTACT_READ_CAPABILITY;
+  const auth = await requireLotteryOperatorCapability(req, {
+    adminClient,
+    campaignId,
+    capability,
+  });
   if (!auth.ok) {
     return sendError(
       res,
       auth.status || 403,
-      auth.error || 'Super admin role required',
-      auth.code || 'super_admin_required',
+      auth.error || 'Lottery operator capability required',
+      auth.code || 'lottery_operator_capability_required',
     );
   }
-  if (req.method !== 'GET' && !requireBrowserOriginForSiteSession(req, auth)) {
-    return sendError(res, 403, 'Origin required for cookie-authenticated sensitive operations', 'origin_required');
+  if (req.method !== 'GET' && !hasRequiredBrowserOrigin(req)) {
+    return sendError(res, 403, 'Origin required for sensitive operations', 'origin_required');
   }
 
   if (req.method === 'GET') {
-    const url = new URL(req.url || '/api/admin-summer-lottery-contacts', 'http://localhost');
-    const campaignId = normalizeCampaignId(url.searchParams.get('campaignId'));
-    if (!campaignId) return sendError(res, 400, '活动 ID 无效', 'invalid_campaign_id');
-    return listTargets(adminClient, campaignId, res);
+    return listTargets(adminClient, campaignId, auth.user.id, res);
   }
 
-  const body = parseBody(req);
   if (req.method === 'POST') return readContact(adminClient, auth.user.id, body, res);
   return purgeContact(adminClient, auth.user.id, body, res);
 }

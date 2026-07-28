@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   decryptLotteryContact: vi.fn(),
   getSupabaseAdminClient: vi.fn(),
   rejectDisallowedBrowserOrigin: vi.fn(() => false),
-  requireSuperAdminUser: vi.fn(),
+  requireLotteryOperatorCapability: vi.fn(),
 }));
 
 vi.mock('../_lib/lotteryContactCrypto.js', () => ({
@@ -18,8 +18,10 @@ vi.mock('../_lib/authAdmin.js', () => ({
 vi.mock('../_lib/http.js', () => ({
   rejectDisallowedBrowserOrigin: mocks.rejectDisallowedBrowserOrigin,
 }));
-vi.mock('../_lib/siteAuth.js', () => ({
-  requireSuperAdminUser: mocks.requireSuperAdminUser,
+vi.mock('../_lib/lotteryOperatorAuth.js', () => ({
+  LOTTERY_CONTACT_PURGE_CAPABILITY: 'contact_purge',
+  LOTTERY_CONTACT_READ_CAPABILITY: 'contact_read',
+  requireLotteryOperatorCapability: mocks.requireLotteryOperatorCapability,
 }));
 
 import handler from '../_routes/root/admin-summer-lottery-contacts.js';
@@ -66,7 +68,7 @@ describe('admin summer lottery contacts API', () => {
     vi.clearAllMocks();
     adminClient = createAdminClient();
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
-    mocks.requireSuperAdminUser.mockResolvedValue({
+    mocks.requireLotteryOperatorCapability.mockResolvedValue({
       ok: true,
       source: 'site_session',
       user: { id: ACTOR_ID },
@@ -74,39 +76,54 @@ describe('admin summer lottery contacts API', () => {
     mocks.decryptLotteryContact.mockReturnValue('winner@example.test');
   });
 
-  it('rejects callers without the super-admin role', async () => {
-    mocks.requireSuperAdminUser.mockResolvedValue({
+  it('rejects callers without the campaign-scoped contact capability', async () => {
+    mocks.requireLotteryOperatorCapability.mockResolvedValue({
       ok: false,
       status: 403,
-      error: 'Super admin role required',
-      code: 'super_admin_required',
+      error: 'Lottery operator capability required',
+      code: 'lottery_operator_capability_required',
     });
     const res = createResponse();
     await handler(createRequest(), res);
     expect(res.statusCode).toBe(403);
-    expect(res.body.code).toBe('super_admin_required');
+    expect(res.body.code).toBe('lottery_operator_capability_required');
     expect(adminClient.rpc).not.toHaveBeenCalled();
   });
 
   it('lists winner metadata without returning a contact value', async () => {
-    adminClient.rpc.mockResolvedValue({
-      data: {
-        campaignId: 'community-lottery',
-        contactRetentionUntil: '2026-09-24T12:00:00.000Z',
-        contactsClearedAt: null,
-        targets: [{ entryId: ENTRY_ID, contactType: 'email', contactAvailable: true }],
-      },
-      error: null,
-    });
+    adminClient.rpc
+      .mockResolvedValueOnce({
+        data: {
+          campaignId: 'community-lottery',
+          contactRetentionUntil: '2026-09-24T12:00:00.000Z',
+          contactsClearedAt: null,
+          targets: [{ entryId: ENTRY_ID, contactType: 'email', contactAvailable: true }],
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: true, error: null });
     const res = createResponse();
     await handler(createRequest('GET'), res);
     expect(res.statusCode).toBe(200);
     expect(res.body.targets).toEqual([
       { entryId: ENTRY_ID, contactType: 'email', contactAvailable: true },
     ]);
+    expect(res.body.permissions).toEqual({ canRead: true, canPurge: true });
     expect(JSON.stringify(res.body)).not.toContain('winner@example.test');
     expect(res.headers['Cache-Control']).toBe('no-store');
     expect(res.headers['Referrer-Policy']).toBe('no-referrer');
+    expect(mocks.requireLotteryOperatorCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        adminClient,
+        campaignId: 'community-lottery',
+        capability: 'contact_read',
+      },
+    );
+    expect(adminClient.rpc).toHaveBeenCalledWith('list_summer_lottery_contact_targets', {
+      p_campaign_id: 'community-lottery',
+      p_actor_user_id: ACTOR_ID,
+    });
   });
 
   it('audits through the RPC and returns only the decrypted single contact', async () => {
@@ -206,6 +223,14 @@ describe('admin summer lottery contacts API', () => {
       campaignId: 'community-lottery',
       cleared: true,
     });
+    expect(mocks.requireLotteryOperatorCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        adminClient,
+        campaignId: 'community-lottery',
+        capability: 'contact_purge',
+      },
+    );
   });
 
   it('rejects disallowed methods before contacting the database', async () => {
