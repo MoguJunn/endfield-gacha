@@ -27,6 +27,7 @@ import {
 } from '../../utils/homeVersionTimeline.js';
 import { getAnnouncementTypeLabel, splitSiteAnnouncements } from '../../utils/announcementMeta.js';
 import { DEFAULT_HOME_ROADMAP_SUMMARY, normalizeHomeRoadmapItems } from '../../constants/homeRoadmap.js';
+import SummerLotteryBanner from '../../components/home/SummerLotteryBanner.jsx';
 
 
 const DEFAULT_LINKS = [
@@ -300,6 +301,8 @@ export default function MobileHomePageView() {
           </div>
           <Star size={120} className="absolute -right-6 -bottom-6 text-slate-900 dark:text-white opacity-[0.03]" />
       </div>
+
+      <SummerLotteryBanner compact />
 
       {/* Security & Community */}
       <div className="grid grid-cols-2 gap-3 mb-6">

@@ -25,8 +25,10 @@ import { useDurableNotifications } from '../../hooks';
 import { useScrollToHighlight } from '../../hooks/app/useScrollToHighlight';
 import { useI18n } from '../../i18n/index.js';
 import { useOAuthCallbackNotice } from '../../hooks/auth/useOAuthCallbackNotice.js';
+import { useSummerLotterySsoContinuation } from '../../hooks/auth/useSummerLotterySsoContinuation.js';
 
 const DeveloperApiDocsPage = lazy(() => import('../../components/docs/DeveloperApiDocsPage'));
+const SummerLotteryOperatorPage = lazy(() => import('../../components/admin/SummerLotteryOperatorPage'));
 
 function MobileRouteFallback({ label }) {
   return (
@@ -42,7 +44,8 @@ function MobileRouteFallback({ label }) {
 function MobileLayout({ onOAuthSessionSynced }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, userRole, authResolved, showAuthModal, closeAuthModal, setUser } = useAuthStore();
+  const { user, userRole, authResolved, showAuthModal, openAuthModal, closeAuthModal, setUser } = useAuthStore();
+  useSummerLotterySsoContinuation({ user, authResolved, openAuthModal });
   const { t } = useI18n();
   const activeTab = getMobileTabFromPath(location.pathname);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -98,6 +101,22 @@ function MobileLayout({ onOAuthSessionSynced }) {
             }
           />
           <Route path="about" element={<MobileAboutView />} />
+          <Route
+            path="lottery-contacts"
+            element={
+              isResolvingRole ? (
+                <MobileRouteFallback label="正在校验兑奖权限..." />
+              ) : user ? (
+                <div className="flex-1 overflow-y-auto p-4">
+                  <Suspense fallback={<MobileRouteFallback label="正在加载兑奖工作台..." />}>
+                    <SummerLotteryOperatorPage />
+                  </Suspense>
+                </div>
+              ) : (
+                <Navigate to={getMobilePathForTab('home')} replace />
+              )
+            }
+          />
           <Route
             path="admin"
             element={

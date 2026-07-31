@@ -26,6 +26,9 @@ const INTERNAL_OPERATION_PATHS = [
   '/api/admin-pool-push',
   '/api/admin-pools',
   '/api/admin-site-health',
+  '/api/admin-summer-lottery-contacts',
+  '/api/admin-summer-lottery-operations',
+  '/api/admin-summer-lottery-permissions',
   '/api/admin-user-data',
   '/api/mail-delivery-feedback',
   '/api/mail-inbound',
@@ -33,6 +36,7 @@ const INTERNAL_OPERATION_PATHS = [
   '/api/status-admin',
   '/api/status-endpoint-probe',
   '/api/status-probe',
+  '/api/summer-lottery-contact-retention',
 ];
 
 const AUTH_OPERATION_PATHS = [
@@ -47,6 +51,8 @@ const AUTH_OPERATION_PATHS = [
   '/api/auth/identities/unlink',
   '/api/auth/session',
   '/api/auth/session/logout',
+  '/api/summer-lottery-backend',
+  '/api/summer-lottery-sso/start',
 ];
 
 const USER_OPERATION_PATHS = [
@@ -61,6 +67,15 @@ const USER_OPERATION_PATHS = [
 ];
 
 const PUBLIC_STATUS_PATHS = ['/api/site-status'];
+
+const LOTTERY_SITE_PATHS = [
+  '/api/lottery',
+  '/api/lottery/enter',
+  '/api/lottery/health',
+  '/api/auth/sso/start',
+  '/api/auth/sso/callback',
+  '/api/auth/logout',
+];
 
 describe('API route registry', () => {
   it('registers every public v1 OpenAPI path in the single-function router map', () => {
@@ -114,6 +129,15 @@ describe('API route registry', () => {
     const routeEntries = new Map(getApiRouteEntries());
 
     PUBLIC_STATUS_PATHS.forEach((path) => {
+      expect(routeEntries.has(path)).toBe(true);
+      expect(getApiRouteHandler(path)).toEqual(expect.any(Function));
+    });
+  });
+
+  it('registers the same-origin lottery site endpoints', () => {
+    const routeEntries = new Map(getApiRouteEntries());
+
+    LOTTERY_SITE_PATHS.forEach((path) => {
       expect(routeEntries.has(path)).toBe(true);
       expect(getApiRouteHandler(path)).toEqual(expect.any(Function));
     });

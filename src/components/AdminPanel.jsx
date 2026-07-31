@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from 'react';
-import { Shield, RefreshCw, ChevronRight, Users, Database, Layers, Star, Bell, Settings, KeyRound, Bot, Globe, Activity, Mail, MessageSquare, AlertTriangle } from 'lucide-react';
+import { Shield, RefreshCw, ChevronRight, Users, Database, Layers, Star, Bell, Settings, KeyRound, Bot, Globe, Activity, Mail, MessageSquare, AlertTriangle, Gift } from 'lucide-react';
 import { useAdminData, useUserDataViewer } from '../hooks/admin';
 
 const CharacterManagement = lazy(() => import('./admin/CharacterManagement'));
@@ -15,6 +15,7 @@ const AccountRecoveryPanel = lazy(() => import('./admin/panels/AccountRecoveryPa
 const DeveloperApiPanel = lazy(() => import('./admin/panels/DeveloperApiPanel'));
 const TicketPanel = lazy(() => import('./TicketPanel'));
 const HistoryAnomalyReviewPanel = lazy(() => import('./admin/panels/HistoryAnomalyReviewPanel'));
+const SummerLotteryContactPanel = lazy(() => import('./admin/panels/SummerLotteryContactPanel'));
 
 // 侧边栏菜单项配置
 const MENU_ITEMS = [
@@ -23,6 +24,7 @@ const MENU_ITEMS = [
   { id: 'users', label: '用户管理', icon: Users },
   { id: 'userData', label: '用户数据', icon: Database },
   { id: 'historyAnomalies', label: '异常日志审阅', icon: AlertTriangle },
+  { id: 'summerLotteryContacts', label: '抽奖兑奖联系', icon: Gift },
   { id: 'pools', label: '卡池管理', icon: Layers },
   { id: 'characters', label: '角色管理', icon: Star },
   { id: 'announcements', label: '公告管理', icon: Bell },
@@ -133,6 +135,14 @@ const AdminPanel = React.memo(({ user, userRole, showToast, addDurableNotificati
 
       case 'historyAnomalies':
         return <HistoryAnomalyReviewPanel showToast={showToast} />;
+
+      case 'summerLotteryContacts':
+        return (
+          <SummerLotteryContactPanel
+            showToast={showToast}
+            showPermissionManager
+          />
+        );
 
       case 'pools':
         return <PoolManagement showToast={showToast} />;

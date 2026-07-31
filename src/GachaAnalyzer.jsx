@@ -21,6 +21,7 @@ import {
   getGameAccountSelectionValue,
   isGameAccountSelectionMatch,
 } from './utils/gameAccountMetadata.js';
+import { useSummerLotterySsoContinuation } from './hooks/auth/useSummerLotterySsoContinuation.js';
 
 export default function GachaAnalyzer() {
   // --- 从 Zustand Stores 获取状态 ---
@@ -34,6 +35,7 @@ export default function GachaAnalyzer() {
   const authResolved = useAuthStore(state => state.authResolved);
   const syncing = useAuthStore(state => state.syncing);
   const openAuthModal = useAuthStore(state => state.openAuthModal);
+  useSummerLotterySsoContinuation({ user, authResolved, openAuthModal });
 
   // 应用全局状态
   const globalStatsLoading = useAppStore(state => state.globalStatsLoading);

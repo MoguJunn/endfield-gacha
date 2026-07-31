@@ -37,6 +37,7 @@ import GuideCard from './GuideCard';
 import PoolMechanicsCard from './PoolMechanicsCard';
 import RoadmapCard from './RoadmapCard';
 import HomeRotationScheduleCard from './RotationScheduleCard';
+import SummerLotteryBanner from './SummerLotteryBanner';
 import { ACCOUNT_RECOVERY_QQ_GROUP, ENGLISH_COMMUNITY_DISCORD_URL } from '../../constants/community';
 import {
   STORAGE_KEYS,
@@ -355,6 +356,8 @@ const HomePage = React.memo(() => {
           <Star size={200} />
         </div>
       </div>
+
+      <SummerLotteryBanner />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800/50 rounded-none overflow-hidden shadow-sm">
