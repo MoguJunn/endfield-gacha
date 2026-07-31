@@ -2,7 +2,7 @@ import React from 'react';
 import { ArrowUpRight, CalendarDays, Gift, Sparkles, Waves } from 'lucide-react';
 import { useI18n } from '../../i18n/index.js';
 
-const LOTTERY_URL = String(import.meta.env.VITE_SUMMER_LOTTERY_URL || '').trim();
+const LOTTERY_URL = String(import.meta.env.VITE_SUMMER_LOTTERY_URL || '/lottery').trim();
 
 export default function SummerLotteryBanner({ compact = false }) {
   const { t } = useI18n();
@@ -11,8 +11,6 @@ export default function SummerLotteryBanner({ compact = false }) {
   return (
     <a
       href={LOTTERY_URL}
-      target="_blank"
-      rel="noopener noreferrer"
       className={compact
         ? 'group relative mb-6 block overflow-hidden rounded-xl border border-cyan-300/70 bg-gradient-to-br from-cyan-500 via-sky-600 to-blue-700 p-4 text-white shadow-lg'
         : 'group relative block overflow-hidden border border-cyan-300/70 bg-gradient-to-r from-sky-700 via-cyan-600 to-cyan-400 px-6 py-5 text-white shadow-md transition-transform hover:-translate-y-0.5 hover:shadow-xl'}

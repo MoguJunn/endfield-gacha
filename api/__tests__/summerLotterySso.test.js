@@ -52,7 +52,7 @@ function createRequest({ state = '', cookie = '' } = {}) {
 describe('summer lottery SSO start', () => {
   beforeEach(() => {
     process.env.VITE_APP_URL = 'https://main.example.com';
-    process.env.LOTTERY_SITE_URL = 'https://lottery.example.com';
+    process.env.LOTTERY_SITE_URL = 'https://main.example.com/lottery';
     process.env.LOTTERY_SSO_AUDIENCE = 'summer-lottery-2026';
     process.env.LOTTERY_BACKEND_SECRET = 's'.repeat(43);
     mocks.consumeLotteryRateLimit.mockReset();
@@ -76,7 +76,7 @@ describe('summer lottery SSO start', () => {
     const response = createResponse();
     await summerLotterySsoStartHandler(createRequest({ state: 'too-short' }), response);
     expect(response.statusCode).toBe(303);
-    expect(response.headers.Location).toBe('https://lottery.example.com/?auth=state_error');
+    expect(response.headers.Location).toBe('https://main.example.com/lottery/?auth=state_error');
     expect(mocks.loadSiteSession).not.toHaveBeenCalled();
   });
 
@@ -108,7 +108,7 @@ describe('summer lottery SSO start', () => {
     await summerLotterySsoStartHandler(createRequest({ state }), response);
 
     expect(response.statusCode).toBe(303);
-    expect(response.headers.Location).toBe('https://lottery.example.com/?auth=rate_error');
+    expect(response.headers.Location).toBe('https://main.example.com/lottery/?auth=rate_error');
     expect(response.headers['Retry-After']).toBe('41');
     expect(mocks.loadSiteSession).not.toHaveBeenCalled();
   });
@@ -148,7 +148,8 @@ describe('summer lottery SSO start', () => {
     expect(insert.mock.calls[0][0]).not.toHaveProperty('ticket');
     expect(response.statusCode).toBe(303);
     const target = new URL(response.headers.Location);
-    expect(target.origin).toBe('https://lottery.example.com');
+    expect(target.origin).toBe('https://main.example.com');
+    expect(target.pathname).toBe('/lottery/');
     expect(target.search).toBe('');
     const fragment = new URLSearchParams(target.hash.slice(1));
     expect(fragment.get('state')).toBe(state);

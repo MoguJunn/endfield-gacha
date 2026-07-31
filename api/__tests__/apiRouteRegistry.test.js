@@ -68,6 +68,15 @@ const USER_OPERATION_PATHS = [
 
 const PUBLIC_STATUS_PATHS = ['/api/site-status'];
 
+const LOTTERY_SITE_PATHS = [
+  '/api/lottery',
+  '/api/lottery/enter',
+  '/api/lottery/health',
+  '/api/auth/sso/start',
+  '/api/auth/sso/callback',
+  '/api/auth/logout',
+];
+
 describe('API route registry', () => {
   it('registers every public v1 OpenAPI path in the single-function router map', () => {
     const openApiPaths = Object.keys(buildDevApiOpenApiSpec().paths);
@@ -120,6 +129,15 @@ describe('API route registry', () => {
     const routeEntries = new Map(getApiRouteEntries());
 
     PUBLIC_STATUS_PATHS.forEach((path) => {
+      expect(routeEntries.has(path)).toBe(true);
+      expect(getApiRouteHandler(path)).toEqual(expect.any(Function));
+    });
+  });
+
+  it('registers the same-origin lottery site endpoints', () => {
+    const routeEntries = new Map(getApiRouteEntries());
+
+    LOTTERY_SITE_PATHS.forEach((path) => {
       expect(routeEntries.has(path)).toBe(true);
       expect(getApiRouteHandler(path)).toEqual(expect.any(Function));
     });

@@ -2,6 +2,21 @@
 
 主站只承担身份、私有数据网关、开奖控制面、兑奖联系方式解密和到期清理。独立活动站不持有主站 Cookie、数据库 service role、联系方式 keyring 或开奖私有种子。
 
+## 同域部署
+
+生产环境只使用现有主站 Vercel 项目和域名。根应用仍部署在 `/`，构建脚本把锁定到精确 Git 提交的 `open-lottery` 依赖构建到 `/lottery`；统一的 `api/router.js` 同时承载活动快照、报名、SSO 回调和退出接口。无需新增 DNS 记录或第二个 Vercel 项目。
+
+关键配置：
+
+- `VITE_SUMMER_LOTTERY_URL=/lottery`
+- `LOTTERY_SITE_URL=https://ef-gacha.mogujun.icu/lottery`
+- `MAIN_SITE_URL=https://ef-gacha.mogujun.icu`
+- `LOTTERY_BODY_FONT_STYLESHEET_URL=/lottery/local-activity/fonts/site-fonts.css`
+
+`LOTTERY_SITE_URL` 是包含路径的活动基础 URL；敏感写请求的 Origin 校验仍只接受 `https://ef-gacha.mogujun.icu`。活动会话 Cookie 保持独立名称、host-only 和 `Path=/`，以便同源 `/api` 路由使用，但不会替代或复用主站会话 Cookie。
+
+主站仓库中的 `src/assets/lottery/` 保存本次活动奖品图；构建时会与主站已有 HarmonyOS Sans、Novecento 字体一起复制到活动产物。公开模板仓库不包含这些活动专属素材。
+
 ## 数据库版本
 
 共享 Supabase 数据库必须按顺序应用独立活动站仓库的迁移 160–165：

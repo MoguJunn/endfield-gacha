@@ -17,11 +17,18 @@ const STATE_PATTERN = /^[A-Za-z0-9_-]{32,128}$/u;
 const TICKET_TTL_SECONDS = 60;
 const PENDING_TTL_SECONDS = 10 * 60;
 
-function normalizeOrigin(value) {
+function normalizeBaseUrl(value) {
   try {
     const url = new URL(String(value || '').trim());
-    if (!['http:', 'https:'].includes(url.protocol)) return '';
-    return url.origin;
+    if (
+      !['http:', 'https:'].includes(url.protocol)
+      || url.username
+      || url.password
+      || url.search
+      || url.hash
+    ) return '';
+    const pathname = url.pathname.replace(/\/+$/u, '');
+    return `${url.origin}${pathname === '/' ? '' : pathname}`;
   } catch {
     return '';
   }
@@ -40,8 +47,8 @@ function sendError(res, status, code, message) {
   return res.status(status).json({ success: false, error: code, code, message });
 }
 
-function redirectLotteryError(res, lotteryOrigin, code) {
-  const target = new URL('/', lotteryOrigin);
+function redirectLotteryError(res, lotteryBaseUrl, code) {
+  const target = new URL(`${lotteryBaseUrl}/`);
   target.searchParams.set('auth', code);
   return redirect(res, target.toString());
 }
@@ -67,7 +74,7 @@ function getPendingState(req) {
 }
 
 function buildMainLoginUrl(req) {
-  const configuredOrigin = normalizeOrigin(process.env.VITE_APP_URL || process.env.APP_URL);
+  const configuredOrigin = normalizeBaseUrl(process.env.VITE_APP_URL || process.env.APP_URL);
   if (configuredOrigin) {
     return `${configuredOrigin}/?summer_lottery_login=1`;
   }
@@ -83,21 +90,21 @@ export default async function summerLotterySsoStartHandler(req, res) {
     return sendError(res, 405, 'method_not_allowed', 'Method not allowed.');
   }
 
-  const lotteryOrigin = normalizeOrigin(process.env.LOTTERY_SITE_URL);
+  const lotteryBaseUrl = normalizeBaseUrl(process.env.LOTTERY_SITE_URL);
   const audience = String(process.env.LOTTERY_SSO_AUDIENCE || DEFAULT_AUDIENCE).trim().slice(0, 100);
-  if (!lotteryOrigin || !audience) {
+  if (!lotteryBaseUrl || !audience) {
     return sendError(res, 503, 'lottery_sso_not_configured', 'Summer lottery SSO is not configured.');
   }
 
   const suppliedState = String(req.query?.state || '').trim();
   const state = suppliedState || getPendingState(req);
   if (!STATE_PATTERN.test(state)) {
-    return redirectLotteryError(res, lotteryOrigin, 'state_error');
+    return redirectLotteryError(res, lotteryBaseUrl, 'state_error');
   }
 
   const adminClient = getSupabaseAdminClient();
   if (!adminClient) {
-    return redirectLotteryError(res, lotteryOrigin, 'service_error');
+    return redirectLotteryError(res, lotteryBaseUrl, 'service_error');
   }
   let rateLimit;
   try {
@@ -107,16 +114,16 @@ export default async function summerLotterySsoStartHandler(req, res) {
       secret: process.env.LOTTERY_BACKEND_SECRET,
     });
   } catch {
-    return redirectLotteryError(res, lotteryOrigin, 'service_error');
+    return redirectLotteryError(res, lotteryBaseUrl, 'service_error');
   }
   if (!rateLimit.allowed) {
     res.setHeader('Retry-After', String(rateLimit.retryAfter));
-    return redirectLotteryError(res, lotteryOrigin, 'rate_error');
+    return redirectLotteryError(res, lotteryBaseUrl, 'rate_error');
   }
 
   const session = await loadSiteSession(adminClient, { req, res, touch: false });
   if (!session.ok) {
-    return redirectLotteryError(res, lotteryOrigin, 'session_error');
+    return redirectLotteryError(res, lotteryBaseUrl, 'session_error');
   }
 
   if (!session.authenticated || !session.user?.id) {
@@ -124,7 +131,7 @@ export default async function summerLotterySsoStartHandler(req, res) {
     return redirect(res, buildMainLoginUrl(req));
   }
   if (!session.session?.id) {
-    return redirectLotteryError(res, lotteryOrigin, 'session_error');
+    return redirectLotteryError(res, lotteryBaseUrl, 'session_error');
   }
 
   const ticket = randomBytes(32).toString('base64url');
@@ -141,7 +148,7 @@ export default async function summerLotterySsoStartHandler(req, res) {
       .is('consumed_at', null),
   ]);
   if (ticketCleanup.error || sessionCleanup.error || pendingCleanup.error) {
-    return redirectLotteryError(res, lotteryOrigin, 'service_error');
+    return redirectLotteryError(res, lotteryBaseUrl, 'service_error');
   }
   const { error } = await adminClient
     .from('summer_lottery_sso_tickets')
@@ -155,11 +162,11 @@ export default async function summerLotterySsoStartHandler(req, res) {
     });
 
   if (error) {
-    return redirectLotteryError(res, lotteryOrigin, 'ticket_error');
+    return redirectLotteryError(res, lotteryBaseUrl, 'ticket_error');
   }
 
   setPendingStateCookie(req, res, '', 0);
-  const callbackUrl = new URL('/', lotteryOrigin);
+  const callbackUrl = new URL(`${lotteryBaseUrl}/`);
   callbackUrl.hash = new URLSearchParams({
     sso_ticket: ticket,
     state,

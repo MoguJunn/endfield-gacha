@@ -84,6 +84,7 @@ import bindingRevokeHandler from './integrations/bindings/revoke.js';
 import bindingVerifyHandler from './integrations/bindings/verify.js';
 import botImportNotifyHandler from './integrations/bot/import-notify.js';
 import historyAnomaliesHandler from './root/history-anomalies.js';
+import lotterySiteHandler from 'open-lottery/api/router.js';
 
 async function devV1BotShareCardHandler(req, res) {
   const mod = await import('./dev/v1/bot/share-card.js');
@@ -148,6 +149,12 @@ export const API_ROUTE_ENTRIES = [
   ['/api/automation-feed', automationFeedHandler],
   ['/api/bootstrap', bootstrapHandler],
   ['/api/history-anomalies', historyAnomaliesHandler],
+  ['/api/lottery', lotterySiteHandler],
+  ['/api/lottery/enter', lotterySiteHandler],
+  ['/api/lottery/health', lotterySiteHandler],
+  ['/api/auth/sso/start', lotterySiteHandler],
+  ['/api/auth/sso/callback', lotterySiteHandler],
+  ['/api/auth/logout', lotterySiteHandler],
   ['/api/mail-delivery-feedback', mailDeliveryFeedbackHandler],
   ['/api/mail-inbound', mailInboundHandler],
   ['/api/mail-outbox-worker', mailOutboxWorkerHandler],
