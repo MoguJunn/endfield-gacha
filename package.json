@@ -107,7 +107,7 @@
     "fflate": "^0.8.3",
     "https-proxy-agent": "^7.0.6",
     "lucide-react": "^0.555.0",
-    "open-lottery": "git+https://github.com/MoguJunn/endfield-summer-lottery.git#ad583f9110e18e5bfd48d705d816de206c6242b6",
+    "open-lottery": "git+https://github.com/MoguJunn/endfield-summer-lottery.git#a5c74774928825eb0458f3f6e193ffd23ca10d18",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-markdown": "^10.1.0",
