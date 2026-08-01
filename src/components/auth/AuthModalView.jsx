@@ -86,17 +86,38 @@ export default function AuthModalView({
     recoveryRequestForm.requestType === 'delete_account'
       ? tt('注销旧账号', 'Delete Old Account')
       : tt('申请人工恢复', 'Manual Recovery');
+  const submitButtonRef = React.useRef(null);
+  const captchaWasReadyRef = React.useRef(captchaReady === true);
+
+  React.useEffect(() => {
+    const becameReady = mode === 'register' && captchaReady === true && !captchaWasReadyRef.current;
+    captchaWasReadyRef.current = captchaReady === true;
+    if (!becameReady) return;
+
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+    const scheduleFrame = window.requestAnimationFrame || ((callback) => window.setTimeout(callback, 0));
+    scheduleFrame(() => {
+      submitButtonRef.current?.scrollIntoView({
+        behavior: reduceMotion ? 'auto' : 'smooth',
+        block: 'nearest',
+      });
+    });
+  }, [captchaReady, mode]);
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in"
+      className="auth-modal-backdrop-enter fixed inset-0 z-[80] overflow-y-auto overscroll-contain bg-black/65 p-2 backdrop-blur-sm sm:p-4"
       onClick={onClose}
     >
+      <div className="flex min-h-full items-start justify-center sm:items-center">
       <div
-        className="bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-lg overflow-hidden animate-scale-up border border-zinc-200 dark:border-zinc-800"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="auth-modal-title"
+        className="auth-modal-panel-enter my-auto flex max-h-[calc(100dvh-1rem)] w-full max-w-lg flex-col overflow-hidden rounded-none border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 sm:max-h-[calc(100dvh-2rem)]"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="relative bg-gradient-to-r from-zinc-900 to-zinc-800 dark:from-zinc-950 dark:to-zinc-900 text-white p-6 border-b-4 border-endfield-yellow">
+        <div className="relative shrink-0 border-b-4 border-endfield-yellow bg-gradient-to-r from-zinc-900 to-zinc-800 p-4 text-white dark:from-zinc-950 dark:to-zinc-900 sm:p-6">
           <div className="absolute inset-0 opacity-10 pointer-events-none">
             <div
               className="absolute inset-0"
@@ -109,24 +130,26 @@ export default function AuthModalView({
           </div>
 
           <button
+            type="button"
+            aria-label={tt('关闭账号窗口', 'Close account dialog')}
             onClick={(event) => {
               event.stopPropagation();
               onClose();
             }}
-            className="absolute top-4 right-4 text-zinc-400 hover:text-white transition-colors p-1 hover:bg-white/10 rounded z-50"
+            className="absolute right-3 top-3 z-50 p-1.5 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white sm:right-4 sm:top-4"
           >
             <X size={20} />
           </button>
 
           <div className="relative z-10">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 bg-endfield-yellow flex items-center justify-center">
+            <div className="mb-1.5 flex items-center gap-2.5 sm:mb-2 sm:gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center bg-endfield-yellow sm:h-10 sm:w-10">
                 {mode === 'login' ? <LogIn size={20} className="text-black" /> :
                   mode === 'register' ? <UserPlus size={20} className="text-black" /> :
                     <KeyRound size={20} className="text-black" />}
               </div>
               <div>
-                <h2 className="text-lg sm:text-xl font-bold tracking-tight font-mono">
+                <h2 id="auth-modal-title" className="font-mono text-base font-bold tracking-tight sm:text-xl">
                   {mode === 'login' ? 'SIGN IN' : mode === 'register' ? 'REGISTER' : 'ACCOUNT RECOVERY'}
                 </h2>
                 <p className="text-zinc-400 text-xs uppercase tracking-widest leading-tight">
@@ -138,7 +161,7 @@ export default function AuthModalView({
                 </p>
               </div>
             </div>
-            <p className="text-zinc-300 text-sm mt-3 leading-relaxed">
+            <p className="mt-2 pr-6 text-xs leading-relaxed text-zinc-300 sm:mt-3 sm:pr-0 sm:text-sm">
               {mode === 'login'
                 ? tt('登录以同步你的抽卡数据到云端', 'Sign in to sync your pull history to the cloud.')
                 : mode === 'register'
@@ -153,7 +176,8 @@ export default function AuthModalView({
 
         <form
           onSubmit={onSubmit}
-          className="p-6 space-y-4 bg-slate-50 dark:bg-zinc-950"
+          data-testid="auth-modal-scroll-region"
+          className="auth-modal-scroll-region min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-slate-50 p-4 max-sm:[&_input:not([type='checkbox'])]:!py-2.5 dark:bg-zinc-950 sm:space-y-4 sm:p-6"
         >
           {message && (
             <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 px-4 py-3 rounded-none text-sm">
@@ -682,9 +706,10 @@ export default function AuthModalView({
           )}
 
           <button
+            ref={submitButtonRef}
             type="submit"
             disabled={submitDisabled}
-            className="w-full min-h-[48px] bg-endfield-yellow hover:bg-yellow-400 disabled:bg-yellow-300 dark:disabled:bg-yellow-600 disabled:cursor-not-allowed text-black font-bold uppercase tracking-wider py-3 rounded-none flex items-center justify-center gap-2 transition-colors shadow-lg mt-6 whitespace-normal text-center leading-tight"
+            className="mt-2 flex min-h-[48px] w-full items-center justify-center gap-2 bg-endfield-yellow py-3 text-center font-bold uppercase leading-tight tracking-wider text-black shadow-lg transition-[background-color,transform,box-shadow] hover:-translate-y-0.5 hover:bg-yellow-400 hover:shadow-xl disabled:translate-y-0 disabled:cursor-not-allowed disabled:bg-yellow-300 disabled:shadow-none dark:disabled:bg-yellow-600 sm:mt-6"
           >
             {loading ? (
               <Loader2 size={20} className="animate-spin" />
@@ -765,7 +790,7 @@ export default function AuthModalView({
           )}
         </form>
 
-        <div className="px-6 py-4 bg-white dark:bg-zinc-900 border-t border-zinc-100 dark:border-zinc-800 text-center">
+        <div className="shrink-0 border-t border-zinc-100 bg-white px-4 py-3 text-center dark:border-zinc-800 dark:bg-zinc-900 sm:px-6 sm:py-4">
           <p className="text-slate-500 dark:text-zinc-500 text-sm">
             {mode === 'login' ? (
               <>
@@ -801,6 +826,7 @@ export default function AuthModalView({
             )}
           </p>
         </div>
+      </div>
       </div>
     </div>
   );

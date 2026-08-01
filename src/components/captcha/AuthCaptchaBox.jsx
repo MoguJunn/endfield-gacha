@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
 import {
   ensureAuthCaptchaProviderScriptLoaded,
   getAuthCaptchaClientConfig,
@@ -62,7 +62,7 @@ export default function AuthCaptchaBox({
     let cancelled = false;
     publishState('loading', {
       provider: 'pow',
-      message: tt('正在签发工作量证明挑战...', 'Issuing proof-of-work challenge...'),
+      message: tt('正在准备本地校验...', 'Preparing local verification...'),
     });
 
     createAuthPowChallenge(config.action)
@@ -71,14 +71,14 @@ export default function AuthCaptchaBox({
         setPowChallenge(challenge);
         publishState('ready', {
           provider: 'pow',
-          message: tt('请启动值守终端完成验证。', 'Start the terminal check to complete verification.'),
+          message: tt('点击“开始校验”完成验证。', 'Select Start Check to complete verification.'),
         });
       })
       .catch((error) => {
         if (cancelled) return;
         publishState('error', {
           provider: 'pow',
-          message: error?.message || tt('工作量证明挑战签发失败。', 'Failed to issue proof-of-work challenge.'),
+          message: error?.message || tt('本地校验准备失败，请改用网页验证。', 'Failed to prepare local verification. Use the web check instead.'),
         });
       });
 
@@ -118,7 +118,7 @@ export default function AuthCaptchaBox({
             sitekey: config.siteKey,
             action: config.action,
             theme: 'auto',
-            size: 'normal',
+            size: 'flexible',
             appearance: 'always',
             execution: 'render',
             callback: (token) => {
@@ -133,7 +133,7 @@ export default function AuthCaptchaBox({
               if (cancelled) return;
               publishState('error', {
                 provider: 'turnstile',
-                message: tt(`Turnstile 验证失败：${code || 'unknown'}。你可以改用值守终端。`, `Turnstile failed: ${code || 'unknown'}. You can use terminal PoW instead.`),
+                message: tt(`网页验证失败：${code || 'unknown'}。你可以改用本地校验。`, `Web verification failed: ${code || 'unknown'}. You can use the local check instead.`),
               });
             },
             'expired-callback': () => {
@@ -175,10 +175,32 @@ export default function AuthCaptchaBox({
     };
   }, [config, mode, publishState, tt]);
 
+  const selectMode = React.useCallback((nextMode) => {
+    if (nextMode === mode) return;
+
+    setPowChallenge(null);
+    publishState('loading', {
+      provider: nextMode,
+      message: nextMode === 'pow'
+        ? tt('正在准备本地校验...', 'Preparing local verification...')
+        : tt('正在准备网页验证...', 'Preparing web verification...'),
+    });
+    setMode(nextMode);
+  }, [mode, publishState, tt]);
+
   if (!config.enabled) {
     return null;
   }
 
+  const statusLabel = status === 'success'
+    ? tt('已完成', 'Complete')
+    : status === 'error' || status === 'expired'
+      ? tt('需重试', 'Try Again')
+      : status === 'loading'
+        ? tt('载入中', 'Loading')
+        : status === 'ready'
+          ? tt('待操作', 'Action Needed')
+          : tt('准备中', 'Preparing');
   const statusTone = status === 'success'
     ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300'
     : status === 'error' || status === 'expired'
@@ -186,53 +208,101 @@ export default function AuthCaptchaBox({
       : 'border-zinc-200 bg-white text-slate-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300';
 
   return (
-    <div className={`border rounded-none p-3 ${statusTone}`}>
-      <div className="mb-3 flex items-start gap-2">
-        {status === 'success' ? <CheckCircle2 size={17} className="mt-0.5 shrink-0" /> : status === 'error' || status === 'expired' ? <AlertTriangle size={17} className="mt-0.5 shrink-0" /> : <ShieldCheck size={17} className="mt-0.5 shrink-0" />}
-        <div className="flex-1">
+    <section
+      aria-label={tt('安全验证', 'Security verification')}
+      data-status={status}
+      className={`min-w-0 overflow-hidden border p-2.5 transition-colors duration-200 sm:p-3 ${statusTone}`}
+    >
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center border border-current/20 bg-white/55 dark:bg-black/15">
+          {status === 'success' ? (
+            <CheckCircle2 size={16} />
+          ) : status === 'error' || status === 'expired' ? (
+            <AlertTriangle size={16} />
+          ) : status === 'loading' ? (
+            <Loader2 size={16} className="animate-spin" />
+          ) : (
+            <ShieldCheck size={16} />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-xs font-bold uppercase tracking-wider">
-              {mode === 'pow' ? tt('值守终端验证', 'Terminal PoW Check') : tt('人机验证', 'Bot Check')}
+            <div>
+              <div className="text-xs font-bold uppercase tracking-[0.14em]">
+                {tt('安全验证', 'Security Check')}
+              </div>
+              <div className="mt-0.5 text-[10px] uppercase tracking-wider opacity-70">
+                {mode === 'pow' ? tt('本地校验', 'Local Check') : tt('网页验证', 'Web Check')}
+              </div>
             </div>
-            {canUseTurnstile(config) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setPowChallenge(null);
-                  setMode((current) => (current === 'pow' ? 'turnstile' : 'pow'));
-                }}
-                className="text-[11px] font-bold uppercase tracking-wider text-endfield-yellow hover:text-yellow-500"
-              >
-                {mode === 'pow' ? tt('使用 Turnstile', 'Use Turnstile') : tt('改用 PoW', 'Use PoW')}
-              </button>
-            )}
+            <span className="border border-current/20 bg-white/60 px-2 py-1 text-[10px] font-bold uppercase tracking-wider dark:bg-black/15">
+              {statusLabel}
+            </span>
           </div>
-          <p className="mt-0.5 text-xs leading-relaxed">
+          <p aria-live="polite" className="mt-1 text-xs leading-relaxed">
             {message || tt('请完成下方验证后继续。', 'Complete the verification below before continuing.')}
           </p>
         </div>
       </div>
 
-      {mode === 'turnstile' && canUseTurnstile(config) && (
-        <div className="min-h-[70px] overflow-hidden">
-          <div ref={containerRef} />
+      {canUseTurnstile(config) && (
+        <div role="group" aria-label={tt('选择验证方式', 'Choose verification method')} className="mt-2.5 grid grid-cols-2 border border-current/15 bg-white/50 p-0.5 dark:bg-black/10">
+          <button
+            type="button"
+            aria-pressed={mode === 'turnstile'}
+            onClick={() => selectMode('turnstile')}
+            className={`min-h-[38px] px-2 py-1.5 text-left transition-[background-color,color,box-shadow] ${
+              mode === 'turnstile'
+                ? 'bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-950'
+                : 'text-current hover:bg-white/70 dark:hover:bg-white/10'
+            }`}
+          >
+            <span className="block text-[11px] font-bold">{tt('网页验证', 'Web Check')}</span>
+            <span className="mt-0.5 block text-[9px] opacity-70">{tt('推荐 · 快速完成', 'Recommended · Quick')}</span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={mode === 'pow'}
+            onClick={() => selectMode('pow')}
+            className={`min-h-[38px] px-2 py-1.5 text-left transition-[background-color,color,box-shadow] ${
+              mode === 'pow'
+                ? 'bg-zinc-900 text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-950'
+                : 'text-current hover:bg-white/70 dark:hover:bg-white/10'
+            }`}
+          >
+            <span className="block text-[11px] font-bold">{tt('本地校验', 'Local Check')}</span>
+            <span className="mt-0.5 block text-[9px] opacity-70">{tt('网络不稳时使用', 'For unstable networks')}</span>
+          </button>
         </div>
       )}
 
-      {mode === 'pow' && powChallenge && (
-        <TerminalPowCaptcha
-          action={config.action}
-          challenge={powChallenge}
-          onVerified={(powPayload) => {
-            publishState('success', {
-              provider: 'pow',
-              powPayload,
-              message: tt('值守终端验证已完成。', 'Terminal PoW check completed.'),
-            });
-          }}
-          showFallbackButton={false}
-        />
-      )}
-    </div>
+      <div key={mode} className="auth-verification-panel-enter mt-2.5 min-w-0">
+        {mode === 'turnstile' && canUseTurnstile(config) && (
+          <div className="min-h-[68px] w-full min-w-0 overflow-x-auto">
+            <div ref={containerRef} className="w-full min-w-0" />
+          </div>
+        )}
+
+        {mode === 'pow' && powChallenge && (
+          <TerminalPowCaptcha
+            action={config.action}
+            challenge={powChallenge}
+            compact
+            onVerified={(powPayload) => {
+              publishState('success', {
+                provider: 'pow',
+                powPayload,
+                message: tt('本地校验已完成，可以创建账号。', 'Local check completed. You can create the account.'),
+              });
+            }}
+            showFallbackButton={false}
+          />
+        )}
+      </div>
+
+      <p className="mt-2 text-[10px] leading-relaxed opacity-65">
+        {tt('验证完成后页面会自动定位到“创建账号”按钮。', 'After verification, the page moves to the Create Account button automatically.')}
+      </p>
+    </section>
   );
 }
