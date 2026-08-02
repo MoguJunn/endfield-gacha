@@ -1,9 +1,9 @@
-import { createHmac, randomBytes } from 'node:crypto';
-import { loadAuthUserById } from './authAdmin.js';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { findAuthUserByEmail, loadAuthUserById } from './authAdmin.js';
 import { resolveSupabaseUrl } from './supabaseEnv.js';
 
 const DEFAULT_SESSION_COOKIE = '__Host-eg_session';
-const DEFAULT_REFRESH_COOKIE = '__Host-eg_refresh';
+const DEFAULT_REFRESH_COOKIE = '__Secure-eg_refresh';
 const LOCAL_SESSION_COOKIE = 'eg_session';
 const LOCAL_REFRESH_COOKIE = 'eg_refresh';
 const DEFAULT_SESSION_TTL_SECONDS = 2 * 60 * 60;
@@ -62,10 +62,17 @@ export function getSiteSessionConfig(env = readEnvironment(), {
 } = {}) {
   const defaultSessionCookie = secure ? DEFAULT_SESSION_COOKIE : LOCAL_SESSION_COOKIE;
   const defaultRefreshCookie = secure ? DEFAULT_REFRESH_COOKIE : LOCAL_REFRESH_COOKIE;
+  const configuredRefreshCookie = normalizeString(
+    env.APP_REFRESH_COOKIE_NAME || defaultRefreshCookie,
+    80
+  );
+  const refreshCookieName = secure && configuredRefreshCookie.startsWith('__Host-')
+    ? `__Secure-${configuredRefreshCookie.slice('__Host-'.length)}`
+    : configuredRefreshCookie;
   return {
     secret: getSiteSessionSecret(env),
     sessionCookieName: normalizeString(env.APP_SESSION_COOKIE_NAME || defaultSessionCookie, 80),
-    refreshCookieName: normalizeString(env.APP_REFRESH_COOKIE_NAME || defaultRefreshCookie, 80),
+    refreshCookieName,
     sessionTtlSeconds: parseInteger(env.APP_SESSION_TTL_SECONDS, DEFAULT_SESSION_TTL_SECONDS),
     idleTtlSeconds: parseInteger(env.APP_SESSION_IDLE_TTL_SECONDS, DEFAULT_IDLE_TTL_SECONDS),
     absoluteTtlSeconds: parseInteger(env.APP_SESSION_ABSOLUTE_TTL_SECONDS, DEFAULT_ABSOLUTE_TTL_SECONDS),
@@ -233,6 +240,64 @@ function hasSitePassword(authUser = null) {
   );
 }
 
+function hasVerifiedPasswordLoginFromAuthPayload(profile = null, authUser = null) {
+  const profileEmail = normalizeString(profile?.email, 320).toLowerCase();
+  const authEmail = normalizeString(authUser?.email, 320).toLowerCase();
+  return Boolean(
+    profileEmail
+    && authEmail
+    && profileEmail === authEmail
+    && !isSyntheticEmail(authEmail)
+    && (authUser?.email_confirmed_at || authUser?.confirmed_at)
+    && hasSitePassword(authUser)
+  );
+}
+
+async function hasVerifiedPasswordLogin(adminClient, {
+  userId,
+  profile = null,
+  authUser = null,
+} = {}) {
+  if (typeof adminClient?.rpc === 'function' && userId) {
+    const { data, error } = await adminClient.rpc('has_verified_password_login', {
+      p_user_id: userId,
+    });
+    if (error) {
+      throw Object.assign(new Error(error.message || 'password_login_state_lookup_failed'), {
+        code: error.code || 'password_login_state_lookup_failed',
+      });
+    }
+    return data === true;
+  }
+
+  return hasVerifiedPasswordLoginFromAuthPayload(profile, authUser);
+}
+
+export async function checkAccountCredentialAllowed(adminClient, userId) {
+  if (!userId) {
+    return { ok: false, allowed: false, code: 'credential_user_missing' };
+  }
+  if (typeof adminClient?.rpc !== 'function') {
+    return { ok: true, allowed: true, legacy: true };
+  }
+  const { data, error } = await adminClient.rpc('is_account_credential_allowed', {
+    p_user_id: userId,
+  });
+  if (error) {
+    return {
+      ok: false,
+      allowed: false,
+      code: error.code || 'credential_state_lookup_failed',
+      reason: error.message,
+    };
+  }
+  return {
+    ok: true,
+    allowed: data === true,
+    code: data === true ? null : 'temporary_password_expired',
+  };
+}
+
 function buildPublicUser({
   userId,
   profile = null,
@@ -316,17 +381,19 @@ async function loadSessionByTokenHash(adminClient, tokenHash) {
   return sessionRow || null;
 }
 
-async function loadSessionByRefreshTokenHash(adminClient, refreshTokenHash) {
+async function loadSessionByRefreshTokenHash(adminClient, refreshTokenHash, config) {
   if (!refreshTokenHash) {
     return null;
   }
 
   const now = new Date();
+  const idleCutoff = new Date(now.getTime() - config.idleTtlSeconds * 1000);
   const { data: sessionRow, error } = await adminClient
     .from('app_sessions')
     .select('*')
     .eq('refresh_token_hash', refreshTokenHash)
     .is('revoked_at', null)
+    .gt('last_seen_at', idleCutoff.toISOString())
     .gt('absolute_expires_at', now.toISOString())
     .maybeSingle();
 
@@ -339,6 +406,7 @@ async function loadSessionByRefreshTokenHash(adminClient, refreshTokenHash) {
 
 async function rotateSessionTokens(adminClient, {
   sessionRow,
+  expectedRefreshTokenHash,
   req,
   res,
   env,
@@ -347,7 +415,7 @@ async function rotateSessionTokens(adminClient, {
 }) {
   const now = new Date();
   const secure = isSecureRequest(req, env);
-  const expiresAtMs = now.getTime() + config.idleTtlSeconds * 1000;
+  const expiresAtMs = now.getTime() + config.sessionTtlSeconds * 1000;
   const absoluteExpiresAtMs = new Date(sessionRow.absolute_expires_at).getTime();
   const expiresAt = new Date(Math.min(expiresAtMs, absoluteExpiresAtMs));
 
@@ -357,36 +425,38 @@ async function rotateSessionTokens(adminClient, {
     absolute_expires_at: new Date(absoluteExpiresAtMs).toISOString(),
   };
 
-  let sessionToken = null;
-  let refreshToken = null;
-  if (res) {
-    sessionToken = createRandomToken();
-    refreshToken = createRandomToken();
-    updatePayload.session_token_hash = hashToken(sessionToken, config.secret, 'session');
-    updatePayload.refresh_token_hash = hashToken(refreshToken, config.secret, 'refresh');
-  }
+  const sessionToken = createRandomToken();
+  const refreshToken = createRandomToken();
+  updatePayload.session_token_hash = hashToken(sessionToken, config.secret, 'session');
+  updatePayload.refresh_token_hash = hashToken(refreshToken, config.secret, 'refresh');
 
-  const { error } = await adminClient
+  const query = adminClient
     .from('app_sessions')
     .update(updatePayload)
     .eq('id', sessionRow.id)
-    .is('revoked_at', null);
+    .eq('refresh_token_hash', expectedRefreshTokenHash)
+    .is('revoked_at', null)
+    .select('*');
+  const { data: rotatedSession, error } = typeof query.maybeSingle === 'function'
+    ? await query.maybeSingle()
+    : await query.single();
 
   if (error) {
     throw error;
   }
-
-  if (res && sessionToken && refreshToken) {
-    appendSetCookieHeader(res, serializeCookie(config.sessionCookieName, sessionToken, {
-      maxAgeSeconds: config.absoluteTtlSeconds,
-      secure,
-    }));
-    appendSetCookieHeader(res, serializeCookie(config.refreshCookieName, refreshToken, {
-      maxAgeSeconds: config.absoluteTtlSeconds,
-      secure,
-      path: '/api/auth/session',
-    }));
+  if (!rotatedSession?.id) {
+    return null;
   }
+
+    appendSetCookieHeader(res, serializeCookie(config.sessionCookieName, sessionToken, {
+      maxAgeSeconds: config.sessionTtlSeconds,
+    secure,
+  }));
+  appendSetCookieHeader(res, serializeCookie(config.refreshCookieName, refreshToken, {
+    maxAgeSeconds: config.absoluteTtlSeconds,
+    secure,
+    path: '/api/auth/session',
+  }));
 
   await persistAuthAudit(adminClient, {
     userId: sessionRow.user_id,
@@ -401,7 +471,7 @@ async function rotateSessionTokens(adminClient, {
   });
 
   return {
-    ...sessionRow,
+    ...rotatedSession,
     expires_at: expiresAt.toISOString(),
     last_seen_at: now.toISOString(),
   };
@@ -448,7 +518,13 @@ async function upsertOAuthSecurityState(adminClient, {
   }
 
   const requiresEmail = !hasUsableEmail(profile, authUser);
-  const requiresPassword = !hasSitePassword(authUser);
+  const requiresPassword = created
+    ? !hasSitePassword(authUser)
+    : !await hasVerifiedPasswordLogin(adminClient, {
+      userId,
+      profile,
+      authUser,
+    });
   if (!requiresEmail && !requiresPassword) {
     return null;
   }
@@ -479,6 +555,14 @@ async function upsertOAuthSecurityState(adminClient, {
     patch.password_change_expires_at = null;
     patch.password_change_recovery_request_id = null;
     patch.password_change_set_by = null;
+    if (created) {
+      patch.password_setup_capability_id = randomUUID();
+      patch.password_setup_capability_status = 'available';
+      patch.password_setup_claimed_at = null;
+      patch.password_setup_completed_at = null;
+      patch.password_setup_attempt_count = 0;
+      patch.password_setup_last_error_code = null;
+    }
   }
 
   const { data, error } = await adminClient
@@ -575,6 +659,7 @@ async function persistAuthAudit(adminClient, {
 async function createOAuthAuthUser(adminClient, {
   profile,
   subjectHash,
+  subjectHashVersion = 'legacy_state_v1',
 }) {
   const provider = normalizeString(profile?.provider, 40) || 'oauth';
   const username = normalizeUsername(profile?.displayName || profile?.username, `${provider}_${subjectHash.slice(0, 8)}`);
@@ -593,6 +678,8 @@ async function createOAuthAuthUser(adminClient, {
       avatar_url: profile?.avatarUrl || '',
       auth_provider: provider,
       synthetic_oauth_email: true,
+      oauth_identity_hash: subjectHash,
+      oauth_identity_hash_key_version: subjectHashVersion,
     },
   });
 
@@ -606,6 +693,42 @@ async function createOAuthAuthUser(adminClient, {
     throw new Error('auth_create_user_empty');
   }
   return user;
+}
+
+async function recoverOAuthAuthUser(adminClient, {
+  profile,
+  subjectHash,
+  subjectHashVersion,
+  previousSubjectHash = '',
+  previousSubjectHashVersion = '',
+}) {
+  if (typeof adminClient?.auth?.admin?.listUsers !== 'function') {
+    return null;
+  }
+
+  const candidates = [
+    { hash: subjectHash, version: subjectHashVersion },
+    { hash: previousSubjectHash, version: previousSubjectHashVersion },
+  ].filter((candidate) => candidate.hash && candidate.version);
+
+  for (const candidate of candidates) {
+    const syntheticEmail = buildSyntheticOAuthEmail(profile.provider, candidate.hash);
+    const authUser = await findAuthUserByEmail(adminClient, syntheticEmail);
+    if (!authUser?.id) {
+      continue;
+    }
+    const metadata = authUser.user_metadata || authUser.raw_user_meta_data || {};
+    if (
+      metadata.auth_provider === profile.provider
+      && metadata.synthetic_oauth_email === true
+      && metadata.oauth_identity_hash === candidate.hash
+      && metadata.oauth_identity_hash_key_version === candidate.version
+    ) {
+      return authUser;
+    }
+  }
+
+  return null;
 }
 
 function sanitizeIdentityMetadata(profile) {
@@ -626,41 +749,131 @@ async function upsertOAuthIdentity(adminClient, {
   userId,
   profile,
   subjectHash,
+  subjectHashVersion = '',
+  previousSubjectHash = '',
+  previousSubjectHashVersion = '',
   profileHash,
   secret,
 }) {
   const email = profile?.provider === 'github'
     ? ''
     : normalizeString(profile?.email, 320).toLowerCase();
-  const { data, error } = await adminClient
+  const identityPayload = {
+    user_id: userId,
+    provider: profile.provider,
+    provider_subject_hash: subjectHash,
+    ...(subjectHashVersion ? {
+      provider_subject_hash_key_version: subjectHashVersion,
+    } : {}),
+    display_name: normalizeString(profile.displayName || profile.username, 120) || null,
+    avatar_url: normalizeString(profile.avatarUrl, 500) || null,
+    email_hash: email ? hmacHex(`email:${email}`, secret) : null,
+    email_verified: profile?.provider === 'github' ? false : profile.emailVerified === true,
+    raw_profile_hash: profileHash || null,
+    last_used_at: new Date().toISOString(),
+    disabled_at: null,
+    metadata_redacted_json: sanitizeIdentityMetadata(profile),
+  };
+  let claimedIdentity = null;
+  if (subjectHashVersion) {
+    if (typeof adminClient?.rpc !== 'function') {
+      const unavailableError = new Error('OAuth identity claim RPC is unavailable');
+      unavailableError.code = 'oauth_identity_claim_unavailable';
+      throw unavailableError;
+    }
+    const claimQuery = adminClient.rpc('claim_oauth_identity', {
+      p_user_id: userId,
+      p_provider: profile.provider,
+      p_current_hash: subjectHash,
+      p_current_version: subjectHashVersion,
+      p_previous_hash: previousSubjectHash || null,
+      p_previous_version: previousSubjectHashVersion || null,
+    });
+    const { data: claimData, error: claimError } = typeof claimQuery?.maybeSingle === 'function'
+      ? await claimQuery.maybeSingle()
+      : await claimQuery;
+    if (claimError) {
+      const error = new Error(claimError.message || 'OAuth identity claim failed');
+      error.code = String(claimError.message || '').includes('oauth_identity_already_linked')
+        ? 'oauth_identity_already_linked'
+        : (claimError.code || 'oauth_identity_claim_failed');
+      throw error;
+    }
+    claimedIdentity = Array.isArray(claimData) ? claimData[0] || null : claimData || null;
+    if (!claimedIdentity?.id) {
+      const emptyError = new Error('OAuth identity claim returned no identity');
+      emptyError.code = 'oauth_identity_claim_empty';
+      throw emptyError;
+    }
+  }
+
+  const { data, error } = claimedIdentity
+    ? await adminClient
+      .from('app_auth_identities')
+      .update({
+        display_name: identityPayload.display_name,
+        avatar_url: identityPayload.avatar_url,
+        email_hash: identityPayload.email_hash,
+        email_verified: identityPayload.email_verified,
+        raw_profile_hash: identityPayload.raw_profile_hash,
+        last_used_at: identityPayload.last_used_at,
+        disabled_at: null,
+        metadata_redacted_json: identityPayload.metadata_redacted_json,
+      })
+      .eq('id', claimedIdentity.id)
+      .eq('user_id', userId)
+      .select('*')
+      .single()
+    : await adminClient
+      .from('app_auth_identities')
+      .insert(identityPayload)
+      .select('*')
+      .single();
+
+  if (!error) {
+    return data || null;
+  }
+  if (error.code !== '23505') {
+    throw error;
+  }
+
+  const existingIdentity = await resolveOAuthIdentity(adminClient, {
+    provider: profile.provider,
+    subjectHash,
+  });
+  if (!existingIdentity?.id || existingIdentity.user_id !== userId) {
+    const conflictError = new Error('OAuth identity already belongs to another user');
+    conflictError.code = 'oauth_identity_already_linked';
+    throw conflictError;
+  }
+
+  const { data: updatedIdentity, error: updateError } = await adminClient
     .from('app_auth_identities')
-    .upsert({
-      user_id: userId,
-      provider: profile.provider,
-      provider_subject_hash: subjectHash,
-      display_name: normalizeString(profile.displayName || profile.username, 120) || null,
-      avatar_url: normalizeString(profile.avatarUrl, 500) || null,
-      email_hash: email ? hmacHex(`email:${email}`, secret) : null,
-      email_verified: profile?.provider === 'github' ? false : profile.emailVerified === true,
-      raw_profile_hash: profileHash || null,
-      last_used_at: new Date().toISOString(),
+    .update({
+      display_name: identityPayload.display_name,
+      avatar_url: identityPayload.avatar_url,
+      email_hash: identityPayload.email_hash,
+      email_verified: identityPayload.email_verified,
+      raw_profile_hash: identityPayload.raw_profile_hash,
+      last_used_at: identityPayload.last_used_at,
       disabled_at: null,
-      metadata_redacted_json: sanitizeIdentityMetadata(profile),
-    }, {
-      onConflict: 'provider,provider_subject_hash',
+      metadata_redacted_json: identityPayload.metadata_redacted_json,
     })
+    .eq('id', existingIdentity.id)
+    .eq('user_id', userId)
     .select('*')
     .single();
 
-  if (error) {
-    throw error;
+  if (updateError) {
+    throw updateError;
   }
-  return data || null;
+  return updatedIdentity || null;
 }
 
 async function resolveOAuthIdentity(adminClient, {
   provider,
   subjectHash,
+  previousSubjectHash = '',
 }) {
   const { data, error } = await adminClient
     .from('app_auth_identities')
@@ -672,7 +885,21 @@ async function resolveOAuthIdentity(adminClient, {
   if (error) {
     throw error;
   }
-  return data || null;
+  if (data || !previousSubjectHash || previousSubjectHash === subjectHash) {
+    return data || null;
+  }
+
+  const { data: previousData, error: previousError } = await adminClient
+    .from('app_auth_identities')
+    .select('*')
+    .eq('provider', provider)
+    .eq('provider_subject_hash', previousSubjectHash)
+    .maybeSingle();
+
+  if (previousError) {
+    throw previousError;
+  }
+  return previousData || null;
 }
 
 async function loadSiteIdentityById(adminClient, identityId) {
@@ -721,7 +948,7 @@ export async function createSiteSession(adminClient, {
   const now = new Date();
   const sessionToken = createRandomToken();
   const refreshToken = createRandomToken();
-  const expiresAtMs = now.getTime() + config.idleTtlSeconds * 1000;
+  const expiresAtMs = now.getTime() + config.sessionTtlSeconds * 1000;
   const absoluteExpiresAtMs = now.getTime() + config.absoluteTtlSeconds * 1000;
   const expiresAt = new Date(Math.min(expiresAtMs, absoluteExpiresAtMs));
   const absoluteExpiresAt = new Date(absoluteExpiresAtMs);
@@ -745,7 +972,7 @@ export async function createSiteSession(adminClient, {
   }
 
   appendSetCookieHeader(res, serializeCookie(config.sessionCookieName, sessionToken, {
-    maxAgeSeconds: config.absoluteTtlSeconds,
+    maxAgeSeconds: config.sessionTtlSeconds,
     secure,
   }));
   appendSetCookieHeader(res, serializeCookie(config.refreshCookieName, refreshToken, {
@@ -768,6 +995,90 @@ export async function createSiteSession(adminClient, {
     session: data,
     expiresAt: expiresAt.toISOString(),
     absoluteExpiresAt: absoluteExpiresAt.toISOString(),
+  };
+}
+
+export async function createSiteSessionFromBearer(adminClient, {
+  userId,
+  sourceAuthSessionId,
+  bearerIssuedAt,
+  bearerExpiresAt,
+  req,
+  res,
+  env = readEnvironment(),
+} = {}) {
+  const secure = isSecureRequest(req, env);
+  const config = getSiteSessionConfig(env, { secure });
+  const issuedAtMs = Number(bearerIssuedAt) * 1000;
+  const bearerExpiresAtMs = Number(bearerExpiresAt) * 1000;
+  if (
+    !config.secret
+    || !adminClient?.rpc
+    || !userId
+    || !sourceAuthSessionId
+    || !Number.isFinite(issuedAtMs)
+    || issuedAtMs <= 0
+    || !Number.isFinite(bearerExpiresAtMs)
+    || bearerExpiresAtMs <= Date.now()
+  ) {
+    return { ok: false, code: 'bearer_session_binding_invalid' };
+  }
+
+  const now = new Date();
+  const sessionToken = createRandomToken();
+  const refreshToken = createRandomToken();
+  const absoluteExpiresAtMs = now.getTime() + config.absoluteTtlSeconds * 1000;
+  const expiresAtMs = now.getTime() + config.sessionTtlSeconds * 1000;
+  const rpcQuery = adminClient.rpc('create_or_rotate_bearer_app_session', {
+    p_user_id: userId,
+    p_source_auth_session_id: sourceAuthSessionId,
+    p_bearer_issued_at: new Date(issuedAtMs).toISOString(),
+    p_session_token_hash: hashToken(sessionToken, config.secret, 'session'),
+    p_refresh_token_hash: hashToken(refreshToken, config.secret, 'refresh'),
+    p_user_agent_hash: buildUserAgentHash(req, config.secret),
+    p_ip_prefix_hash: buildIpPrefixHash(req, config.secret),
+    p_expires_at: new Date(expiresAtMs).toISOString(),
+    p_absolute_expires_at: new Date(absoluteExpiresAtMs).toISOString(),
+  });
+  const { data, error } = typeof rpcQuery?.maybeSingle === 'function'
+    ? await rpcQuery.maybeSingle()
+    : await rpcQuery;
+  const session = Array.isArray(data) ? data[0] || null : data || null;
+
+  if (error) {
+    return { ok: false, code: error.code || 'site_session_insert_failed', reason: error.message };
+  }
+  if (!session?.id) {
+    return { ok: false, code: 'bearer_session_revoked' };
+  }
+
+  appendSetCookieHeader(res, serializeCookie(config.sessionCookieName, sessionToken, {
+    maxAgeSeconds: Math.max(1, Math.floor((expiresAtMs - now.getTime()) / 1000)),
+    secure,
+  }));
+  appendSetCookieHeader(res, serializeCookie(config.refreshCookieName, refreshToken, {
+    maxAgeSeconds: Math.max(1, Math.floor((absoluteExpiresAtMs - now.getTime()) / 1000)),
+    secure,
+    path: '/api/auth/session',
+  }));
+
+  await persistAuthAudit(adminClient, {
+    userId,
+    provider: 'supabase',
+    eventType: 'site_session_created',
+    outcome: 'success',
+    req,
+    secret: config.secret,
+    metadata: {
+      source: 'native_bearer',
+    },
+  });
+
+  return {
+    ok: true,
+    session,
+    expiresAt: new Date(expiresAtMs).toISOString(),
+    absoluteExpiresAt: new Date(absoluteExpiresAtMs).toISOString(),
   };
 }
 
@@ -797,19 +1108,28 @@ export async function loadSiteSession(adminClient, {
     }
   }
 
-  if (!sessionRow && refreshToken) {
+  let refreshRejected = false;
+  if (!sessionRow && refreshToken && res) {
     try {
-      const refreshRow = await loadSessionByRefreshTokenHash(adminClient, hashToken(refreshToken, config.secret, 'refresh'));
+      const refreshTokenHash = hashToken(refreshToken, config.secret, 'refresh');
+      const refreshRow = await loadSessionByRefreshTokenHash(adminClient, refreshTokenHash, config);
       if (refreshRow?.id) {
-        sessionRow = refreshRow;
-        await rotateSessionTokens(adminClient, {
+        const rotatedSession = await rotateSessionTokens(adminClient, {
           sessionRow: refreshRow,
+          expectedRefreshTokenHash: refreshTokenHash,
           req,
           res,
           env,
           config,
           reason: 'session_refresh',
         });
+        if (rotatedSession?.id) {
+          sessionRow = rotatedSession;
+        } else {
+          refreshRejected = true;
+        }
+      } else {
+        refreshRejected = true;
       }
     } catch (error) {
       lookupError = lookupError || error;
@@ -819,8 +1139,32 @@ export async function loadSiteSession(adminClient, {
   if (lookupError) {
     return { ok: false, authenticated: false, code: lookupError.code || 'site_session_lookup_failed', reason: lookupError.message };
   }
+  if (refreshRejected) {
+    return { ok: true, authenticated: false, code: 'site_session_refresh_replayed' };
+  }
   if (!sessionRow?.user_id) {
     return { ok: true, authenticated: false, code: 'site_session_missing' };
+  }
+
+  const credentialGate = await checkAccountCredentialAllowed(adminClient, sessionRow.user_id);
+  if (!credentialGate.ok) {
+    return {
+      ok: false,
+      authenticated: false,
+      code: credentialGate.code || 'credential_state_lookup_failed',
+      reason: credentialGate.reason,
+    };
+  }
+  if (!credentialGate.allowed) {
+    await adminClient
+      .from('app_sessions')
+      .update({
+        revoked_at: new Date().toISOString(),
+        revoke_reason: 'temporary_password_expired',
+      })
+      .eq('id', sessionRow.id)
+      .is('revoked_at', null);
+    return { ok: true, authenticated: false, code: 'temporary_password_expired' };
   }
 
   const now = new Date();
@@ -832,14 +1176,11 @@ export async function loadSiteSession(adminClient, {
   const hasVerifiedProviderEmail = identities.some((identity) => (
     identity?.identity_data?.email_verified === true
   ));
-  const absoluteExpiresAt = new Date(sessionRow.absolute_expires_at).getTime();
-  const nextExpiresAt = new Date(Math.min(now.getTime() + config.idleTtlSeconds * 1000, absoluteExpiresAt));
   if (touch) {
     await adminClient
       .from('app_sessions')
       .update({
         last_seen_at: now.toISOString(),
-        expires_at: nextExpiresAt.toISOString(),
       })
       .eq('id', sessionRow.id);
 
@@ -854,7 +1195,6 @@ export async function loadSiteSession(adminClient, {
     authenticated: true,
     session: {
       ...sessionRow,
-      expires_at: nextExpiresAt.toISOString(),
     },
     profile,
     identities,
@@ -895,6 +1235,74 @@ export async function revokeSiteSession(adminClient, {
   }
 
   return { ok: true };
+}
+
+export async function loadActiveSiteSessionById(adminClient, {
+  sessionId,
+  userId,
+  now = Date.now(),
+} = {}) {
+  const normalizedSessionId = normalizeString(sessionId, 80);
+  const normalizedUserId = normalizeString(userId, 80);
+  if (!adminClient?.from || !normalizedSessionId || !normalizedUserId) {
+    return { ok: false, active: false, code: 'site_session_lookup_invalid' };
+  }
+
+  const nowIso = new Date(Number(now)).toISOString();
+  const { data, error } = await adminClient
+    .from('app_sessions')
+    .select('id, user_id, expires_at, absolute_expires_at')
+    .eq('id', normalizedSessionId)
+    .eq('user_id', normalizedUserId)
+    .is('revoked_at', null)
+    .gt('expires_at', nowIso)
+    .gt('absolute_expires_at', nowIso)
+    .maybeSingle();
+
+  if (error) {
+    return {
+      ok: false,
+      active: false,
+      code: error.code || 'site_session_lookup_failed',
+      reason: error.message,
+    };
+  }
+
+  return {
+    ok: true,
+    active: Boolean(data?.id),
+    session: data || null,
+  };
+}
+
+export async function revokeAllSiteSessionsForUser(adminClient, {
+  userId,
+  reason = 'credential_changed',
+  now = Date.now(),
+} = {}) {
+  const normalizedUserId = normalizeString(userId, 80);
+  if (!adminClient?.rpc || !normalizedUserId) {
+    return { ok: false, code: 'site_session_revoke_invalid' };
+  }
+
+  const { data, error } = await adminClient.rpc('revoke_all_app_sessions_for_user', {
+    p_user_id: normalizedUserId,
+    p_reason: normalizeString(reason, 120) || 'credential_changed',
+    p_revoked_at: new Date(Number(now)).toISOString(),
+  });
+
+  if (error) {
+    return {
+      ok: false,
+      code: error.code || 'site_session_revoke_failed',
+      reason: error.message,
+    };
+  }
+
+  return {
+    ok: true,
+    revokedCount: Math.max(0, Number(data) || 0),
+  };
 }
 
 export function createSupabaseCompatAccessToken({
@@ -949,6 +1357,9 @@ export function createSupabaseCompatAccessToken({
 export async function createOrLinkOAuthUserAndSession(adminClient, {
   profile,
   subjectHash,
+  subjectHashVersion = '',
+  previousSubjectHash = '',
+  previousSubjectHashVersion = '',
   profileHash,
   req,
   res,
@@ -968,6 +1379,7 @@ export async function createOrLinkOAuthUserAndSession(adminClient, {
   let identity = await resolveOAuthIdentity(adminClient, {
     provider: profile.provider,
     subjectHash,
+    previousSubjectHash,
   });
   let authUser = null;
   let created = false;
@@ -988,23 +1400,49 @@ export async function createOrLinkOAuthUserAndSession(adminClient, {
   }
 
   if (!identity?.user_id) {
-    authUser = await createOAuthAuthUser(adminClient, {
+    authUser = await recoverOAuthAuthUser(adminClient, {
       profile,
       subjectHash,
+      subjectHashVersion,
+      previousSubjectHash,
+      previousSubjectHashVersion,
     });
-    created = true;
-    identity = await upsertOAuthIdentity(adminClient, {
-      userId: authUser.id,
-      profile,
-      subjectHash,
-      profileHash,
-      secret,
-    });
+    if (!authUser) {
+      authUser = await createOAuthAuthUser(adminClient, {
+        profile,
+        subjectHash,
+        subjectHashVersion,
+      });
+      created = true;
+    }
+    try {
+      identity = await upsertOAuthIdentity(adminClient, {
+        userId: authUser.id,
+        profile,
+        subjectHash,
+        subjectHashVersion,
+        previousSubjectHash,
+        previousSubjectHashVersion,
+        profileHash,
+        secret,
+      });
+    } catch (error) {
+      if (created) {
+        const deleteUser = adminClient?.auth?.admin?.deleteUser;
+        if (typeof deleteUser === 'function') {
+          await deleteUser.call(adminClient.auth.admin, authUser.id).catch(() => null);
+        }
+      }
+      throw error;
+    }
   } else {
     identity = await upsertOAuthIdentity(adminClient, {
       userId: identity.user_id,
       profile,
       subjectHash,
+      subjectHashVersion,
+      previousSubjectHash,
+      previousSubjectHashVersion,
       profileHash,
       secret,
     });
@@ -1014,9 +1452,9 @@ export async function createOrLinkOAuthUserAndSession(adminClient, {
   if (!authUser && userId) {
     authUser = await loadAuthUserById(adminClient, userId);
   }
-  const profileRow = created
-    ? await upsertOAuthProfile(adminClient, { userId, profile })
-    : await loadProfile(adminClient, userId);
+  const existingProfile = await loadProfile(adminClient, userId);
+  const profileRow = existingProfile
+    || await upsertOAuthProfile(adminClient, { userId, profile });
   await upsertOAuthSecurityState(adminClient, {
     userId,
     profile: profileRow,
@@ -1075,6 +1513,9 @@ export async function createOrLinkOAuthUserAndSession(adminClient, {
 export async function linkOAuthIdentityToSiteSession(adminClient, {
   profile,
   subjectHash,
+  subjectHashVersion = '',
+  previousSubjectHash = '',
+  previousSubjectHashVersion = '',
   profileHash,
   req,
   env = readEnvironment(),
@@ -1115,6 +1556,7 @@ export async function linkOAuthIdentityToSiteSession(adminClient, {
   const existingIdentity = await resolveOAuthIdentity(adminClient, {
     provider: profile.provider,
     subjectHash,
+    previousSubjectHash,
   });
 
   if (existingIdentity?.user_id && existingIdentity.user_id !== sessionResult.user.id) {
@@ -1136,6 +1578,9 @@ export async function linkOAuthIdentityToSiteSession(adminClient, {
     userId: sessionResult.user.id,
     profile,
     subjectHash,
+    subjectHashVersion,
+    previousSubjectHash,
+    previousSubjectHashVersion,
     profileHash,
     secret,
   });
@@ -1206,36 +1651,65 @@ export async function unlinkSiteAuthIdentity(adminClient, {
     return { ok: false, code: 'oauth_identity_forbidden' };
   }
 
-  const remainingOAuthCount = await countActiveOAuthIdentities(adminClient, sessionResult.user.id, {
-    excludeIdentityId: identity.id,
-  });
-  const profile = sessionResult.profile || await loadProfile(adminClient, sessionResult.user.id);
-  if (remainingOAuthCount < 1 && !hasUsableEmail(profile, sessionResult.user)) {
-    await persistAuthAudit(adminClient, {
-      userId: sessionResult.user.id,
-      provider: identity.provider || null,
-      eventType: 'oauth_identity_unlink',
-      outcome: 'last_login_method_blocked',
-      req,
-      secret,
-      metadata: {
-        identityId: identity.id,
-      },
+  let data = null;
+  let error = null;
+  if (typeof adminClient?.rpc === 'function') {
+    const unlinkQuery = adminClient.rpc('unlink_oauth_identity_atomically', {
+      p_user_id: sessionResult.user.id,
+      p_identity_id: identity.id,
     });
-    return { ok: false, code: 'oauth_last_login_method' };
-  }
+    const rpcResult = typeof unlinkQuery?.maybeSingle === 'function'
+      ? await unlinkQuery.maybeSingle()
+      : await unlinkQuery;
+    data = Array.isArray(rpcResult?.data) ? rpcResult.data[0] || null : rpcResult?.data || null;
+    error = rpcResult?.error || null;
+    if (error) {
+      const message = String(error.message || '');
+      const code = [
+        'oauth_identity_not_found',
+        'oauth_identity_forbidden',
+        'oauth_last_login_method',
+        'oauth_identity_unlink_failed',
+      ].find((candidate) => message.includes(candidate));
+      if (code === 'oauth_last_login_method') {
+        await persistAuthAudit(adminClient, {
+          userId: sessionResult.user.id,
+          provider: identity.provider || null,
+          eventType: 'oauth_identity_unlink',
+          outcome: 'last_login_method_blocked',
+          req,
+          secret,
+          metadata: { identityId: identity.id },
+        });
+      }
+      return { ok: false, code: code || error.code || 'oauth_identity_unlink_failed', reason: error.message };
+    }
+  } else {
+    const remainingOAuthCount = await countActiveOAuthIdentities(adminClient, sessionResult.user.id, {
+      excludeIdentityId: identity.id,
+    });
+    const profile = sessionResult.profile || await loadProfile(adminClient, sessionResult.user.id);
+    const authUser = remainingOAuthCount < 1
+      ? await loadAuthUserById(adminClient, sessionResult.user.id)
+      : null;
+    if (remainingOAuthCount < 1 && !hasVerifiedPasswordLoginFromAuthPayload(profile, authUser)) {
+      return { ok: false, code: 'oauth_last_login_method' };
+    }
 
-  const { data, error } = await adminClient
-    .from('app_auth_identities')
-    .update({
-      disabled_at: new Date().toISOString(),
-      last_used_at: new Date().toISOString(),
-    })
-    .eq('id', identity.id)
-    .eq('user_id', sessionResult.user.id)
-    .is('disabled_at', null)
-    .select('*')
-    .single();
+    const legacyResult = await adminClient
+      .from('app_auth_identities')
+      .update({
+        disabled_at: new Date().toISOString(),
+        last_used_at: new Date().toISOString(),
+      })
+      .eq('id', identity.id)
+      .eq('user_id', sessionResult.user.id)
+      .is('disabled_at', null)
+      .select('*')
+      .single();
+    data = legacyResult.data;
+    error = legacyResult.error;
+  }
 
   if (error) {
     return { ok: false, code: error.code || 'oauth_identity_unlink_failed', reason: error.message };
@@ -1262,10 +1736,12 @@ export async function unlinkSiteAuthIdentity(adminClient, {
 export default {
   appendSetCookieHeader,
   buildSyntheticOAuthEmail,
+  checkAccountCredentialAllowed,
   clearSiteSessionCookies,
   linkOAuthIdentityToSiteSession,
   createOrLinkOAuthUserAndSession,
   createSiteSession,
+  createSiteSessionFromBearer,
   createSupabaseCompatAccessToken,
   getSiteSessionConfig,
   getSiteSessionSecret,
@@ -1273,6 +1749,7 @@ export default {
   loadSiteAuthIdentities,
   loadSiteSession,
   parseCookieHeader,
+  revokeAllSiteSessionsForUser,
   revokeSiteSession,
   serializeCookie,
   unlinkSiteAuthIdentity,

@@ -22,6 +22,7 @@
 | 小游戏平台 | 小游戏站（`endfield-games`）已独立闭环：邮箱+密码直连自建 Supabase 登录（不再使用 SSO ticket），`game_*` 表与 `apply_game_currency_delta` RPC 由迁移 `140`-`143` 建于自建实例；钱包流水、每日挑战、拼图制作/游玩与折金票奖励结算均在小游戏站内完成。主站侧仅保留拼图验证码所用的同源 `/api/puzzles` 与共享 `puzzles` 题库，二者共用同一张表。 | 维持主站验证码与小游戏站共享 `puzzles` 题库；新增玩法（UNO / 挖矿 / 放置）在小游戏站继续扩展，与主站解耦。 | `GAMES-001 / GAMES-002` |
 | 首页路线图 | 路线图已读取 `site_config.home_roadmap_items`，并能规避旧 `virtual-scroll` 默认项；但 fallback 默认值仍在代码和 i18n 中重复任务状态。 | 从 site config 或受维护的发布 / 任务状态源生成路线图，避免每次 todo 重排后再次漂移。 | `ROADMAP-001` |
 | 平台绑定 | 绑定接口和设置页入口已存在；root `todo` 仍要求 Discord / Telegram / QQ 实测、解绑后 BOT 查询失效、RLS 直连拒绝和公开输出隐私校验。 | 三个平台逐项完成真实验证和隐私检查后，才把绑定链路视为完成。 | `PROFILE-001` |
+| 统一认证与第三方登录 | `AUTH-HARDEN-001` Phase A–D、MaaMCP GitHub 核心浏览器闭环、最新 `origin/main` 集成和迁移 166/167 重编号已完成；181 个测试文件/976 项测试、lint、主站与抽奖构建、公开验证、性能预算、baseline 空库执行和两个 PostgreSQL 17 认证专项通过。生产 schema 已通过 SSH 只读确认抽奖 160–165 存在、认证结构不存在。 | 当前候选已到提交前状态，但仍未 commit/push/deploy/生产 migration；取消授权受 provider 已授权状态限制，跨浏览器 transaction、link Session 切换和 callback 重放保留自动化专项证据。LinuxDo 暂缓。 | `AUTH-HARDEN-001 / AUTH-LINUXDO-002` |
 | 导入恢复 | 官方导入已支持 Token / JSON 解析、剪贴板读取、同一 Token 重试、CN / INTL 互换、文件导入 30 分钟 `sessionStorage` 草稿恢复，以及可复制脱敏诊断。`v4.5.4 / 1.6.3` 过滤官方情报书等非寻访事件；当账号存在可修复的旧四星未知占位时，增量模式会停用提前结束并完整抓取，再以账号、区服、卡池、官方序号和时间精确匹配后原子修复。导入结果页会同时保留异常、漏池、警告和云端刷新失败信息，桌面与移动端均可进入统一核对流程。 | 全量写入链与非寻访修复链已收口。后续只保留错服子区服回退、别名迁移后 raw pool id 与 canonical pool id 不一致时的增量观测，以及低频生产回归监测。 | `IMPORT-UX-002` |
 
 ## 收口规则
@@ -78,8 +79,10 @@ npm run test:manual-placeholder-apply-sql
 
 除非用户重新调整优先级，后续按以下顺序推进：
 
-1. `DATA-NEW-017`：新增非破坏性 placeholder ID 审计和迁移就绪报告。
-2. `API-003 / STATS-004`：继续补生产迁移应用、刷新耗时观测和更多写入点的统计刷新验收。
-3. `DEVAPI-004` 和 `SUPPORT-001`：先关闭管理员决策链路，再接入持久通知。
-4. `MOBILE-004 / SIM-005`：替换或移除仍可见的 fallback 体验。
-5. `ACCOUNT-ALL-001`：如需重新开放跨账号汇总，先按 `docs/ACCOUNT_ALL_CLOSEOUT.md` 补指标契约。
+1. `AUTH-HARDEN-001`：核心 GitHub 浏览器闭环、主线集成、迁移 166/167 和提交前验证已完成；下一步等待 commit 授权，之后再分别申请 push、生产迁移与部署授权。
+2. `AUTH-LINUXDO-002`：公共基础设施与 GitHub 核心回归已通过，可在认证主线集成边界明确后重新实现并验证 LinuxDo。
+3. `DATA-NEW-017`：新增非破坏性 placeholder ID 审计和迁移就绪报告。
+4. `API-003 / STATS-004`：继续补生产迁移应用、刷新耗时观测和更多写入点的统计刷新验收。
+5. `DEVAPI-004` 和 `SUPPORT-001`：先关闭管理员决策链路，再接入持久通知。
+6. `MOBILE-004 / SIM-005`：替换或移除仍可见的 fallback 体验。
+7. `ACCOUNT-ALL-001`：如需重新开放跨账号汇总，先按 `docs/ACCOUNT_ALL_CLOSEOUT.md` 补指标契约。

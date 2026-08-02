@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getRequesterKey: vi.fn(() => 'test-requester'),
   getBearerToken: vi.fn(),
   getSupabaseAdminClient: vi.fn(),
+  resolveAuthenticatedRequestUser: vi.fn(),
 }));
 
 vi.mock('../_lib/authAdmin.js', () => ({
@@ -20,6 +21,10 @@ vi.mock('../_lib/http.js', () => ({
   checkMemoryRateLimit: mocks.checkMemoryRateLimit,
   getRequesterKey: mocks.getRequesterKey,
   rejectDisallowedBrowserOrigin: vi.fn(() => false),
+}));
+
+vi.mock('../_lib/siteAuth.js', () => ({
+  resolveAuthenticatedRequestUser: mocks.resolveAuthenticatedRequestUser,
 }));
 
 import accountEmailVerifyHandler, { __internal } from '../_routes/root/account-email-verify.js';
@@ -81,30 +86,30 @@ function createAdminClient({
   loadError = null,
   updateError = null,
 } = {}) {
-  const maybeSingle = vi.fn(async () => ({
-    data: stateRow,
-    error: loadError,
-  }));
-  const selectEq = vi.fn(() => ({ maybeSingle }));
-  const select = vi.fn(() => ({ eq: selectEq }));
-  const updateEqSecond = vi.fn(async () => ({ error: updateError }));
-  const updateEqFirst = vi.fn(() => ({ eq: updateEqSecond }));
-  const update = vi.fn(() => ({ eq: updateEqFirst }));
+  const rpc = vi.fn(async (_name, payload) => {
+    const expiresAt = payload.p_kind === 'code'
+      ? stateRow?.email_verification_code_expires_at
+      : stateRow?.email_verification_token_expires_at;
+    const expired = !expiresAt || new Date(expiresAt).getTime() <= Date.now();
+    const wrongUser = payload.p_user_id && stateRow?.user_id !== payload.p_user_id;
+    return {
+      data: !loadError && !updateError && stateRow?.user_id && !expired && !wrongUser
+        ? {
+          user_id: stateRow.user_id,
+          target_email: stateRow.target_email || 'verified@example.com',
+          challenge_id: 'challenge-1',
+          verified_at: new Date().toISOString(),
+        }
+        : null,
+      error: loadError || updateError,
+    };
+  });
 
   return {
-    from: vi.fn((table) => {
-      expect(table).toBe('account_security_states');
-      return {
-        select,
-        update,
-      };
-    }),
+    from: vi.fn(),
+    rpc,
     __mocks: {
-      maybeSingle,
-      selectEq,
-      update,
-      updateEqFirst,
-      updateEqSecond,
+      rpc,
     },
   };
 }
@@ -127,6 +132,29 @@ describe('api/account-email-verify handler', () => {
         })),
       },
     });
+    mocks.resolveAuthenticatedRequestUser.mockImplementation(async (req, { adminClient }) => {
+      const token = mocks.getBearerToken(req);
+      if (!token) {
+        return {
+          ok: false,
+          status: 401,
+          code: 'missing_access_token',
+          error: 'Missing access token',
+        };
+      }
+      const callerClient = mocks.createSupabaseAccessTokenClient(token);
+      const { data, error } = await callerClient.auth.getUser(token);
+      if (error || !data?.user?.id) {
+        return { ok: false, status: 401, code: 'invalid_access_token', error: 'Invalid access token' };
+      }
+      return {
+        ok: true,
+        source: 'supabase',
+        user: data.user,
+        adminClient,
+        callerClient,
+      };
+    });
   });
 
   it('clears the rollout email verification requirement for a valid token', async () => {
@@ -148,14 +176,11 @@ describe('api/account-email-verify handler', () => {
 
     expect(res.statusCode).toBe(303);
     expect(res.headers.Location).toBe('https://ef-gacha.example/settings?email_verification=success');
-    expect(adminClient.__mocks.selectEq).toHaveBeenCalledWith('email_verification_token_hash', tokenHash);
-    expect(adminClient.__mocks.update).toHaveBeenCalledWith(expect.objectContaining({
-      email_verification_required: false,
-      email_verification_token_hash: null,
-      email_verification_token_expires_at: null,
-    }));
-    expect(adminClient.__mocks.updateEqFirst).toHaveBeenCalledWith('user_id', 'user-1');
-    expect(adminClient.__mocks.updateEqSecond).toHaveBeenCalledWith('email_verification_token_hash', tokenHash);
+    expect(adminClient.__mocks.rpc).toHaveBeenCalledWith('consume_account_email_challenge', {
+      p_kind: 'token',
+      p_hash: tokenHash,
+      p_user_id: null,
+    });
   });
 
   it('redirects to a failure state when the token is expired', async () => {
@@ -174,8 +199,7 @@ describe('api/account-email-verify handler', () => {
     await accountEmailVerifyHandler(req, res);
 
     expect(res.statusCode).toBe(303);
-    expect(res.headers.Location).toBe('https://ef-gacha.example/settings?email_verification=failed&reason=token_expired');
-    expect(adminClient.__mocks.update).not.toHaveBeenCalled();
+    expect(res.headers.Location).toBe('https://ef-gacha.example/settings?email_verification=failed&reason=token_not_found');
   });
 
   it('verifies the current user email with a valid code', async () => {
@@ -200,16 +224,14 @@ describe('api/account-email-verify handler', () => {
       success: true,
       data: {
         status: 'verified',
+        email: 'verified@example.com',
       },
     });
-    expect(adminClient.__mocks.selectEq).toHaveBeenCalledWith('email_verification_code_hash', codeHash);
-    expect(adminClient.__mocks.update).toHaveBeenCalledWith(expect.objectContaining({
-      email_verification_required: false,
-      email_verification_code_hash: null,
-      email_verification_code_expires_at: null,
-    }));
-    expect(adminClient.__mocks.updateEqFirst).toHaveBeenCalledWith('user_id', 'user-1');
-    expect(adminClient.__mocks.updateEqSecond).toHaveBeenCalledWith('email_verification_code_hash', codeHash);
+    expect(adminClient.__mocks.rpc).toHaveBeenCalledWith('consume_account_email_challenge', {
+      p_kind: 'code',
+      p_hash: codeHash,
+      p_user_id: 'user-1',
+    });
   });
 
   it('rejects code verification without a current session', async () => {
@@ -265,7 +287,7 @@ describe('api/account-email-verify handler', () => {
       success: false,
       code: 'code_not_found',
     });
-    expect(adminClient.__mocks.update).not.toHaveBeenCalled();
+    expect(adminClient.__mocks.rpc).toHaveBeenCalledTimes(1);
   });
 
   it('rejects an expired verification code', async () => {
@@ -286,8 +308,8 @@ describe('api/account-email-verify handler', () => {
     expect(res.statusCode).toBe(400);
     expect(res.body).toMatchObject({
       success: false,
-      code: 'code_expired',
+      code: 'code_not_found',
     });
-    expect(adminClient.__mocks.update).not.toHaveBeenCalled();
+    expect(adminClient.__mocks.rpc).toHaveBeenCalledTimes(1);
   });
 });

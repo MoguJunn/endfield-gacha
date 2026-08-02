@@ -5,37 +5,14 @@
 -- 0. 清理旧数据（如果存在）
 -- ============================================
 
--- 删除旧的RLS策略
-DROP POLICY IF EXISTS "Users can view own tickets" ON tickets;
-DROP POLICY IF EXISTS "Admins can view admin tickets" ON tickets;
-DROP POLICY IF EXISTS "Super admins can view all tickets" ON tickets;
-DROP POLICY IF EXISTS "Users can create tickets" ON tickets;
-DROP POLICY IF EXISTS "Users can update own pending tickets" ON tickets;
-DROP POLICY IF EXISTS "Admins can update admin tickets" ON tickets;
-DROP POLICY IF EXISTS "Super admins can update all tickets" ON tickets;
-DROP POLICY IF EXISTS "Users can delete own pending tickets" ON tickets;
-DROP POLICY IF EXISTS "Super admins can delete any ticket" ON tickets;
-
-DROP POLICY IF EXISTS "Users can view replies on own tickets" ON ticket_replies;
-DROP POLICY IF EXISTS "Admins can view replies on admin tickets" ON ticket_replies;
-DROP POLICY IF EXISTS "Super admins can view all replies" ON ticket_replies;
-DROP POLICY IF EXISTS "Related users can create replies" ON ticket_replies;
-
--- 删除旧的触发器和函数
-DROP TRIGGER IF EXISTS tickets_updated_at_trigger ON tickets;
-DROP FUNCTION IF EXISTS update_tickets_updated_at();
-DROP FUNCTION IF EXISTS get_ticket_stats();
-
--- 删除旧的索引
-DROP INDEX IF EXISTS idx_tickets_user_id;
-DROP INDEX IF EXISTS idx_tickets_target_role;
-DROP INDEX IF EXISTS idx_tickets_status;
-DROP INDEX IF EXISTS idx_tickets_created_at;
-DROP INDEX IF EXISTS idx_ticket_replies_ticket_id;
-
 -- 删除旧的表（注意顺序：先删除有外键依赖的表）
+-- 表级策略、索引和触发器会随表一并删除；先删表也能兼容真正的空数据库。
 DROP TABLE IF EXISTS ticket_replies;
 DROP TABLE IF EXISTS tickets;
+
+-- 删除旧的函数
+DROP FUNCTION IF EXISTS update_tickets_updated_at();
+DROP FUNCTION IF EXISTS get_ticket_stats();
 
 -- ============================================
 -- 1. 创建工单主表

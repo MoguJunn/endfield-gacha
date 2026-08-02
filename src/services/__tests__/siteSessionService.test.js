@@ -5,6 +5,7 @@ import {
   bootstrapSiteSessionFromSupabaseToken,
   clearSiteSessionCache,
   getCurrentSiteSession,
+  revokeAllSiteSessions,
 } from '../siteSessionService.js';
 
 vi.mock('../../supabaseClient.js', () => ({
@@ -85,6 +86,34 @@ describe('siteSessionService', () => {
         Authorization: 'Bearer current-access-token',
       }),
     }), expect.any(Object));
+  });
+
+  it('revokes all site sessions with the current native bearer identity', async () => {
+    fetchJsonWithTimeout.mockResolvedValue({
+      response: { ok: true },
+      data: {
+        success: true,
+        data: {
+          sessionsRevoked: true,
+          revokedCount: 3,
+        },
+      },
+    });
+
+    await expect(revokeAllSiteSessions('native-token')).resolves.toEqual({
+      sessionsRevoked: true,
+      revokedCount: 3,
+    });
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/auth/session/revoke-all', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        Authorization: 'Bearer native-token',
+      },
+    }, expect.objectContaining({
+      label: 'auth-session-revoke-all',
+    }));
   });
 
   it('does not sync authenticated site sessions back to the Supabase client by default', async () => {

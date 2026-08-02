@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getSupabaseAnonServerClient: vi.fn(),
   findAuthUserByEmail: vi.fn(),
   createMailProviderAdapter: vi.fn(),
+  resolveAuthenticatedRequestUser: vi.fn(),
 }));
 
 vi.mock('../_lib/http.js', () => ({
@@ -30,6 +31,10 @@ vi.mock('../_lib/authAdmin.js', () => ({
 
 vi.mock('../_lib/mailProviderAdapter.js', () => ({
   createMailProviderAdapter: mocks.createMailProviderAdapter,
+}));
+
+vi.mock('../_lib/siteAuth.js', () => ({
+  resolveAuthenticatedRequestUser: mocks.resolveAuthenticatedRequestUser,
 }));
 
 import accountEmailActionHandler from '../_routes/root/account-email-action.js';
@@ -104,6 +109,14 @@ function createAdminClient({
   const profileUpdate = vi.fn(() => ({
     eq: vi.fn(async () => ({ error: null })),
   }));
+  const challengeRpc = vi.fn(async () => ({
+    data: {
+      id: 'challenge-1',
+      user_id: 'user-1',
+      target_email: 'target@example.com',
+    },
+    error: null,
+  }));
   const runtimeRow = mailRuntimeConfig
     ? {
       key: 'mail_runtime_config',
@@ -114,6 +127,7 @@ function createAdminClient({
     : null;
 
   return {
+    rpc: challengeRpc,
     auth: {
       admin: {
         generateLink,
@@ -165,6 +179,7 @@ function createAdminClient({
       deliveryInsert,
       generateLink,
       profileUpdate,
+      challengeRpc,
       securityUpsert,
     },
   };
@@ -266,6 +281,24 @@ describe('api/account-email-action handler', () => {
     mocks.createMailProviderAdapter.mockReturnValue(createMailAdapter());
     mocks.createSupabaseAccessTokenClient.mockReturnValue(createCallerClient());
     mocks.getSupabaseAnonServerClient.mockReturnValue(createCallerClient());
+    mocks.resolveAuthenticatedRequestUser.mockImplementation(async (req, { adminClient }) => {
+      const token = mocks.getBearerToken(req);
+      if (!token) {
+        return { ok: false, status: 401, error: 'Missing access token' };
+      }
+      const callerClient = mocks.createSupabaseAccessTokenClient(token);
+      const { data, error } = await callerClient.auth.getUser(token);
+      if (error || !data?.user?.id) {
+        return { ok: false, status: 401, error: error?.message || 'Invalid access token' };
+      }
+      return {
+        ok: true,
+        source: 'supabase',
+        user: data.user,
+        adminClient,
+        callerClient,
+      };
+    });
   });
 
   it('rejects unauthenticated account email actions', async () => {
@@ -399,10 +432,15 @@ describe('api/account-email-action handler', () => {
     });
     expect(callerClient.auth.signInWithPassword).not.toHaveBeenCalled();
     expect(adminClient.__mocks.generateLink).not.toHaveBeenCalled();
-    expect(adminClient.__mocks.profileUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      email: 'site-user@example.com',
-      updated_at: expect.any(String),
-    }));
+    expect(adminClient.__mocks.profileUpdate).not.toHaveBeenCalled();
+    expect(adminClient.__mocks.challengeRpc).toHaveBeenCalledWith(
+      'start_account_email_challenge',
+      expect.objectContaining({
+        p_user_id: 'user-1',
+        p_target_email: 'site-user@example.com',
+        p_reason: 'oauth_email_setup_required',
+      })
+    );
     expect(adapter.sentMessages).toHaveLength(1);
     expect(adapter.sentMessages[0]).toMatchObject({
       to: 'site-user@example.com',
@@ -577,18 +615,17 @@ describe('api/account-email-action handler', () => {
       },
     });
     expect(adminClient.__mocks.generateLink).not.toHaveBeenCalled();
-    expect(adminClient.__mocks.securityUpsert).toHaveBeenCalledWith(
+    expect(adminClient.__mocks.challengeRpc).toHaveBeenCalledWith(
+      'start_account_email_challenge',
       expect.objectContaining({
-        user_id: 'user-1',
-        email_verification_required: true,
-        email_verification_reason: 'user_requested',
-        email_verification_verified_at: null,
-        email_verification_token_hash: expect.any(String),
-        email_verification_token_expires_at: expect.any(String),
-        email_verification_code_hash: expect.any(String),
-        email_verification_code_expires_at: expect.any(String),
-      }),
-      { onConflict: 'user_id' },
+        p_user_id: 'user-1',
+        p_target_email: 'current@example.com',
+        p_reason: 'user_requested',
+        p_token_hash: expect.any(String),
+        p_token_expires_at: expect.any(String),
+        p_code_hash: expect.any(String),
+        p_code_expires_at: expect.any(String),
+      })
     );
     expect(adapter.sentMessages).toHaveLength(1);
     expect(adapter.sentMessages[0]).toMatchObject({
@@ -643,14 +680,14 @@ describe('api/account-email-action handler', () => {
 
     expect(res.statusCode).toBe(200);
     expect(adminClient.__mocks.generateLink).not.toHaveBeenCalled();
-    expect(adminClient.__mocks.securityUpsert).toHaveBeenCalledWith(
+    expect(adminClient.__mocks.challengeRpc).toHaveBeenCalledWith(
+      'start_account_email_challenge',
       expect.objectContaining({
-        user_id: 'user-1',
-        email_verification_required: true,
-        email_verification_token_hash: expect.any(String),
-        email_verification_code_hash: expect.any(String),
-      }),
-      { onConflict: 'user_id' },
+        p_user_id: 'user-1',
+        p_target_email: 'current@example.com',
+        p_token_hash: expect.any(String),
+        p_code_hash: expect.any(String),
+      })
     );
     expect(adapter.sentMessages).toHaveLength(1);
     expect(adapter.sentMessages[0]).toMatchObject({

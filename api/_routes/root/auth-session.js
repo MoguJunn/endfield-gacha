@@ -1,10 +1,15 @@
 import { applyCors } from '../../_lib/http.js';
 import { getSupabaseAdminClient } from '../../_lib/authAdmin.js';
-import { resolveAuthenticatedRequestUser } from '../../_lib/siteAuth.js';
 import {
+  resolveAuthenticatedRequestUser,
+  resolveBearerRequestUser,
+} from '../../_lib/siteAuth.js';
+import {
+  clearSiteSessionCookies,
   createSupabaseCompatAccessToken,
-  createSiteSession,
+  createSiteSessionFromBearer,
   loadSiteSession,
+  revokeAllSiteSessionsForUser,
   revokeSiteSession,
 } from '../../_lib/siteSession.js';
 
@@ -106,9 +111,8 @@ async function bootstrapSiteSessionHandler(req, res) {
     return sendJsonError(res, 503, 'supabase_admin_not_configured', 'Supabase admin client is not configured.');
   }
 
-  const authResult = await resolveAuthenticatedRequestUser(req, {
+  const authResult = await resolveBearerRequestUser(req, {
     adminClient,
-    touch: false,
   });
 
   if (!authResult.ok) {
@@ -120,29 +124,29 @@ async function bootstrapSiteSessionHandler(req, res) {
     );
   }
 
-  if (authResult.source === 'site_session') {
-    const sessionResult = await loadSiteSession(adminClient, {
-      req,
+  if (authResult.bearerTokenKind !== 'native_supabase') {
+    return sendJsonError(
       res,
-      touch: true,
-    });
-
-    if (!sessionResult.ok) {
-      return sendJsonError(res, 500, sessionResult.code || 'site_session_load_failed', sessionResult.reason || 'Failed to load site session.');
-    }
-
-    return res.status(200).json(buildSessionPayload(sessionResult));
+      409,
+      'native_bearer_required',
+      'A native Supabase access token is required to bootstrap a site session.'
+    );
   }
 
-  const sessionResult = await createSiteSession(adminClient, {
+  const sessionResult = await createSiteSessionFromBearer(adminClient, {
     userId: authResult.user.id,
+    sourceAuthSessionId: authResult.sourceAuthSessionId,
+    bearerIssuedAt: authResult.bearerIssuedAt,
+    bearerExpiresAt: authResult.bearerExpiresAt,
     req,
     res,
-    provider: authResult.source || 'supabase',
   });
 
   if (!sessionResult.ok) {
-    return sendJsonError(res, 500, sessionResult.code || 'site_session_create_failed', sessionResult.reason || 'Failed to create site session.');
+    const status = ['bearer_session_revoked', 'bearer_session_binding_invalid'].includes(sessionResult.code)
+      ? 401
+      : 500;
+    return sendJsonError(res, status, sessionResult.code || 'site_session_create_failed', sessionResult.reason || 'Failed to create site session.');
   }
 
   return res.status(200).json({
@@ -203,6 +207,56 @@ export async function authSessionLogoutHandler(req, res) {
     success: true,
     data: {
       signedOut: true,
+    },
+    meta: {
+      cache: 'no-store',
+      generatedAt: new Date().toISOString(),
+    },
+  });
+}
+
+export async function authSessionRevokeAllHandler(req, res) {
+  if (!guardCommon(req, res, { methods: ['POST'] })) {
+    return;
+  }
+
+  const adminClient = getSupabaseAdminClient();
+  if (!adminClient) {
+    return sendJsonError(res, 503, 'supabase_admin_not_configured', 'Supabase admin client is not configured.');
+  }
+
+  const authResult = await resolveAuthenticatedRequestUser(req, {
+    adminClient,
+    touch: false,
+  });
+  if (!authResult.ok || !authResult.user?.id) {
+    return sendJsonError(
+      res,
+      authResult.status || 401,
+      authResult.code || 'auth_required',
+      authResult.error || 'Authentication required.'
+    );
+  }
+
+  const revokeResult = await revokeAllSiteSessionsForUser(adminClient, {
+    userId: authResult.user.id,
+    reason: 'credential_changed',
+  });
+  if (!revokeResult.ok) {
+    return sendJsonError(
+      res,
+      500,
+      revokeResult.code || 'site_session_revoke_failed',
+      revokeResult.reason || 'Failed to revoke site sessions.'
+    );
+  }
+
+  clearSiteSessionCookies(res, req);
+  return res.status(200).json({
+    success: true,
+    data: {
+      sessionsRevoked: true,
+      revokedCount: revokeResult.revokedCount,
     },
     meta: {
       cache: 'no-store',

@@ -39,6 +39,17 @@ npm run test:ops-automation
 npm run test:official-announcements-feed
 ```
 
+如果改到了邮箱、密码、OAuth、站点 Session、身份 key 或认证迁移，还必须补跑：
+
+```bash
+npm run test:auth-hardening-phase-a
+npm run test:auth-hardening-phase-cd
+npm run test:supabase-baseline
+npm run test:supabase-baseline:smoke
+```
+
+认证迁移编号改变后必须重新生成并验证 baseline；本地测试通过不代表真实浏览器回归、生产迁移或部署已经完成。真实 OAuth secret、identity hash key、邮箱 challenge 和临时凭据不得进入提交。
+
 ## 文档要求
 
 - UI 或路由变更请同步更新 README、截图或代码地图。

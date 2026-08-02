@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   loadAuthUserById: vi.fn(),
   findAuthUserByEmail: vi.fn(),
   resolveAuthenticatedRequestUser: vi.fn(),
+  clearSiteSessionCookies: vi.fn(),
+  createSiteSession: vi.fn(),
+  revokeAllSiteSessionsForUser: vi.fn(),
 }));
 
 vi.mock('../_lib/http.js', () => ({
@@ -22,6 +25,12 @@ vi.mock('../_lib/authAdmin.js', () => ({
 
 vi.mock('../_lib/siteAuth.js', () => ({
   resolveAuthenticatedRequestUser: mocks.resolveAuthenticatedRequestUser,
+}));
+
+vi.mock('../_lib/siteSession.js', () => ({
+  clearSiteSessionCookies: mocks.clearSiteSessionCookies,
+  createSiteSession: mocks.createSiteSession,
+  revokeAllSiteSessionsForUser: mocks.revokeAllSiteSessionsForUser,
 }));
 
 import accountPasswordSetupHandler from '../_routes/root/account-password-setup.js';
@@ -74,9 +83,22 @@ function createAdminClient({
     },
     error: null,
   }));
-  const upserts = [];
+  const rpc = vi.fn(async (name) => {
+    if (name === 'claim_oauth_password_setup_capability') {
+      securityState.password_setup_capability_status = 'claimed';
+      return { data: 'claimed', error: null };
+    }
+    if (name === 'finish_oauth_password_setup_capability') {
+      securityState.password_setup_capability_status = 'completed';
+      securityState.password_change_required = false;
+      securityState.password_change_reason = null;
+      return { data: 'completed', error: null };
+    }
+    throw new Error(`Unexpected RPC: ${name}`);
+  });
 
   return {
+    rpc,
     auth: {
       admin: {
         updateUserById,
@@ -91,16 +113,6 @@ function createAdminClient({
               eq() {
                 return {
                   maybeSingle: async () => ({ data: securityState, error: null }),
-                };
-              },
-            };
-          },
-          upsert(payload) {
-            upserts.push(payload);
-            return {
-              select() {
-                return {
-                  maybeSingle: async () => ({ data: payload, error: null }),
                 };
               },
             };
@@ -124,7 +136,7 @@ function createAdminClient({
     },
     __mocks: {
       updateUserById,
-      upserts,
+      rpc,
     },
   };
 }
@@ -144,6 +156,8 @@ describe('api/account-password-setup handler', () => {
       },
     });
     mocks.findAuthUserByEmail.mockResolvedValue(null);
+    mocks.createSiteSession.mockResolvedValue({ ok: true, session: { id: 'new-session' } });
+    mocks.revokeAllSiteSessionsForUser.mockResolvedValue({ ok: true, revokedCount: 2 });
   });
 
   it('rejects first password setup until the user verifies a site email', async () => {
@@ -151,6 +165,8 @@ describe('api/account-password-setup handler', () => {
       securityState: {
         password_change_required: true,
         password_change_reason: 'oauth_password_setup_required',
+        password_setup_capability_id: '00000000-0000-4000-8000-000000000001',
+        password_setup_capability_status: 'available',
         email_verification_required: true,
         email_verification_verified_at: null,
       },
@@ -175,8 +191,11 @@ describe('api/account-password-setup handler', () => {
       securityState: {
         password_change_required: true,
         password_change_reason: 'oauth_password_setup_required_existing',
+        password_setup_capability_id: '00000000-0000-4000-8000-000000000001',
+        password_setup_capability_status: 'available',
         email_verification_required: false,
         email_verification_verified_at: '2026-06-03T00:00:00.000Z',
+        email_verification_target_email: 'site-user@example.com',
       },
       profile: {
         id: 'user-1',
@@ -201,10 +220,63 @@ describe('api/account-password-setup handler', () => {
         site_password_set: true,
       }),
     }));
-    expect(adminClient.__mocks.upserts[0]).toMatchObject({
-      user_id: 'user-1',
-      password_change_required: false,
-      password_change_reason: null,
+    expect(adminClient.__mocks.rpc).toHaveBeenCalledWith('claim_oauth_password_setup_capability', expect.any(Object));
+    expect(adminClient.__mocks.rpc).toHaveBeenCalledWith('finish_oauth_password_setup_capability', expect.objectContaining({
+      p_outcome: 'completed',
+    }));
+    expect(mocks.revokeAllSiteSessionsForUser).toHaveBeenCalledWith(adminClient, {
+      userId: 'user-1',
+      reason: 'password_setup_completed',
     });
+    expect(mocks.createSiteSession).toHaveBeenCalledWith(adminClient, expect.objectContaining({
+      userId: 'user-1',
+      provider: 'password_setup',
+    }));
+    expect(res.body).toMatchObject({
+      sessionsRevoked: true,
+      revokedSessionCount: 2,
+      currentSessionRecreated: true,
+    });
+  });
+
+  it('keeps the one-time password setup capability consumed when session revocation fails', async () => {
+    const securityState = {
+      password_change_required: true,
+      password_change_reason: 'oauth_password_setup_required_existing',
+      password_setup_capability_id: '00000000-0000-4000-8000-000000000001',
+      password_setup_capability_status: 'available',
+      email_verification_required: false,
+      email_verification_verified_at: '2026-06-03T00:00:00.000Z',
+      email_verification_target_email: 'site-user@example.com',
+    };
+    const adminClient = createAdminClient({
+      securityState,
+      profile: {
+        id: 'user-1',
+        email: 'site-user@example.com',
+        role: 'user',
+      },
+    });
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    mocks.revokeAllSiteSessionsForUser.mockResolvedValue({
+      ok: false,
+      code: 'site_session_revoke_failed',
+      reason: 'session database unavailable',
+    });
+    const res = createResponseRecorder();
+
+    await accountPasswordSetupHandler(createRequest({ newPassword: 'StrongPass123' }), res);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toMatchObject({
+      success: false,
+      passwordUpdated: true,
+      code: 'site_session_revoke_failed',
+      state: {
+        passwordChangeRequired: false,
+        passwordSetupCapabilityStatus: 'completed',
+      },
+    });
+    expect(mocks.createSiteSession).not.toHaveBeenCalled();
   });
 });

@@ -33,6 +33,9 @@ npm run dev
 | `npm run test:public-api-boundary` | 首屏公共读取不直连 Supabase |
 | `npm run test:bootstrap-cache` | 公共 cache partial / stale 行为 |
 | `npm run test:supabase-baseline` | baseline 覆盖范围和首尾 marker |
+| `npm run test:supabase-baseline:smoke` | 在临时 PostgreSQL 中小范围真实执行候选 baseline |
+| `npm run test:auth-hardening-phase-a` | Phase A/B：管理员 RPC、OAuth transaction、Session 与 owner 权限边界 |
+| `npm run test:auth-hardening-phase-cd` | Phase C/D：邮箱归属、首次设密、临时凭据到期与 identity key 迁移 |
 | `npm run test:history-batch-delete-guard` | 在临时 PostgreSQL 中验证旧批量删除的跨账号重复 ID 防护 |
 | `npm run test:mail-abuse-guards` | 自建邮件防刷 guard、预算桶、幂等和脱敏 |
 | `npm run test:mail-outbox-enqueue` | 自建邮件 outbox 入队、幂等、预算和 RPC 边界 |
@@ -61,6 +64,26 @@ SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxx
 SUPABASE_SECRET_KEY=sb_secret_xxx
+
+# 认证安全与同源站点 Session（真实值仅放服务端秘密存储）
+OAUTH_STATE_SECRET=replace-me-with-long-random-secret
+AUTH_IDENTITY_HASH_KEY_CURRENT=replace-me-with-independent-identity-hash-key
+AUTH_IDENTITY_HASH_KEY_CURRENT_VERSION=v2
+AUTH_IDENTITY_HASH_KEY_PREVIOUS=
+AUTH_IDENTITY_HASH_KEY_PREVIOUS_VERSION=
+APP_SESSION_SECRET=replace-me-with-another-long-random-secret
+APP_SESSION_COOKIE_NAME=__Host-eg_session
+APP_REFRESH_COOKIE_NAME=__Secure-eg_refresh
+AUTH_SECURITY_HASH_SECRET=replace-me-with-third-long-random-secret
+# 仅在服务端 OAuth 出站网络必须使用 HTTPS_PROXY / HTTP_PROXY 时开启；NO_PROXY 仍生效
+AUTH_OAUTH_USE_ENV_PROXY=false
+
+# GitHub 公开模板默认关闭；隔离浏览器回归已完成，生产仍需单独授权后再开启
+AUTH_OAUTH_GITHUB_ENABLED=false
+AUTH_OAUTH_GITHUB_CLIENT_ID=
+AUTH_OAUTH_GITHUB_CLIENT_SECRET=
+AUTH_OAUTH_GITHUB_REDIRECT_URI=https://your-domain.vercel.app/api/auth/oauth/github/callback
+VITE_AUTH_OAUTH_GITHUB_ENABLED=false
 
 # App / cache
 VITE_APP_URL=https://your-domain.vercel.app
@@ -127,15 +150,17 @@ TELEGRAM_OFFICIAL_BOT_LONG_POLL_SECONDS=20
 
 主站生产部署由 GitHub `main` 推送触发 GitHub-connected Vercel 自动部署。正常开发流程不直接运行 `vercel deploy --prod`；仅在用户明确批准紧急回滚、promotion 或切换已有部署时使用 Vercel CLI，并在操作前后核对目标部署和生产 alias。独立状态页等其他 Vercel 项目必须按单独项目处理，不与主站发布混用。
 
+`AUTH-HARDEN-001` Phase A–D 与隔离 GitHub 核心浏览器闭环已完成，并已集成到最新 `origin/main` 的独立 worktree。2026-08-02 通过 SSH 只读确认生产运行版本为 `v4.5.4`、抽奖 160–165 结构存在、认证结构不存在；认证迁移因此定为 166/167。候选尚未提交、推送、部署或执行生产迁移；提交前仍需重新生成 baseline 并完成集成树全量验证。LinuxDo 暂缓。
+
 当前管理后台主链已收口到 Vercel Serverless `/api/admin`，并通过 `vercel.json` rewrite 兼容旧 `admin-*` 路径。不再要求额外部署同名 Supabase Edge Functions。
 
 官方导入的数据获取仍由独立 CN / INTL 私有后端承接。`v4.5.4` 对应后端版本为 `1.6.3`：浏览器用 `POST import-full` 创建后台任务，只通过 `GET import-status` 轮询；后端先过滤情报书等非寻访事件，再把规范化结果写入 `official_import_tasks` 与 `official_import_staged_records`，并在内部调用 `commit_official_import_records()` 自动原子提交。当前浏览器主路径不再调用同步 `import-confirm`，旧逐条审阅接口仅保留兼容。正常记录直接写入；仍具备账号、区服、卡池、官方序号和时间作用域的未知角色 / 武器记录会保留并写入 `history_anomalies`，由前端在导入完成后提示用户现在或稍后核对；缺少安全定位字段的记录继续跳过。再次导入时，后端只会通过迁移 157 提供的 service-role-only RPC 修复与官方非寻访标记完整吻合的旧版四星未知占位；查询失败时增量导入会保守降级为完整抓取。私有后端镜像必须同时包含 `backend/lib/officialImportStaging.js`、`backend/lib/officialImportIncremental.js`、`shared/historyPity.js` 和 `shared/officialImportRecordNormalizer.js`；两个地区部署后都要核对 `/health`、容器版本、正常 CORS 预检和一次受控导入，不得只更新单一区域。
 
 邮件发送分为两层：认证邮件使用受控同源 `/api/auth-email-action`，支持注册验证、密码重置和邮件登录；通知类和人工恢复队列继续走 provider-independent outbox / 队列处理器。认证邮件入口必须同时启用 `AUTH_MAIL_ACTIONS_ENABLED=true`、`MAIL_OUTBOX_WORKER_ENABLED=true`，且未命中环境级紧急停发开关 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH` 才会调用 provider adapter；它会先做 origin、CAPTCHA、内存限流、账号存在性判断和脱敏审计，未知邮箱的重置 / 邮件登录仍返回通用状态。当前 `api/_lib/mailOutbox.js` 只允许服务端 service-role 经过防刷、suppression、幂等和 `enqueue_mail_outbox_event()` RPC 写入私有 `mail_outbox`；`api/_lib/mailOutboxWorker.js` 和 `api/_lib/mailProviderAdapter.js` 已提供 Stalwart-first 的队列处理器 / provider 边界。`api/_lib/mailTemplateRenderer.js` 是统一 HTML + plaintext 邮件模板入口，注册验证、邮件登录、密码重置、账号恢复队列处理器、开发者 API 审核通知、工单回复通知、管理员告警和后台测试邮件都应复用它。开发者 API 审核结果已可在 `DEVELOPER_API_REVIEW_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时写入 outbox；工单 staff 回复已通过 `/api/tickets/reply` 服务端路由写入回复，并可在 `TICKET_REPLY_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时为工单所有者写入 `ticket.reply` outbox；后台“邮件状态”页可在 `ADMIN_ALERT_MAIL_OUTBOX_ENABLED=true` 且队列处理器开启时把 `admin.alert` 受控入队给当前超级管理员自己的账号邮箱。通知类入队失败都不会阻断原业务操作，响应只回传 queued / deduped / disabled / skipped / blocked / error 等脱敏状态，不返回收件邮箱或 guard decision。`/api/mail-outbox-worker` 是内部队列处理 endpoint，同时接受 `MAIL_OUTBOX_WORKER_SECRET` 和 `CRON_SECRET` 鉴权；`vercel.json` 已配置每日一次 Vercel Cron 触发该 endpoint，外部 cron 或受控运维脚本可使用独立 worker secret，后台“邮件状态”页也能由超级管理员手动调用 `/api/admin?route=mail-outbox-drain` 处理到期队列。`/api/mail-delivery-feedback` 是内部投递反馈入口，用服务端 secret 接收单条 hard bounce / complaint / invalid recipient / domain pause，也能接收 Stalwart Telemetry Webhook `{ events: [...] }` 批量投递事件；永久失败会写入 `mail_suppression`，成功和临时失败只写入脱敏 `mail_delivery_events`。`/api/mail-inbound` 是内部入站邮件事件入口，用服务端 secret 接收 Stalwart Webhooks / MTA Hooks 或受控桥接脚本的入站摘要，并只写入脱敏 `mail_delivery_events`，不保存原始正文或自动生成工单。后台“站点健康”和“邮件状态”面板通过 `/api/admin?route=site-health` 汇总内容更新时间、公共缓存、自动化、邮件队列、入站事件、suppression、发送预算高水位和待处理事项；“邮件状态”页还提供超级管理员测试邮件入口，用当前 provider adapter 发送受控测试邮件，并只记录脱敏投递事件。邮件状态页可在线编辑 `mail_abuse_budget_config` 的窗口、上限和启用状态，并能展开查看最近失败 / suppressed outbox 的脱敏错误摘要。所有响应不返回原始邮箱、SMTP 密码、webhook secret、Stalwart 原始 event id / queue id 或预算 bucket hash。真实投递前必须先设置 `MAIL_ABUSE_HASH_SECRET`、保持环境级紧急停发开关可用，并确认 `docs/SELF_HOSTED_MAIL.md` 中的 DNS、suppression、预算和投递监控检查项完成。
 
-账号恢复现在优先走自助重置邮件：登录弹窗的“账号恢复”会先调用 `/api/auth-email-action` 发送密码重置邮件；只有多次收不到邮件、邮箱不可访问或需要注销旧账号时，才提交人工恢复申请。人工恢复申请仍只返回通用 `received` 状态；超管核验后可设置临时密码；临时密码过期时间由 `ACCOUNT_RECOVERY_TEMP_PASSWORD_TTL_HOURS` 控制；用户登录后会从私有 `account_security_states` 读取强制改密状态，并在设置页改密成功后清除。只有 `ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时，人工恢复申请中的 `password_reset` 才会写入 `mail_outbox` 并标记为 `mail_reset_queued`；防刷阻断、入队异常或状态回写失败时仍保留人工恢复 fallback。认证预检和恢复申请会写入私有 `auth_security_events`，只保存 hash、风险桶、CAPTCHA 摘要和脱敏 metadata。不要把强制改密状态放进公开 profile 字段，也不要在响应、日志或审计包中保存明文临时密码、原始邮箱、验证码 token 或 `game_uid`。
+账号恢复现在优先走自助重置邮件：登录弹窗的“账号恢复”会先调用 `/api/auth-email-action` 发送密码重置邮件；只有多次收不到邮件、邮箱不可访问或需要注销旧账号时，才提交人工恢复申请。人工恢复申请仍只返回通用 `received` 状态。Phase C 候选已把管理员临时密码的 issue/issued/expires 元数据与 Auth 密码更新原子写入，并通过 `auth.sessions` 门禁和站点 Session/Bearer 检查执行认证层到期；普通用户不能直接清除改密状态。该能力尚未生产部署。只有 `ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时，人工恢复申请中的 `password_reset` 才会写入 `mail_outbox` 并标记为 `mail_reset_queued`；防刷阻断、入队异常或状态回写失败时仍保留人工恢复 fallback。认证预检和恢复申请会写入私有 `auth_security_events`，只保存 hash、风险桶、CAPTCHA 摘要和脱敏 metadata。不要把强制改密状态放进公开 profile 字段，也不要在响应、日志或审计包中保存明文临时密码、原始邮箱、验证码 token 或 `game_uid`。
 
-第三方一键登录当前走本站统一 OAuth 桥接：GitHub、Linux.do、QQ 的前端按钮都进入 `/api/auth/oauth/{provider}/start`，服务端签名 `state`、限制回跳地址、交换 provider token、读取 profile、保存 provider subject 的 HMAC 哈希，并通过 `app_auth_identities` / `app_sessions` 创建本站 HttpOnly session。`auth.users` 仍作为兼容用户 ID 锚点，不在本阶段删除；`/api/auth/session` 会在过渡期返回短期 Supabase 兼容 token，并附带脱敏后的站内第三方身份摘要，让现有 RLS 直连链路和设置页展示逐步迁移。Linux.do 的 Supabase Custom Provider 路径只保留为诊断，不再作为默认上线前提；Linux.do 应用后台默认回调应登记 `https://ef-gacha.mogujun.icu/api/auth/oauth/linuxdo/callback`。GitHub OAuth App 默认回调应登记 `https://ef-gacha.mogujun.icu/api/auth/oauth/github/callback`。QQ 等审核和真实返回格式确认后再开放前端按钮。GitHub / Linux.do / QQ 的真实 secret 只写入服务端环境变量，不进入 `VITE_*`；服务端不得保存 raw access token / refresh token，也不得把 provider 原始资料写入公开输出。设置页绑定、解绑、最后一种登录方式保护和冲突确认仍是后续任务。
+第三方一键登录当前走本站统一 OAuth 桥接：provider 进入 `/api/auth/oauth/{provider}/start` / callback，以 `auth.users` UUID 为锚点并通过 `app_auth_identities` / `app_sessions` 创建 HttpOnly 站点会话。Phase A–D 候选已完成 OAuth transaction 浏览器/Session 绑定与单次消费、Cookie/Bearer 冲突拒绝、独立版本化 identity keyring、旧 key 原子迁移、owner 防改写、原子认领/解绑和半成品 Auth user 补偿恢复。隔离 OAuth App 已完成 GitHub 登录、绑定、软解绑、解绑后拒绝和恢复原 identity 的核心浏览器闭环；取消授权、跨浏览器 transaction、link Session 切换和 callback 重放仍需独立真人浏览器证据。LinuxDo 前后端保持关闭并暂缓重新实现，QQ 保持关闭。真实 Client Secret 只写服务端环境变量，不进入 `VITE_*`；服务端不得保存 raw access token / refresh token，也不得把 provider 原始资料写入公开输出。
 
 受控队列处理器可用 `npm run worker:mail-outbox` 手动运行，也可调用 `/api/mail-outbox-worker`，或在后台“邮件状态”页点击“处理到期队列”。这些路径默认都需要 `MAIL_OUTBOX_WORKER_ENABLED=true` 且未命中紧急停发开关才会处理队列；每日 Vercel Cron 只负责触发，不会绕过队列处理器开关、演练模式或紧急停发开关。当前已接入 Stalwart SMTP 真实传输、Stalwart Telemetry Webhook 批量投递事件归一、入站事件记录、后台健康汇总、发送预算高水位摘要和站内测试邮件入口；在关闭演练模式前仍必须完成 DNS、收件端认证结果审计、Stalwart 管理端 Webhook 真实事件小测试、紧急停发灰度和更细的投递监控。未配置 SMTP 主机、账号或密码时会以 `stalwart_smtp_not_configured` 安全失败，不会伪装投递成功。
 
@@ -155,7 +180,7 @@ npm run generate:supabase-baseline
 npm run test:supabase-baseline
 ```
 
-迁移 152、153 增加历史异常 / 变更审计、官方导入内部暂存和原子提交 RPC；历史版本迁移 154 曾把运行时站点版本提升到 `v4.5.2`；迁移 155 加固旧客户端的仅 ID 批量删除；迁移 156 把运行时站点版本提升到 `v4.5.3`；迁移 157 增加官方非寻访事件旧占位的精确修复 RPC；当前版本迁移 158 把运行时站点版本提升到 `v4.5.4` 并刷新公共缓存 epoch。已有生产库按前向迁移顺序执行；新环境直接使用已覆盖到 158 的 baseline，不要再叠加重复执行。下一迁移从 159 开始。历史异常回填脚本默认只读，只有同时提供 `--apply` 与脚本打印的精确确认快照时才允许写入。
+迁移 152–158 是已发布主站标准链。共享生产 schema 已确认独立抽奖 160–165 存在而认证结构不存在；认证迁移最终为 166/167，集成 baseline 覆盖到 167，但两条认证迁移仍未生产执行。性能线和旧邮箱候选的同号 159 位于其他 worktree，不属于本认证分支。历史异常回填脚本默认只读，只有同时提供 `--apply` 与脚本打印的精确确认快照时才允许写入。
 
 数据库体积治理的现状：远端 `history` 体积主要来自索引。删除字段或索引前必须先做线上读写路径、RPC 查询计划、回滚脚本和实际基准验证；本轮只整理 baseline 和迁移归档，不直接改生产表结构。
 

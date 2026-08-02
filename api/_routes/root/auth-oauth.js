@@ -1,8 +1,15 @@
 import {
   appendOAuthResultParams,
+  consumeOAuthTransaction,
   createOAuthState,
+  createOAuthTransactionMaterial,
   getOAuthStateSecret,
+  hashOAuthBrowserBinding,
+  normalizeOAuthIntent,
   normalizeOAuthReturnTo,
+  persistOAuthTransaction,
+  readOAuthTransactionCookie,
+  serializeOAuthTransactionCookie,
   verifyOAuthState,
 } from '../../_lib/oauthState.js';
 import {
@@ -12,11 +19,11 @@ import {
   fetchOAuthProfile,
   getOAuthProviderConfig,
   hashOAuthProfile,
-  hashOAuthSubject,
   isSupportedOAuthProvider,
   normalizeOAuthProvider,
   sanitizeOAuthProfile,
 } from '../../_lib/oauthProviders.js';
+import { buildOAuthIdentityHashCandidates } from '../../_lib/identityHash.js';
 import {
   applyCors,
   checkMemoryRateLimit,
@@ -24,8 +31,11 @@ import {
 } from '../../_lib/http.js';
 import { getSupabaseAdminClient } from '../../_lib/authAdmin.js';
 import {
+  appendSetCookieHeader,
   createOrLinkOAuthUserAndSession,
+  isSecureRequest,
   linkOAuthIdentityToSiteSession,
+  loadSiteSession,
 } from '../../_lib/siteSession.js';
 
 function readEnvironment() {
@@ -75,6 +85,25 @@ function redirectWithOAuthResult(res, req, {
 function readQueryParam(query, key) {
   const value = query?.[key];
   return Array.isArray(value) ? value[0] : value;
+}
+
+function clearOAuthTransactionCookie(res, transactionId, secure) {
+  appendSetCookieHeader(res, serializeOAuthTransactionCookie(transactionId, '', {
+    secure,
+    maxAgeSeconds: 0,
+  }));
+}
+
+async function loadOAuthLinkSession(adminClient, req, env) {
+  return loadSiteSession(adminClient, {
+    req,
+    env,
+    touch: false,
+  }).catch((error) => ({
+    ok: false,
+    authenticated: false,
+    code: error?.code || 'site_session_lookup_failed',
+  }));
 }
 
 function guardCommon(req, res, {
@@ -189,24 +218,91 @@ export function createOAuthStartHandler(fallbackProvider) {
       });
     }
 
+    const intent = normalizeOAuthIntent(readQueryParam(req?.query, 'intent'));
+    if (!intent) {
+      return redirectWithOAuthResult(res, req, {
+        returnTo,
+        provider,
+        status: 'error',
+        code: 'oauth_intent_invalid',
+        env,
+      });
+    }
+
+    const adminClient = getSupabaseAdminClient();
+    if (!adminClient) {
+      return redirectWithOAuthResult(res, req, {
+        returnTo,
+        provider,
+        status: 'error',
+        code: 'oauth_session_unavailable',
+        env,
+      });
+    }
+
+    let startedSessionId = null;
+    let startedUserId = null;
+    if (intent === 'link') {
+      const sessionResult = await loadOAuthLinkSession(adminClient, req, env);
+      if (!sessionResult?.authenticated || !sessionResult.session?.id || !sessionResult.user?.id) {
+        return redirectWithOAuthResult(res, req, {
+          returnTo,
+          provider,
+          status: 'error',
+          code: 'site_session_required',
+          env,
+        });
+      }
+      startedSessionId = sessionResult.session.id;
+      startedUserId = sessionResult.user.id;
+    }
+
     let state = '';
     try {
+      const secret = getOAuthStateSecret(env);
+      const transactionMaterial = createOAuthTransactionMaterial({ secret });
+      const persisted = await persistOAuthTransaction(adminClient, {
+        transactionId: transactionMaterial.transactionId,
+        provider,
+        intent,
+        returnTo,
+        browserBindingHash: transactionMaterial.browserBindingHash,
+        pkceCodeVerifier: transactionMaterial.pkceCodeVerifier,
+        startedSessionId,
+        startedUserId,
+      });
+      if (!persisted.ok) {
+        throw Object.assign(new Error(persisted.code || 'oauth_transaction_create_failed'), {
+          code: persisted.code,
+        });
+      }
+
       state = createOAuthState({
         provider,
         returnTo,
-        intent: String(req?.query?.intent || 'login'),
-      }, { env, req });
+        intent,
+        transactionId: transactionMaterial.transactionId,
+      }, { env, req, secret });
+
+      const secure = isSecureRequest(req, env);
+      appendSetCookieHeader(res, serializeOAuthTransactionCookie(
+        transactionMaterial.transactionId,
+        transactionMaterial.browserBindingToken,
+        { secure }
+      ));
+
+      return redirect(res, buildOAuthAuthorizationUrl(config, state, {
+        codeChallenge: transactionMaterial.pkceCodeChallenge,
+      }));
     } catch (error) {
       return redirectWithOAuthResult(res, req, {
         returnTo,
         provider,
         status: 'error',
-        code: error?.message || 'oauth_state_create_failed',
+        code: error?.code || error?.message || 'oauth_state_create_failed',
         env,
       });
     }
-
-    return redirect(res, buildOAuthAuthorizationUrl(config, state));
   };
 }
 
@@ -244,8 +340,68 @@ export function createOAuthCallbackHandler(fallbackProvider) {
       }, env, req));
     }
 
-    const returnTo = normalizeOAuthReturnTo(stateResult.payload.returnTo || '/', env, req);
-    const intent = String(stateResult.payload.intent || 'login').trim().toLowerCase();
+    const fallbackReturnTo = normalizeOAuthReturnTo(stateResult.payload.returnTo || '/', env, req);
+    const transactionId = String(stateResult.payload.transactionId || '').trim();
+    const secure = isSecureRequest(req, env);
+    const browserBindingToken = readOAuthTransactionCookie(req, transactionId, { secure });
+    if (!browserBindingToken) {
+      return redirectWithOAuthResult(res, req, {
+        returnTo: fallbackReturnTo,
+        provider,
+        status: 'error',
+        code: 'oauth_transaction_browser_mismatch',
+        env,
+      });
+    }
+
+    const adminClient = getSupabaseAdminClient();
+    if (!adminClient) {
+      return redirectWithOAuthResult(res, req, {
+        returnTo: fallbackReturnTo,
+        provider,
+        status: 'error',
+        code: 'oauth_session_unavailable',
+        env,
+      });
+    }
+
+    let transactionResult = null;
+    try {
+      transactionResult = await consumeOAuthTransaction(adminClient, {
+        transactionId,
+        provider,
+        browserBindingHash: hashOAuthBrowserBinding(browserBindingToken, { secret }),
+      });
+    } catch (error) {
+      transactionResult = {
+        ok: false,
+        code: error?.code || 'oauth_transaction_consume_failed',
+      };
+    }
+    if (!transactionResult.ok) {
+      return redirectWithOAuthResult(res, req, {
+        returnTo: fallbackReturnTo,
+        provider,
+        status: 'error',
+        code: transactionResult.code || 'oauth_transaction_consume_failed',
+        env,
+      });
+    }
+
+    clearOAuthTransactionCookie(res, transactionId, secure);
+    const transaction = transactionResult.transaction;
+    const returnTo = normalizeOAuthReturnTo(transaction.return_to || fallbackReturnTo, env, req);
+    const intent = normalizeOAuthIntent(transaction.intent);
+    if (!intent) {
+      return redirectWithOAuthResult(res, req, {
+        returnTo,
+        provider,
+        status: 'error',
+        code: 'oauth_intent_invalid',
+        env,
+      });
+    }
+
     if (providerError) {
       return redirectWithOAuthResult(res, req, {
         returnTo,
@@ -266,6 +422,23 @@ export function createOAuthCallbackHandler(fallbackProvider) {
       });
     }
 
+    if (intent === 'link') {
+      const sessionResult = await loadOAuthLinkSession(adminClient, req, env);
+      if (
+        !sessionResult?.authenticated
+        || sessionResult.session?.id !== transaction.started_session_id
+        || sessionResult.user?.id !== transaction.started_user_id
+      ) {
+        return redirectWithOAuthResult(res, req, {
+          returnTo,
+          provider,
+          status: 'error',
+          code: 'oauth_link_session_mismatch',
+          env,
+        });
+      }
+    }
+
     const config = getOAuthProviderConfig(provider, { env, req });
     if (!config.ok) {
       return redirectWithOAuthResult(res, req, {
@@ -278,7 +451,9 @@ export function createOAuthCallbackHandler(fallbackProvider) {
     }
 
     try {
-      const tokenResult = await exchangeOAuthCode(config, code);
+      const tokenResult = await exchangeOAuthCode(config, code, {
+        codeVerifier: transaction.pkce_code_verifier,
+      });
       if (!tokenResult.ok) {
         return redirectWithOAuthResult(res, req, {
           returnTo,
@@ -311,24 +486,27 @@ export function createOAuthCallbackHandler(fallbackProvider) {
         });
       }
 
-      const subjectHash = hashOAuthSubject(provider, profile.subject, secret);
-      const profileHash = hashOAuthProfile(profile);
-      const adminClient = getSupabaseAdminClient();
-      if (!adminClient) {
+      const identityHashes = buildOAuthIdentityHashCandidates(provider, profile.subject, env);
+      if (!identityHashes.ok) {
         return redirectWithOAuthResult(res, req, {
           returnTo,
           provider,
           status: 'error',
-          code: 'oauth_session_unavailable',
+          code: identityHashes.code || 'oauth_identity_hash_key_missing',
           env,
         });
       }
+      const subjectHash = identityHashes.current.hash;
+      const profileHash = hashOAuthProfile(profile);
 
       try {
         if (intent === 'link') {
           const linkResult = await linkOAuthIdentityToSiteSession(adminClient, {
             profile,
             subjectHash,
+            subjectHashVersion: identityHashes.current.version,
+            previousSubjectHash: identityHashes.previous?.hash || '',
+            previousSubjectHashVersion: identityHashes.previous?.version || '',
             profileHash,
             req,
             env,
@@ -347,6 +525,9 @@ export function createOAuthCallbackHandler(fallbackProvider) {
         const signInResult = await createOrLinkOAuthUserAndSession(adminClient, {
           profile,
           subjectHash,
+          subjectHashVersion: identityHashes.current.version,
+          previousSubjectHash: identityHashes.previous?.hash || '',
+          previousSubjectHashVersion: identityHashes.previous?.version || '',
           profileHash,
           req,
           res,
@@ -372,11 +553,11 @@ export function createOAuthCallbackHandler(fallbackProvider) {
           env,
         });
       }
-    } catch (error) {
+    } catch {
       return redirect(res, appendOAuthResultParams(returnTo || '/', {
         oauth_status: 'error',
         oauth_provider: provider,
-        oauth_code: error?.code || error?.message || 'oauth_callback_failed',
+        oauth_code: 'oauth_callback_failed',
       }, env, req));
     }
   };

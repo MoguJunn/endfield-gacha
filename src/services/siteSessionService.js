@@ -111,6 +111,36 @@ export async function bootstrapSiteSessionFromSupabaseToken(accessToken = '') {
   };
 }
 
+export async function revokeAllSiteSessions(accessToken = '') {
+  const token = String(accessToken || '').trim();
+  const headers = {
+    Accept: 'application/json',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const { response, data } = await fetchJsonWithTimeout('/api/auth/session/revoke-all', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers,
+  }, {
+    label: 'auth-session-revoke-all',
+    timeoutMs: 15000,
+    retries: 0,
+  });
+
+  if (!response.ok || data?.success !== true) {
+    throw new Error(data?.message || data?.error || 'site_session_revoke_failed');
+  }
+
+  clearSiteSessionCache();
+  return {
+    sessionsRevoked: data?.data?.sessionsRevoked === true,
+    revokedCount: Number(data?.data?.revokedCount || 0),
+  };
+}
+
 export async function getCurrentSiteSession({
   syncSupabase = false,
   useCache = false,
@@ -209,5 +239,6 @@ export default {
   clearSiteSessionCache,
   getCurrentSiteSession,
   logoutSiteSession,
+  revokeAllSiteSessions,
   syncSiteSessionToSupabase,
 };

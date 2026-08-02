@@ -6,9 +6,10 @@
 
 ## 不要公开提交的内容
 
-- access token、refresh token、session、API key
+- access token、refresh token、session、API key、`OAUTH_STATE_SECRET`、`APP_SESSION_SECRET`
+- `AUTH_IDENTITY_HASH_KEY_CURRENT/PREVIOUS`、OAuth Client Secret 或可复用的 provider identity 映射材料
 - Supabase `service_role` / `sb_secret` 类密钥
-- 真实用户数据、UID、邮箱、账号恢复信息
+- 真实用户数据、UID、邮箱、邮箱归属记录、账号恢复信息、临时密码及其 issue/expiry metadata
 - 私有后端地址、代理配置、内部调试脚本输出
 - 可直接复现的攻击 payload、绕过样例或验证码破解细节
 

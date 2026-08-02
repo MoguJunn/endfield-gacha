@@ -1,21 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { supabase } from '../../supabaseClient.js';
 
 import {
-  clearPasswordChangeRequired,
   isOAuthAccountCompletionRequired,
   isOAuthEmailSetupRequired,
   isOAuthPasswordSetupRequired,
   loadAccountSecurityState,
   setupPasswordForOAuthAccount,
+  updatePasswordWithCurrentPassword,
 } from '../accountSecurityService.js';
 import { getSupabaseAccessToken } from '../authFetchService.js';
 import { fetchJsonWithTimeout } from '../supabaseRequest.js';
+import {
+  bootstrapSiteSessionFromSupabaseToken,
+} from '../siteSessionService.js';
 
 vi.mock('../../supabaseClient.js', () => ({
   supabase: {
     auth: {
       signInWithPassword: vi.fn(),
       updateUser: vi.fn(),
+      getSession: vi.fn(),
     },
   },
 }));
@@ -26,6 +31,10 @@ vi.mock('../authFetchService.js', () => ({
 
 vi.mock('../supabaseRequest.js', () => ({
   fetchJsonWithTimeout: vi.fn(),
+}));
+
+vi.mock('../siteSessionService.js', () => ({
+  bootstrapSiteSessionFromSupabaseToken: vi.fn(),
 }));
 
 describe('accountSecurityService OAuth setup guards', () => {
@@ -41,6 +50,18 @@ describe('accountSecurityService OAuth setup guards', () => {
           reason: 'oauth_password_setup_required:github',
         },
       },
+    });
+    supabase.auth.signInWithPassword.mockResolvedValue({
+      data: { session: { access_token: 'fresh-native-token' } },
+      error: null,
+    });
+    supabase.auth.updateUser.mockResolvedValue({ error: null });
+    supabase.auth.getSession.mockResolvedValue({
+      data: { session: { access_token: 'fresh-native-token' } },
+    });
+    bootstrapSiteSessionFromSupabaseToken.mockResolvedValue({
+      bootstrapped: true,
+      authenticated: true,
     });
   });
 
@@ -132,23 +153,6 @@ describe('accountSecurityService OAuth setup guards', () => {
     });
   });
 
-  it('clears temporary password state through the same-origin endpoint', async () => {
-    await clearPasswordChangeRequired();
-
-    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/account-security-state', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        action: 'clear_password_change_required',
-      }),
-    }, expect.objectContaining({
-      label: 'account-security-state:clear',
-    }));
-  });
-
   it('sets OAuth account password through the same-origin endpoint', async () => {
     fetchJsonWithTimeout
       .mockResolvedValueOnce({
@@ -196,5 +200,28 @@ describe('accountSecurityService OAuth setup guards', () => {
     }, expect.objectContaining({
       label: 'account-password-setup',
     }));
+  });
+
+  it('revokes old site sessions and creates a fresh current session after password change', async () => {
+    const result = await updatePasswordWithCurrentPassword({
+      email: 'user@example.com',
+      currentPassword: 'OldPassword123',
+      newPassword: 'NewPassword456',
+    });
+
+    expect(supabase.auth.updateUser).toHaveBeenCalledWith({
+      password: 'NewPassword456',
+    });
+    expect(supabase.auth.signInWithPassword).toHaveBeenNthCalledWith(2, {
+      email: 'user@example.com',
+      password: 'NewPassword456',
+    });
+    expect(bootstrapSiteSessionFromSupabaseToken).toHaveBeenCalledWith('fresh-native-token');
+    expect(result).toMatchObject({
+      securityStateUpdated: true,
+      sessionsRevoked: true,
+      revokedSessionCount: null,
+      currentSessionRecreated: true,
+    });
   });
 });

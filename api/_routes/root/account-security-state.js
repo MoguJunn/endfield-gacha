@@ -6,27 +6,8 @@ import { resolveAuthenticatedRequestUser } from '../../_lib/siteAuth.js';
 import {
   rejectDisallowedBrowserOrigin,
 } from '../../_lib/http.js';
-import {
-  buildClearedPasswordChangeState,
-} from '../../../src/utils/accountRecoveryFlow.js';
 
 const SYNTHETIC_OAUTH_EMAIL_SUFFIX = '@oauth.local.invalid';
-
-function parseRequestBody(req) {
-  if (!req.body) {
-    return {};
-  }
-
-  if (typeof req.body === 'string') {
-    try {
-      return JSON.parse(req.body);
-    } catch {
-      return {};
-    }
-  }
-
-  return req.body;
-}
 
 function toClientSecurityState(row) {
   return {
@@ -40,6 +21,10 @@ function toClientSecurityState(row) {
     emailVerificationReason: row?.email_verification_reason || null,
     emailVerificationRequestedAt: row?.email_verification_requested_at || null,
     emailVerificationVerifiedAt: row?.email_verification_verified_at || null,
+    emailVerificationTargetEmail: row?.email_verification_target_email || null,
+    emailVerificationVersion: row?.email_verification_version || null,
+    passwordSetupCapabilityStatus: row?.password_setup_capability_status || null,
+    passwordSetupLastErrorCode: row?.password_setup_last_error_code || null,
   };
 }
 
@@ -74,15 +59,6 @@ function isSuperAdminUser(user, profile = null) {
   return user?.app_metadata?.role === 'super_admin'
     || user?.profile_role === 'super_admin'
     || profile?.role === 'super_admin';
-}
-
-function hasSitePassword(authUser = null) {
-  const metadata = authUser?.user_metadata || authUser?.raw_user_meta_data || {};
-  return Boolean(
-    authUser?.encrypted_password
-    || metadata?.site_password_set === true
-    || metadata?.email_bound_from_profile === true
-  );
 }
 
 async function loadProfile(adminClient, userId) {
@@ -125,7 +101,6 @@ function normalizeEffectiveSecurityState(row, {
   const emailReason = String(row.email_verification_reason || '');
   const passwordReason = String(row.password_change_reason || '');
   const isOAuthEmailSetup = emailReason.startsWith('oauth_email_setup_required');
-  const isOAuthPasswordSetup = passwordReason.startsWith('oauth_password_setup_required');
 
   if (
     (superAdmin && isOAuthEmailSetup)
@@ -134,19 +109,13 @@ function normalizeEffectiveSecurityState(row, {
       && isOAuthEmailSetup
       && hasUsableEmail
       && emailVerified
+      && (!row.email_verification_target_email || row.email_verification_target_email === effectiveEmail)
     )
   ) {
     next.email_verification_required = false;
   }
 
-  if (
-    (superAdmin && isOAuthPasswordSetup)
-    || (
-      row.password_change_required === true
-      && isOAuthPasswordSetup
-      && hasSitePassword(authUser)
-    )
-  ) {
+  if (superAdmin && passwordReason.startsWith('oauth_password_setup_required')) {
     next.password_change_required = false;
   }
 
@@ -175,7 +144,7 @@ async function resolveCurrentUser(req, {
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
-  if (rejectDisallowedBrowserOrigin(req, res, { methods: 'GET, POST, OPTIONS', headers: 'Content-Type, Authorization' })) {
+  if (rejectDisallowedBrowserOrigin(req, res, { methods: 'GET, OPTIONS', headers: 'Content-Type, Authorization' })) {
     return;
   }
 
@@ -183,7 +152,7 @@ export default async function handler(req, res) {
     return res.status(204).end();
   }
 
-  if (!['GET', 'POST'].includes(req.method)) {
+  if (req.method !== 'GET') {
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
@@ -208,29 +177,6 @@ export default async function handler(req, res) {
       });
     }
 
-    if (req.method === 'POST') {
-      const { action } = parseRequestBody(req);
-      if (action !== 'clear_password_change_required') {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid account security action',
-        });
-      }
-
-      const { error: upsertError } = await dbClient
-        .from('account_security_states')
-        .upsert({
-          user_id: currentUser.id,
-          ...buildClearedPasswordChangeState(),
-        }, {
-          onConflict: 'user_id',
-        });
-
-      if (upsertError) {
-        throw upsertError;
-      }
-    }
-
     const [
       profile,
       authUser,
@@ -241,7 +187,7 @@ export default async function handler(req, res) {
 
     const { data: stateRow, error: stateError } = await dbClient
       .from('account_security_states')
-      .select('password_change_required, password_change_reason, password_change_source, password_change_requested_at, password_change_expires_at, password_change_recovery_request_id, email_verification_required, email_verification_reason, email_verification_requested_at, email_verification_verified_at')
+      .select('password_change_required, password_change_reason, password_change_source, password_change_requested_at, password_change_expires_at, password_change_recovery_request_id, email_verification_required, email_verification_reason, email_verification_requested_at, email_verification_verified_at, email_verification_target_email, email_verification_version, password_setup_capability_status, password_setup_last_error_code')
       .eq('user_id', currentUser.id)
       .maybeSingle();
 

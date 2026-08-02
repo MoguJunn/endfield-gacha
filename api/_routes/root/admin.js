@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   checkMemoryRateLimit,
   getRequesterKey,
@@ -9,6 +10,7 @@ import {
   listMergedAdminUsers,
 } from '../../_lib/authAdmin.js';
 import { requireSuperAdminUser } from '../../_lib/siteAuth.js';
+import { revokeAllSiteSessionsForUser } from '../../_lib/siteSession.js';
 import {
   createApiKeySecret,
   createVerifierSecret,
@@ -97,11 +99,24 @@ async function loadProfileEmailForAuthSync(adminClient, userId) {
   return normalizeAuthEmail(data?.email);
 }
 
-async function buildTemporaryPasswordAuthUpdate(adminClient, userId, temporaryPassword) {
+async function buildTemporaryPasswordAuthUpdate(adminClient, userId, temporaryPassword, {
+  issueMetadata,
+  issueId = randomUUID(),
+} = {}) {
+  const authUser = await loadAdminAuthUser(adminClient, userId);
+  const temporaryPasswordAppMetadata = issueMetadata ? {
+    ...(authUser?.app_metadata || authUser?.raw_app_meta_data || {}),
+    temporary_password_issue_id: issueId,
+    temporary_password_force_change: true,
+    temporary_password_issued_at: issueMetadata.issuedAt,
+    temporary_password_expires_at: issueMetadata.expiresAt,
+  } : null;
   const payload = {
     password: temporaryPassword,
+    ...(temporaryPasswordAppMetadata ? {
+      app_metadata: temporaryPasswordAppMetadata,
+    } : {}),
   };
-  const authUser = await loadAdminAuthUser(adminClient, userId);
   if (!isSyntheticOAuthAuthUser(authUser)) {
     return {
       payload,
@@ -894,10 +909,15 @@ async function handleUserResetPassword(req, res, adminClient) {
   }
 
   try {
+    const issueMetadata = buildTemporaryPasswordIssueMetadata({
+      actorUserId: authResult.callerUser.id,
+      reason: 'admin_temporary_password',
+    });
     const authUpdate = await buildTemporaryPasswordAuthUpdate(
       adminClient,
       normalizedUserId,
-      normalizedPassword
+      normalizedPassword,
+      { issueMetadata }
     );
     const { error: updateAuthError } = await adminClient.auth.admin.updateUserById(
       normalizedUserId,
@@ -906,6 +926,42 @@ async function handleUserResetPassword(req, res, adminClient) {
 
     if (updateAuthError) {
       throw updateAuthError;
+    }
+
+    const { error: securityStateError } = await adminClient
+      .from('account_security_states')
+      .upsert({
+        user_id: normalizedUserId,
+        ...issueMetadata.securityState,
+      }, {
+        onConflict: 'user_id',
+      });
+    if (securityStateError) {
+      return res.status(500).json({
+        success: false,
+        partial: true,
+        passwordUpdated: true,
+        userId: normalizedUserId,
+        emailSynced: authUpdate.emailSynced,
+        error: securityStateError.message || 'Password was reset but its expiry state could not be stored',
+        code: 'account_security_state_update_failed',
+      });
+    }
+
+    const revokeResult = await revokeAllSiteSessionsForUser(adminClient, {
+      userId: normalizedUserId,
+      reason: 'admin_password_reset',
+    });
+    if (!revokeResult.ok) {
+      return res.status(500).json({
+        success: false,
+        partial: true,
+        passwordUpdated: true,
+        userId: normalizedUserId,
+        emailSynced: authUpdate.emailSynced,
+        error: revokeResult.reason || 'Password was reset but existing site sessions could not be revoked',
+        code: revokeResult.code || 'site_session_revoke_failed',
+      });
     }
 
     return res.status(200).json({
@@ -1011,10 +1067,15 @@ async function handleResetRecoveryPassword(req, res, adminClient) {
       });
     }
 
+    const issueMetadata = buildTemporaryPasswordIssueMetadata({
+      actorUserId: authResult.callerUser.id,
+      requestId: normalizedRequestId,
+    });
     const authUpdate = await buildTemporaryPasswordAuthUpdate(
       adminClient,
       normalizedUserId,
-      normalizedPassword
+      normalizedPassword,
+      { issueMetadata }
     );
     const { error: updateAuthError } = await adminClient.auth.admin.updateUserById(
       normalizedUserId,
@@ -1025,11 +1086,18 @@ async function handleResetRecoveryPassword(req, res, adminClient) {
       throw updateAuthError;
     }
 
-    const issueMetadata = buildTemporaryPasswordIssueMetadata({
-      actorUserId: authResult.callerUser.id,
-      requestId: normalizedRequestId,
+    const revokeResult = await revokeAllSiteSessionsForUser(adminClient, {
+      userId: normalizedUserId,
+      reason: 'admin_recovery_password_reset',
     });
+
     const warnings = [];
+    if (!revokeResult.ok) {
+      warnings.push({
+        code: revokeResult.code || 'site_session_revoke_failed',
+        message: revokeResult.reason || 'Password was reset but existing site sessions could not be revoked',
+      });
+    }
 
     const { error: securityStateError } = await adminClient
       .from('account_security_states')

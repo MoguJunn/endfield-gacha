@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   checkMemoryRateLimit,
   getRequesterKey,
@@ -155,7 +155,7 @@ async function loadAccountSecurityState(adminClient, userId) {
 
   const { data, error } = await adminClient
     .from('account_security_states')
-    .select('email_verification_required, email_verification_reason, email_verification_requested_at, email_verification_verified_at, password_change_required, password_change_reason')
+    .select('email_verification_required, email_verification_reason, email_verification_requested_at, email_verification_verified_at, email_verification_target_email, email_verification_version, password_change_required, password_change_reason')
     .eq('user_id', userId)
     .maybeSingle();
 
@@ -169,6 +169,7 @@ async function loadAccountSecurityState(adminClient, userId) {
 async function storeAccountEmailVerificationToken(adminClient, userId, {
   token,
   code,
+  targetEmail,
   now,
   reason = 'user_requested',
 }) {
@@ -176,22 +177,25 @@ async function storeAccountEmailVerificationToken(adminClient, userId, {
   const codeExpiresAt = new Date(now.getTime() + EMAIL_VERIFICATION_CODE_TTL_MS);
   const tokenHash = hashEmailVerificationToken(token);
   const codeHash = hashEmailVerificationCode(code, userId);
-  const { error } = await adminClient
-    .from('account_security_states')
-    .upsert({
-      user_id: userId,
-      email_verification_required: true,
-      email_verification_reason: reason,
-      email_verification_requested_at: now.toISOString(),
-      email_verification_verified_at: null,
-      email_verification_token_hash: tokenHash,
-      email_verification_token_expires_at: tokenExpiresAt.toISOString(),
-      email_verification_code_hash: codeHash,
-      email_verification_code_expires_at: codeExpiresAt.toISOString(),
-      updated_at: now.toISOString(),
-    }, {
-      onConflict: 'user_id',
-    });
+  if (typeof adminClient?.rpc !== 'function') {
+    const error = new Error('Email challenge service is unavailable');
+    error.code = 'email_challenge_unavailable';
+    throw error;
+  }
+  const challengeId = randomUUID();
+  const challengeQuery = adminClient.rpc('start_account_email_challenge', {
+    p_challenge_id: challengeId,
+    p_user_id: userId,
+    p_target_email: targetEmail,
+    p_reason: reason,
+    p_token_hash: tokenHash,
+    p_token_expires_at: tokenExpiresAt.toISOString(),
+    p_code_hash: codeHash,
+    p_code_expires_at: codeExpiresAt.toISOString(),
+  });
+  const { error } = typeof challengeQuery?.maybeSingle === 'function'
+    ? await challengeQuery.maybeSingle()
+    : await challengeQuery;
 
   if (error) {
     throw error;
@@ -202,6 +206,8 @@ async function storeAccountEmailVerificationToken(adminClient, userId, {
     tokenExpiresAt,
     codeHash,
     codeExpiresAt,
+    challengeId,
+    targetEmail,
   };
 }
 
@@ -239,6 +245,7 @@ function sendAccountEmailResponse(res, {
   dryRun = false,
   partial = false,
   sent = {},
+  pendingEmail = null,
 } = {}) {
   return res.status(200).json({
     success: true,
@@ -249,6 +256,7 @@ function sendAccountEmailResponse(res, {
       deliveryChannel: 'mail',
       dryRun,
       sent,
+      pendingEmail,
     },
   });
 }
@@ -544,6 +552,7 @@ export default async function handler(req, res) {
       const storedToken = await storeAccountEmailVerificationToken(adminClient, currentUser.id, {
         token,
         code: verificationCode,
+        targetEmail: currentEmail,
         now,
         reason: accountSecurityState?.email_verification_requested_at
           ? 'user_requested'
@@ -633,19 +642,10 @@ export default async function handler(req, res) {
       const storedToken = await storeAccountEmailVerificationToken(adminClient, currentUser.id, {
         token,
         code: verificationCode,
+        targetEmail: nextEmail,
         now,
         reason: 'oauth_email_setup_required',
       });
-      const { error: profileError } = await adminClient
-        .from('profiles')
-        .update({
-          email: nextEmail,
-          updated_at: now.toISOString(),
-        })
-        .eq('id', currentUser.id);
-      if (profileError) {
-        throw profileError;
-      }
 
       const mailResult = await sendAccountMail({
         adminClient,
@@ -684,6 +684,7 @@ export default async function handler(req, res) {
           current: false,
           new: true,
         },
+        pendingEmail: nextEmail,
       });
     }
 

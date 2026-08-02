@@ -2,7 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { CheckCircle2, KeyRound, Loader2, ShieldAlert } from 'lucide-react';
 import { supabase } from '../../supabaseClient';
-import { bootstrapSiteSessionFromSupabaseToken } from '../../services/siteSessionService.js';
+import {
+  bootstrapSiteSessionFromSupabaseToken,
+} from '../../services/siteSessionService.js';
 import { useI18n } from '../../i18n/index.js';
 import {
   getPrimaryAccountPasswordError,
@@ -131,6 +133,17 @@ export default function ResetPasswordPage() {
     setSuccess('');
 
     try {
+      const {
+        data: { session: recoverySession } = {},
+      } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
+      const recoveryEmail = String(recoverySession?.user?.email || '').trim();
+      if (!recoveryEmail) {
+        throw new Error(tt(
+          '无法确认当前账号邮箱，请重新打开密码重置邮件中的链接。',
+          'The account email could not be confirmed. Reopen the link from the password reset email.'
+        ));
+      }
+
       const { error: updateError } = await supabase.auth.updateUser({
         password
       });
@@ -139,12 +152,22 @@ export default function ResetPasswordPage() {
         throw updateError;
       }
 
-      const {
-        data: { session: currentSession } = {},
-      } = await supabase.auth.getSession().catch(() => ({ data: { session: null } }));
-      const accessToken = currentSession?.access_token || '';
-      if (accessToken) {
-        await bootstrapSiteSessionFromSupabaseToken(accessToken).catch(() => null);
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: recoveryEmail,
+        password,
+      });
+      if (signInError) {
+        throw signInError;
+      }
+      const freshAccessToken = signInData?.session?.access_token || '';
+      const bootstrapResult = freshAccessToken
+        ? await bootstrapSiteSessionFromSupabaseToken(freshAccessToken)
+        : { authenticated: false };
+      if (!bootstrapResult.authenticated) {
+        throw new Error(tt(
+          '密码已更新，旧登录状态已撤销，但当前浏览器未能建立新的登录状态。请重新登录。',
+          'Password changed and old sign-ins were revoked, but this browser could not create a new sign-in. Sign in again.'
+        ));
       }
 
       setSuccess(tt('密码已更新。3 秒后将返回首页，您也可以立即手动跳转。', 'Password updated. You will return to the home page in 3 seconds, or you can jump back immediately.'));

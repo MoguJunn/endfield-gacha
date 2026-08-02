@@ -28,7 +28,20 @@
 3. 仅当仓库里存在“编号高于 baseline 覆盖范围”的新迁移时，再补执行这些较新的 `migrations/` 文件
 4. 仅在明确场景下手工执行 `manual/` 中的脚本
 
-当前仓库内的 baseline 已覆盖到 `active/158_bump_site_version_454.sql`，因此不要再把 `001~158` 这批标准迁移重复叠加执行在同版本 baseline 上。`supabase/migrations/` 保留当前 active 前向迁移源文件供审计与重新生成 baseline；下一次新增迁移应从 `159_*.sql` 开始。
+2026-08-01 的真实本地 Supabase/PostgreSQL 17 空库导入已补齐两项此前静态检查未覆盖的边界：`archive/004_tickets_system.sql` 必须在表不存在时也能执行清理；Phase A/B 必须显式授予 `service_role` 访问 `profiles` 与私有 Session 撤销状态所需的 DML 权限，同时保持 `anon/authenticated` 对私有撤销状态的拒绝。`test:supabase-baseline:smoke` 与 `test:auth-hardening-phase-a` 已加入对应回归断言。
+
+本认证集成树的 baseline 覆盖到 `active/167_harden_account_credentials_and_identity_keys.sql` 后，不要再把 `001~167` 的主站标准迁移重复叠加到同版本 baseline。主站发布链原到 158；2026-08-02 已通过 SSH 只读确认共享生产 schema 存在独立抽奖 160–165，且认证 Phase A–D 结构尚不存在。认证最终编号为 166/167，均未生产应用。
+
+### migration 编号说明
+
+- **本分支 166：** `migrations/166_harden_admin_profile_and_oauth_transactions.sql`（认证 admin RPC + OAuth transaction）。
+- **本分支 167：** `migrations/167_harden_account_credentials_and_identity_keys.sql`（认证 Phase C/D 数据库面）。
+- **其他 worktree 仍占用同号文件名（不得与本文件一起部署）：**
+  - 主脏树性能线：`159_add_history_scope_read_models.sql`
+  - 邮箱候选树：`159_bind_email_verification_to_target.sql`
+- 生产库没有主站应用级 migration ledger；本次编号依据实际 schema 指纹、运行版本和仓库执行记录确定。生产执行仍需单独授权，并严格按 166 → 167。
+
+Phase A–D 与 GitHub 核心浏览器闭环已完成，代码已集成到最新 `origin/main` 的独立 worktree 并重编号为 166/167；仍未 commit、push、部署或执行生产 migration。最终测试数字以本集成树的重新验证结果为准。
 
 `site_config.public_cache_epoch` 是公共数据缓存版本源；公共 API / 首屏不应回退成浏览器直连 Supabase 读写。
 公共卡池统计读取 `public_pool_analytics_cache` 和 `public_pool_trend_cache`；受控刷新入口是 `refresh_public_analytics_cache()`，请求期不应扫描原始 `history` 生成趋势点。
@@ -55,6 +68,17 @@
 `157_repair_official_non_pull_artifact.sql` 提供仅限 `service_role` 的精确修复 RPC：只有历史记录与待处理异常在用户、游戏账号、区服、卡池、官方序号、时间及四星未知占位条件全部吻合时，才原子删除旧错误占位、写入变更审计并重算对应卡池保底。该迁移不会主动扫描或批量修改生产记录。
 
 `158_bump_site_version_454.sql` 将运行时 `site_config.site_version` 提升到 `v4.5.4`，并更新 `public_cache_epoch` 使 bootstrap 与站点配置缓存失效；它不增加业务表或接口。
+
+`166_harden_admin_profile_and_oauth_transactions.sql`（认证 Phase A/B 数据库面）：撤销 `PUBLIC / anon / authenticated` 对 `admin_update_profile` 的执行权，只保留 service-role 同源后台路径；同时新增 service-role-only 的短期 `app_oauth_transactions`，保存浏览器绑定 hash、PKCE verifier 和 link 发起 session/user。callback 通过条件 `DELETE ... RETURNING` 原子取走 transaction，创建新 transaction 前清理已过期行，因此成功、取消和重放都不会留下可再次消费的 PKCE 凭据。该迁移还提供用户级 Session 撤销边界：`auth.users.email / encrypted_password` 真正变化时在同一数据库事务内撤销活动站点 Session，旧 Auth session 后续刷新出的 Bearer 也不能绕过；发送邮箱确认邮件本身不会触发撤销。原生 Bearer bootstrap 按 `auth.sessions.id` 幂等创建，拒绝兼容 JWT 自我派生，限制每用户最多 20 个活动站点 Session，并清理已到期或长期撤销记录。OAuth identity 的首个 owner 在数据库和应用层均不可改写，并发认领失败方会清理刚创建的孤儿 Auth user。该迁移不扫描或主动修改生产账号资料。
+
+`167_harden_account_credentials_and_identity_keys.sql`（认证 Phase C/D 数据库面）：
+
+- 邮箱归属与挑战：`account_email_ownerships`（规范化邮箱唯一归属，回填已确认 Auth 邮箱）与 `account_email_challenges`（一次性挑战，绑定用户、目标邮箱、token/code hash 与版本）；`start_account_email_challenge()` 原子占用目标邮箱并取消旧挑战，`consume_account_email_challenge()` 在 advisory lock + 条件更新下只成功一次，验证成功后才把邮箱提升为 canonical `profiles.email`。`auth.users` 确认邮箱变化时同步归属。
+- 首次设密一次性能力：`claim_oauth_password_setup_capability()` 原子占用（要求邮箱已验证且与归属一致），`finish_oauth_password_setup_capability()` 收尾为 `completed / coordination_required`，失败不再重新开放免旧密码入口。
+- 临时密码认证层到期：`is_account_credential_allowed()` 检查恢复临时密码是否已过期；`auth.sessions` 插入/更新前由 `reject_expired_temporary_password_auth_session()` 拒绝过期用户。管理员发放临时密码时，到期元数据随 Auth 用户更新原子写入，`revoke_app_sessions_on_auth_password_change()` 触发器同步安全状态并在改密后清除。
+- OAuth identity key 版本化：`app_auth_identities.provider_subject_hash_key_version`；`claim_oauth_identity()` 按新旧 hash 双读并原子迁移（owner 不可变、hash split 拒绝）；owner/provider/hash/版本字段被触发器锁定，只允许受控 RPC 修改。
+- 原子解绑：`unlink_oauth_identity_atomically()` 在用户级锁内检查提交后的真实登录方式，拒绝解绑最后一个可用方式。
+- 以上表与 RPC 全部 service-role-only；`authenticated` 不可读私密归属/挑战表，也不可执行私密 RPC。
 
 `scripts/backfill-history-anomalies.mjs` 是已知异常扫描 / 回填入口。默认模式只读；正式写入必须同时提供 `--apply` 和脚本要求的 `CONFIRM_HISTORY_ANOMALY_BACKFILL=<记录数>:<用户数>` 精确快照。记录数或用户数变化时应停止、重新审计候选范围，不得跳过 guard。
 

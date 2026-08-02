@@ -6,6 +6,12 @@ const oauthSessionMocks = vi.hoisted(() => ({
   getSupabaseAdminClient: vi.fn(),
   createOrLinkOAuthUserAndSession: vi.fn(),
   linkOAuthIdentityToSiteSession: vi.fn(),
+  loadSiteSession: vi.fn(),
+}));
+
+const oauthTransactionMocks = vi.hoisted(() => ({
+  persistOAuthTransaction: vi.fn(),
+  consumeOAuthTransaction: vi.fn(),
 }));
 
 vi.mock('../_lib/authAdmin.js', () => ({
@@ -18,6 +24,16 @@ vi.mock('../_lib/siteSession.js', async () => {
     ...actual,
     createOrLinkOAuthUserAndSession: oauthSessionMocks.createOrLinkOAuthUserAndSession,
     linkOAuthIdentityToSiteSession: oauthSessionMocks.linkOAuthIdentityToSiteSession,
+    loadSiteSession: oauthSessionMocks.loadSiteSession,
+  };
+});
+
+vi.mock('../_lib/oauthState.js', async () => {
+  const actual = await vi.importActual('../_lib/oauthState.js');
+  return {
+    ...actual,
+    persistOAuthTransaction: oauthTransactionMocks.persistOAuthTransaction,
+    consumeOAuthTransaction: oauthTransactionMocks.consumeOAuthTransaction,
   };
 });
 
@@ -29,11 +45,18 @@ import {
   linuxdoSupabaseAuthorizeHandler,
   qqOAuthStartHandler,
 } from '../_routes/root/auth-oauth.js';
-import { createOAuthState, verifyOAuthState } from '../_lib/oauthState.js';
+import {
+  createOAuthState,
+  getOAuthTransactionCookieName,
+  verifyOAuthState,
+} from '../_lib/oauthState.js';
+import { resolveOAuthProxyUrl } from '../_lib/oauthProviders.js';
 
 const ENV_KEYS = [
   'APP_URL',
   'OAUTH_STATE_SECRET',
+  'AUTH_IDENTITY_HASH_KEY_CURRENT',
+  'AUTH_IDENTITY_HASH_KEY_CURRENT_VERSION',
   'AUTH_OAUTH_LINUXDO_ENABLED',
   'AUTH_OAUTH_LINUXDO_CLIENT_ID',
   'AUTH_OAUTH_LINUXDO_CLIENT_SECRET',
@@ -50,6 +73,7 @@ const ENV_KEYS = [
   'AUTH_OAUTH_GITHUB_REDIRECT_URI',
   'AUTH_OAUTH_GITHUB_SCOPE',
   'AUTH_OAUTH_GITHUB_SEND_REDIRECT_URI',
+  'AUTH_OAUTH_USE_ENV_PROXY',
 ];
 
 function createResponseRecorder() {
@@ -103,6 +127,8 @@ function createRequest({
 function setLinuxDoEnv() {
   process.env.APP_URL = 'https://ef-gacha.mogujun.icu';
   process.env.OAUTH_STATE_SECRET = 'test-oauth-state-secret';
+  process.env.AUTH_IDENTITY_HASH_KEY_CURRENT = 'test-identity-hash-key-current-1234567890';
+  process.env.AUTH_IDENTITY_HASH_KEY_CURRENT_VERSION = 'v2';
   process.env.AUTH_OAUTH_LINUXDO_ENABLED = 'true';
   process.env.AUTH_OAUTH_LINUXDO_CLIENT_ID = 'linuxdo-client-id';
   process.env.AUTH_OAUTH_LINUXDO_CLIENT_SECRET = 'linuxdo-client-secret';
@@ -112,10 +138,43 @@ function setLinuxDoEnv() {
 function setGithubEnv() {
   process.env.APP_URL = 'https://ef-gacha.mogujun.icu';
   process.env.OAUTH_STATE_SECRET = 'test-oauth-state-secret';
+  process.env.AUTH_IDENTITY_HASH_KEY_CURRENT = 'test-identity-hash-key-current-1234567890';
+  process.env.AUTH_IDENTITY_HASH_KEY_CURRENT_VERSION = 'v2';
   process.env.AUTH_OAUTH_GITHUB_ENABLED = 'true';
   process.env.AUTH_OAUTH_GITHUB_CLIENT_ID = 'github-client-id';
   process.env.AUTH_OAUTH_GITHUB_CLIENT_SECRET = 'github-client-secret';
   process.env.AUTH_OAUTH_GITHUB_REDIRECT_URI = 'https://ef-gacha.mogujun.icu/api/auth/oauth/github/callback';
+}
+
+function createCallbackCookie(state, bindingToken = 'test-browser-binding') {
+  const stateResult = verifyOAuthState(state, {
+    secret: 'test-oauth-state-secret',
+  });
+  expect(stateResult.ok).toBe(true);
+  const cookieName = getOAuthTransactionCookieName(stateResult.payload.transactionId, {
+    secure: true,
+  });
+  return `${cookieName}=${bindingToken}`;
+}
+
+function mockConsumedTransaction(state, overrides = {}) {
+  const stateResult = verifyOAuthState(state, {
+    secret: 'test-oauth-state-secret',
+  });
+  expect(stateResult.ok).toBe(true);
+  oauthTransactionMocks.consumeOAuthTransaction.mockResolvedValueOnce({
+    ok: true,
+    transaction: {
+      id: stateResult.payload.transactionId,
+      provider: stateResult.payload.provider,
+      intent: stateResult.payload.intent,
+      return_to: stateResult.payload.returnTo,
+      pkce_code_verifier: 'test-pkce-code-verifier-123456789012345678901234567890',
+      started_session_id: null,
+      started_user_id: null,
+      ...overrides,
+    },
+  });
 }
 
 beforeEach(() => {
@@ -127,6 +186,18 @@ beforeEach(() => {
   oauthSessionMocks.getSupabaseAdminClient.mockReset();
   oauthSessionMocks.createOrLinkOAuthUserAndSession.mockReset();
   oauthSessionMocks.linkOAuthIdentityToSiteSession.mockReset();
+  oauthSessionMocks.loadSiteSession.mockReset();
+  oauthTransactionMocks.persistOAuthTransaction.mockReset();
+  oauthTransactionMocks.consumeOAuthTransaction.mockReset();
+  oauthSessionMocks.getSupabaseAdminClient.mockReturnValue({ from: vi.fn() });
+  oauthTransactionMocks.persistOAuthTransaction.mockImplementation(async (_adminClient, transaction) => ({
+    ok: true,
+    transaction: {
+      id: transaction.transactionId,
+      provider: transaction.provider,
+      intent: transaction.intent,
+    },
+  }));
 });
 
 afterEach(() => {
@@ -134,6 +205,25 @@ afterEach(() => {
 });
 
 describe('auth OAuth bridge', () => {
+  it('uses an environment proxy only after explicit OAuth opt-in', () => {
+    const targetUrl = 'https://github.com/login/oauth/access_token';
+    const proxyEnv = {
+      HTTPS_PROXY: 'http://127.0.0.1:7890',
+      NO_PROXY: '127.0.0.1,localhost',
+    };
+
+    expect(resolveOAuthProxyUrl(targetUrl, proxyEnv)).toBe('');
+    expect(resolveOAuthProxyUrl(targetUrl, {
+      ...proxyEnv,
+      AUTH_OAUTH_USE_ENV_PROXY: 'true',
+    })).toBe('http://127.0.0.1:7890/');
+    expect(resolveOAuthProxyUrl(targetUrl, {
+      ...proxyEnv,
+      AUTH_OAUTH_USE_ENV_PROXY: 'true',
+      NO_PROXY: 'github.com',
+    })).toBe('');
+  });
+
   it('redirects Linux.do start requests to the provider with signed state', async () => {
     setLinuxDoEnv();
     const req = createRequest({
@@ -153,12 +243,26 @@ describe('auth OAuth bridge', () => {
     expect(location.searchParams.get('client_id')).toBe('linuxdo-client-id');
     expect(location.searchParams.has('redirect_uri')).toBe(false);
     expect(location.searchParams.get('scope')).toBe('openid profile email');
+    expect(location.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(location.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     const stateResult = verifyOAuthState(location.searchParams.get('state'), {
       expectedProvider: 'linuxdo',
       secret: 'test-oauth-state-secret',
     });
     expect(stateResult.ok).toBe(true);
     expect(stateResult.payload.returnTo).toBe('/settings?tab=account');
+    expect(oauthTransactionMocks.persistOAuthTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        transactionId: stateResult.payload.transactionId,
+        provider: 'linuxdo',
+        intent: 'login',
+        returnTo: '/settings?tab=account',
+        browserBindingHash: expect.any(String),
+        pkceCodeVerifier: expect.stringMatching(/^[A-Za-z0-9_-]{64}$/u),
+      })
+    );
+    expect(String(res.headers['Set-Cookie'] || '')).toContain('__Host-eg_oauth_tx_');
   });
 
   it('strips Supabase redirect_to when proxying Linux.do custom provider authorization', async () => {
@@ -232,12 +336,33 @@ describe('auth OAuth bridge', () => {
     expect(location.searchParams.get('client_id')).toBe('github-client-id');
     expect(location.searchParams.get('redirect_uri')).toBe('https://ef-gacha.mogujun.icu/api/auth/oauth/github/callback');
     expect(location.searchParams.get('scope')).toBe('read:user user:email');
+    expect(location.searchParams.get('code_challenge_method')).toBe('S256');
     const stateResult = verifyOAuthState(location.searchParams.get('state'), {
       expectedProvider: 'github',
       secret: 'test-oauth-state-secret',
     });
     expect(stateResult.ok).toBe(true);
     expect(stateResult.payload.returnTo).toBe('/settings?tab=account');
+    expect(String(res.headers['Set-Cookie'] || '')).toContain('__Host-eg_oauth_tx_');
+  });
+
+  it('rejects unknown OAuth intents before creating a transaction', async () => {
+    setGithubEnv();
+    const req = createRequest({
+      query: {
+        intent: 'switch-user',
+        returnTo: '/settings',
+      },
+    });
+    const res = createResponseRecorder();
+
+    await githubOAuthStartHandler(req, res);
+
+    const location = new URL(res.headers.Location);
+    expect(location.pathname).toBe('/settings');
+    expect(location.searchParams.get('oauth_status')).toBe('error');
+    expect(location.searchParams.get('oauth_code')).toBe('oauth_intent_invalid');
+    expect(oauthTransactionMocks.persistOAuthTransaction).not.toHaveBeenCalled();
   });
 
   it('redirects provider-disabled starts back to the safe return path', async () => {
@@ -278,6 +403,70 @@ describe('auth OAuth bridge', () => {
     expect(location.searchParams.get('oauth_code')).toBe('oauth_state_malformed');
   });
 
+  it('does not let another browser consume a signed OAuth transaction', async () => {
+    setGithubEnv();
+    const state = createOAuthState({
+      provider: 'github',
+      returnTo: '/settings',
+    }, {
+      secret: 'test-oauth-state-secret',
+    });
+    const req = createRequest({
+      query: {
+        code: 'auth-code',
+        state,
+      },
+    });
+    const res = createResponseRecorder();
+
+    await githubOAuthCallbackHandler(req, res);
+
+    const location = new URL(res.headers.Location);
+    expect(location.pathname).toBe('/settings');
+    expect(location.searchParams.get('oauth_status')).toBe('error');
+    expect(location.searchParams.get('oauth_code')).toBe('oauth_transaction_browser_mismatch');
+    expect(oauthTransactionMocks.consumeOAuthTransaction).not.toHaveBeenCalled();
+    expect(oauthSessionMocks.createOrLinkOAuthUserAndSession).not.toHaveBeenCalled();
+  });
+
+  it('consumes cancelled OAuth transactions once and rejects replay', async () => {
+    setGithubEnv();
+    const state = createOAuthState({
+      provider: 'github',
+      returnTo: '/settings',
+    }, {
+      secret: 'test-oauth-state-secret',
+    });
+    mockConsumedTransaction(state);
+    oauthTransactionMocks.consumeOAuthTransaction.mockResolvedValueOnce({
+      ok: false,
+      code: 'oauth_transaction_invalid_or_consumed',
+    });
+    const request = () => createRequest({
+      query: {
+        error: 'access_denied',
+        state,
+      },
+      headers: {
+        cookie: createCallbackCookie(state),
+      },
+    });
+
+    const firstResponse = createResponseRecorder();
+    await githubOAuthCallbackHandler(request(), firstResponse);
+    const firstLocation = new URL(firstResponse.headers.Location);
+    expect(firstLocation.searchParams.get('oauth_status')).toBe('cancelled');
+    expect(firstLocation.searchParams.get('oauth_code')).toBe('access_denied');
+    expect(String(firstResponse.headers['Set-Cookie'] || '')).toContain('Max-Age=0');
+
+    const replayResponse = createResponseRecorder();
+    await githubOAuthCallbackHandler(request(), replayResponse);
+    const replayLocation = new URL(replayResponse.headers.Location);
+    expect(replayLocation.searchParams.get('oauth_status')).toBe('error');
+    expect(replayLocation.searchParams.get('oauth_code')).toBe('oauth_transaction_invalid_or_consumed');
+    expect(oauthTransactionMocks.consumeOAuthTransaction).toHaveBeenCalledTimes(2);
+  });
+
   it('exchanges Linux.do callback code and creates a site session', async () => {
     setLinuxDoEnv();
     const adminClient = { from: vi.fn() };
@@ -292,12 +481,14 @@ describe('auth OAuth bridge', () => {
     }, {
       secret: 'test-oauth-state-secret',
     });
+    mockConsumedTransaction(state);
     const fetchMock = vi.fn(async (url, options = {}) => {
       if (String(url).includes('/oauth2/token')) {
         expect(options.headers.Authorization).toBe(`Basic ${Buffer.from('linuxdo-client-id:linuxdo-client-secret').toString('base64')}`);
         expect(String(options.body)).not.toContain('client_id=linuxdo-client-id');
         expect(String(options.body)).not.toContain('client_secret=linuxdo-client-secret');
         expect(String(options.body)).not.toContain('redirect_uri=');
+        expect(String(options.body)).toContain('code_verifier=test-pkce-code-verifier');
         return new Response(JSON.stringify({ access_token: 'provider-access-token', token_type: 'Bearer' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -322,6 +513,9 @@ describe('auth OAuth bridge', () => {
       query: {
         code: 'auth-code',
         state,
+      },
+      headers: {
+        cookie: createCallbackCookie(state),
       },
     });
     const res = createResponseRecorder();
@@ -364,11 +558,13 @@ describe('auth OAuth bridge', () => {
     }, {
       secret: 'test-oauth-state-secret',
     });
+    mockConsumedTransaction(state);
     const fetchMock = vi.fn(async (url, options = {}) => {
       if (String(url).includes('/login/oauth/access_token')) {
         expect(String(options.body)).toContain('client_id=github-client-id');
         expect(String(options.body)).toContain('client_secret=github-client-secret');
         expect(String(options.body)).toContain('redirect_uri=https%3A%2F%2Fef-gacha.mogujun.icu%2Fapi%2Fauth%2Foauth%2Fgithub%2Fcallback');
+        expect(String(options.body)).toContain('code_verifier=test-pkce-code-verifier');
         return new Response(JSON.stringify({ access_token: 'github-access-token', token_type: 'Bearer' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -395,6 +591,9 @@ describe('auth OAuth bridge', () => {
       query: {
         code: 'auth-code',
         state,
+      },
+      headers: {
+        cookie: createCallbackCookie(state),
       },
     });
     const res = createResponseRecorder();
@@ -423,6 +622,84 @@ describe('auth OAuth bridge', () => {
     expect(location.searchParams.get('oauth_status')).toBe('signed_in');
     expect(location.searchParams.get('oauth_provider')).toBe('github');
     expect(location.searchParams.get('oauth_code')).toBe('oauth_account_created');
+  });
+
+  it('retries transient GitHub token network failures and returns a stable error code', async () => {
+    setGithubEnv();
+    const state = createOAuthState({
+      provider: 'github',
+      returnTo: '/settings',
+    }, {
+      secret: 'test-oauth-state-secret',
+    });
+    mockConsumedTransaction(state);
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const req = createRequest({
+      query: {
+        code: 'auth-code',
+        state,
+      },
+      headers: {
+        cookie: createCallbackCookie(state),
+      },
+    });
+    const res = createResponseRecorder();
+
+    await githubOAuthCallbackHandler(req, res);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(oauthSessionMocks.createOrLinkOAuthUserAndSession).not.toHaveBeenCalled();
+    const location = new URL(res.headers.Location);
+    expect(location.pathname).toBe('/settings');
+    expect(location.searchParams.get('oauth_status')).toBe('error');
+    expect(location.searchParams.get('oauth_code')).toBe('oauth_token_network_error');
+    expect(location.search).not.toContain('fetch+failed');
+    expect(location.search).not.toContain('fetch%20failed');
+  });
+
+  it('retries transient GitHub profile network failures and returns a stable error code', async () => {
+    setGithubEnv();
+    const state = createOAuthState({
+      provider: 'github',
+      returnTo: '/settings',
+    }, {
+      secret: 'test-oauth-state-secret',
+    });
+    mockConsumedTransaction(state);
+    const fetchMock = vi.fn(async (url) => {
+      if (String(url).includes('/login/oauth/access_token')) {
+        return new Response(JSON.stringify({ access_token: 'github-access-token', token_type: 'Bearer' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new TypeError('fetch failed');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const req = createRequest({
+      query: {
+        code: 'auth-code',
+        state,
+      },
+      headers: {
+        cookie: createCallbackCookie(state),
+      },
+    });
+    const res = createResponseRecorder();
+
+    await githubOAuthCallbackHandler(req, res);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(oauthSessionMocks.createOrLinkOAuthUserAndSession).not.toHaveBeenCalled();
+    const location = new URL(res.headers.Location);
+    expect(location.pathname).toBe('/settings');
+    expect(location.searchParams.get('oauth_status')).toBe('error');
+    expect(location.searchParams.get('oauth_code')).toBe('oauth_profile_network_error');
+    expect(location.search).not.toContain('fetch+failed');
+    expect(location.search).not.toContain('fetch%20failed');
   });
 
   it('returns an explicit OAuth error when the site session layer is unavailable', async () => {
@@ -456,6 +733,9 @@ describe('auth OAuth bridge', () => {
       query: {
         code: 'auth-code',
         state,
+      },
+      headers: {
+        cookie: createCallbackCookie(state),
       },
     });
     const res = createResponseRecorder();

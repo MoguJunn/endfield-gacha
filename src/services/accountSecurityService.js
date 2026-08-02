@@ -1,6 +1,9 @@
 import { supabase } from '../supabaseClient.js';
 import { fetchJsonWithTimeout } from './supabaseRequest.js';
 import { getSupabaseAccessToken } from './authFetchService.js';
+import {
+  bootstrapSiteSessionFromSupabaseToken,
+} from './siteSessionService.js';
 
 export class AuthRateLimitError extends Error {
   constructor(retryAfter = 60) {
@@ -46,6 +49,10 @@ const EMPTY_ACCOUNT_SECURITY_STATE = Object.freeze({
   emailVerificationReason: null,
   emailVerificationRequestedAt: null,
   emailVerificationVerifiedAt: null,
+  emailVerificationTargetEmail: null,
+  emailVerificationVersion: null,
+  passwordSetupCapabilityStatus: null,
+  passwordSetupLastErrorCode: null,
 });
 
 export async function loadAccountSecurityState() {
@@ -74,42 +81,6 @@ export async function loadAccountSecurityState() {
       return EMPTY_ACCOUNT_SECURITY_STATE;
     }
     throw new Error(payload?.error || 'Failed to load account security state');
-  }
-
-  return payload.state || EMPTY_ACCOUNT_SECURITY_STATE;
-}
-
-export async function clearPasswordChangeRequired() {
-  const accessToken = await getSupabaseAccessToken({
-    syncSiteSession: false,
-    useSiteSessionCache: true,
-    allowSiteSessionToken: false,
-  });
-  const headers = {
-    'Content-Type': 'application/json',
-  };
-  if (accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
-  }
-
-  const { response, data: payload } = await fetchJsonWithTimeout('/api/account-security-state', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers,
-    body: JSON.stringify({
-      action: 'clear_password_change_required',
-    }),
-  }, {
-    label: 'account-security-state:clear',
-    timeoutMs: 20000,
-    retries: 1,
-  });
-
-  if (!response.ok || payload?.success !== true) {
-    if (response.status === 401 || response.status === 403) {
-      return EMPTY_ACCOUNT_SECURITY_STATE;
-    }
-    throw new Error(payload?.error || 'Failed to clear account security state');
   }
 
   return payload.state || EMPTY_ACCOUNT_SECURITY_STATE;
@@ -149,26 +120,38 @@ export async function updatePasswordWithCurrentPassword({
     throw error;
   }
 
-  if (!clearTemporaryPasswordState) {
-    return {
-      securityStateUpdated: false,
-      securityStateError: null,
-    };
+  const { data: newSessionData, error: newSignInError } = await supabase.auth.signInWithPassword({
+    email: normalizedEmail,
+    password: newPassword,
+  });
+  if (newSignInError) {
+    throw newSignInError;
+  }
+  const accessToken = newSessionData?.session?.access_token || '';
+  const bootstrapResult = accessToken
+    ? await bootstrapSiteSessionFromSupabaseToken(accessToken)
+    : { bootstrapped: false, authenticated: false };
+
+  let securityStateUpdated = false;
+  let securityStateError = null;
+  let state = null;
+  try {
+    if (clearTemporaryPasswordState) {
+      state = await loadAccountSecurityState();
+      securityStateUpdated = true;
+    }
+  } catch (clearError) {
+    securityStateError = clearError;
   }
 
-  try {
-    const state = await clearPasswordChangeRequired();
-    return {
-      securityStateUpdated: true,
-      state,
-      securityStateError: null,
-    };
-  } catch (securityStateError) {
-    return {
-      securityStateUpdated: false,
-      securityStateError,
-    };
-  }
+  return {
+    securityStateUpdated,
+    state,
+    securityStateError,
+    sessionsRevoked: true,
+    revokedSessionCount: null,
+    currentSessionRecreated: bootstrapResult.authenticated === true,
+  };
 }
 
 export function isOAuthPasswordSetupRequired(state) {

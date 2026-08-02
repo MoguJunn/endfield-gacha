@@ -89,7 +89,16 @@ CREATE SCHEMA IF NOT EXISTS storage;
 CREATE TABLE IF NOT EXISTS auth.users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT,
+  email_confirmed_at TIMESTAMPTZ,
+  encrypted_password TEXT,
+  raw_app_meta_data JSONB DEFAULT '{}'::jsonb,
   raw_user_meta_data JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS auth.sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS storage.objects (
@@ -137,6 +146,10 @@ SELECT proname
 FROM pg_proc
 WHERE proname IN ('get_global_stats', 'get_app_visible_pools', 'resolve_character_alias')
 ORDER BY proname;
+SELECT 'service_profiles_select=' || has_table_privilege('service_role', 'public.profiles', 'SELECT');
+SELECT 'service_profiles_update=' || has_table_privilege('service_role', 'public.profiles', 'UPDATE');
+SELECT 'service_revocation_select=' || has_table_privilege('service_role', 'public.app_session_revocation_states', 'SELECT');
+SELECT 'anon_revocation_select=' || has_table_privilege('anon', 'public.app_session_revocation_states', 'SELECT');
 SELECT ((public.get_global_stats())::jsonb ? 'contributorsByRegion')::text AS has_contributor_regions;
 SELECT (((public.get_global_stats())::jsonb -> 'byType' -> 'limited') ? 'avgPityTarget')::text AS has_limited_avg_pity_target;
 SELECT (((public.get_global_stats())::jsonb -> 'byType' -> 'weapon') ? 'avgPityTarget')::text AS has_weapon_avg_pity_target;
@@ -273,6 +286,10 @@ async function main() {
       'get_app_visible_pools',
       'get_global_stats',
       'resolve_character_alias',
+      'service_profiles_select=true',
+      'service_profiles_update=true',
+      'service_revocation_select=true',
+      'anon_revocation_select=false',
       'true',
       'limited_avg_target=15.5',
       'weapon_avg_target=8.0',
