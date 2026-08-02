@@ -105,7 +105,7 @@
 - `SIM-004`：`src/features/simulator/useGachaSimulatorController.js` 仍承担较多模拟器 UI、资源、继承和分享状态。
 - `ARCH-021`：桌面 / 移动端 dashboard 与 settings 仍有重复控制器逻辑。
 - `DB-OPTIMIZE-001`：线上数据库体积治理要先做索引使用审计和查询计划验证，本轮未直接变更生产 schema 语义。
-- `AUTH-HARDEN-001`：Phase A–D、GitHub 核心浏览器闭环、最新主线集成和迁移 166/167 重编号已完成；剩余提交授权、发布与生产验证。LinuxDo 暂缓。
+- `AUTH-HARDEN-001`：Phase A–D、邮箱/凭据状态机、安全属性专项和 GitHub 核心浏览器闭环已完成，并由 `5dd8505` 固化；生产数据库已按 166 → 167 完成迁移和核验，API/主线代码尚未部署。LinuxDo 保持在独立分支 `feat/linuxdo-oauth`，已下调为 P3且不阻塞认证发布。
 
 ## 独立导入后端兼容层
 

@@ -1,32 +1,31 @@
 # 统一认证架构与安全加固计划
 
-状态：2026-08-02 进度同步。本文记录当前事实、目标不变量和实施顺序；本地代码候选不等于已发布或允许部署。
+状态：`AUTH-HARDEN-001` 本地安全实现与候选验收已完成；远端审查和生产发布由 `AUTH-HARDEN-RELEASE-001` 继续跟踪。本地提交不等于已发布或允许部署。
 
 > 新会话入口：根目录 `SESSION_HANDOFF.md` 与 `todo` 的 `AUTH-HARDEN-001`。
-> 实现目录：`D:\Learning\Endfield Gacha\_tmp\auth-hardening-integration`（分支 `fix/auth-hardening-integration`）。
-> Phase A、B、C、D 已集成到最新主线并重编号为 166/167；**未 commit / 未 push / 未部署 / 未执行生产 migration**。
-> 隔离本地 Supabase/PostgreSQL 17、普通测试账号和隔离 GitHub OAuth App 已完成登录、绑定、解绑、解绑后拒绝与重绑核心浏览器闭环；提交前完整验证、发布和生产验证仍未完成。
+> 实现目录：`D:\Learning\Endfield Gacha\_tmp\auth-hardening-integration`；当前检出纯认证候选 `fix/auth-hardening-integration`，Phase A–D 基线提交为 `5dd8505`。
+> Phase A、B、C、D 已集成到最新主线基线、重编号为 166/167，并由本地提交 `5dd8505` 固化；2026-08-02 已按 166 → 167 应用到生产数据库并完成权限/回填核验，**API 尚未部署，代码尚未合入主线**。
+> LinuxDo 属于独立低优先级任务 `AUTH-LINUXDO-002`：实现继续隔离在 `feat/linuxdo-oauth`，不进入本认证候选；目前无法申请隔离 Connect Client，前后端开关保持关闭，不再阻塞认证发布。
 
 ## 当前决策
 
 1. **保留正常邮箱注册主链。** 邮箱注册、密码登录、邮件验证码登录、密码找回和站内邮箱验证继续使用 Supabase Auth 与现有同源邮件入口；本轮不推翻这条主链。
-2. **保留统一同源认证出口。** GitHub、后续 LinuxDo / QQ 等第三方 provider 仍由本站 OAuth bridge 接入，最终与邮箱登录共同落到 `app_sessions` 和 HttpOnly 站点 Cookie。Supabase `auth.users` 继续作为稳定用户 UUID 与邮箱密码锚点。
-3. **先加固公共认证基础设施，再恢复 provider 扩展。** LinuxDo 现有实现曾无法稳定完成真实登录，本轮不修 LinuxDo provider 细节，也不把它描述为可用；完成公共 OAuth、会话、邮箱和凭据生命周期加固后再重新实现、验证。
-4. **冻结认证相关生产变更。** 加固完成、测试通过并获得单独授权前，不推送认证候选实现、不执行认证迁移、不运行账号修复脚本的真实执行模式、不修改生产 Auth 用户或账号归属。
+2. **保留统一同源认证出口。** GitHub、LinuxDo 和后续 QQ 等第三方 provider 由本站 OAuth bridge 接入，最终与邮箱登录共同落到 `app_sessions` 和 HttpOnly 站点 Cookie。Supabase `auth.users` 继续作为稳定用户 UUID 与邮箱密码锚点。
+3. **provider 使用独立协议 adapter。** LinuxDo 已完全脱离旧 Supabase Custom Provider 代理，固定使用当前 Connect 的授权码、PKCE S256、Basic Token 鉴权和 Bearer UserInfo；自动化通过不等于真实 provider 已验收，隔离浏览器闭环前保持开关关闭。
+4. **发布动作继续独立授权。** `AUTH-HARDEN-001` 完成不自动授权 push、合并、认证迁移、部署、账号修复脚本真实执行或生产 Auth 用户/账号归属修改；这些动作由 `AUTH-HARDEN-RELEASE-001` 分层推进。
 
 ## 当前仓库事实
 
 - 生产版本仍是 `v4.5.4`；主站标准迁移链与主站 baseline 到 158。共享生产库另有独立抽奖项目迁移 160–165，这些迁移不属于主站 baseline，也不得复制或重复执行。
 - 远端 `origin/main` 当前为 `4826b76`（PR #13 合并提交）。
 - 主工作树仍检出 `feat/perf-013-history-scope` @ `2a4f909`，有大量用户改动和已完成的认证文档改动；**不要在这棵树上实现认证代码**。
-- **认证集成 worktree（当前唯一提交候选）：**
+- **认证集成 worktree（当前唯一认证实现树）：**
   - 路径：`D:\Learning\Endfield Gacha\_tmp\auth-hardening-integration`
-  - 分支：`fix/auth-hardening-integration`
-  - 基线 HEAD：`4826b76`（最新 `origin/main`）
-  - 状态：Phase A–D 已集成到最新主线并重编号为 166/167；未 commit、未 push、未部署
+  - 认证分支：`fix/auth-hardening-integration` @ `5dd8505`（基于最新 `origin/main` `4826b76` 的本地认证提交）
+  - LinuxDo 存储分支：`feat/linuxdo-oauth`（从 `5dd8505` 切出，代码与文档均保持隔离，未合并、未部署）
 - `.agent-tmp/oauth-password-email-conflict` 是已注册的 `fix/oauth-password-email-conflict` worktree @ `ea7466a`，含未提交邮箱目标绑定、首次设密和遗留冲突修复候选；仅作参考，不是实现基线。
 - 命令工具对 `_tmp/*` / `.agent-tmp/*` 的 `working_directory` 可能错误回退到主工作树。Git 使用 `git -C "D:\Learning\Endfield Gacha\_tmp\auth-hardening-integration"`；npm 使用 `npm --prefix "D:\Learning\Endfield Gacha\_tmp\auth-hardening-integration"`。
-- `origin/main` 的主站标准迁移尾号是 158；这不等同于共享生产数据库的全局迁移尾号。认证候选尚未执行生产迁移。
+- `origin/main` 的主站标准迁移尾号是 158；共享生产数据库另含抽奖 160–165，并已于 2026-08-02 应用认证 166/167。主线代码和 API 部署仍未包含认证候选。
 
 ### migration 编号的跨 worktree 冲突（不是同分支重复文件）
 
@@ -37,23 +36,24 @@
 | 主脏树性能线 | `159_add_history_scope_read_models.sql` | 本地性能 RPC/索引；**不得部署**；合入前必须重编号 |
 | 邮箱候选 worktree | `159_bind_email_verification_to_target.sql` | Phase C 参考候选；**不得部署**；合入前必须重编号 |
 
-- 2026-08-02 已通过 `ssh.secret` 只读核对生产 schema：运行版本为 `v4.5.4`，抽奖 160–165 的代表性结构全部存在，性能 159 与认证 Phase A–D 结构均不存在；生产库没有主站应用级 migration ledger。
+- 2026-08-02 迁移前只读核对确认运行版本为 `v4.5.4`、抽奖 160–165 存在、性能 159 与认证结构不存在；随后已创建受限完整备份并按 166 → 167 应用认证迁移。生产库没有主站应用级 migration ledger。
 - 因此认证两条迁移使用连续新号 166/167。性能线 159 和旧邮箱候选 159 仍是独立未发布候选，不进入本认证分支。
-- 编号只表示发布顺序；生产应用仍需单独授权，并按 166 → 167 执行。
+- 166/167 已按编号顺序生产应用；性能线 159 仍未应用，也不得因编号较小而补执行。
 
 ## 实现进度
 
 | 阶段 | 状态 |
 | --- | --- |
 | 文档 / 任务账本 / 交接 | 已同步到 2026-08-02 实现与浏览器证据 |
-| 认证实现 worktree | 已创建；含未提交 Phase A–D 候选 |
-| Phase A 代码（admin RPC + OAuth transaction） | **本地完成，未 commit** |
-| Phase B 代码（双凭据、刷新凭据、session 撤销、兼容 JWT 回查） | **本地完成，未 commit** |
-| Phase C 代码（候选邮箱、首次设密、临时密码到期） | **本地完成，未 commit** |
-| Phase D 代码（identity keyring、原子认领、补偿恢复） | **本地完成，未 commit** |
-| Phase E（GitHub 真实浏览器回归） | 核心闭环已完成；取消授权、跨浏览器 transaction、link Session 切换和 callback 重放仍缺独立真人浏览器证据 |
-| LinuxDo 重新实现 | 暂缓 |
-| push / 部署 / 生产 migration / 生产账号修复 | 未授权 |
+| 认证实现 worktree | 已创建；Phase A–D 由 `5dd8505` 固化；LinuxDo 保持在独立分支，不进入本候选 |
+| Phase A 代码（admin RPC + OAuth transaction） | **完成并提交；数据库面已生产应用，API 未部署** |
+| Phase B 代码（双凭据、刷新凭据、session 撤销、兼容 JWT 回查） | **完成并提交；数据库面已生产应用，API 未部署** |
+| Phase C 代码（候选邮箱、首次设密、临时密码到期） | **完成并提交；数据库面已生产应用，API 未部署** |
+| Phase D 代码（identity keyring、原子认领、补偿恢复） | **完成并提交；数据库面已生产应用，API 未部署** |
+| 候选验收（GitHub / 邮箱 / 安全属性） | **已完成**：GitHub 核心闭环使用隔离浏览器验证；跨浏览器 transaction、link Session 切换、callback 重放及邮箱/凭据状态机由专项自动化与本地 PostgreSQL 17 验证；已授权 App 无取消控件的限制已记录 |
+| LinuxDo provider | **转 `AUTH-LINUXDO-002`（P3）**：代码和自动化合同已完成，真实 Client 验收因外部条件暂停，不阻塞本任务 |
+| 生产 migration | **已完成**：166 → 167、3,095 个确认邮箱归属回填、83 条 identity key 版本和角色权限核验通过 |
+| push / 合并 / API 部署 | **转 `AUTH-HARDEN-RELEASE-001`**：候选进入远端审查；合并和部署仍需独立授权 |
 
 ## 认证数据流
 
@@ -61,7 +61,7 @@
 flowchart LR
   Browser["Browser / Mobile"] --> EmailAuth["Supabase Auth\n邮箱密码 / OTP / recovery"]
   Browser --> OAuthStart["Same-origin OAuth start / callback"]
-  OAuthStart --> Provider["GitHub / later LinuxDo / QQ"]
+  OAuthStart --> Provider["GitHub / LinuxDo / later QQ"]
   OAuthStart --> Identity["app_auth_identities"]
   EmailAuth --> SessionBootstrap["POST /api/auth/session"]
   Identity --> AuthUsers["auth.users UUID anchor"]
@@ -88,7 +88,7 @@ flowchart LR
 - 密码修改、密码找回和管理员重置后，旧站点 session、其他设备 session 与相关兼容 token 必须按策略撤销。
 - 标注为“临时”的密码必须在认证层真正失效；业务表中的到期时间和设置页提示不能代替认证执行。
 
-## 本地候选已修复、仍待发布验收的问题
+## 本地候选已修复并完成候选验收的问题
 
 ### 第一组：直接攻击面
 
@@ -127,7 +127,7 @@ flowchart LR
 
 ### Phase A：关闭直接攻击面
 
-**本地实现状态：已完成（未 commit）。**
+**实现状态：已由 `5dd8505` 提交；数据库面已生产应用，API 尚未部署。**
 
 1. migration `166_harden_admin_profile_and_oauth_transactions.sql`：
    - 撤销 `PUBLIC/anon/authenticated` 对 `admin_update_profile` 的 EXECUTE；仅 `service_role`
@@ -142,7 +142,7 @@ flowchart LR
 
 ### Phase B：统一请求身份与凭据撤销
 
-**本地实现状态：已完成（未 commit）。**
+**实现状态：已由 `5dd8505` 提交；数据库面已生产应用，API 尚未部署。**
 
 1. `POST /api/auth/session` bootstrap 只走 `resolveBearerRequestUser`；已有 Cookie 不能覆盖待引导用户。
 2. `resolveAuthenticatedRequestUser`：有 Authorization 时先校验 Bearer；若同时有有效 Cookie session，比较 user ID，不一致返回 `auth_identity_conflict`。
@@ -154,7 +154,7 @@ flowchart LR
 
 ### Phase C：收敛邮箱与密码状态机
 
-**本地实现状态：已完成（未 commit）。**
+**实现状态：已由 `5dd8505` 提交；数据库面已生产应用，API 尚未部署。**
 
 1. 建立规范化候选邮箱/pending 状态；验证前不把候选值写成 canonical `profiles.email`。migration 167 新增 `account_email_ownerships`（规范化唯一归属）与 `account_email_challenges`（一次性挑战，绑定 `user_id + target_email + 版本`，`start/consume` RPC 以 advisory lock + 条件更新保证单次消费）。
 2. 邮箱归属使用数据库唯一约束或原子 claim，不用全量扫描 Auth 用户替代唯一性。
@@ -168,7 +168,7 @@ flowchart LR
 
 ### Phase D：稳定 OAuth identity
 
-**本地实现状态：已完成（未 commit）。**
+**实现状态：已由 `5dd8505` 提交；数据库面已生产应用，API 尚未部署。**
 
 1. 引入独立、版本化的 identity hash key：`api/_lib/identityHash.js`（`AUTH_IDENTITY_HASH_KEY_CURRENT/PREVIOUS`，缺 key 安全关闭、版本冲突拒绝，与 state 密钥解耦）。
 2. 支持旧 key 查询、新 key 写入和登录时原子迁移（`claim_oauth_identity` RPC 双 hash 双读，owner 不可变、hash split 拒绝）；迁移完成前不得轮换/退役旧 key。
@@ -176,17 +176,18 @@ flowchart LR
 4. Auth user 创建与 identity 写入增加补偿和幂等恢复：按新旧 synthetic email 恢复半成品，profile 缺失时修复，孤儿清理只针对本次新建。
 5. token/profile 请求使用稳定错误码、15 秒超时和有限重试；服务端 OAuth 环境代理仅在 `AUTH_OAUTH_USE_ENV_PROXY=true` 时启用，并尊重 `NO_PROXY`。
 
-### Phase E：provider 恢复顺序
+### Phase E：候选验收与 provider 分工
 
 1. GitHub 核心浏览器闭环已完成：登录原账号、绑定、软解绑、解绑后拒绝和恢复原 identity。
-2. 继续补取消授权、跨浏览器 transaction、link Session 切换和 callback 重放的独立真人浏览器证据；GitHub 已授权 scope 不显示拒绝控件时如实记录 provider 限制。
-3. 再重新实现并验证 LinuxDo；不要直接复用先前无法正确登录的实现作为“已完成”基础。
-4. LinuxDo 验收需覆盖登录、绑定、解绑、重绑、取消、错误配置、邮箱缺失和账号冲突。
-5. QQ 保持关闭，等待平台审核和真实回调格式确认。
+2. 跨浏览器 transaction、link Session 切换和 callback 重放是确定性安全属性，已由专项自动化覆盖，不再要求人工制造危险或不可稳定复现的状态。GitHub 已授权 scope 不显示取消/拒绝控件时如实记录平台限制，不以浏览器后退伪造证据。
+3. LinuxDo adapter 已完全重写并通过自动化合同；真实 Connect Client 验收全部转 `AUTH-LINUXDO-002`，当前降为 P3 外部条件任务。
+4. QQ 保持关闭，等待平台审核和真实回调格式确认。
 
-## 邮箱主链验收
+LinuxDo 专项合同、配置和验收矩阵由独立分支 `feat/linuxdo-oauth` 维护。
 
-邮箱主链不因 OAuth 加固而停用，但发布前必须覆盖：
+## 邮箱主链候选验收
+
+邮箱主链不因 OAuth 加固而停用。下列安全合同已由 API 测试、数据库专项、本地普通账号和完整站点 Session 链覆盖，因此计入 `AUTH-HARDEN-001` 候选验收完成：
 
 - 新邮箱注册、重复邮箱、profile 初始化失败收容；
 - 密码登录、错误密码、Cookie/Bearer 一致性；
@@ -196,19 +197,23 @@ flowchart LR
 - 邮件发送失败时的持久化状态与用户提示；
 - 普通邮箱双确认完成后的 Auth/profile/security-state 一致性。
 
-## 迁移与发布闸门
+生产小范围真实验证仍在 166/167 与 API 部署之后执行，属于 `AUTH-HARDEN-RELEASE-001`，不反向否定本地实现完成。
 
-1. `origin/main` 的主站标准迁移链仍到 158；共享生产 schema 已只读确认抽奖 160–165 存在，认证最终 migration 为 166/167，均未生产应用。
+## AUTH-HARDEN-RELEASE-001：迁移与发布闸门
+
+1. `origin/main` 的主站标准迁移链仍到 158；共享生产 schema 包含独立抽奖 160–165。认证 166/167 已于 2026-08-02 按顺序生产应用，`site_version` 保持 `v4.5.4`。
 2. 性能线 `159_add_history_scope_read_models.sql` 与旧邮箱候选 `159_bind_email_verification_to_target.sql` 仍位于其他 worktree，未进入本分支、未生产应用。
-3. 最终集成树必须重新生成 baseline 到 167，并通过静态校验、临时 PostgreSQL 完整执行与认证 PostgreSQL 17 专项。真实空库验证还覆盖历史工单迁移在表不存在时的清理顺序，以及 `service_role` 对 profiles / 私有 Session 撤销状态的最小权限。
+3. 集成树已重新生成 baseline 到 167，并通过静态校验、临时 PostgreSQL 完整执行与认证 PostgreSQL 17 专项。生产执行前已完成全库自定义格式备份和 schema 备份；迁移后确认 3,095 个已确认真实邮箱全部建立唯一归属、83 条既有 OAuth identity 全部带 key 版本，角色权限、表、函数与触发器断言通过。
 4. 数据库迁移先于依赖新列/新 RPC 的 API 代码部署。
 5. 先在关闭第三方 provider 和真实账号修复的状态下部署基础设施，再逐项做小范围真实测试。
-6. GitHub 核心验收已完成，可在认证主线集成边界明确后进入 LinuxDo 实现；LinuxDo 验收前保持前后端开关关闭。
+6. GitHub 核心验收已完成；LinuxDo 不属于本次认证发布的开放条件，前后端开关保持关闭。
 7. 生产账号定向修复必须单独申请授权，并先重新运行只读演练；提交、推送或部署授权不自动包含账号修改授权。
+8. `fix/auth-hardening-integration` 作为远端审查候选处理；推送不授权合并或部署。`feat/linuxdo-oauth` 只作为低优先级本地实现存储分支处理。
 
 ### 本地验证快照（2026-08-02，认证集成 worktree）
 
-- 全量 Vitest：181 文件 / 976 测试全部通过
+- LinuxDo OAuth 专项：6 文件 / 59 测试全部通过
+- 全量 Vitest：182 文件 / 988 测试全部通过
 - ESLint：通过
 - 生产构建：通过
 - `test:auth-hardening-phase-a`（PostgreSQL 17）：admin RPC 权限、transaction 单次删除消费、过期清理、owner 不可变、session 撤销、Bearer bootstrap 幂等通过
@@ -219,11 +224,12 @@ flowchart LR
 - 当前本地站点使用 `http://127.0.0.1:5173`；隔离账号已完成“绑定 → GitHub 登录同一账号 → 软解绑 → 邮箱密码仍可登录 → `oauth_identity_unlinked` → 重绑恢复原 identity ID/owner”
 - MaaMCP 操作 Firefox 复验退出、GitHub 登录和官方账户选择器；最终为 1 个 user、1 条活动 identity、1 条活动 Session、0 个待处理 transaction
 - GitHub 已授权状态下官方账户选择器没有取消/拒绝控件；浏览器后退未重新请求 302 callback，因此没有把它冒充取消或重放通过
-- 仍未：commit、push、部署、生产 migration、生产账号修改，以及取消授权/跨浏览器/link Session 切换/callback 重放的独立真人浏览器证据
+- Phase A–D 已由 `5dd8505` 本地提交；生产 migration 166/167 已完成且未修改生产账号。LinuxDo 存储于本地分支 `feat/linuxdo-oauth`（`b8d14d2`），未合并、未部署；前后端开关保持关闭
 
 ## 文档职责
 
 - 本文：认证目标架构、风险、实施顺序和验收门禁。
+- `LINUXDO_OAUTH.md`：LinuxDo Connect 固定协议、配置、安全边界和真实浏览器验收。
 - `ARCHITECTURE.md`：全站系统边界和数据流。
 - `PROJECT_GUIDE.md`：环境变量、部署和运维入口。
 - `supabase/README.md`：迁移编号、baseline 和数据库执行规则。

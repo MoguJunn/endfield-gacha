@@ -6,12 +6,12 @@
 
 - [ ] 版本号和 changelog 已更新
 - [ ] 公开主链的变更已完成局部自测
-- [ ] `npm run lint`
-- [ ] `npm run test:unit`
-- [ ] `npm run build`
-- [ ] `npm run test:supabase-baseline:smoke`（baseline 小范围真实执行）
+- [x] `npm run lint`
+- [x] `npm run test:unit`
+- [x] `npm run build`
+- [x] `npm run test:supabase-baseline:smoke`（baseline 小范围真实执行）
 - [ ] `npm run test:history-batch-delete-guard`
-- [ ] `git diff --check`
+- [x] `git diff --check`
 
 ## Git 历史与分支
 
@@ -25,46 +25,52 @@
 
 ## 公开验证
 
-- [ ] `npm test`
+- [x] `npm test`
 - [ ] `npm run test:public-api-boundary`
 - [ ] `npm run test:bootstrap-cache`
 - [ ] `npm run test:official-announcements-feed`
 - [ ] `npm run test:ops-automation`
 - [ ] `npm run perf:report`
 
-## 认证专项（涉及邮箱、密码、OAuth、Session 时必做）
+## 统一认证加固候选（AUTH-HARDEN-001 / AUTH-HARDEN-RELEASE-001）
 
-- [ ] `npm run test:auth-hardening-phase-a`
-- [ ] `npm run test:auth-hardening-phase-cd`
-- [ ] candidate baseline 已在真正的空数据库和本地 Supabase/PostgreSQL 17 中完整执行，不只检查头尾标记
-- [ ] `service_role` 可读写认证同源 API 所需的 `profiles` / 私有 Session 撤销状态；`anon/authenticated` 仍不可访问私有撤销状态
-- [ ] 已确认邮箱 challenge 只能消费一次、首次设密能力不能重放、过期临时凭据不能创建/刷新 Auth Session
-- [ ] 已确认 identity 旧 key 双读迁移、owner/hash/version 防改写和原子解绑
-- [ ] 隔离普通账号已通过邮箱密码登录、站点 Session 建立、当前用户读取和注销；测试密码未写入仓库或文档
-- [ ] GitHub 登录、绑定、解绑、重绑已使用隔离测试 OAuth App 完成真实浏览器回归
-- [ ] 已验证解绑后 GitHub 直接登录返回 `oauth_identity_unlinked`，重绑恢复原 identity ID 和 owner
-- [ ] 取消授权、跨浏览器 transaction、link Session 切换和 callback 重放分别有真实浏览器证据；若 provider 已授权状态无法无副作用触发取消页，需记录 provider 限制，不能以浏览器后退冒充 `access_denied`
-- [ ] OAuth 出站网络需要代理时，仅显式开启 `AUTH_OAUTH_USE_ENV_PROXY`，并确认 `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` 不会把本地数据库或内部服务错误送入代理
-- [x] 已区分本地 181 个测试文件/976 项测试、MaaMCP 真实浏览器回归、提交前集成和生产部署状态
+- [x] `npm run test:auth-hardening-phase-a`
+- [x] `npm run test:auth-hardening-phase-cd`
+- [x] candidate baseline 已在真正的空数据库和本地 Supabase/PostgreSQL 17 中完整执行，不只检查头尾标记
+- [x] `service_role` 可读写认证同源 API 所需的 `profiles` / 私有 Session 撤销状态；`anon/authenticated` 仍不可访问私有撤销状态
+- [x] 已确认邮箱 challenge 只能消费一次、首次设密能力不能重放、过期临时凭据不能创建/刷新 Auth Session
+- [x] 已确认 identity 旧 key 双读迁移、owner/hash/version 防改写和原子解绑
+- [x] 隔离普通账号已通过邮箱密码登录、站点 Session 建立、当前用户读取和注销；测试密码未写入仓库或文档
+- [x] GitHub 登录、绑定、解绑、重绑已使用隔离测试 OAuth App 完成真实浏览器回归
+- [x] 已验证解绑后 GitHub 直接登录返回 `oauth_identity_unlinked`，重绑恢复原 identity ID 和 owner
+- [x] 跨浏览器 transaction、link Session 切换和 callback 重放已有确定性专项自动化；不再把重复真人复现作为 `AUTH-HARDEN-001` 完成条件
+- [x] GitHub 已授权 App 不提供取消/拒绝控件的平台限制已记录，没有以浏览器后退冒充 `access_denied`
+- [x] OAuth 出站网络需要代理时，仅显式开启 `AUTH_OAUTH_USE_ENV_PROXY`，并确认 `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` 不会把本地数据库或内部服务错误送入代理
+- [x] 已区分 `AUTH-HARDEN-001` 本地实现完成与 `AUTH-HARDEN-RELEASE-001` 远端/生产发布状态
+- [x] 已确认分支技术上可推送为远端审查候选，但推送不授权合并、部署、生产迁移或生产账号修改
+
+## LinuxDo provider（仅 AUTH-LINUXDO-002，P3）
+
+LinuxDo 代码、配置和验收矩阵由独立分支 `feat/linuxdo-oauth` 维护，不进入本认证候选。外部申请条件恢复前保持关闭，也不阻塞本次认证发布。
 
 ## 文档
 
 - [ ] README 已保持 GitHub 首页短摘要，并链接到专题文档
-- [ ] `docs/PROJECT_GUIDE.md` 已同步部署、环境变量、数据库和维护命令
-- [ ] `docs/ARCHITECTURE.md` 已同步架构、公共缓存、自动化和数据库边界
-- [ ] `docs/CODEMAP.md` 已同步代码入口索引
-- [ ] `supabase/README.md` 已同步 baseline 覆盖范围
+- [x] `docs/PROJECT_GUIDE.md` 已同步部署、环境变量、数据库和维护命令
+- [x] `docs/ARCHITECTURE.md` 已同步架构、公共缓存、自动化和数据库边界
+- [x] `docs/CODEMAP.md` 已同步代码入口索引
+- [x] `supabase/README.md` 已同步 baseline 覆盖范围
 - [ ] 若 UI 有变化，`docs/screenshots/` 已更新
 - [ ] `.github/` 模板已覆盖当前提交流程
 
 ## 部署
 
-- [ ] Supabase baseline / migration 状态已确认
-- [x] 已通过 SSH 只读核对生产 schema；独立抽奖迁移 160–165 的结构存在且不属于主站 baseline，认证结构尚不存在
+- [x] Supabase baseline / migration 状态已确认
+- [x] 迁移前已通过 SSH 只读核对生产 schema；独立抽奖 160–165 存在且不属于主站 baseline，认证结构当时不存在
 - [x] 认证迁移已定为 166/167，并已重新生成/验证 baseline
-- [ ] 新迁移已按编号顺序执行；站点版本与 `public_cache_epoch` 已核对
-- [ ] 数据库迁移先于依赖新列/RPC 的 API，provider 开关最后开放
-- [ ] commit、push、部署、生产 migration 和生产账号修改已分别获得所需授权，没有相互推定
+- [x] 生产数据库已按 166 → 167 执行；3,095 个邮箱归属、83 条 identity key 版本、权限/触发器/函数断言和 `site_version=v4.5.4` 均核对通过
+- [x] 数据库迁移先于依赖新列/RPC 的 API；API 尚未部署，LinuxDo/QQ 开关保持关闭
+- [x] 生产 migration 已获本次明确授权并完成；未把该授权解释为合并、API 部署或生产账号修改授权
 - [ ] CN / INTL 私有导入后端版本一致，`/health` 返回正确 `sourceMode`、版本和 `fullImport: true`
 - [ ] 官方导入已验证“`import-full` → 后台获取 / 内部暂存 → 自动原子写入 → `import-status` 轮询 → 异常标记 → 现在 / 稍后处理”；缺少安全归属字段的记录会跳过，任务重试保持幂等，浏览器不调用同步 `import-confirm`
 - [ ] 历史编辑已验证乐观锁冲突、变更审计、受影响作用域保底重算，以及旧批量删除对跨账号重复 ID 的整笔拒绝

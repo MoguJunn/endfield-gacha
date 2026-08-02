@@ -30,7 +30,7 @@
 
 2026-08-01 的真实本地 Supabase/PostgreSQL 17 空库导入已补齐两项此前静态检查未覆盖的边界：`archive/004_tickets_system.sql` 必须在表不存在时也能执行清理；Phase A/B 必须显式授予 `service_role` 访问 `profiles` 与私有 Session 撤销状态所需的 DML 权限，同时保持 `anon/authenticated` 对私有撤销状态的拒绝。`test:supabase-baseline:smoke` 与 `test:auth-hardening-phase-a` 已加入对应回归断言。
 
-本认证集成树的 baseline 覆盖到 `active/167_harden_account_credentials_and_identity_keys.sql` 后，不要再把 `001~167` 的主站标准迁移重复叠加到同版本 baseline。主站发布链原到 158；2026-08-02 已通过 SSH 只读确认共享生产 schema 存在独立抽奖 160–165，且认证 Phase A–D 结构尚不存在。认证最终编号为 166/167，均未生产应用。
+本认证集成树的 baseline 覆盖到 `active/167_harden_account_credentials_and_identity_keys.sql` 后，不要再把 `001~167` 的主站标准迁移重复叠加到同版本 baseline。主站发布链原到 158；共享生产 schema 另含独立抽奖 160–165。认证 166/167 已于 2026-08-02 按顺序生产应用并通过回填、权限、函数和触发器核验。
 
 ### migration 编号说明
 
@@ -39,9 +39,9 @@
 - **其他 worktree 仍占用同号文件名（不得与本文件一起部署）：**
   - 主脏树性能线：`159_add_history_scope_read_models.sql`
   - 邮箱候选树：`159_bind_email_verification_to_target.sql`
-- 生产库没有主站应用级 migration ledger；本次编号依据实际 schema 指纹、运行版本和仓库执行记录确定。生产执行仍需单独授权，并严格按 166 → 167。
+- 生产库没有主站应用级 migration ledger；166/167 的执行记录、迁移文件校验和、迁移前备份和迁移后核验结果保存在受限运维备份中。性能线 159 仍未应用。
 
-Phase A–D 与 GitHub 核心浏览器闭环已完成，代码已集成到最新 `origin/main` 的独立 worktree 并重编号为 166/167；仍未 commit、push、部署或执行生产 migration。最终测试数字以本集成树的重新验证结果为准。
+`AUTH-HARDEN-001` Phase A–D 与本地候选验收已完成，代码由 `5dd8505` 固化；生产迁移 166/167 已完成，主线合入和 API 部署仍由 `AUTH-HARDEN-RELEASE-001` 跟踪。LinuxDo provider 不新增数据库迁移，其实现保持在独立分支；因外部申请条件下调为 P3，真实浏览器验收前保持关闭且不阻塞认证发布。
 
 `site_config.public_cache_epoch` 是公共数据缓存版本源；公共 API / 首屏不应回退成浏览器直连 Supabase 读写。
 公共卡池统计读取 `public_pool_analytics_cache` 和 `public_pool_trend_cache`；受控刷新入口是 `refresh_public_analytics_cache()`，请求期不应扫描原始 `history` 生成趋势点。
