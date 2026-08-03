@@ -2,13 +2,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AccountEmailActionError,
+  confirmOAuthEmailArtifactMerge,
   isUserEmailVerified,
+  prepareOAuthEmailArtifactMerge,
   requestCurrentEmailVerification,
   requestEmailChange,
   verifyCurrentEmailCode,
+  verifyOAuthEmailArtifactMerge,
 } from '../accountEmailService.js';
 import { getSupabaseAccessToken } from '../authFetchService.js';
 import { fetchJsonWithTimeout } from '../supabaseRequest.js';
+import {
+  clearSiteSessionCache,
+  getCurrentSiteSession,
+} from '../siteSessionService.js';
 
 vi.mock('../authFetchService.js', () => ({
   getSupabaseAccessToken: vi.fn(),
@@ -18,10 +25,19 @@ vi.mock('../supabaseRequest.js', () => ({
   fetchJsonWithTimeout: vi.fn(),
 }));
 
+vi.mock('../siteSessionService.js', () => ({
+  clearSiteSessionCache: vi.fn(),
+  getCurrentSiteSession: vi.fn(),
+}));
+
 describe('accountEmailService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getSupabaseAccessToken.mockResolvedValue(null);
+    getCurrentSiteSession.mockResolvedValue({
+      authenticated: true,
+      user: { id: 'user-1', email: 'legacy@example.com' },
+    });
     fetchJsonWithTimeout.mockResolvedValue({
       response: { ok: true, status: 200 },
       data: {
@@ -127,6 +143,68 @@ describe('accountEmailService', () => {
       sent: {
         code: false,
       },
+    });
+  });
+
+  it('prepares and verifies the explicit OAuth email artifact repair', async () => {
+    await prepareOAuthEmailArtifactMerge({
+      email: 'legacy@example.com',
+      locale: 'zh-CN',
+    });
+    expect(fetchJsonWithTimeout).toHaveBeenLastCalledWith('/api/account-email-action', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'prepare_oauth_email_merge',
+        newEmail: 'legacy@example.com',
+        locale: 'zh-CN',
+      }),
+    }, expect.objectContaining({
+      label: 'account-email-action:prepare-oauth-email-merge',
+    }));
+
+    await verifyOAuthEmailArtifactMerge({
+      intentId: 'intent-1',
+      code: '12-34-56',
+    });
+    expect(fetchJsonWithTimeout).toHaveBeenLastCalledWith('/api/account-email-merge', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'verify',
+        intentId: 'intent-1',
+        code: '123456',
+      }),
+    }, expect.objectContaining({
+      label: 'account-email-merge:verify',
+    }));
+  });
+
+  it('confirms repair and reloads the fresh site session', async () => {
+    const result = await confirmOAuthEmailArtifactMerge({ intentId: 'intent-1' });
+
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/account-email-merge', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'confirm',
+        intentId: 'intent-1',
+        confirmation: 'merge',
+      }),
+    }, expect.objectContaining({
+      label: 'account-email-merge:confirm',
+    }));
+    expect(clearSiteSessionCache).toHaveBeenCalledTimes(1);
+    expect(getCurrentSiteSession).toHaveBeenCalledWith({
+      syncSupabase: true,
+      useCache: false,
+    });
+    expect(result.session).toMatchObject({
+      authenticated: true,
+      user: { id: 'user-1' },
     });
   });
 

@@ -7,6 +7,7 @@ import LocaleSwitcher from './common/LocaleSwitcher.jsx';
 import PlatformBindingsSection from './settings/PlatformBindingsSection.jsx';
 import DeveloperApiSection from './settings/DeveloperApiSection.jsx';
 import LoginIdentitiesSection from './settings/LoginIdentitiesSection.jsx';
+import OAuthEmailMergeFlow from './settings/OAuthEmailMergeFlow.jsx';
 import UsernameEditDialog from './settings/UsernameEditDialog.jsx';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCloudSync } from '../hooks/app';
@@ -176,6 +177,7 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
   const [emailSuccess, setEmailSuccess] = useState('');
   const [emailStatusMessage, setEmailStatusMessage] = useState('');
   const [emailStatusTone, setEmailStatusTone] = useState('success');
+  const [emailMergeOffer, setEmailMergeOffer] = useState(null);
   const [serverLabelUpdatingAccount, setServerLabelUpdatingAccount] = useState(null);
   const [serverLabelError, setServerLabelError] = useState('');
   const [newEmail, setNewEmail] = useState('');
@@ -493,6 +495,16 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
         setPasswordError(t('settings.error.passwordChangeRateLimited', { minutes: retryMinutes }));
       } else if (isInvalidCurrentPasswordError(error)) {
         setPasswordError(t('settings.error.currentPasswordIncorrect'));
+      } else if (error?.code === 'oauth_email_merge_available') {
+        const targetEmail = accountSecurityState?.emailVerificationTargetEmail || user?.email || '';
+        setEmailMergeOffer({
+          targetEmail,
+          maskedEmail: error?.details?.maskedEmail || '',
+        });
+        setNewEmail(targetEmail);
+        setShowPasswordModal(false);
+        resetPasswordModalState();
+        setShowEmailModal(true);
       } else {
         setPasswordError(
           error?.code === 'verified_email_required'
@@ -510,6 +522,7 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
     setEmailSuccess('');
     setNewEmail('');
     setEmailCurrentPassword('');
+    setEmailMergeOffer(null);
   };
 
   const showEmailStatus = (message, tone = 'success') => {
@@ -645,7 +658,15 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
         resetEmailModalState();
       }, 2400);
     } catch (error) {
-      setEmailError(getAccountEmailErrorMessage(error, t));
+      if (error?.code === 'oauth_email_merge_available') {
+        setEmailMergeOffer({
+          targetEmail: newEmail.trim().toLowerCase(),
+          maskedEmail: error?.details?.maskedEmail || '',
+        });
+        setEmailError('');
+      } else {
+        setEmailError(getAccountEmailErrorMessage(error, t));
+      }
     } finally {
       setEmailLoading(false);
     }
@@ -1266,6 +1287,32 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
               </button>
             </div>
             <div className="p-5 space-y-4">
+              {emailMergeOffer ? (
+                <OAuthEmailMergeFlow
+                  targetEmail={emailMergeOffer.targetEmail}
+                  initialMaskedEmail={emailMergeOffer.maskedEmail}
+                  onCancel={() => setEmailMergeOffer(null)}
+                  onCompleted={(result) => {
+                    const nextUser = result?.session?.user;
+                    if (nextUser?.id) {
+                      setUser(nextUser);
+                    }
+                    setAccountSecurityState((prev) => ({
+                      ...(prev || {}),
+                      emailVerificationRequired: false,
+                      emailVerificationVerifiedAt: new Date().toISOString(),
+                      emailVerificationTargetEmail: result?.data?.email || emailMergeOffer.targetEmail,
+                    }));
+                    setEmailSuccess(t('settings.oauthEmailMerge.completedMessage'));
+                  }}
+                  onDone={() => {
+                    setShowEmailModal(false);
+                    resetEmailModalState();
+                    setShowPasswordModal(true);
+                  }}
+                />
+              ) : (
+                <>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
                 {oauthPasswordSetupRequired ? t('settings.oauthEmailSetupModalDesc') : t('settings.emailModalDesc')}
               </p>
@@ -1312,6 +1359,8 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
               >
                 {emailLoading ? t('settings.emailChangeSending') : emailSuccess ? t('settings.emailChangeSent') : t('settings.emailChangeAction')}
               </button>
+                </>
+              )}
             </div>
           </div>
         </div>

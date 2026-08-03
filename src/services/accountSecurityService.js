@@ -209,6 +209,7 @@ export async function setupPasswordForOAuthAccount({
     const error = new Error(payload?.error || 'Failed to set account password');
     error.code = payload?.code || `http_${response.status}`;
     error.status = response.status;
+    error.details = payload?.details || null;
     throw error;
   }
 

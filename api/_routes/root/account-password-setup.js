@@ -1,6 +1,7 @@
 import { getSupabaseAdminClient, loadAuthUserById, findAuthUserByEmail } from '../../_lib/authAdmin.js';
 import { rejectDisallowedBrowserOrigin } from '../../_lib/http.js';
 import { resolveAuthenticatedRequestUser } from '../../_lib/siteAuth.js';
+import { inspectOAuthEmailArtifactMerge } from '../../_lib/oauthEmailArtifactMerge.js';
 import {
   clearSiteSessionCookies,
   createSiteSession,
@@ -206,6 +207,21 @@ export default async function handler(req, res) {
       if (typeof adminClient?.auth?.admin?.listUsers === 'function') {
         const existingAuthUser = await findAuthUserByEmail(adminClient, profileEmail);
         if (existingAuthUser?.id && existingAuthUser.id !== userId) {
+          const inspection = await inspectOAuthEmailArtifactMerge(adminClient, {
+            sourceUserId: userId,
+            targetEmail: profileEmail,
+          }).catch(() => ({ eligible: false }));
+          if (inspection.eligible && inspection.artifactUserId === existingAuthUser.id) {
+            return res.status(409).json({
+              success: false,
+              error: 'This email is blocked by an empty account created by the previous verification flow',
+              code: 'oauth_email_merge_available',
+              details: {
+                mergeAvailable: true,
+                maskedEmail: inspection.maskedEmail,
+              },
+            });
+          }
           return res.status(409).json({
             success: false,
             error: 'Email is already used by another auth account',

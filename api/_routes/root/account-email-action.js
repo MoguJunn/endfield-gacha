@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import {
   checkMemoryRateLimit,
   getRequesterKey,
@@ -25,10 +25,15 @@ import {
   normalizeMailRecipient,
   sanitizeMailPayload,
 } from '../../_lib/mailAbuseGuards.js';
+import {
+  inspectOAuthEmailArtifactMerge,
+  startOAuthEmailArtifactMerge,
+} from '../../_lib/oauthEmailArtifactMerge.js';
 
 const ACTIONS = Object.freeze({
   RESEND_VERIFICATION: 'resend_verification',
   CHANGE_EMAIL: 'change_email',
+  PREPARE_OAUTH_EMAIL_MERGE: 'prepare_oauth_email_merge',
 });
 const EMAIL_VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const EMAIL_VERIFICATION_CODE_TTL_MS = 15 * 60 * 1000;
@@ -43,6 +48,11 @@ const ACTION_META = Object.freeze({
     eventType: MAIL_EVENT_TYPES.EMAIL_CHANGE,
     currentTemplateKey: 'auth.email-change-current',
     newTemplateKey: 'auth.email-change-new',
+    rateLimit: { windowMs: 15 * 60 * 1000, max: 4 },
+  },
+  [ACTIONS.PREPARE_OAUTH_EMAIL_MERGE]: {
+    eventType: MAIL_EVENT_TYPES.EMAIL_VERIFICATION,
+    templateKey: 'auth.email-verification',
     rateLimit: { windowMs: 15 * 60 * 1000, max: 4 },
   },
 });
@@ -246,6 +256,7 @@ function sendAccountEmailResponse(res, {
   partial = false,
   sent = {},
   pendingEmail = null,
+  extra = {},
 } = {}) {
   return res.status(200).json({
     success: true,
@@ -257,6 +268,7 @@ function sendAccountEmailResponse(res, {
       dryRun,
       sent,
       pendingEmail,
+      ...extra,
     },
   });
 }
@@ -424,6 +436,7 @@ async function resolveCurrentUser(req, {
     ok: true,
     currentUser: authResult.user,
     authSource: authResult.source,
+    sessionId: authResult.session?.id || null,
   };
 }
 
@@ -521,7 +534,10 @@ export default async function handler(req, res) {
       )
     );
     const currentEmail = getNormalizedEmail(currentUser.email);
-    if (!currentEmail && (action !== ACTIONS.CHANGE_EMAIL || !isOAuthEmailSetup)) {
+    if (!currentEmail && (
+      ![ACTIONS.CHANGE_EMAIL, ACTIONS.PREPARE_OAUTH_EMAIL_MERGE].includes(action)
+      || !isOAuthEmailSetup
+    )) {
       return res.status(400).json({
         success: false,
         error: 'Current account does not have a valid email address',
@@ -610,6 +626,111 @@ export default async function handler(req, res) {
       });
     }
 
+    if (action === ACTIONS.PREPARE_OAUTH_EMAIL_MERGE) {
+      if (!isOAuthEmailSetup) {
+        return res.status(403).json({
+          success: false,
+          error: 'This account is not eligible for OAuth email repair',
+          code: 'oauth_email_merge_not_available',
+        });
+      }
+
+      const existingUser = await findAuthUserByEmail(adminClient, nextEmail);
+      if (!existingUser?.id || existingUser.id === currentUser.id) {
+        return res.status(409).json({
+          success: false,
+          error: 'The conflicting email account has changed',
+          code: 'oauth_email_merge_target_changed',
+        });
+      }
+
+      const inspection = await inspectOAuthEmailArtifactMerge(adminClient, {
+        sourceUserId: currentUser.id,
+        targetEmail: nextEmail,
+      });
+      if (!inspection.eligible || inspection.artifactUserId !== existingUser.id) {
+        return res.status(409).json({
+          success: false,
+          error: 'This email belongs to an account that cannot be merged automatically',
+          code: 'oauth_email_merge_not_available',
+        });
+      }
+
+      const nextBlock = getRuntimeRecipientBlock(runtimeState, meta.eventType, nextEmail);
+      if (nextBlock.blocked) {
+        return res.status(503).json({
+          success: false,
+          error: nextBlock.reason,
+          code: nextBlock.code,
+        });
+      }
+
+      const intentId = randomUUID();
+      const verificationCode = String(randomInt(100000, 1000000));
+      const expiresAt = new Date(now.getTime() + EMAIL_VERIFICATION_CODE_TTL_MS);
+      const intent = await startOAuthEmailArtifactMerge(adminClient, {
+        intentId,
+        sourceUserId: currentUser.id,
+        startedSessionId: userResult.sessionId,
+        targetEmail: nextEmail,
+        verificationCode,
+        expiresAt: expiresAt.toISOString(),
+      });
+      if (!intent?.id) {
+        return res.status(409).json({
+          success: false,
+          error: 'Account merge preparation could not be completed',
+          code: 'oauth_email_merge_prepare_failed',
+        });
+      }
+
+      const mailResult = await sendAccountMail({
+        adminClient,
+        eventType: meta.eventType,
+        templateKey: meta.templateKey,
+        email: nextEmail,
+        actionLink: `${getAppUrl(env, req)}/settings`,
+        verificationCode,
+        locale,
+        env,
+        now,
+        controls,
+        relatedEntityId: intent.id,
+        payload: {
+          action: ACTIONS.PREPARE_OAUTH_EMAIL_MERGE,
+          verificationMode: 'oauth_email_artifact_merge',
+          codeEntry: true,
+          codeExpiresAt: expiresAt.toISOString(),
+        },
+      });
+      const providerResult = mailResult.providerResult || {};
+      if (!providerResult.ok) {
+        await adminClient
+          .from('account_email_merge_intents')
+          .update({ status: 'cancelled', last_error_code: providerResult.code || 'mail_send_failed' })
+          .eq('id', intent.id)
+          .eq('source_user_id', currentUser.id);
+        return res.status(502).json({
+          success: false,
+          error: 'Unable to send account merge verification email',
+          code: providerResult.code || 'mail_send_failed',
+        });
+      }
+
+      return sendAccountEmailResponse(res, {
+        status: providerResult.dryRun ? 'dry_run' : 'sent',
+        nextStep: 'enter_merge_verification_code',
+        dryRun: Boolean(providerResult.dryRun),
+        sent: { current: false, new: true },
+        pendingEmail: nextEmail,
+        extra: {
+          mergeIntentId: intent.id,
+          maskedEmail: inspection.maskedEmail,
+          expiresAt: intent.expires_at || expiresAt.toISOString(),
+        },
+      });
+    }
+
     if (nextEmail === currentEmail) {
       return res.status(400).json({
         success: false,
@@ -620,6 +741,23 @@ export default async function handler(req, res) {
 
     const existingUser = await findAuthUserByEmail(adminClient, nextEmail);
     if (existingUser?.id && existingUser.id !== currentUser.id) {
+      if (isOAuthEmailSetup) {
+        const inspection = await inspectOAuthEmailArtifactMerge(adminClient, {
+          sourceUserId: currentUser.id,
+          targetEmail: nextEmail,
+        }).catch(() => ({ eligible: false }));
+        if (inspection.eligible && inspection.artifactUserId === existingUser.id) {
+          return res.status(409).json({
+            success: false,
+            error: 'This email is blocked by an empty account created by the previous verification flow',
+            code: 'oauth_email_merge_available',
+            details: {
+              mergeAvailable: true,
+              maskedEmail: inspection.maskedEmail,
+            },
+          });
+        }
+      }
       return res.status(409).json({
         success: false,
         error: 'Email already registered',
