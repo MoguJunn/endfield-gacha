@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 function readMigration(name) {
@@ -13,6 +13,37 @@ function readBaseline() {
 
 function readBackfillScript() {
   return readFileSync(new URL('../../scripts/backfill-history-anomalies.mjs', import.meta.url), 'utf8');
+}
+
+function readMissingOfficialImportAnomalyRepair() {
+  return readFileSync(
+    new URL(
+      '../../supabase/manual/data-backfill/170_backfill_missing_official_import_anomalies.sql',
+      import.meta.url
+    ),
+    'utf8'
+  );
+}
+
+function readLatestOfficialImportCommitMigration() {
+  const migrationDirectory = new URL('../../supabase/migrations/', import.meta.url);
+  const migrationNames = readdirSync(migrationDirectory)
+    .filter((name) => /^\d+_.+\.sql$/i.test(name))
+    .sort((left, right) => {
+      const leftNumber = Number(left.match(/^(\d+)/)?.[1] || 0);
+      const rightNumber = Number(right.match(/^(\d+)/)?.[1] || 0);
+      return leftNumber - rightNumber || left.localeCompare(right);
+    });
+  let latest = null;
+
+  migrationNames.forEach((name) => {
+    const sql = readMigration(name);
+    if (sql.includes('CREATE OR REPLACE FUNCTION public.commit_official_import_records')) {
+      latest = { name, sql };
+    }
+  });
+
+  return latest;
 }
 
 describe('history review database migrations', () => {
@@ -53,6 +84,28 @@ describe('history review database migrations', () => {
     expect(sql).toMatch(/GRANT EXECUTE ON FUNCTION public\.commit_official_import_records[\s\S]+TO service_role;/);
   });
 
+  it('keeps the latest official import commit aligned with the server-scoped history key', () => {
+    const latest = readLatestOfficialImportCommitMigration();
+    expect(latest).not.toBeNull();
+
+    const normalizedSql = latest.sql.replace(/\s+/g, ' ');
+    expect(normalizedSql).toContain(
+      'ON CONFLICT (user_id, game_uid, server_scope, pool_id, seq_id)'
+    );
+    expect(normalizedSql).not.toContain(
+      'ON CONFLICT (user_id, game_uid, server_id, pool_id, seq_id, record_id)'
+    );
+    expect(normalizedSql).toContain('IF NOT public.is_account_credential_allowed(p_user_id)');
+    expect(normalizedSql).toContain("v_task.summary ->> 'newRecords'");
+    expect(normalizedSql).toContain('nick_name, rarity, character_name, item_name, character_id');
+    expect(normalizedSql).toContain('pity, is_free, is_info_book, is_new, is_standard');
+    expect(normalizedSql).toContain('server_id, region, batch_id, special_type');
+    expect(normalizedSql).toContain('committed_at = NOW()');
+    expect(normalizedSql).toContain("AND status = 'confirming'");
+    expect(normalizedSql).toContain('official_import_history_conflict_constraint_missing');
+    expect(normalizedSql).toContain('official_import_history_conflict_target_invalid');
+  });
+
   it('rejects ambiguous legacy batch deletion before deleting exact locked rows', () => {
     const sql = readMigration('155_guard_ambiguous_history_batch_delete.sql');
 
@@ -69,6 +122,7 @@ describe('history review database migrations', () => {
     const baseline = readBaseline();
 
     expect(baseline).toContain('active/153_commit_official_import_records_atomically.sql');
+    expect(baseline).toContain('active/170_restore_official_import_atomic_commit.sql');
     expect(baseline).toContain('active/155_guard_ambiguous_history_batch_delete.sql');
     expect(baseline).toContain('CREATE OR REPLACE FUNCTION public.update_history_record_controlled');
     expect(baseline).toContain('CREATE OR REPLACE FUNCTION public.commit_official_import_records');
@@ -87,5 +141,22 @@ describe('history review database migrations', () => {
     expect(script).toContain('CONFIRM_HISTORY_ANOMALY_BACKFILL');
     expect(script).toContain('const APPLY_CONFIRMATION = `${EXPECTED_RECORDS}:${EXPECTED_USERS}`;');
     expect(script).toContain('await verifyAnomalyMarkers(client, anomalies);');
+  });
+
+  it('repairs missing official-import anomaly markers from exact history parent rows', () => {
+    const sql = readMissingOfficialImportAnomalyRepair();
+    const normalizedSql = sql.replace(/\s+/g, ' ');
+
+    expect(normalizedSql).toContain('IF v_candidate_count <> 10 THEN');
+    expect(normalizedSql).toContain('INSERT INTO public.history_anomalies');
+    expect(normalizedSql).toContain('FROM public.history AS history_row');
+    expect(normalizedSql).toContain("anomaly.issue_code = 'OFFICIAL_IMPORT_UNKNOWN_ITEM'");
+    expect(normalizedSql).toContain("history_row.rarity = 4");
+    expect(normalizedSql).toContain('history_row.special_type IS NULL');
+    expect(normalizedSql).toContain(
+      'ON CONFLICT (user_id, game_uid, server_scope, pool_id, seq_id, issue_code) DO NOTHING'
+    );
+    expect(normalizedSql).toContain("'repairSource', 'production_repair_2026_08_03'");
+    expect(normalizedSql).toContain('IF v_inserted_count <> v_candidate_count THEN');
   });
 });

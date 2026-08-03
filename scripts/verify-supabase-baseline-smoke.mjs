@@ -226,6 +226,206 @@ SELECT 'weapon_avg_target=' || COALESCE(((public.get_global_stats())::jsonb -> '
 `.trim();
 }
 
+function buildOfficialImportCommitFixtureSql() {
+  return `
+DO $fixture$
+DECLARE
+  v_result JSONB;
+  v_user_id UUID := '00000000-0000-0000-0000-000000000001';
+BEGIN
+  INSERT INTO public.official_import_tasks (
+    id,
+    user_id,
+    source,
+    import_mode,
+    game_uid,
+    server_id,
+    status,
+    access_key_hash,
+    summary
+  ) VALUES (
+    '00000000-0000-0000-0000-000000000101',
+    v_user_id,
+    'cn',
+    'incremental',
+    'rpc-game-1',
+    '1',
+    'confirming',
+    'fixture-access-key-hash-1',
+    '{"newRecords":1}'::JSONB
+  );
+
+  SELECT public.commit_official_import_records(
+    '00000000-0000-0000-0000-000000000101',
+    v_user_id,
+    jsonb_build_array(jsonb_build_object(
+      'pool_id', 'rpc_pool',
+      'name', 'RPC fixture pool',
+      'type', 'limited'
+    )),
+    jsonb_build_array(jsonb_build_object(
+      'record_id', 'rpc-record-1',
+      'pool_id', 'rpc_pool',
+      'seq_id', 'rpc-seq-1',
+      'game_uid', 'rpc-game-1',
+      'nick_name', 'RPC fixture user',
+      'rarity', 6,
+      'character_name', 'RPC fixture character',
+      'item_name', 'RPC fixture character',
+      'character_id', 'rpc-character-1',
+      'timestamp', '2026-08-03T12:00:00.000Z',
+      'pity', 99,
+      'is_free', TRUE,
+      'is_info_book', TRUE,
+      'is_new', TRUE,
+      'is_standard', FALSE,
+      'server_id', '1',
+      'region', 'cn',
+      'batch_id', 'rpc-batch-1',
+      'special_type', 'guaranteed'
+    ))
+  ) INTO v_result;
+
+  IF (v_result ->> 'savedRecords')::INTEGER <> 1
+    OR (v_result ->> 'atomicCommit')::BOOLEAN IS NOT TRUE
+  THEN
+    RAISE EXCEPTION 'official_import_fixture_first_commit_failed: %', v_result;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.history
+    WHERE user_id = v_user_id
+      AND game_uid = 'rpc-game-1'
+      AND server_scope = '1'
+      AND pool_id = 'rpc_pool'
+      AND seq_id = 'rpc-seq-1'
+      AND record_id = 'rpc-record-1'
+      AND nick_name = 'RPC fixture user'
+      AND character_name = 'RPC fixture character'
+      AND character_id = 'rpc-character-1'
+      AND pity = 80
+      AND is_free IS TRUE
+      AND is_info_book IS TRUE
+      AND is_new IS TRUE
+      AND region = 'cn'
+      AND batch_id = 'rpc-batch-1'
+      AND special_type = 'guaranteed'
+  ) THEN
+    RAISE EXCEPTION 'official_import_fixture_full_payload_missing';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.official_import_tasks
+    WHERE id = '00000000-0000-0000-0000-000000000101'
+      AND status = 'committed'
+      AND committed_at IS NOT NULL
+  ) THEN
+    RAISE EXCEPTION 'official_import_fixture_task_not_committed';
+  END IF;
+
+  INSERT INTO public.official_import_tasks (
+    id,
+    user_id,
+    source,
+    import_mode,
+    game_uid,
+    server_id,
+    status,
+    access_key_hash,
+    summary
+  ) VALUES (
+    '00000000-0000-0000-0000-000000000102',
+    v_user_id,
+    'cn',
+    'incremental',
+    'rpc-game-1',
+    '1',
+    'confirming',
+    'fixture-access-key-hash-2',
+    '{"newRecords":1}'::JSONB
+  );
+
+  PERFORM public.commit_official_import_records(
+    '00000000-0000-0000-0000-000000000102',
+    v_user_id,
+    '[]'::JSONB,
+    jsonb_build_array(jsonb_build_object(
+      'record_id', 'rpc-record-2',
+      'pool_id', 'rpc_pool',
+      'seq_id', 'rpc-seq-1',
+      'game_uid', 'rpc-game-1',
+      'nick_name', 'RPC fixture updated',
+      'rarity', 5,
+      'character_name', 'RPC fixture updated character',
+      'item_name', 'RPC fixture updated character',
+      'character_id', 'rpc-character-2',
+      'timestamp', '2026-08-03T12:01:00.000Z',
+      'pity', 7,
+      'is_free', FALSE,
+      'is_info_book', FALSE,
+      'is_new', FALSE,
+      'is_standard', TRUE,
+      'server_id', '1',
+      'region', 'cn',
+      'batch_id', 'rpc-batch-2',
+      'special_type', 'gift'
+    ))
+  );
+
+  IF (SELECT COUNT(*) FROM public.history
+      WHERE user_id = v_user_id
+        AND game_uid = 'rpc-game-1'
+        AND server_scope = '1'
+        AND pool_id = 'rpc_pool'
+        AND seq_id = 'rpc-seq-1') <> 1
+  THEN
+    RAISE EXCEPTION 'official_import_fixture_conflict_created_duplicate';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.history
+    WHERE user_id = v_user_id
+      AND game_uid = 'rpc-game-1'
+      AND server_scope = '1'
+      AND pool_id = 'rpc_pool'
+      AND seq_id = 'rpc-seq-1'
+      AND record_id = 'rpc-record-2'
+      AND nick_name = 'RPC fixture updated'
+      AND character_name = 'RPC fixture updated character'
+      AND character_id = 'rpc-character-2'
+      AND pity = 7
+      AND is_standard IS TRUE
+      AND batch_id = 'rpc-batch-2'
+      AND special_type = 'gift'
+  ) THEN
+    RAISE EXCEPTION 'official_import_fixture_conflict_update_incomplete';
+  END IF;
+
+  IF has_function_privilege(
+    'anon',
+    'public.commit_official_import_records(uuid,uuid,jsonb,jsonb)',
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'authenticated',
+    'public.commit_official_import_records(uuid,uuid,jsonb,jsonb)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.commit_official_import_records(uuid,uuid,jsonb,jsonb)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'official_import_fixture_function_privileges_invalid';
+  END IF;
+END;
+$fixture$;
+
+SELECT 'official_import_rpc=ok';
+`.trim();
+}
+
 async function main() {
   const baselineSql = await readFile(baselinePath, 'utf8');
 
@@ -269,6 +469,18 @@ async function main() {
       ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName],
       { input: `${buildTargetIntervalFixtureSql()}\n` }
     );
+
+    const officialImportVerification = await run(
+      'docker',
+      ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName, '-At'],
+      { input: `${buildOfficialImportCommitFixtureSql()}\n` }
+    );
+
+    if (!officialImportVerification.stdout.includes('official_import_rpc=ok')) {
+      throw new Error(
+        `Official import RPC verification returned incomplete output:\n${officialImportVerification.stdout}`
+      );
+    }
 
     const verification = await run(
       'docker',
