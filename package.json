@@ -48,6 +48,8 @@
     "test:force-refresh-gate": "node scripts/verify-force-refresh-gate.mjs",
     "test:supabase-baseline": "node scripts/verify-supabase-baseline.mjs",
     "test:supabase-baseline:smoke": "node scripts/verify-supabase-baseline-smoke.mjs",
+    "test:auth-hardening-phase-a": "node scripts/verify-auth-hardening-phase-a.mjs",
+    "test:auth-hardening-phase-cd": "node scripts/verify-auth-hardening-phase-cd.mjs",
     "test:history-batch-delete-guard": "node scripts/verify-history-batch-delete-guard.mjs",
     "test:bootstrap-cache": "node scripts/verify-bootstrap-cache-partial.mjs",
     "test:public-api-boundary": "node scripts/verify-public-api-boundary.mjs",

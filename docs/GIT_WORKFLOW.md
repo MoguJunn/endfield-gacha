@@ -79,6 +79,14 @@ chore:发布v4.4.1
 8. 推送 `main`、`release/vX.Y.Z`、需要保留的 `feat/*` / `fix/*` 分支和 tag。
 9. 等待 GitHub-connected Vercel 自动创建 Production 部署，确认状态为 Ready、生产 alias 指向新部署，并核对站点版本与公共缓存版本。
 
+认证和数据库变更需要额外分层：
+
+1. 合入前分别检查主站标准链、各 worktree 候选和共享生产库迁移记录；不能只按本地文件名推断生产编号。
+2. 本认证 worktree 已按共享生产 schema 将迁移重编号为 166/167，避开独立抽奖 160–165；性能线和旧邮箱候选的同号 159 未进入认证分支。
+3. 认证集成 baseline 已重新生成并验证到 167；生产数据库已于 2026-08-02 按 166 → 167 执行并完成权限、回填、函数和触发器核验。
+4. 数据库已先于依赖新列/RPC 的 API 应用；API 部署仍需独立授权。每个 provider 都必须完成各自真实浏览器回归后才开放，GitHub 验收不能替代 LinuxDo/QQ 验收。
+5. commit、push、部署、生产 migration 和生产账号修改分别授权，不能相互推定。
+
 主站正常发布不直接运行 `vercel deploy --prod`。只有用户明确批准紧急回滚、promotion 或切换已有部署时，才使用 Vercel CLI；操作前必须说明目标部署 URL / ID，操作后必须重新核对生产 alias。独立状态页等其他 Vercel 项目是不同部署目标，不得与主站发布混用。
 
 发布收口提交建议固定为：
@@ -98,7 +106,7 @@ npm run build
 git diff --check
 ```
 
-如果涉及公共 API、缓存、数据库迁移、邮件、账号安全或自动化，还要补对应专项脚本。验证结果应写进提交前说明、PR 描述或交接文档。
+如果涉及公共 API、缓存、数据库迁移、邮件、账号安全或自动化，还要补对应专项脚本。认证变更必须运行 `test:auth-hardening-phase-a`、`test:auth-hardening-phase-cd` 和 baseline 验证；LinuxDo 独立分支还必须运行其 `test:linuxdo-oauth` 专项。任何 provider 的真实浏览器回归都不能由单元测试替代。验证结果应写进提交前说明、PR 描述或交接文档。
 
 ## 历史改写守则
 

@@ -17,7 +17,10 @@ import adminPoolsHandler from './root/admin-pools.js';
 import announcementsHandler from './root/announcements.js';
 import authEmailActionHandler from './root/auth-email-action.js';
 import { authIdentityUnlinkHandler } from './root/auth-identities.js';
-import authSessionHandler, { authSessionLogoutHandler } from './root/auth-session.js';
+import authSessionHandler, {
+  authSessionLogoutHandler,
+  authSessionRevokeAllHandler,
+} from './root/auth-session.js';
 import {
   githubOAuthCallbackHandler,
   githubOAuthStartHandler,
@@ -144,6 +147,7 @@ export const API_ROUTE_ENTRIES = [
   ['/api/auth/identities/unlink', authIdentityUnlinkHandler],
   ['/api/auth/session', authSessionHandler],
   ['/api/auth/session/logout', authSessionLogoutHandler],
+  ['/api/auth/session/revoke-all', authSessionRevokeAllHandler],
   ['/api/auth-pow-challenge', authPowChallengeHandler],
   ['/api/auth-rate-limit', authRateLimitHandler],
   ['/api/automation-feed', automationFeedHandler],

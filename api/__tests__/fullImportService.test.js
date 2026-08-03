@@ -87,6 +87,31 @@ function createHistoryRangeQuery(rangeHandler) {
   return query;
 }
 
+function createCompatSessionQuery(sessionRow = null, error = null) {
+  const filters = [];
+  const query = {
+    select: vi.fn(() => query),
+    eq: vi.fn((column, value) => {
+      filters.push({ column, value });
+      return query;
+    }),
+    is: vi.fn(() => query),
+    gt: vi.fn(() => query),
+    maybeSingle: vi.fn(async () => ({ data: sessionRow, error })),
+    filters,
+  };
+  return query;
+}
+
+function createCredentialAwareRpc(handler = async () => ({ data: null, error: null })) {
+  return vi.fn(async (functionName, args = {}) => {
+    if (functionName === 'is_account_credential_allowed') {
+      return { data: true, error: null };
+    }
+    return handler(functionName, args);
+  });
+}
+
 describe('verifySupabaseAccessToken', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -94,6 +119,13 @@ describe('verifySupabaseAccessToken', () => {
   });
 
   it('keeps accepting native Supabase access tokens', async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const token = createCompatAccessToken({
+      sub: 'native-user',
+      session_id: '10000000-0000-4000-8000-000000000001',
+      iat: nowSeconds,
+      exp: nowSeconds + 3600,
+    });
     mockSupabaseClient = {
       auth: {
         getUser: vi.fn(async () => ({
@@ -106,14 +138,25 @@ describe('verifySupabaseAccessToken', () => {
           getUserById: vi.fn(),
         },
       },
+      rpc: vi.fn(async () => ({ data: true, error: null })),
     };
 
     const { initSupabaseAdmin, verifySupabaseAccessToken } = await import('../../backend/fullImportService.js');
     initSupabaseAdmin('https://example.supabase.co', 'service-role-key');
 
-    await expect(verifySupabaseAccessToken('native-token')).resolves.toEqual({ id: 'native-user' });
-    expect(mockSupabaseClient.auth.getUser).toHaveBeenCalledWith('native-token');
+    await expect(verifySupabaseAccessToken(token)).resolves.toEqual({ id: 'native-user' });
+    expect(mockSupabaseClient.auth.getUser).toHaveBeenCalledWith(token);
     expect(mockSupabaseClient.auth.admin.getUserById).not.toHaveBeenCalled();
+    expect(mockSupabaseClient.rpc).toHaveBeenCalledWith(
+      'is_bearer_auth_session_allowed',
+      expect.objectContaining({
+        p_user_id: 'native-user',
+        p_auth_session_id: '10000000-0000-4000-8000-000000000001',
+      })
+    );
+    expect(mockSupabaseClient.rpc).toHaveBeenCalledWith('is_account_credential_allowed', {
+      p_user_id: 'native-user',
+    });
   });
 
   it('accepts signed site-session compatible tokens for OAuth users', async () => {
@@ -130,9 +173,11 @@ describe('verifySupabaseAccessToken', () => {
       user_metadata: {
         site_session: true,
       },
+      session_binding: '10000000-0000-4000-8000-0000000000ab',
       exp: nowSeconds + 3600,
       iat: nowSeconds,
     });
+    const sessionQuery = createCompatSessionQuery({ id: 'site-session-1' });
     mockSupabaseClient = {
       auth: {
         getUser: vi.fn(async () => ({
@@ -148,6 +193,13 @@ describe('verifySupabaseAccessToken', () => {
           })),
         },
       },
+      from: vi.fn((table) => {
+        if (table === 'app_sessions') {
+          return sessionQuery;
+        }
+        throw new Error(`Unexpected table access: ${table}`);
+      }),
+      rpc: vi.fn(async () => ({ data: true, error: null })),
     };
 
     const { initSupabaseAdmin, verifySupabaseAccessToken } = await import('../../backend/fullImportService.js');
@@ -157,8 +209,114 @@ describe('verifySupabaseAccessToken', () => {
       id: 'oauth-user',
       email: 'github.hash@oauth.local.invalid',
     });
-    expect(mockSupabaseClient.auth.getUser).toHaveBeenCalledWith(token);
+    expect(mockSupabaseClient.auth.getUser).not.toHaveBeenCalled();
     expect(mockSupabaseClient.auth.admin.getUserById).toHaveBeenCalledWith('oauth-user');
+    expect(sessionQuery.filters).toEqual([
+      { column: 'user_id', value: 'oauth-user' },
+      { column: 'compat_session_binding', value: '10000000-0000-4000-8000-0000000000ab' },
+    ]);
+    expect(mockSupabaseClient.rpc).toHaveBeenCalledWith('is_account_credential_allowed', {
+      p_user_id: 'oauth-user',
+    });
+  });
+
+  it('rejects a native token after its temporary password expires', async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const token = createCompatAccessToken({
+      sub: 'temporary-user',
+      session_id: '10000000-0000-4000-8000-000000000001',
+      iat: nowSeconds,
+      exp: nowSeconds + 3600,
+    });
+    mockSupabaseClient = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: 'temporary-user' } },
+          error: null,
+        })),
+        admin: { getUserById: vi.fn() },
+      },
+      rpc: vi.fn(async (name) => ({
+        data: name === 'is_bearer_auth_session_allowed',
+        error: null,
+      })),
+    };
+
+    const { initSupabaseAdmin, verifySupabaseAccessToken } = await import('../../backend/fullImportService.js');
+    initSupabaseAdmin('https://example.supabase.co', 'service-role-key');
+
+    await expect(verifySupabaseAccessToken(token)).rejects.toMatchObject({
+      publicCode: 'temporary_password_expired',
+    });
+  });
+
+  it('rejects a compatible token after its temporary password expires', async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const token = createCompatAccessToken({
+      sub: 'temporary-oauth-user',
+      aud: 'authenticated',
+      role: 'authenticated',
+      app_metadata: { provider: 'site_session' },
+      user_metadata: { site_session: true },
+      session_id: 'site-session-1',
+      iat: nowSeconds,
+      exp: nowSeconds + 3600,
+    });
+    mockSupabaseClient = {
+      auth: {
+        getUser: vi.fn(),
+        admin: { getUserById: vi.fn() },
+      },
+      from: vi.fn(() => createCompatSessionQuery({ id: 'site-session-1' })),
+      rpc: vi.fn(async () => ({ data: false, error: null })),
+    };
+
+    const { initSupabaseAdmin, verifySupabaseAccessToken } = await import('../../backend/fullImportService.js');
+    initSupabaseAdmin('https://example.supabase.co', 'service-role-key');
+
+    await expect(verifySupabaseAccessToken(token)).rejects.toMatchObject({
+      publicCode: 'temporary_password_expired',
+    });
+    expect(mockSupabaseClient.auth.admin.getUserById).not.toHaveBeenCalled();
+  });
+
+  it('rejects site-session compatible tokens when the bound session is revoked', async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const token = createCompatAccessToken({
+      sub: 'oauth-user',
+      aud: 'authenticated',
+      role: 'authenticated',
+      app_metadata: { provider: 'site_session' },
+      user_metadata: { site_session: true },
+      session_id: 'revoked-session',
+      exp: nowSeconds + 3600,
+    });
+    mockSupabaseClient = {
+      auth: {
+        getUser: vi.fn(async () => ({
+          data: { user: { id: 'oauth-user' } },
+          error: null,
+        })),
+        admin: {
+          getUserById: vi.fn(),
+        },
+      },
+      from: vi.fn((table) => {
+        if (table === 'app_sessions') {
+          return createCompatSessionQuery(null);
+        }
+        throw new Error(`Unexpected table access: ${table}`);
+      }),
+    };
+
+    const { initSupabaseAdmin, verifySupabaseAccessToken } = await import('../../backend/fullImportService.js');
+    initSupabaseAdmin('https://example.supabase.co', 'service-role-key');
+
+    await expect(verifySupabaseAccessToken(token)).rejects.toMatchObject({
+      publicCode: 'compat_jwt_session_inactive',
+    });
+    expect(mockSupabaseClient.auth.getUser).not.toHaveBeenCalled();
+    expect(mockSupabaseClient.auth.admin.getUserById).not.toHaveBeenCalled();
   });
 
   it('reports a missing backend JWT secret for site-session compatible tokens', async () => {
@@ -372,6 +530,38 @@ describe('executeFullImport import mode metadata', () => {
     expect(normalizeFullImportMode('incremental')).toBe('incremental');
     expect(normalizeFullImportMode('unsafe')).toBe('incremental');
     expect(normalizeFullImportMode(undefined)).toBe('incremental');
+  });
+
+  it('rejects expired credentials before starting the queued grant chain', async () => {
+    const grantAppToken = vi.fn();
+    mockSupabaseClient = {
+      auth: {
+        admin: {
+          getUserById: vi.fn(async () => ({
+            data: { user: { id: 'temporary-user' } },
+            error: null,
+          })),
+        },
+      },
+      rpc: vi.fn(async (functionName) => ({
+        data: functionName === 'is_account_credential_allowed' ? false : null,
+        error: null,
+      })),
+    };
+
+    const { executeFullImport, initSupabaseAdmin } = await import('../../backend/fullImportService.js');
+    initSupabaseAdmin('https://example.supabase.co', 'service-role-key');
+
+    await expect(executeFullImport({
+      token: 'AbCdEfGhIjKlMnOpQrStUvWx',
+      accountIndex: 0,
+      userId: 'temporary-user',
+      updateProgress: vi.fn(),
+      authChainFunctions: { grantAppToken },
+    })).rejects.toMatchObject({
+      publicCode: 'temporary_password_expired',
+    });
+    expect(grantAppToken).not.toHaveBeenCalled();
   });
 
   it('keeps anomaly metadata paired with its record when timestamps reorder the batch', async () => {
@@ -624,7 +814,7 @@ describe('executeFullImport import mode metadata', () => {
     const operations = [];
     const insertedPoolIds = new Set();
     let savedHistoryRows = [];
-    const rpc = vi.fn(async (functionName, args = {}) => {
+    const rpc = createCredentialAwareRpc(async (functionName, args = {}) => {
       if (functionName === 'commit_official_import_records') {
         savedHistoryRows = args.p_history || [];
         operations.push({
@@ -908,7 +1098,7 @@ describe('executeFullImport import mode metadata', () => {
     const operations = [];
     const insertedPoolIds = new Set();
     let savedHistoryRows = [];
-    const rpc = vi.fn(async () => ({
+    const rpc = createCredentialAwareRpc(async () => ({
       data: {
         refreshedPools: 1,
         refreshedTrendRows: 3,
@@ -1118,7 +1308,7 @@ describe('executeFullImport import mode metadata', () => {
     const operations = [];
     const insertedPoolIds = new Set();
     let historyUpsertAttempts = 0;
-    const rpc = vi.fn(async () => ({
+    const rpc = createCredentialAwareRpc(async () => ({
       data: {
         refreshedPools: 1,
         refreshedTrendRows: 3,
@@ -1338,7 +1528,7 @@ describe('executeFullImport import mode metadata', () => {
     const operations = [];
     const insertedPoolIds = new Set();
     let historyUpsertAttempts = 0;
-    const rpc = vi.fn(async () => ({
+    const rpc = createCredentialAwareRpc(async () => ({
       data: {
         refreshedPools: 1,
         refreshedTrendRows: 3,
@@ -1558,7 +1748,7 @@ describe('executeFullImport import mode metadata', () => {
     const operations = [];
     const insertedPoolIds = new Set();
     let historySelectCalls = 0;
-    const rpc = vi.fn(async () => ({
+    const rpc = createCredentialAwareRpc(async () => ({
       data: {
         refreshedPools: 1,
         refreshedTrendRows: 3,
@@ -1803,7 +1993,7 @@ describe('executeFullImport import mode metadata', () => {
   it('skips public analytics refresh when incremental import has no new records', async () => {
     const operations = [];
     const insertedPoolIds = new Set();
-    const rpc = vi.fn();
+    const rpc = createCredentialAwareRpc();
 
     mockSupabaseClient = {
       auth: {
@@ -1960,7 +2150,10 @@ describe('executeFullImport import mode metadata', () => {
       reviewRequired: false,
       warnings: [],
     });
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith('is_account_credential_allowed', {
+      p_user_id: '00000000-0000-0000-0000-000000000001',
+    });
+    expect(rpc).not.toHaveBeenCalledWith('refresh_public_analytics_cache');
     expect(operations).toEqual([]);
     expect(officialImportStagingMocks.stageOfficialImportTask).not.toHaveBeenCalled();
   });
@@ -1968,7 +2161,7 @@ describe('executeFullImport import mode metadata', () => {
   it('keeps import successful when public analytics refresh fails after saving records', async () => {
     const operations = [];
     const insertedPoolIds = new Set();
-    const rpc = vi.fn(async (functionName, args = {}) => {
+    const rpc = createCredentialAwareRpc(async (functionName, args = {}) => {
       if (functionName === 'commit_official_import_records') {
         operations.push({
           tableName: 'official_import_records',

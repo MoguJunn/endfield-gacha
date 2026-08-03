@@ -20,7 +20,7 @@ function buildSupabaseSessionPayload(payload) {
     token_type: payload.supabase.tokenType || 'bearer',
     expires_in: payload.supabase.expiresIn || 3600,
     expires_at: payload.supabase.expiresAt || Math.floor(Date.now() / 1000) + 3600,
-    refresh_token: `site_session_${payload?.session?.id || user.id}`,
+    refresh_token: 'site_session_compat',
     user,
   };
 }
@@ -108,6 +108,36 @@ export async function bootstrapSiteSessionFromSupabaseToken(accessToken = '') {
     bootstrapped: data?.data?.bootstrapped === true,
     authenticated: true,
     source: data?.data?.source || 'supabase',
+  };
+}
+
+export async function revokeAllSiteSessions(accessToken = '') {
+  const token = String(accessToken || '').trim();
+  const headers = {
+    Accept: 'application/json',
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const { response, data } = await fetchJsonWithTimeout('/api/auth/session/revoke-all', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers,
+  }, {
+    label: 'auth-session-revoke-all',
+    timeoutMs: 15000,
+    retries: 0,
+  });
+
+  if (!response.ok || data?.success !== true) {
+    throw new Error(data?.message || data?.error || 'site_session_revoke_failed');
+  }
+
+  clearSiteSessionCache();
+  return {
+    sessionsRevoked: data?.data?.sessionsRevoked === true,
+    revokedCount: Number(data?.data?.revokedCount || 0),
   };
 }
 
@@ -209,5 +239,6 @@ export default {
   clearSiteSessionCache,
   getCurrentSiteSession,
   logoutSiteSession,
+  revokeAllSiteSessions,
   syncSiteSessionToSupabase,
 };

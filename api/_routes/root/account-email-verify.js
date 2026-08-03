@@ -102,6 +102,30 @@ async function resolveCurrentUser(req, adminClient) {
   };
 }
 
+async function consumeEmailChallenge(adminClient, {
+  kind,
+  hash,
+  userId = null,
+}) {
+  if (typeof adminClient?.rpc !== 'function') {
+    const error = new Error('Email challenge service unavailable');
+    error.code = 'email_challenge_unavailable';
+    throw error;
+  }
+  const query = adminClient.rpc('consume_account_email_challenge', {
+    p_kind: kind,
+    p_hash: hash,
+    p_user_id: userId,
+  });
+  const { data, error } = typeof query?.maybeSingle === 'function'
+    ? await query.maybeSingle()
+    : await query;
+  if (error) {
+    throw error;
+  }
+  return Array.isArray(data) ? data[0] || null : data || null;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
@@ -153,47 +177,22 @@ export default async function handler(req, res) {
       }
 
       const codeHash = hashEmailVerificationCode(code, currentUser.id);
-      const { data: stateRow, error: loadError } = await adminClient
-        .from('account_security_states')
-        .select('user_id, email_verification_required, email_verification_code_expires_at')
-        .eq('email_verification_code_hash', codeHash)
-        .maybeSingle();
-
-      if (loadError) {
-        throw loadError;
-      }
-
-      if (!stateRow?.user_id || stateRow.user_id !== currentUser.id) {
+      const consumed = await consumeEmailChallenge(adminClient, {
+        kind: 'code',
+        hash: codeHash,
+        userId: currentUser.id,
+      });
+      if (!consumed?.user_id) {
         return res.status(400).json({ success: false, error: 'Verification code not found', code: 'code_not_found' });
       }
 
-      const expiresAt = stateRow.email_verification_code_expires_at
-        ? new Date(stateRow.email_verification_code_expires_at)
-        : null;
-      if (!expiresAt || Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()) {
-        return res.status(400).json({ success: false, error: 'Verification code expired', code: 'code_expired' });
-      }
-
-      const now = new Date().toISOString();
-      const { error: updateError } = await adminClient
-        .from('account_security_states')
-        .update({
-          email_verification_required: false,
-          email_verification_verified_at: now,
-          email_verification_token_hash: null,
-          email_verification_token_expires_at: null,
-          email_verification_code_hash: null,
-          email_verification_code_expires_at: null,
-          updated_at: now,
-        })
-        .eq('user_id', stateRow.user_id)
-        .eq('email_verification_code_hash', codeHash);
-
-      if (updateError) {
-        throw updateError;
-      }
-
-      return res.status(200).json({ success: true, data: { status: 'verified' } });
+      return res.status(200).json({
+        success: true,
+        data: {
+          status: 'verified',
+          email: consumed.target_email || null,
+        },
+      });
     } catch {
       return res.status(500).json({ success: false, error: 'Failed to verify email code', code: 'server_error' });
     }
@@ -217,50 +216,15 @@ export default async function handler(req, res) {
 
   try {
     const tokenHash = hashEmailVerificationToken(token);
-    const { data: stateRow, error: loadError } = await adminClient
-      .from('account_security_states')
-      .select('user_id, email_verification_required, email_verification_token_expires_at')
-      .eq('email_verification_token_hash', tokenHash)
-      .maybeSingle();
-
-    if (loadError) {
-      throw loadError;
-    }
-
-    if (!stateRow?.user_id) {
+    const consumed = await consumeEmailChallenge(adminClient, {
+      kind: 'token',
+      hash: tokenHash,
+    });
+    if (!consumed?.user_id) {
       return redirect(res, buildRedirectUrl(req, {
         email_verification: 'failed',
         reason: 'token_not_found',
       }));
-    }
-
-    const expiresAt = stateRow.email_verification_token_expires_at
-      ? new Date(stateRow.email_verification_token_expires_at)
-      : null;
-    if (!expiresAt || Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()) {
-      return redirect(res, buildRedirectUrl(req, {
-        email_verification: 'failed',
-        reason: 'token_expired',
-      }));
-    }
-
-    const now = new Date().toISOString();
-    const { error: updateError } = await adminClient
-      .from('account_security_states')
-      .update({
-        email_verification_required: false,
-        email_verification_verified_at: now,
-        email_verification_token_hash: null,
-        email_verification_token_expires_at: null,
-        email_verification_code_hash: null,
-        email_verification_code_expires_at: null,
-        updated_at: now,
-      })
-      .eq('user_id', stateRow.user_id)
-      .eq('email_verification_token_hash', tokenHash);
-
-    if (updateError) {
-      throw updateError;
     }
 
     return redirect(res, buildRedirectUrl(req, {
@@ -276,6 +240,7 @@ export default async function handler(req, res) {
 
 export const __internal = {
   buildRedirectUrl,
+  consumeEmailChallenge,
   hashEmailVerificationCode,
   hashEmailVerificationToken,
 };

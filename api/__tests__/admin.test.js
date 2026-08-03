@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
     ...(runResult.results || {}),
   })),
   buildAdminSiteHealth: vi.fn(),
+  revokeAllSiteSessionsForUser: vi.fn(),
+  requireSuperAdminUser: vi.fn(),
 }));
 
 vi.mock('../_lib/http.js', () => ({
@@ -64,6 +66,15 @@ vi.mock('../_lib/mailOutbox.js', () => ({
 
 vi.mock('../_lib/adminSiteHealth.js', () => ({
   buildAdminSiteHealth: mocks.buildAdminSiteHealth,
+}));
+
+vi.mock('../_lib/siteAuth.js', () => ({
+  requireSuperAdminUser: mocks.requireSuperAdminUser,
+}));
+
+vi.mock('../_lib/siteSession.js', async (importOriginal) => ({
+  ...await importOriginal(),
+  revokeAllSiteSessionsForUser: mocks.revokeAllSiteSessionsForUser,
 }));
 
 import handler from '../_routes/root/admin.js';
@@ -122,6 +133,12 @@ function createCleanupQuery() {
   };
 }
 
+function createAccountSecurityStateQuery() {
+  return {
+    upsert: vi.fn(async () => ({ error: null })),
+  };
+}
+
 function createAdminClient({ role = 'super_admin', deleteError = null } = {}) {
   return {
     from: vi.fn((table) => {
@@ -131,6 +148,10 @@ function createAdminClient({ role = 'super_admin', deleteError = null } = {}) {
 
       if (['announcements', 'site_config', 'puzzles'].includes(table)) {
         return createCleanupQuery();
+      }
+
+      if (table === 'account_security_states') {
+        return createAccountSecurityStateQuery();
       }
 
       throw new Error(`Unexpected table: ${table}`);
@@ -855,6 +876,13 @@ describe('api/admin handler', () => {
       },
     });
     mocks.findAuthUserByEmail.mockResolvedValue(null);
+    mocks.revokeAllSiteSessionsForUser.mockResolvedValue({ ok: true, revokedCount: 2 });
+    mocks.requireSuperAdminUser.mockImplementation(async (_req, { adminClient }) => ({
+      ok: true,
+      user: { id: 'super-admin-id' },
+      profile: { id: 'super-admin-id', role: 'super_admin' },
+      adminClient,
+    }));
   });
 
   it('returns merged users for the users route', async () => {
@@ -1099,6 +1127,9 @@ describe('api/admin handler', () => {
             'target-user-id': targetProfile,
           });
         }
+        if (table === 'account_security_states') {
+          return createAccountSecurityStateQuery();
+        }
         throw new Error(`Unexpected table: ${table}`);
       }),
       auth: {
@@ -1142,17 +1173,23 @@ describe('api/admin handler', () => {
 
     expect(res.statusCode).toBe(200);
     expect(mocks.findAuthUserByEmail).toHaveBeenCalledWith(adminClient, 'github-user@example.com');
-    expect(adminClient.auth.admin.updateUserById).toHaveBeenCalledWith('target-user-id', {
+    expect(adminClient.auth.admin.updateUserById).toHaveBeenCalledWith('target-user-id', expect.objectContaining({
       password: 'TempPass123',
       email: 'github-user@example.com',
       email_confirm: true,
+      app_metadata: expect.objectContaining({
+        temporary_password_issue_id: expect.any(String),
+        temporary_password_force_change: true,
+        temporary_password_issued_at: expect.any(String),
+        temporary_password_expires_at: expect.any(String),
+      }),
       user_metadata: {
         synthetic_oauth_email: false,
         auth_provider: 'github',
         username: 'github-user',
         email_bound_from_profile: true,
       },
-    });
+    }));
     expect(res.body).toEqual({
       success: true,
       userId: 'target-user-id',
@@ -1266,13 +1303,51 @@ describe('api/admin handler', () => {
     await handler(req, res);
 
     expect(res.statusCode).toBe(200);
-    expect(adminClient.auth.admin.updateUserById).toHaveBeenCalledWith('target-user-id', {
+    expect(adminClient.auth.admin.updateUserById).toHaveBeenCalledWith('target-user-id', expect.objectContaining({
       password: 'TempPass123',
-    });
+      app_metadata: expect.objectContaining({
+        temporary_password_issue_id: expect.any(String),
+        temporary_password_force_change: true,
+        temporary_password_issued_at: expect.any(String),
+        temporary_password_expires_at: expect.any(String),
+      }),
+    }));
     expect(res.body).toEqual({
       success: true,
       userId: 'target-user-id',
       emailSynced: false,
+    });
+  });
+
+  it('reports partial success when password reset succeeds but session revocation fails', async () => {
+    const adminClient = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    mocks.revokeAllSiteSessionsForUser.mockResolvedValue({
+      ok: false,
+      code: 'site_session_revoke_failed',
+      reason: 'session database unavailable',
+    });
+    const req = createRequest({
+      method: 'POST',
+      url: 'https://example.com/api/admin-user-reset-password',
+      headers: { authorization: 'Bearer token' },
+      body: {
+        userId: 'target-user-id',
+        temporaryPassword: 'TempPass123',
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await handler(req, res);
+
+    expect(adminClient.auth.admin.updateUserById).toHaveBeenCalled();
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toMatchObject({
+      success: false,
+      partial: true,
+      passwordUpdated: true,
+      userId: 'target-user-id',
+      code: 'site_session_revoke_failed',
     });
   });
 
@@ -2262,9 +2337,15 @@ describe('api/admin handler', () => {
     await handler(req, res);
 
     expect(res.statusCode).toBe(200);
-    expect(adminClient.auth.admin.updateUserById).toHaveBeenCalledWith('target-user-id', {
+    expect(adminClient.auth.admin.updateUserById).toHaveBeenCalledWith('target-user-id', expect.objectContaining({
       password: 'TempPass123',
-    });
+      app_metadata: expect.objectContaining({
+        temporary_password_issue_id: expect.any(String),
+        temporary_password_force_change: true,
+        temporary_password_issued_at: expect.any(String),
+        temporary_password_expires_at: expect.any(String),
+      }),
+    }));
     expect(adminClient.__recoveryResetMocks.securityUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
         user_id: 'target-user-id',
@@ -2336,9 +2417,15 @@ describe('api/admin handler', () => {
     await handler(req, res);
 
     expect(res.statusCode).toBe(200);
-    expect(adminClient.auth.admin.updateUserById).toHaveBeenCalledWith('target-user-id', {
+    expect(adminClient.auth.admin.updateUserById).toHaveBeenCalledWith('target-user-id', expect.objectContaining({
       password: 'TempPass123',
-    });
+      app_metadata: expect.objectContaining({
+        temporary_password_issue_id: expect.any(String),
+        temporary_password_force_change: true,
+        temporary_password_issued_at: expect.any(String),
+        temporary_password_expires_at: expect.any(String),
+      }),
+    }));
     expect(res.body).toMatchObject({
       success: true,
       partial: true,

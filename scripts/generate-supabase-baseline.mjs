@@ -29,6 +29,15 @@ function stripBom(content) {
   return content.replace(/^\uFEFF/, '');
 }
 
+function normalizeMigrationContent(content) {
+  return stripBom(content)
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .trim();
+}
+
 function toPosixPath(filePath) {
   return filePath.split(path.sep).join(path.posix.sep);
 }
@@ -101,7 +110,7 @@ async function main() {
     const baseDir = isArchived ? archivedMigrationsDir : activeMigrationsDir;
     const absolutePath = path.join(baseDir, relativePath);
     const rawContent = await readFile(absolutePath, 'utf8');
-    const content = stripBom(rawContent).trim();
+    const content = normalizeMigrationContent(rawContent);
 
     chunks.push([
       `-- >>> BEGIN MIGRATION: ${fileName}`,

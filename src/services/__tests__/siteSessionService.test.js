@@ -5,6 +5,7 @@ import {
   bootstrapSiteSessionFromSupabaseToken,
   clearSiteSessionCache,
   getCurrentSiteSession,
+  revokeAllSiteSessions,
 } from '../siteSessionService.js';
 
 vi.mock('../../supabaseClient.js', () => ({
@@ -87,6 +88,34 @@ describe('siteSessionService', () => {
     }), expect.any(Object));
   });
 
+  it('revokes all site sessions with the current native bearer identity', async () => {
+    fetchJsonWithTimeout.mockResolvedValue({
+      response: { ok: true },
+      data: {
+        success: true,
+        data: {
+          sessionsRevoked: true,
+          revokedCount: 3,
+        },
+      },
+    });
+
+    await expect(revokeAllSiteSessions('native-token')).resolves.toEqual({
+      sessionsRevoked: true,
+      revokedCount: 3,
+    });
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/auth/session/revoke-all', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        Accept: 'application/json',
+        Authorization: 'Bearer native-token',
+      },
+    }, expect.objectContaining({
+      label: 'auth-session-revoke-all',
+    }));
+  });
+
   it('does not sync authenticated site sessions back to the Supabase client by default', async () => {
     fetchJsonWithTimeout.mockResolvedValue({
       response: { ok: true },
@@ -103,7 +132,7 @@ describe('siteSessionService', () => {
           },
           identities: [],
           session: {
-            id: 'site-session-id',
+            expiresAt: '2026-08-03T08:00:00.000Z',
           },
           supabase: {
             accessToken: 'compat-access-token',
@@ -147,7 +176,7 @@ describe('siteSessionService', () => {
           },
           identities: [],
           session: {
-            id: 'site-session-id',
+            expiresAt: '2026-08-03T08:00:00.000Z',
           },
           supabase: {
             accessToken: 'compat-access-token',
@@ -165,7 +194,7 @@ describe('siteSessionService', () => {
     expect(result.supabaseSessionSynced).toBe(true);
     expect(supabase.auth.setSession).toHaveBeenCalledWith(expect.objectContaining({
       access_token: 'compat-access-token',
-      refresh_token: 'site_session_site-session-id',
+      refresh_token: 'site_session_compat',
       user: expect.objectContaining({
         id: '00000000-0000-4000-8000-000000000001',
       }),
@@ -188,7 +217,7 @@ describe('siteSessionService', () => {
           },
           identities: [],
           session: {
-            id: 'site-session-id',
+            expiresAt: '2026-08-03T08:00:00.000Z',
           },
           supabase: {
             accessToken: 'compat-access-token',

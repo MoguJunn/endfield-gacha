@@ -1,5 +1,12 @@
 import { createHash, createHmac } from 'node:crypto';
+import https from 'node:https';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { getAppUrl } from './oauthState.js';
+
+const DEFAULT_OAUTH_FETCH_TIMEOUT_MS = 15_000;
+const DEFAULT_OAUTH_FETCH_ATTEMPTS = 2;
+const DEFAULT_OAUTH_FETCH_RETRY_DELAY_MS = 150;
+const MAX_OAUTH_RESPONSE_BYTES = 1024 * 1024;
 
 export const OAUTH_PROVIDERS = Object.freeze({
   linuxdo: {
@@ -177,7 +184,9 @@ export function getOAuthProviderConfig(provider, {
   };
 }
 
-export function buildOAuthAuthorizationUrl(config, state) {
+export function buildOAuthAuthorizationUrl(config, state, {
+  codeChallenge = '',
+} = {}) {
   const url = new URL(config.authorizeUrl);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('client_id', config.clientId);
@@ -187,6 +196,10 @@ export function buildOAuthAuthorizationUrl(config, state) {
   url.searchParams.set('state', state);
   if (config.scope) {
     url.searchParams.set('scope', config.scope);
+  }
+  if (codeChallenge) {
+    url.searchParams.set('code_challenge', String(codeChallenge));
+    url.searchParams.set('code_challenge_method', 'S256');
   }
   return url.toString();
 }
@@ -217,6 +230,218 @@ async function parseOAuthResponse(response) {
   }
 }
 
+function normalizePositiveInteger(value, fallback, maximum) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.min(parsed, maximum);
+}
+
+function waitForRetry(delayMs) {
+  if (delayMs <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function shouldBypassProxy(targetUrl, noProxyValue) {
+  const hostname = String(targetUrl?.hostname || '').trim().toLowerCase();
+  const port = String(targetUrl?.port || (targetUrl?.protocol === 'https:' ? '443' : '80'));
+  if (!hostname) {
+    return false;
+  }
+
+  return String(noProxyValue || '')
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean)
+    .some((entry) => {
+      if (entry === '*') {
+        return true;
+      }
+
+      let entryHost = entry;
+      let entryPort = '';
+      const portSeparator = entry.lastIndexOf(':');
+      if (portSeparator > 0 && /^\d+$/u.test(entry.slice(portSeparator + 1))) {
+        entryHost = entry.slice(0, portSeparator);
+        entryPort = entry.slice(portSeparator + 1);
+      }
+      if (entryPort && entryPort !== port) {
+        return false;
+      }
+
+      entryHost = entryHost.replace(/^\*\./u, '.');
+      if (entryHost.startsWith('.')) {
+        return hostname.endsWith(entryHost) || hostname === entryHost.slice(1);
+      }
+      return hostname === entryHost || hostname.endsWith(`.${entryHost}`);
+    });
+}
+
+export function resolveOAuthProxyUrl(targetUrlValue, env = readEnvironment()) {
+  if (!parseBoolean(env.AUTH_OAUTH_USE_ENV_PROXY, false)) {
+    return '';
+  }
+
+  let targetUrl = null;
+  try {
+    targetUrl = new URL(targetUrlValue);
+  } catch {
+    return '';
+  }
+
+  const noProxy = env.NO_PROXY || env.no_proxy || '';
+  if (shouldBypassProxy(targetUrl, noProxy)) {
+    return '';
+  }
+
+  const rawProxy = targetUrl.protocol === 'https:'
+    ? env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy
+    : env.HTTP_PROXY || env.http_proxy;
+  if (!rawProxy) {
+    return '';
+  }
+
+  try {
+    const proxyUrl = new URL(rawProxy);
+    return ['http:', 'https:'].includes(proxyUrl.protocol) ? proxyUrl.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
+function createBufferedResponse(response, body) {
+  const status = Number(response?.statusCode || 0);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get(name) {
+        const value = response?.headers?.[String(name || '').toLowerCase()];
+        if (Array.isArray(value)) {
+          return value.join(', ');
+        }
+        return value == null ? null : String(value);
+      },
+    },
+    async text() {
+      return body.toString('utf8');
+    },
+  };
+}
+
+function fetchOAuthUrlViaProxy(urlValue, options, proxyUrl) {
+  return new Promise((resolve, reject) => {
+    const targetUrl = new URL(urlValue);
+    const signal = options?.signal;
+    if (signal?.aborted) {
+      reject(Object.assign(new Error('OAuth request aborted.'), { name: 'AbortError' }));
+      return;
+    }
+
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener?.('abort', onAbort);
+      callback(value);
+    };
+    const request = https.request(targetUrl, {
+      method: options?.method || 'GET',
+      headers: options?.headers || {},
+      agent: new HttpsProxyAgent(proxyUrl),
+    }, (response) => {
+      const chunks = [];
+      let totalBytes = 0;
+      response.on('data', (chunk) => {
+        totalBytes += chunk.length;
+        if (totalBytes > MAX_OAUTH_RESPONSE_BYTES) {
+          response.destroy(new Error('OAuth provider response is too large.'));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on('end', () => {
+        finish(resolve, createBufferedResponse(response, Buffer.concat(chunks)));
+      });
+      response.on('error', (error) => finish(reject, error));
+    });
+    const onAbort = () => {
+      request.destroy(Object.assign(new Error('OAuth request aborted.'), { name: 'AbortError' }));
+    };
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    request.on('error', (error) => finish(reject, error));
+    if (options?.body != null) {
+      request.write(options.body);
+    }
+    request.end();
+  });
+}
+
+function resolveOAuthFetchImpl(fetchImpl, env = readEnvironment()) {
+  if (typeof fetchImpl === 'function') {
+    return fetchImpl;
+  }
+  if (typeof globalThis.fetch !== 'function') {
+    return null;
+  }
+
+  return (url, options) => {
+    const proxyUrl = resolveOAuthProxyUrl(url, env);
+    if (proxyUrl && String(url).startsWith('https://')) {
+      return fetchOAuthUrlViaProxy(url, options, proxyUrl);
+    }
+    return globalThis.fetch(url, options);
+  };
+}
+
+async function requestOAuthPayload(url, requestOptions, {
+  fetchImpl,
+  timeoutMs = DEFAULT_OAUTH_FETCH_TIMEOUT_MS,
+  maxAttempts = DEFAULT_OAUTH_FETCH_ATTEMPTS,
+  retryDelayMs = DEFAULT_OAUTH_FETCH_RETRY_DELAY_MS,
+  networkErrorCode,
+  timeoutErrorCode,
+}) {
+  const normalizedTimeoutMs = normalizePositiveInteger(timeoutMs, DEFAULT_OAUTH_FETCH_TIMEOUT_MS, 30_000);
+  const normalizedMaxAttempts = normalizePositiveInteger(maxAttempts, DEFAULT_OAUTH_FETCH_ATTEMPTS, 3);
+  const normalizedRetryDelayMs = Math.max(0, Math.min(Number(retryDelayMs) || 0, 2_000));
+  let lastCode = networkErrorCode;
+
+  for (let attempt = 1; attempt <= normalizedMaxAttempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), normalizedTimeoutMs);
+    try {
+      const response = await fetchImpl(url, {
+        ...requestOptions,
+        signal: controller.signal,
+      });
+      const payload = await parseOAuthResponse(response);
+      return { ok: true, response, payload };
+    } catch (error) {
+      lastCode = controller.signal.aborted
+        || error?.name === 'AbortError'
+        || error?.name === 'TimeoutError'
+        ? timeoutErrorCode
+        : networkErrorCode;
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (attempt < normalizedMaxAttempts) {
+      await waitForRetry(normalizedRetryDelayMs);
+    }
+  }
+
+  return {
+    ok: false,
+    code: lastCode,
+    reason: 'OAuth provider is temporarily unreachable.',
+  };
+}
+
 function buildTokenHeaders(config) {
   const headers = {
     Accept: 'application/json',
@@ -231,14 +456,20 @@ function buildTokenHeaders(config) {
 }
 
 export async function exchangeOAuthCode(config, code, {
-  fetchImpl = globalThis.fetch,
+  fetchImpl = null,
+  codeVerifier = '',
+  timeoutMs = DEFAULT_OAUTH_FETCH_TIMEOUT_MS,
+  maxAttempts = DEFAULT_OAUTH_FETCH_ATTEMPTS,
+  retryDelayMs = DEFAULT_OAUTH_FETCH_RETRY_DELAY_MS,
+  env = readEnvironment(),
 } = {}) {
   const normalizedCode = normalizeString(code, 2048);
   if (!normalizedCode) {
     return { ok: false, code: 'oauth_code_missing', reason: 'OAuth authorization code is missing.' };
   }
 
-  if (typeof fetchImpl !== 'function') {
+  const resolvedFetchImpl = resolveOAuthFetchImpl(fetchImpl, env);
+  if (typeof resolvedFetchImpl !== 'function') {
     return { ok: false, code: 'fetch_unavailable', reason: 'Server fetch is unavailable.' };
   }
 
@@ -249,6 +480,10 @@ export async function exchangeOAuthCode(config, code, {
 
   if (config.sendRedirectUri !== false) {
     params.set('redirect_uri', config.redirectUri);
+  }
+
+  if (codeVerifier) {
+    params.set('code_verifier', normalizeString(codeVerifier, 256));
   }
 
   if (config.tokenAuthMethod !== 'basic') {
@@ -268,12 +503,23 @@ export async function exchangeOAuthCode(config, code, {
     body = params.toString();
   }
 
-  const response = await fetchImpl(url.toString(), {
+  const requestResult = await requestOAuthPayload(url.toString(), {
     method,
     headers,
     body,
+  }, {
+    fetchImpl: resolvedFetchImpl,
+    timeoutMs,
+    maxAttempts,
+    retryDelayMs,
+    networkErrorCode: 'oauth_token_network_error',
+    timeoutErrorCode: 'oauth_token_timeout',
   });
-  const payload = await parseOAuthResponse(response);
+  if (!requestResult.ok) {
+    return requestResult;
+  }
+
+  const { response, payload } = requestResult;
   if (!response.ok || payload?.error) {
     return {
       ok: false,
@@ -298,17 +544,37 @@ export async function exchangeOAuthCode(config, code, {
 }
 
 async function fetchJson(url, {
-  fetchImpl = globalThis.fetch,
+  fetchImpl = null,
   headers = {},
+  timeoutMs = DEFAULT_OAUTH_FETCH_TIMEOUT_MS,
+  maxAttempts = DEFAULT_OAUTH_FETCH_ATTEMPTS,
+  retryDelayMs = DEFAULT_OAUTH_FETCH_RETRY_DELAY_MS,
+  env = readEnvironment(),
 } = {}) {
-  const response = await fetchImpl(url, {
+  const resolvedFetchImpl = resolveOAuthFetchImpl(fetchImpl, env);
+  if (typeof resolvedFetchImpl !== 'function') {
+    return { ok: false, code: 'fetch_unavailable', reason: 'Server fetch is unavailable.' };
+  }
+
+  const requestResult = await requestOAuthPayload(url, {
     method: 'GET',
     headers: {
       Accept: 'application/json',
       ...headers,
     },
+  }, {
+    fetchImpl: resolvedFetchImpl,
+    timeoutMs,
+    maxAttempts,
+    retryDelayMs,
+    networkErrorCode: 'oauth_profile_network_error',
+    timeoutErrorCode: 'oauth_profile_timeout',
   });
-  const payload = await parseOAuthResponse(response);
+  if (!requestResult.ok) {
+    return requestResult;
+  }
+
+  const { response, payload } = requestResult;
   if (!response.ok || payload?.error) {
     return {
       ok: false,

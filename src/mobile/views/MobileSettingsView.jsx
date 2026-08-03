@@ -233,7 +233,9 @@ function MobileSettingsView() {
     }),
     [accountSecurityState?.emailVerificationVerifiedAt, emailVerificationRequired, user]
   );
-  const pendingEmailChange = user?.new_email || null;
+  const pendingEmailChange = accountSecurityState?.emailVerificationRequired
+    ? accountSecurityState?.emailVerificationTargetEmail || user?.new_email || null
+    : user?.new_email || null;
   const passwordChangeRequired = Boolean(accountSecurityState?.passwordChangeRequired);
   const oauthPasswordSetupRequired = isOAuthPasswordSetupRequired(accountSecurityState);
   const passwordChangeExpiresAt = useMemo(
@@ -544,7 +546,14 @@ function MobileSettingsView() {
 
     setEmailVerificationCodeLoading(true);
     try {
-      await verifyCurrentEmailCode({ code });
+      const result = await verifyCurrentEmailCode({ code });
+      const verifiedEmail = result?.data?.email || '';
+      if (verifiedEmail) {
+        setUser({
+          ...user,
+          email: verifiedEmail,
+        });
+      }
       setEmailVerificationCode('');
       setEmailVerificationSendCount(0);
       setEmailVerificationDeferred(false);
@@ -552,6 +561,7 @@ function MobileSettingsView() {
         ...(prev || {}),
         emailVerificationRequired: false,
         emailVerificationVerifiedAt: new Date().toISOString(),
+        emailVerificationTargetEmail: verifiedEmail || prev?.emailVerificationTargetEmail || null,
       }));
       showToast(t('settings.success.emailVerificationCodeVerified'), 'success');
     } catch (error) {
@@ -594,15 +604,12 @@ function MobileSettingsView() {
         locale,
       });
       if (result?.data?.nextStep === 'enter_verification_code' && result?.data?.sent?.new) {
-        const normalizedNewEmail = newEmail.trim().toLowerCase();
-        setUser({
-          ...user,
-          email: normalizedNewEmail,
-        });
+        const pendingEmail = result?.data?.pendingEmail || newEmail.trim().toLowerCase();
         setAccountSecurityState((prev) => ({
           ...(prev || {}),
           emailVerificationRequired: true,
           emailVerificationVerifiedAt: null,
+          emailVerificationTargetEmail: pendingEmail,
         }));
         setEmailVerificationCode('');
         setEmailVerificationSendCount((prev) => prev + 1);

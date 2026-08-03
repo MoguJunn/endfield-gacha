@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getBearerToken: vi.fn(() => 'token'),
   getSupabaseAdminClient: vi.fn(),
   loadAuthUserById: vi.fn(),
+  resolveAuthenticatedRequestUser: vi.fn(),
 }));
 
 vi.mock('../_lib/http.js', () => ({
@@ -19,6 +20,10 @@ vi.mock('../_lib/authAdmin.js', () => ({
   getBearerToken: mocks.getBearerToken,
   getSupabaseAdminClient: mocks.getSupabaseAdminClient,
   loadAuthUserById: mocks.loadAuthUserById,
+}));
+
+vi.mock('../_lib/siteAuth.js', () => ({
+  resolveAuthenticatedRequestUser: mocks.resolveAuthenticatedRequestUser,
 }));
 
 import accountSecurityStateHandler from '../_routes/root/account-security-state.js';
@@ -144,6 +149,24 @@ describe('api/account-security-state handler', () => {
         })),
       },
     });
+    mocks.resolveAuthenticatedRequestUser.mockImplementation(async (req, { adminClient }) => {
+      const token = mocks.getBearerToken(req);
+      if (!token) {
+        return { ok: false, status: 401, error: 'Missing access token' };
+      }
+      const callerClient = mocks.createSupabaseAccessTokenClient(token);
+      const { data, error } = await callerClient.auth.getUser(token);
+      if (error || !data?.user?.id) {
+        return { ok: false, status: 401, error: 'Invalid access token' };
+      }
+      return {
+        ok: true,
+        source: 'supabase',
+        user: data.user,
+        adminClient,
+        callerClient,
+      };
+    });
   });
 
   it('loads the current user password-change state from the private table', async () => {
@@ -172,6 +195,10 @@ describe('api/account-security-state handler', () => {
         emailVerificationReason: 'mail_verification_rollout_2026_05',
         emailVerificationRequestedAt: '2026-05-26T00:00:00.000Z',
         emailVerificationVerifiedAt: null,
+        emailVerificationTargetEmail: null,
+        emailVerificationVersion: null,
+        passwordSetupCapabilityStatus: null,
+        passwordSetupLastErrorCode: null,
       },
     });
     expect(JSON.stringify(res.body)).not.toContain('password_change_');
@@ -255,16 +282,18 @@ describe('api/account-security-state handler', () => {
         role: 'user',
       },
       stateRow: {
-        password_change_required: true,
-        password_change_reason: 'oauth_password_setup_required:github',
-        password_change_source: 'oauth',
-        password_change_requested_at: '2026-06-04T00:00:00.000Z',
+        password_change_required: false,
+        password_change_reason: null,
+        password_change_source: null,
+        password_change_requested_at: null,
         password_change_expires_at: null,
         password_change_recovery_request_id: null,
-        email_verification_required: true,
+        email_verification_required: false,
         email_verification_reason: 'oauth_email_setup_required',
         email_verification_requested_at: '2026-06-04T00:00:00.000Z',
         email_verification_verified_at: '2026-06-04T01:00:00.000Z',
+        email_verification_target_email: 'site-user@example.com',
+        password_setup_capability_status: 'completed',
       },
     });
     mocks.loadAuthUserById.mockResolvedValue({
@@ -287,7 +316,7 @@ describe('api/account-security-state handler', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.state).toMatchObject({
       passwordChangeRequired: false,
-      reason: 'oauth_password_setup_required:github',
+      reason: null,
       emailVerificationRequired: false,
       emailVerificationReason: 'oauth_email_setup_required',
       emailVerificationVerifiedAt: '2026-06-04T01:00:00.000Z',
@@ -348,7 +377,7 @@ describe('api/account-security-state handler', () => {
     });
   });
 
-  it('clears the password-change requirement for the current user', async () => {
+  it('rejects direct attempts to clear the password-change requirement', async () => {
     const adminClient = createAdminClient({
       stateRow: {
         password_change_required: false,
@@ -375,34 +404,8 @@ describe('api/account-security-state handler', () => {
 
     await accountSecurityStateHandler(req, res);
 
-    expect(res.statusCode).toBe(200);
-    expect(adminClient.__securityStateMocks.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        user_id: 'user-1',
-        password_change_required: false,
-        password_change_reason: null,
-        password_change_source: null,
-        password_change_recovery_request_id: null,
-        password_change_set_by: null,
-        updated_at: expect.any(String),
-      }),
-      { onConflict: 'user_id' },
-    );
-    expect(res.body).toEqual({
-      success: true,
-      state: {
-        passwordChangeRequired: false,
-        reason: null,
-        source: null,
-        requestedAt: null,
-        expiresAt: null,
-        recoveryRequestId: null,
-        emailVerificationRequired: false,
-        emailVerificationReason: null,
-        emailVerificationRequestedAt: null,
-        emailVerificationVerifiedAt: '2026-05-26T00:00:00.000Z',
-      },
-    });
+    expect(res.statusCode).toBe(405);
+    expect(adminClient.__securityStateMocks.upsert).not.toHaveBeenCalled();
   });
 
   it('rejects requests without an access token', async () => {

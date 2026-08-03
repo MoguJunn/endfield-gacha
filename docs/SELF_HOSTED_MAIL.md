@@ -2,6 +2,8 @@
 
 本文档用于 `MAIL-SELFHOST-001` / `MAIL-ABUSE-001`。它定义选型、边界、基础设施、已落地的 provider-independent 防刷 / outbox / 队列处理器、受控 Auth 邮件入口和后续决策点；当前默认以 Stalwart 作为第一阶段自建邮件平台方向，生产真实发信仍由显式环境变量和紧急停发开关控制。
 
+> 认证边界：Phase A–D 已在本 worktree 本地完成邮箱唯一归属、一次性 challenge、首次设密能力、临时凭据认证层到期和 identity keyring，但尚未生产部署。SMTP、DNS 或测试邮件成功不能替代这些数据库能力、GitHub 真实浏览器回归或生产迁移验收。
+
 ## 目标
 
 - 为账号注册确认、密码重置、工单提醒、开发者 API 审核通知和管理员告警提供可控事务邮件能力。
@@ -13,7 +15,7 @@
 
 - 数据库按自建站点数据库处理，不描述为官方数据库。
 - 当前账号恢复优先走受控同源自助密码重置邮件；风控命中、邮件不可用、投递失败、邮箱不可访问或用户需要人工核验时，再回退到人工审核链路。人工恢复申请始终返回通用 `received`，避免邮箱枚举。
-- `AUTH-003` 已补 provider-independent 降级闭环：超管设置临时密码后写入私有 `account_security_states`，用户登录后在设置页看到强制改密提示，改密成功后清除该状态。
+- `AUTH-003` 已补 provider-independent 降级闭环；Phase C 候选进一步把管理员临时凭据元数据与 Auth 密码更新原子写入，并通过 Auth session 门禁和站点 Session/Bearer 检查执行认证层到期。候选尚未生产部署。
 - `AUTH-003` 已补受控同源 Auth 邮件入口：`/api/auth-email-action` 支持注册验证、密码重置和邮件登录，必须启用 `AUTH_MAIL_ACTIONS_ENABLED=true`、`MAIL_OUTBOX_WORKER_ENABLED=true` 且未命中 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH` 才会真实调用 provider adapter。
 - `AUTH-003` 也支持在 `ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时，把密码重置申请写入 `mail_outbox`。入队被防刷阻断、异常或状态回写失败时，申请仍保留人工恢复 fallback。
 - `api/_lib/mailTemplateRenderer.js` 是统一 HTML + plaintext 邮件模板入口。注册验证、邮件登录、密码重置、开发者 API 审核通知、工单回复通知、管理员告警、后台测试邮件和账号恢复队列邮件都应复用它，不再散落纯文本邮件。

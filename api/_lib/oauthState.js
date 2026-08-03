@@ -1,8 +1,17 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from 'node:crypto';
 
 const DEFAULT_APP_URL = 'https://ef-gacha.mogujun.icu';
 const STATE_TTL_MS = 10 * 60 * 1000;
 const PENDING_TTL_MS = 10 * 60 * 1000;
+const OAUTH_TRANSACTION_TABLE = 'app_oauth_transactions';
+const OAUTH_TRANSACTION_COOKIE_PREFIX = 'eg_oauth_tx_';
+const OAUTH_INTENTS = new Set(['login', 'link']);
 
 function readEnvironment() {
   return globalThis.process?.env || {};
@@ -18,6 +27,10 @@ function fromBase64Url(value) {
 
 function hmacSha256(value, secret) {
   return createHmac('sha256', secret).update(String(value || ''), 'utf8').digest('base64url');
+}
+
+function sha256Base64Url(value) {
+  return createHash('sha256').update(String(value || ''), 'utf8').digest('base64url');
 }
 
 function safeEqual(left, right) {
@@ -94,10 +107,219 @@ export function appendOAuthResultParams(returnTo, params = {}, env = readEnviron
   return url.toString();
 }
 
+export function normalizeOAuthIntent(value, fallback = 'login') {
+  const normalized = String(value || fallback).trim().toLowerCase();
+  return OAUTH_INTENTS.has(normalized) ? normalized : '';
+}
+
+export function createOAuthTransactionMaterial({
+  secret,
+} = {}) {
+  if (!secret) {
+    throw new Error('oauth_state_secret_missing');
+  }
+
+  const transactionId = randomUUID();
+  const browserBindingToken = randomBytes(32).toString('base64url');
+  const pkceCodeVerifier = randomBytes(48).toString('base64url');
+  return {
+    transactionId,
+    browserBindingToken,
+    browserBindingHash: hashOAuthBrowserBinding(browserBindingToken, { secret }),
+    pkceCodeVerifier,
+    pkceCodeChallenge: sha256Base64Url(pkceCodeVerifier),
+  };
+}
+
+export function hashOAuthBrowserBinding(value, {
+  env = readEnvironment(),
+  secret = getOAuthStateSecret(env),
+} = {}) {
+  if (!secret) {
+    throw new Error('oauth_state_secret_missing');
+  }
+  const token = String(value || '').trim();
+  if (!token) {
+    return '';
+  }
+  return hmacSha256(`oauth-browser:${token}`, secret);
+}
+
+export function getOAuthTransactionCookieName(transactionId, {
+  secure = true,
+} = {}) {
+  const safeId = String(transactionId || '').replace(/[^a-f0-9]/gi, '').toLowerCase();
+  if (!safeId) {
+    return '';
+  }
+  return `${secure ? '__Host-' : ''}${OAUTH_TRANSACTION_COOKIE_PREFIX}${safeId}`;
+}
+
+export function readOAuthTransactionCookie(req, transactionId, {
+  secure = true,
+} = {}) {
+  const cookieName = getOAuthTransactionCookieName(transactionId, { secure });
+  if (!cookieName) {
+    return '';
+  }
+
+  const rawHeader = String(req?.headers?.cookie || '');
+  for (const part of rawHeader.split(';')) {
+    const trimmed = part.trim();
+    const separatorIndex = trimmed.indexOf('=');
+    if (separatorIndex <= 0 || trimmed.slice(0, separatorIndex).trim() !== cookieName) {
+      continue;
+    }
+    const rawValue = trimmed.slice(separatorIndex + 1).trim();
+    try {
+      return decodeURIComponent(rawValue);
+    } catch {
+      return rawValue;
+    }
+  }
+  return '';
+}
+
+export function serializeOAuthTransactionCookie(transactionId, value, {
+  secure = true,
+  maxAgeSeconds = Math.ceil(STATE_TTL_MS / 1000),
+} = {}) {
+  const cookieName = getOAuthTransactionCookieName(transactionId, { secure });
+  if (!cookieName) {
+    throw new Error('oauth_transaction_id_invalid');
+  }
+
+  const parts = [
+    `${cookieName}=${encodeURIComponent(value || '')}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${Math.max(0, Number(maxAgeSeconds) || 0)}`,
+  ];
+  if (secure) {
+    parts.push('Secure');
+  }
+  return parts.join('; ');
+}
+
+export async function persistOAuthTransaction(adminClient, {
+  transactionId,
+  provider,
+  intent,
+  returnTo,
+  browserBindingHash,
+  pkceCodeVerifier,
+  startedSessionId = null,
+  startedUserId = null,
+  now = Date.now(),
+  ttlMs = STATE_TTL_MS,
+} = {}) {
+  if (!adminClient?.from) {
+    return { ok: false, code: 'oauth_session_unavailable' };
+  }
+
+  const normalizedIntent = normalizeOAuthIntent(intent);
+  if (!normalizedIntent) {
+    return { ok: false, code: 'oauth_intent_invalid' };
+  }
+
+  const row = {
+    id: String(transactionId || '').trim(),
+    provider: String(provider || '').trim().toLowerCase(),
+    intent: normalizedIntent,
+    return_to: String(returnTo || '/'),
+    browser_binding_hash: String(browserBindingHash || '').trim(),
+    pkce_code_verifier: String(pkceCodeVerifier || '').trim(),
+    started_session_id: startedSessionId || null,
+    started_user_id: startedUserId || null,
+    created_at: new Date(Number(now)).toISOString(),
+    expires_at: new Date(Number(now) + Number(ttlMs)).toISOString(),
+  };
+
+  if (
+    !row.id
+    || !row.provider
+    || !row.browser_binding_hash
+    || !row.pkce_code_verifier
+    || (normalizedIntent === 'link' && (!row.started_session_id || !row.started_user_id))
+  ) {
+    return { ok: false, code: 'oauth_transaction_invalid' };
+  }
+
+  const { error: cleanupError } = await adminClient
+    .from(OAUTH_TRANSACTION_TABLE)
+    .delete()
+    .lte('expires_at', row.created_at);
+  if (cleanupError) {
+    return {
+      ok: false,
+      code: cleanupError.code || 'oauth_transaction_cleanup_failed',
+      reason: cleanupError.message,
+    };
+  }
+
+  const { data, error } = await adminClient
+    .from(OAUTH_TRANSACTION_TABLE)
+    .insert(row)
+    .select('*')
+    .single();
+
+  if (error) {
+    return {
+      ok: false,
+      code: error.code || 'oauth_transaction_create_failed',
+      reason: error.message,
+    };
+  }
+
+  return { ok: true, transaction: data || row };
+}
+
+export async function consumeOAuthTransaction(adminClient, {
+  transactionId,
+  provider,
+  browserBindingHash,
+  now = Date.now(),
+} = {}) {
+  if (!adminClient?.from) {
+    return { ok: false, code: 'oauth_session_unavailable' };
+  }
+  if (!transactionId || !provider || !browserBindingHash) {
+    return { ok: false, code: 'oauth_transaction_invalid' };
+  }
+
+  const consumedAt = new Date(Number(now)).toISOString();
+  const query = adminClient
+    .from(OAUTH_TRANSACTION_TABLE)
+    .delete()
+    .eq('id', String(transactionId))
+    .eq('provider', String(provider).trim().toLowerCase())
+    .eq('browser_binding_hash', String(browserBindingHash))
+    .gt('expires_at', consumedAt)
+    .select('*');
+  const { data, error } = typeof query.maybeSingle === 'function'
+    ? await query.maybeSingle()
+    : await query.single();
+
+  if (error) {
+    return {
+      ok: false,
+      code: error.code || 'oauth_transaction_consume_failed',
+      reason: error.message,
+    };
+  }
+  if (!data?.id) {
+    return { ok: false, code: 'oauth_transaction_invalid_or_consumed' };
+  }
+
+  return { ok: true, transaction: data };
+}
+
 export function createOAuthState({
   provider,
   returnTo = '/',
   intent = 'login',
+  transactionId = randomUUID(),
   now = Date.now(),
   ttlMs = STATE_TTL_MS,
 } = {}, {
@@ -113,6 +335,7 @@ export function createOAuthState({
     provider: String(provider || '').trim().toLowerCase(),
     intent: String(intent || 'login').trim().toLowerCase(),
     returnTo: normalizeOAuthReturnTo(returnTo, env, req),
+    transactionId: String(transactionId || '').trim(),
     nonce: randomBytes(16).toString('base64url'),
     createdAt: Number(now),
     expiresAt: Number(now) + ttlMs,
@@ -151,6 +374,10 @@ export function verifyOAuthState(state, {
 
   if (expectedProvider && payload?.provider !== expectedProvider) {
     return { ok: false, code: 'oauth_state_provider_mismatch' };
+  }
+
+  if (!payload?.transactionId) {
+    return { ok: false, code: 'oauth_state_transaction_missing' };
   }
 
   if (!Number.isFinite(Number(payload?.expiresAt)) || Number(payload.expiresAt) <= Number(now)) {
