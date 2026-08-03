@@ -30,7 +30,7 @@
 
 2026-08-01 的真实本地 Supabase/PostgreSQL 17 空库导入已补齐两项此前静态检查未覆盖的边界：`archive/004_tickets_system.sql` 必须在表不存在时也能执行清理；Phase A/B 必须显式授予 `service_role` 访问 `profiles` 与私有 Session 撤销状态所需的 DML 权限，同时保持 `anon/authenticated` 对私有撤销状态的拒绝。`test:supabase-baseline:smoke` 与 `test:auth-hardening-phase-a` 已加入对应回归断言。
 
-本分支 baseline 覆盖到 `active/170_allow_consumed_magiclink_email_artifact.sql` 后，不要再把 `001~170` 的主站标准迁移重复叠加到同版本 baseline。主站发布链原到 158；共享生产 schema 另含独立抽奖 160–165。认证 166/167/168 已按顺序生产应用并通过回填、权限、函数、RLS 与触发器核验；迁移 169 已生产应用（PR #15）；迁移 170 是本分支新增候选，尚未生产应用。
+本分支 baseline 覆盖到 `active/171_allow_consumed_magiclink_email_artifact.sql` 后，不要再把 `001~171` 的主站标准迁移重复叠加到同版本 baseline。主站发布链原到 158；共享生产 schema 另含独立抽奖 160–165。认证 166/167/168 已按顺序生产应用并通过回填、权限、函数、RLS 与触发器核验；迁移 169 已生产应用（PR #15），主线另含正式导入修复迁移 170（PR #16）；迁移 171 是本分支新增候选，尚未生产应用。
 
 ### migration 编号说明
 
@@ -38,7 +38,7 @@
 - **本分支 167：** `migrations/167_harden_account_credentials_and_identity_keys.sql`（认证 Phase C/D 数据库面）。
 - **本分支 168：** `migrations/168_close_auth_review_findings.sql`（历史 identity 哈希兼容、直连 RLS Session 门禁和首次设密并发收口；必须先于依赖新 RPC 的 API 部署）。
 - **本分支 169：** `migrations/169_add_oauth_email_artifact_merge.sql`（只针对旧版验证流程产生且经严格证据确认无任何站内数据的 Auth 空壳，提供一次性邮箱验证、显式确认、归属转移、会话撤销和补偿账本；不是通用账号合并）。
-- **本分支 170：** `migrations/170_allow_consumed_magiclink_email_artifact.sql`（识别旧缺陷第二种形状：点击过旧 Magic Link 并留下占位 bcrypt 密码与原生 Session/refresh token 的空壳；要求独立证据版本 `legacy_magiclink_consumed_v2`、真实工单与 super_admin 批准人、完整证据快照哈希绑定；`service_role` 对批准表只读，claim 先锁定批准行再复核）。
+- **本分支 171：** `migrations/171_allow_consumed_magiclink_email_artifact.sql`（识别旧缺陷第二种形状：点击过旧 Magic Link 并留下占位 bcrypt 密码与原生 Session/refresh token 的空壳；要求独立证据版本 `legacy_magiclink_consumed_v2`、真实工单与 super_admin 批准人、完整证据快照哈希绑定；`service_role` 对批准表只读，claim 先锁定批准行再复核）。
 - **其他 worktree 仍占用同号文件名（不得与本文件一起部署）：**
   - 主脏树性能线：`159_add_history_scope_read_models.sql`
   - 邮箱候选树：`159_bind_email_verification_to_target.sql`
