@@ -38,6 +38,7 @@ vi.mock('../_lib/siteSession.js', () => ({
 }));
 
 import authSessionHandler, {
+  authSessionLogoutHandler,
   authSessionRevokeAllHandler,
 } from '../_routes/root/auth-session.js';
 
@@ -74,7 +75,7 @@ describe('/api/auth/session', () => {
     mocks.createSupabaseCompatAccessToken.mockReturnValue(null);
     mocks.loadSiteSession.mockResolvedValue({ ok: true, authenticated: false });
     mocks.revokeAllSiteSessionsForUser.mockResolvedValue({ ok: true, revokedCount: 2 });
-    mocks.revokeSiteSession.mockResolvedValue({ ok: true });
+    mocks.revokeSiteSession.mockResolvedValue({ ok: true, revokedCount: 1 });
   });
 
   it('bootstraps exclusively from the bearer user even when another session cookie is present', async () => {
@@ -186,6 +187,49 @@ describe('/api/auth/session', () => {
     expect(res.body).toMatchObject({
       success: true,
       data: { sessionsRevoked: true, revokedCount: 2 },
+    });
+  });
+
+  it('reports logout success only after the database session family is revoked', async () => {
+    const adminClient = mocks.getSupabaseAdminClient();
+    const req = {
+      method: 'POST',
+      headers: { cookie: '__Secure-eg_refresh=refresh-token' },
+    };
+    const res = createResponseRecorder();
+
+    await authSessionLogoutHandler(req, res);
+
+    expect(mocks.revokeSiteSession).toHaveBeenCalledWith(adminClient, {
+      req,
+      res,
+      reason: 'user_logout',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      data: { signedOut: true, revokedCount: 1 },
+    });
+  });
+
+  it('does not report logout success when database revocation fails', async () => {
+    mocks.revokeSiteSession.mockResolvedValue({
+      ok: false,
+      code: 'site_session_revoke_failed',
+      reason: 'database unavailable',
+    });
+    const req = {
+      method: 'POST',
+      headers: { cookie: '__Secure-eg_refresh=refresh-token' },
+    };
+    const res = createResponseRecorder();
+
+    await authSessionLogoutHandler(req, res);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'site_session_revoke_failed',
     });
   });
 });

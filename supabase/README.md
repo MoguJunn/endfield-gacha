@@ -30,18 +30,19 @@
 
 2026-08-01 的真实本地 Supabase/PostgreSQL 17 空库导入已补齐两项此前静态检查未覆盖的边界：`archive/004_tickets_system.sql` 必须在表不存在时也能执行清理；Phase A/B 必须显式授予 `service_role` 访问 `profiles` 与私有 Session 撤销状态所需的 DML 权限，同时保持 `anon/authenticated` 对私有撤销状态的拒绝。`test:supabase-baseline:smoke` 与 `test:auth-hardening-phase-a` 已加入对应回归断言。
 
-本认证集成树的 baseline 覆盖到 `active/167_harden_account_credentials_and_identity_keys.sql` 后，不要再把 `001~167` 的主站标准迁移重复叠加到同版本 baseline。主站发布链原到 158；共享生产 schema 另含独立抽奖 160–165。认证 166/167 已于 2026-08-02 按顺序生产应用并通过回填、权限、函数和触发器核验。
+本认证集成树的 baseline 覆盖到 `active/168_close_auth_review_findings.sql` 后，不要再把 `001~168` 的主站标准迁移重复叠加到同版本 baseline。主站发布链原到 158；共享生产 schema 另含独立抽奖 160–165。认证 166/167 已于 2026-08-02 按顺序生产应用并通过回填、权限、函数和触发器核验；审查修复迁移 168 尚未生产应用。
 
 ### migration 编号说明
 
 - **本分支 166：** `migrations/166_harden_admin_profile_and_oauth_transactions.sql`（认证 admin RPC + OAuth transaction）。
 - **本分支 167：** `migrations/167_harden_account_credentials_and_identity_keys.sql`（认证 Phase C/D 数据库面）。
+- **本分支 168：** `migrations/168_close_auth_review_findings.sql`（历史 identity 哈希兼容、直连 RLS Session 门禁和首次设密并发收口；必须先于依赖新 RPC 的 API 部署）。
 - **其他 worktree 仍占用同号文件名（不得与本文件一起部署）：**
   - 主脏树性能线：`159_add_history_scope_read_models.sql`
   - 邮箱候选树：`159_bind_email_verification_to_target.sql`
-- 生产库没有主站应用级 migration ledger；166/167 的执行记录、迁移文件校验和、迁移前备份和迁移后核验结果保存在受限运维备份中。性能线 159 仍未应用。
+- 生产库没有主站应用级 migration ledger；166/167 的执行记录、迁移文件校验和、迁移前备份和迁移后核验结果保存在受限运维备份中。168 需另行授权和记录，性能线 159 仍未应用。
 
-`AUTH-HARDEN-001` Phase A–D 与本地候选验收已完成，代码由 `5dd8505` 固化；生产迁移 166/167 已完成，主线合入和 API 部署仍由 `AUTH-HARDEN-RELEASE-001` 跟踪。LinuxDo provider 不新增数据库迁移，其实现保持在独立分支；因外部申请条件下调为 P3，真实浏览器验收前保持关闭且不阻塞认证发布。
+`AUTH-HARDEN-001` Phase A–D 与本地候选验收已完成，代码由 `5dd8505` 固化；生产迁移 166/167 已完成，审查修复迁移 168、主线合入和 API 部署仍由 `AUTH-HARDEN-RELEASE-001` 跟踪。LinuxDo provider 不新增数据库迁移，其实现保持在独立分支；因外部申请条件下调为 P3，真实浏览器验收前保持关闭且不阻塞认证发布。
 
 `site_config.public_cache_epoch` 是公共数据缓存版本源；公共 API / 首屏不应回退成浏览器直连 Supabase 读写。
 公共卡池统计读取 `public_pool_analytics_cache` 和 `public_pool_trend_cache`；受控刷新入口是 `refresh_public_analytics_cache()`，请求期不应扫描原始 `history` 生成趋势点。
@@ -79,6 +80,13 @@
 - OAuth identity key 版本化：`app_auth_identities.provider_subject_hash_key_version`；`claim_oauth_identity()` 按新旧 hash 双读并原子迁移（owner 不可变、hash split 拒绝）；owner/provider/hash/版本字段被触发器锁定，只允许受控 RPC 修改。
 - 原子解绑：`unlink_oauth_identity_atomically()` 在用户级锁内检查提交后的真实登录方式，拒绝解绑最后一个可用方式。
 - 以上表与 RPC 全部 service-role-only；`authenticated` 不可读私密归属/挑战表，也不可执行私密 RPC。
+
+`168_close_auth_review_findings.sql`（远端审查修复）：
+
+- `claim_oauth_identity_v2()` 同时锁定 current、previous 和旧主线真实 state-secret HMAC 候选；唯一 owner 匹配后迁移到当前专用 key/version，候选分裂或跨 owner 时拒绝。
+- `is_request_auth_session_allowed()` 读取 JWT 的 `sub/session_id/iat`，同时核对站点兼容 Session 或原生 Auth Session、用户撤销边界与临时凭据状态。迁移为 `public/storage` 中所有已启用 RLS 的现有表附加 `AS RESTRICTIVE TO authenticated` 策略，旧 JWT 不能绕过同源 API 直连 PostgREST。
+- `refresh_oauth_account_security_state()` 与首次设密 claim/finish 共用用户级 advisory lock，并在锁内重新检查 `has_verified_password_login()`，避免陈旧 OAuth callback 把已完成能力回退为待设密。
+- 新 API 会调用本迁移新增 RPC，因此发布顺序固定为：先执行并核验 168，再部署 API；不得反序。
 
 `scripts/backfill-history-anomalies.mjs` 是已知异常扫描 / 回填入口。默认模式只读；正式写入必须同时提供 `--apply` 和脚本要求的 `CONFIRM_HISTORY_ANOMALY_BACKFILL=<记录数>:<用户数>` 精确快照。记录数或用户数变化时应停止、重新审计候选范围，不得跳过 guard。
 

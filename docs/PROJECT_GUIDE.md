@@ -67,6 +67,7 @@ SUPABASE_SECRET_KEY=sb_secret_xxx
 
 # 认证安全与同源站点 Session（真实值仅放服务端秘密存储）
 OAUTH_STATE_SECRET=replace-me-with-long-random-secret
+AUTH_IDENTITY_HASH_KEY_LEGACY_STATE=replace-me-with-the-historical-identity-secret
 AUTH_IDENTITY_HASH_KEY_CURRENT=replace-me-with-independent-identity-hash-key
 AUTH_IDENTITY_HASH_KEY_CURRENT_VERSION=v2
 AUTH_IDENTITY_HASH_KEY_PREVIOUS=

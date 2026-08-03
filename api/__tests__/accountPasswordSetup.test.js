@@ -73,7 +73,10 @@ function createRequest(body = {}) {
 function createAdminClient({
   securityState,
   profile,
+  completedFinishFailures = 0,
+  commitCompletedBeforeFailure = false,
 } = {}) {
+  let remainingCompletedFinishFailures = completedFinishFailures;
   const updateUserById = vi.fn(async (_userId, payload) => ({
     data: {
       user: {
@@ -83,16 +86,30 @@ function createAdminClient({
     },
     error: null,
   }));
-  const rpc = vi.fn(async (name) => {
+  const rpc = vi.fn(async (name, payload) => {
     if (name === 'claim_oauth_password_setup_capability') {
       securityState.password_setup_capability_status = 'claimed';
       return { data: 'claimed', error: null };
     }
     if (name === 'finish_oauth_password_setup_capability') {
-      securityState.password_setup_capability_status = 'completed';
-      securityState.password_change_required = false;
-      securityState.password_change_reason = null;
-      return { data: 'completed', error: null };
+      if (payload.p_outcome === 'completed' && remainingCompletedFinishFailures > 0) {
+        remainingCompletedFinishFailures -= 1;
+        if (commitCompletedBeforeFailure) {
+          securityState.password_setup_capability_status = 'completed';
+          securityState.password_change_required = false;
+          securityState.password_change_reason = null;
+        }
+        return { data: null, error: { code: 'finish_failed', message: 'finish failed' } };
+      }
+      if (securityState.password_setup_capability_status === 'completed') {
+        return { data: 'completed', error: null };
+      }
+      securityState.password_setup_capability_status = payload.p_outcome;
+      securityState.password_change_required = payload.p_outcome !== 'completed';
+      securityState.password_change_reason = payload.p_outcome === 'completed'
+        ? null
+        : securityState.password_change_reason;
+      return { data: payload.p_outcome, error: null };
     }
     throw new Error(`Unexpected RPC: ${name}`);
   });
@@ -278,5 +295,71 @@ describe('api/account-password-setup handler', () => {
       },
     });
     expect(mocks.createSiteSession).not.toHaveBeenCalled();
+  });
+
+  it('retries an idempotent completion when the committed response is lost', async () => {
+    const securityState = {
+      password_change_required: true,
+      password_change_reason: 'oauth_password_setup_required_existing',
+      password_setup_capability_id: '00000000-0000-4000-8000-000000000001',
+      password_setup_capability_status: 'available',
+      email_verification_required: false,
+      email_verification_verified_at: '2026-06-03T00:00:00.000Z',
+      email_verification_target_email: 'site-user@example.com',
+    };
+    const adminClient = createAdminClient({
+      securityState,
+      profile: { id: 'user-1', email: 'site-user@example.com', role: 'user' },
+      completedFinishFailures: 1,
+      commitCompletedBeforeFailure: true,
+    });
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createResponseRecorder();
+
+    await accountPasswordSetupHandler(createRequest({ newPassword: 'StrongPass123' }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(securityState).toMatchObject({
+      password_change_required: false,
+      password_setup_capability_status: 'completed',
+    });
+    expect(adminClient.__mocks.rpc.mock.calls.filter(([name, payload]) => (
+      name === 'finish_oauth_password_setup_capability' && payload.p_outcome === 'completed'
+    ))).toHaveLength(2);
+  });
+
+  it('persists coordination state when completion cannot be confirmed', async () => {
+    const securityState = {
+      password_change_required: true,
+      password_change_reason: 'oauth_password_setup_required_existing',
+      password_setup_capability_id: '00000000-0000-4000-8000-000000000001',
+      password_setup_capability_status: 'available',
+      email_verification_required: false,
+      email_verification_verified_at: '2026-06-03T00:00:00.000Z',
+      email_verification_target_email: 'site-user@example.com',
+    };
+    const adminClient = createAdminClient({
+      securityState,
+      profile: { id: 'user-1', email: 'site-user@example.com', role: 'user' },
+      completedFinishFailures: 2,
+    });
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createResponseRecorder();
+
+    await accountPasswordSetupHandler(createRequest({ newPassword: 'StrongPass123' }), res);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toMatchObject({
+      passwordUpdated: true,
+      capabilityConsumed: true,
+      state: {
+        passwordChangeRequired: true,
+        passwordSetupCapabilityStatus: 'coordination_required',
+      },
+    });
+    expect(adminClient.__mocks.rpc).toHaveBeenCalledWith(
+      'finish_oauth_password_setup_capability',
+      expect.objectContaining({ p_outcome: 'coordination_required' })
+    );
   });
 });

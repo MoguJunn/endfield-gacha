@@ -2,6 +2,7 @@ import { createSupabaseAccessTokenClient, getBearerToken, getSupabaseAdminClient
 import {
   checkAccountCredentialAllowed,
   createSupabaseCompatAccessToken,
+  loadActiveSiteSessionByBinding,
   loadActiveSiteSessionById,
   loadSiteSession,
 } from './siteSession.js';
@@ -22,7 +23,7 @@ function buildSiteSessionAuthResult(siteSession, adminClient, bearerResult = nul
   const compatToken = createSupabaseCompatAccessToken({
     user: siteSession.user,
     profile: siteSession.profile || null,
-    sessionId: siteSession.session?.id || '',
+    sessionBinding: siteSession.session?.compat_session_binding || '',
   });
 
   return {
@@ -94,7 +95,9 @@ export async function resolveBearerRequestUser(req, {
   const isSiteSessionCompatToken = tokenPayload?.app_metadata?.provider === 'site_session'
     && tokenPayload?.user_metadata?.site_session === true;
   if (isSiteSessionCompatToken) {
-    if (!adminClient?.from || !tokenPayload?.session_id) {
+    const sessionBinding = String(tokenPayload?.session_binding || '').trim();
+    const legacySessionId = String(tokenPayload?.session_id || '').trim();
+    if (!adminClient?.from || (!sessionBinding && !legacySessionId)) {
       return {
         ok: false,
         status: adminClient ? 401 : 503,
@@ -105,10 +108,15 @@ export async function resolveBearerRequestUser(req, {
       };
     }
 
-    const activeSession = await loadActiveSiteSessionById(adminClient, {
-      sessionId: tokenPayload.session_id,
-      userId: userData.user.id,
-    });
+    const activeSession = sessionBinding
+      ? await loadActiveSiteSessionByBinding(adminClient, {
+        sessionBinding,
+        userId: userData.user.id,
+      })
+      : await loadActiveSiteSessionById(adminClient, {
+        sessionId: legacySessionId,
+        userId: userData.user.id,
+      });
     if (!activeSession.ok) {
       return {
         ok: false,

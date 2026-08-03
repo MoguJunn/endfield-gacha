@@ -255,13 +255,48 @@ export default async function handler(req, res) {
         p_error_code: null,
       });
     } catch (finishError) {
-      return res.status(500).json({
-        success: false,
-        passwordUpdated: true,
-        capabilityConsumed: true,
-        error: finishError.message || 'Password was updated but account state requires coordination',
-        code: finishError.code || 'password_setup_coordination_required',
-      });
+      let recoveredStatus = null;
+      let recoveryError = finishError;
+      try {
+        recoveredStatus = await runPasswordSetupCapabilityRpc(
+          adminClient,
+          'finish_oauth_password_setup_capability',
+          {
+            p_user_id: userId,
+            p_capability_id: capabilityId,
+            p_outcome: 'completed',
+            p_error_code: null,
+          }
+        );
+      } catch (retryError) {
+        recoveryError = retryError;
+        try {
+          recoveredStatus = await runPasswordSetupCapabilityRpc(
+            adminClient,
+            'finish_oauth_password_setup_capability',
+            {
+              p_user_id: userId,
+              p_capability_id: capabilityId,
+              p_outcome: 'coordination_required',
+              p_error_code: retryError.code || 'password_setup_finish_failed',
+            }
+          );
+        } catch (coordinationError) {
+          recoveryError = coordinationError;
+        }
+      }
+
+      if (recoveredStatus !== 'completed') {
+        const latestState = await loadSecurityState(adminClient, userId).catch(() => null);
+        return res.status(500).json({
+          success: false,
+          passwordUpdated: true,
+          capabilityConsumed: true,
+          error: recoveryError.message || 'Password was updated but account state requires coordination',
+          code: recoveryError.code || 'password_setup_coordination_required',
+          state: toClientSecurityState(latestState),
+        });
+      }
     }
 
     const revokeResult = await revokeAllSiteSessionsForUser(adminClient, {

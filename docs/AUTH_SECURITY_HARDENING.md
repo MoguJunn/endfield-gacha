@@ -4,7 +4,7 @@
 
 > 新会话入口：根目录 `SESSION_HANDOFF.md` 与 `todo` 的 `AUTH-HARDEN-001`。
 > 实现目录：`D:\Learning\Endfield Gacha\_tmp\auth-hardening-integration`；当前检出纯认证候选 `fix/auth-hardening-integration`，Phase A–D 基线提交为 `5dd8505`。
-> Phase A、B、C、D 已集成到最新主线基线、重编号为 166/167，并由本地提交 `5dd8505` 固化；2026-08-02 已按 166 → 167 应用到生产数据库并完成权限/回填核验，**API 尚未部署，代码尚未合入主线**。
+> Phase A、B、C、D 已集成到最新主线基线、重编号为 166/167，并由本地提交 `5dd8505` 固化；2026-08-02 已按 166 → 167 应用到生产数据库并完成权限/回填核验。远端审查发现的历史 identity 哈希、直连 RLS 撤销和凭据生命周期缺口由前向迁移 168 与配套代码收口；**168 尚未应用到生产，API 尚未部署，代码尚未合入主线**。
 > LinuxDo 属于独立低优先级任务 `AUTH-LINUXDO-002`：实现继续隔离在 `feat/linuxdo-oauth`，不进入本认证候选；目前无法申请隔离 Connect Client，前后端开关保持关闭，不再阻塞认证发布。
 
 ## 当前决策
@@ -33,12 +33,13 @@
 | --- | --- | --- |
 | 认证集成 worktree | `166_harden_admin_profile_and_oauth_transactions.sql` | Phase A/B forward migration；已避开抽奖 160–165 |
 | 认证集成 worktree | `167_harden_account_credentials_and_identity_keys.sql` | Phase C/D forward migration；紧随 Phase A/B |
+| 认证集成 worktree | `168_close_auth_review_findings.sql` | 远端审查修复；历史 identity 原子迁移、直连 RLS Session 门禁和首次设密并发串行化；尚未生产应用 |
 | 主脏树性能线 | `159_add_history_scope_read_models.sql` | 本地性能 RPC/索引；**不得部署**；合入前必须重编号 |
 | 邮箱候选 worktree | `159_bind_email_verification_to_target.sql` | Phase C 参考候选；**不得部署**；合入前必须重编号 |
 
 - 2026-08-02 迁移前只读核对确认运行版本为 `v4.5.4`、抽奖 160–165 存在、性能 159 与认证结构不存在；随后已创建受限完整备份并按 166 → 167 应用认证迁移。生产库没有主站应用级 migration ledger。
-- 因此认证两条迁移使用连续新号 166/167。性能线 159 和旧邮箱候选 159 仍是独立未发布候选，不进入本认证分支。
-- 166/167 已按编号顺序生产应用；性能线 159 仍未应用，也不得因编号较小而补执行。
+- 因此认证初始两条迁移使用连续新号 166/167，审查修复继续使用 168。性能线 159 和旧邮箱候选 159 仍是独立未发布候选，不进入本认证分支。
+- 166/167 已按编号顺序生产应用；168 是本 PR 新增的前向迁移，必须在部署依赖其 RPC 的 API 前单独授权并执行。性能线 159 仍未应用，也不得因编号较小而补执行。
 
 ## 实现进度
 
@@ -52,7 +53,7 @@
 | Phase D 代码（identity keyring、原子认领、补偿恢复） | **完成并提交；数据库面已生产应用，API 未部署** |
 | 候选验收（GitHub / 邮箱 / 安全属性） | **已完成**：GitHub 核心闭环使用隔离浏览器验证；跨浏览器 transaction、link Session 切换、callback 重放及邮箱/凭据状态机由专项自动化与本地 PostgreSQL 17 验证；已授权 App 无取消控件的限制已记录 |
 | LinuxDo provider | **转 `AUTH-LINUXDO-002`（P3）**：代码和自动化合同已完成，真实 Client 验收因外部条件暂停，不阻塞本任务 |
-| 生产 migration | **已完成**：166 → 167、3,095 个确认邮箱归属回填、83 条 identity key 版本和角色权限核验通过 |
+| 生产 migration | **部分完成**：166 → 167、3,095 个确认邮箱归属回填、83 条 identity key 版本和角色权限核验通过；审查修复迁移 168 尚未生产应用 |
 | push / 合并 / API 部署 | **转 `AUTH-HARDEN-RELEASE-001`**：候选进入远端审查；合并和部署仍需独立授权 |
 
 ## 认证数据流
@@ -101,12 +102,16 @@ flowchart LR
 - ~~未验证、未绑定 Auth、未设置密码的 profile 邮箱会被当作备用登录方式，可能允许解绑最后一个 OAuth identity~~ → **本地已修**：解绑走 `unlink_oauth_identity_atomically`，在用户级锁内按“活动 OAuth identity 数 + Auth 确认邮箱密码”判定，提交后必然保留一种可用方式。
 - ~~候选邮箱在验证前写入 `profiles.email`，而 profile 邮箱缺少规范化唯一归属模型~~ → **本地已修**：migration 167 引入 `account_email_ownerships`（规范化唯一归属）与 `account_email_challenges`（一次性挑战），验证成功后才提升 canonical。
 - ~~OAuth identity 认领依赖先查后 upsert；并发时可能改写 owner。首次创建 Auth user 后 identity 写入失败也缺少幂等恢复~~ → **本地已修**：`claim_oauth_identity` 原子认领（owner 不可变、hash split 拒绝）；创建前先按新旧 synthetic email 恢复半成品 Auth user，profile 缺失时修复，孤儿清理只针对本次新建。
+- ~~迁移 167 只给历史 identity 标记 `legacy_state_v1`，应用却没有计算旧主线真实 HMAC 格式，既有 OAuth 用户可能被创建为新账号~~ → **本地已修**：完整复现旧 `getOAuthStateSecret()` fallback 与任意非空历史 key 行为，并支持用 `AUTH_IDENTITY_HASH_KEY_LEGACY_STATE` 固定轮换前真实值；`claim_oauth_identity_v2` 按每个候选排序加锁，在 current / previous / legacy 间锁定唯一 owner 后迁移到当前专用 key。
 
 ### 第三组：凭据生命周期
 
 - ~~临时密码到期时间目前只是业务元数据；通用状态清除接口也不要求密码实际已修改~~ → **本地已修**：`auth.sessions` 插入/更新前与站点 session/Bearer 解析均执行认证层到期检查；`clear_password_change_required` 用户入口已删除；管理员发放临时密码时到期状态随 Auth 更新原子写入。
 - ~~改密/找回/管理员重置后不撤销旧 `app_sessions`；兼容 JWT 不回查活动 session~~ → **本地已修**：`revokeAllSiteSessionsForUser` + `POST /api/auth/session/revoke-all`；兼容 JWT 回查 `session_id` 对应活动行。
+- ~~已签发兼容 JWT 仍可绕过同源 API 直接访问 Supabase RLS；独立导入后端也未检查临时凭据到期~~ → **本地已修**：迁移 168 为 `public/storage` 中所有已启用 RLS 的表附加 restrictive Session 门禁；原生与站点兼容 JWT 都必须绑定活动 Session 且临时凭据未过期。独立导入后端两条 token 路径同步执行 `is_account_credential_allowed`。
+- ~~仅剩 refresh Cookie 时注销只清浏览器 Cookie，不撤销数据库 Session~~ → **本地已修**：迁移 168 用受限 alias 表记录同一刷新凭据族的历史 hash，轮换与注销 RPC 对 token hash 使用同一 advisory lock；旧/新 refresh 任一命中都撤销整个 Session，数据库失败不再返回注销成功。
 - ~~OAuth 首次设密在 Auth 更新成功、状态清理失败时，可能继续保留免旧密码能力~~ → **本地已修**：一次性能力先原子 claim；Auth 更新失败或收尾失败均进入 `coordination_required`，不再重新开放免旧密码入口。
+- ~~OAuth callback 刷新安全状态可能与首次设密完成交错，把已完成能力回退为 `password_change_required=true`~~ → **本地已修**：`refresh_oauth_account_security_state` 与首次设密 RPC 共用用户级 advisory lock，并在锁内重新核对真实密码登录能力；已完成状态不能被陈旧 callback 覆盖。
 - ~~首次设密与邮箱补录跨 Supabase Auth 和业务表，最终检查后仍存在并发提交窗口~~ → **本地已修**：challenge/能力状态机全部在数据库 RPC 内以 advisory lock + 条件更新完成单次消费。
 
 ### 第四组：密钥演进

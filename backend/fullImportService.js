@@ -372,28 +372,43 @@ async function loadUserByVerifiedJwtPayload(supabase, payload) {
 }
 
 async function verifyActiveCompatSession(supabase, payload) {
-  const sessionId = normalizeString(payload?.session_id, 128);
+  const sessionBinding = normalizeString(payload?.session_binding, 128);
+  const legacySessionId = normalizeString(payload?.session_id, 128);
   const userId = normalizeString(payload?.sub, 128);
-  if (!sessionId || !userId) {
+  if (!userId || (!sessionBinding && !legacySessionId)) {
     throw createAuthTokenError('compat_jwt_session_binding_missing');
   }
 
   const nowIso = new Date().toISOString();
-  const { data, error } = await supabase
+  let query = supabase
     .from('app_sessions')
     .select('id')
-    .eq('id', sessionId)
     .eq('user_id', userId)
     .is('revoked_at', null)
     .gt('expires_at', nowIso)
-    .gt('absolute_expires_at', nowIso)
-    .maybeSingle();
+    .gt('absolute_expires_at', nowIso);
+  query = sessionBinding
+    ? query.eq('compat_session_binding', sessionBinding)
+    : query.eq('id', legacySessionId);
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     throw createAuthTokenError('compat_jwt_session_lookup_failed');
   }
   if (!data?.id) {
     throw createAuthTokenError('compat_jwt_session_inactive');
+  }
+}
+
+async function verifyAccountCredentialAllowed(supabase, userId) {
+  const { data: allowed, error } = await supabase.rpc('is_account_credential_allowed', {
+    p_user_id: userId,
+  });
+  if (error) {
+    throw createAuthTokenError('credential_state_lookup_failed');
+  }
+  if (allowed !== true) {
+    throw createAuthTokenError('temporary_password_expired');
   }
 }
 
@@ -440,6 +455,7 @@ async function verifySiteSessionCompatToken(supabase, accessToken) {
   }
 
   await verifyActiveCompatSession(supabase, payload);
+  await verifyAccountCredentialAllowed(supabase, payload.sub);
   return loadUserByVerifiedJwtPayload(supabase, payload);
 }
 
@@ -461,6 +477,7 @@ async function verifyNativeBearerSession(supabase, user, payload) {
   if (allowed !== true) {
     throw createAuthTokenError('auth_session_revoked');
   }
+  await verifyAccountCredentialAllowed(supabase, user.id);
 }
 
 export function getAuthVerificationPublicDetails(error) {
@@ -1870,6 +1887,11 @@ export async function executeFullImport({
           : 'Invalid user ID. Check that backend SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY point to the same project as the frontend.'
       );
     }
+
+    // 1.5 Re-check credentials at task start. The request-time check may have
+    // passed before a queued task actually runs; temporary credentials that
+    // expire while waiting must not start a grant chain or fetch records.
+    await verifyAccountCredentialAllowed(supabase, userId);
 
     // 2. 执行认证链 - grant
     updateProgress({ progress: 10, message: '正在验证 token...' });

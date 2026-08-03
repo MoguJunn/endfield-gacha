@@ -1,9 +1,12 @@
 // @vitest-environment node
 
+import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   buildOAuthIdentityHashCandidates,
+  getLegacyOAuthIdentityHashSecret,
   getOAuthIdentityHashKeyring,
+  hashLegacyOAuthIdentitySubject,
   hashOAuthIdentitySubject,
 } from '../_lib/identityHash.js';
 
@@ -44,6 +47,64 @@ describe('OAuth identity hash keyring', () => {
       },
     });
     expect(result.current.hash).not.toBe(result.previous.hash);
+  });
+
+  it('also builds the exact legacy state-secret hash for account migration', () => {
+    const stateSecret = 'legacy-state-secret-12345678901234567890';
+    const result = buildOAuthIdentityHashCandidates('github', 'provider-user-1', {
+      AUTH_IDENTITY_HASH_KEY_CURRENT: 'current-identity-key-12345678901234567890',
+      AUTH_IDENTITY_HASH_KEY_CURRENT_VERSION: 'v2',
+      OAUTH_STATE_SECRET: stateSecret,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      legacy: {
+        version: 'legacy_state_v1',
+        hash: createHmac('sha256', stateSecret)
+          .update('github:provider-user-1', 'utf8')
+          .digest('hex'),
+      },
+    });
+    expect(result.legacy.hash).toBe(
+      hashLegacyOAuthIdentitySubject('github', 'provider-user-1', stateSecret)
+    );
+  });
+
+  it('replays the complete historical state-secret fallback order, including short keys', () => {
+    const fallbackCases = [
+      ['OAUTH_STATE_SECRET', 'short-state-key'],
+      ['AUTH_SECURITY_HASH_SECRET', 'historical-auth-security-key'],
+      ['MAIL_ABUSE_HASH_SECRET', 'historical-mail-key'],
+      ['SUPABASE_JWT_SECRET', 'historical-jwt-key'],
+    ];
+
+    fallbackCases.forEach(([key, secret]) => {
+      const env = {
+        AUTH_IDENTITY_HASH_KEY_CURRENT: 'current-identity-key-12345678901234567890',
+        [key]: secret,
+      };
+      const result = buildOAuthIdentityHashCandidates('github', 'provider-user-1', env);
+      expect(getLegacyOAuthIdentityHashSecret(env)).toBe(secret);
+      expect(result.legacy).toEqual({
+        version: 'legacy_state_v1',
+        hash: createHmac('sha256', secret)
+          .update('github:provider-user-1', 'utf8')
+          .digest('hex'),
+      });
+    });
+  });
+
+  it('uses the pinned historical identity secret after the OAuth state secret rotates', () => {
+    const result = buildOAuthIdentityHashCandidates('github', 'provider-user-1', {
+      AUTH_IDENTITY_HASH_KEY_CURRENT: 'current-identity-key-12345678901234567890',
+      AUTH_IDENTITY_HASH_KEY_LEGACY_STATE: 'pinned-original-state-key',
+      OAUTH_STATE_SECRET: 'rotated-state-key',
+    });
+
+    expect(result.legacy.hash).toBe(
+      hashLegacyOAuthIdentitySubject('github', 'provider-user-1', 'pinned-original-state-key')
+    );
   });
 
   it('domain-separates providers using the same subject', () => {

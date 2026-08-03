@@ -13,6 +13,7 @@ import {
   loadSiteAuthIdentities,
   loadSiteSession,
   parseCookieHeader,
+  revokeSiteSession,
   revokeAllSiteSessionsForUser,
   serializeCookie,
   unlinkSiteAuthIdentity,
@@ -80,6 +81,20 @@ class SessionLifecycleQuery {
 function createSessionLifecycleAdminClient(rows) {
   return {
     rpc(name, payload) {
+      if (name === 'revoke_app_session_by_token_hashes') {
+        let revokedCount = 0;
+        rows.forEach((row) => {
+          const matches = row.session_token_hash === payload.p_session_token_hash
+            || row.refresh_token_hash === payload.p_refresh_token_hash
+            || row.refresh_token_aliases?.includes(payload.p_refresh_token_hash);
+          if (matches && row.revoked_at === null) {
+            row.revoked_at = payload.p_revoked_at;
+            row.revoke_reason = payload.p_reason;
+            revokedCount += 1;
+          }
+        });
+        return Promise.resolve({ data: revokedCount, error: null });
+      }
       if (name !== 'revoke_all_app_sessions_for_user') {
         throw new Error(`Unexpected RPC: ${name}`);
       }
@@ -220,10 +235,35 @@ function createRefreshableSessionAdminClient({ sessionRow = null, refreshRow = n
     };
     return query;
   });
+  const rpc = vi.fn(async (name, payload) => {
+    if (name === 'is_account_credential_allowed') {
+      return { data: true, error: null };
+    }
+    if (name !== 'rotate_app_session_tokens') {
+      throw new Error(`Unexpected RPC: ${name}`);
+    }
+    if (
+      !refreshRow
+      || refreshRow.id !== payload.p_session_id
+      || refreshRow.refresh_token_hash !== payload.p_expected_refresh_token_hash
+      || refreshRow.revoked_at !== null
+    ) {
+      return { data: null, error: null };
+    }
+    Object.assign(refreshRow, {
+      session_token_hash: payload.p_new_session_token_hash,
+      refresh_token_hash: payload.p_new_refresh_token_hash,
+      expires_at: payload.p_expires_at,
+      last_seen_at: new Date().toISOString(),
+    });
+    return { data: { ...refreshRow }, error: null };
+  });
   return {
     __mocks: {
+      rpc,
       update,
     },
+    rpc,
     from(table) {
       if (table === 'app_sessions') {
         const buildRowResult = (row) => ({
@@ -325,6 +365,7 @@ function createSiteIdentityMutationAdminClient({
   identityInsertConflictRow = null,
   withIdentityRpc = false,
   verifiedPasswordLogin = null,
+  authUsersForRecovery = null,
 } = {}) {
   const identities = [...identityRows];
   const updates = [];
@@ -354,7 +395,22 @@ function createSiteIdentityMutationAdminClient({
             error: null,
           };
         }
-        if (name !== 'claim_oauth_identity') {
+        if (name === 'refresh_oauth_account_security_state') {
+          const authUser = authUserById[payload.p_user_id] || null;
+          const hasPassword = verifiedPasswordLogin ?? Boolean(authUser?.encrypted_password);
+          const state = {
+            user_id: payload.p_user_id,
+            email_verification_required: payload.p_requires_email === true,
+            password_change_required: !hasPassword,
+            password_setup_capability_id: payload.p_created ? payload.p_capability_id : null,
+            password_setup_capability_status: payload.p_created && !hasPassword ? 'available' : null,
+          };
+          if (payload.p_requires_email || !hasPassword) {
+            securityStates.push(state);
+          }
+          return { data: state, error: null };
+        }
+        if (name !== 'claim_oauth_identity_v2') {
           throw new Error(`Unexpected RPC: ${name}`);
         }
         const current = identities.find((identity) => (
@@ -363,7 +419,7 @@ function createSiteIdentityMutationAdminClient({
         ));
         const previous = identities.find((identity) => (
           identity.provider === payload.p_provider
-          && identity.provider_subject_hash === payload.p_previous_hash
+          && payload.p_candidate_hashes.includes(identity.provider_subject_hash)
         ));
         const identity = current || previous;
         if (identity && identity.user_id !== payload.p_user_id) {
@@ -386,6 +442,15 @@ function createSiteIdentityMutationAdminClient({
     } : {}),
     auth: {
       admin: {
+        ...(Array.isArray(authUsersForRecovery) ? {
+          listUsers: vi.fn(async () => ({
+            data: {
+              users: authUsersForRecovery,
+              total: authUsersForRecovery.length,
+            },
+            error: null,
+          })),
+        } : {}),
         getUserById: vi.fn(async (userId) => ({
           data: {
             user: authUserById[userId] || null,
@@ -773,7 +838,7 @@ describe('siteSession utilities', () => {
       profile: {
         username: 'linuxdo_user',
       },
-      sessionId: 'session-id',
+      sessionBinding: '10000000-0000-4000-8000-0000000000ab',
       ttlSeconds: 300,
     });
 
@@ -783,7 +848,8 @@ describe('siteSession utilities', () => {
     expect(payload.sub).toBe('00000000-0000-4000-8000-000000000001');
     expect(payload.role).toBe('authenticated');
     expect(payload.user_metadata.username).toBe('linuxdo_user');
-    expect(payload.session_id).toBe('session-id');
+    expect(payload.session_binding).toBe('10000000-0000-4000-8000-0000000000ab');
+    expect(payload.session_id).toBeUndefined();
   });
 
   it('revokes every active session for a user and invalidates compatibility token lookup', async () => {
@@ -831,6 +897,78 @@ describe('siteSession utilities', () => {
       now,
     })).resolves.toMatchObject({ ok: true, active: false });
     expect(rows[2].revoked_at).toBeNull();
+  });
+
+  it('revokes the database session when only the refresh cookie remains', async () => {
+    process.env.APP_SESSION_SECRET = 'site-session-test-secret';
+    const refreshToken = 'refresh-only-token';
+    const rows = [{
+      id: 'refresh-only-session',
+      user_id: 'user-1',
+      session_token_hash: 'expired-session-token-hash',
+      refresh_token_hash: createHmac('sha256', process.env.APP_SESSION_SECRET)
+        .update(`refresh:${refreshToken}`, 'utf8')
+        .digest('hex'),
+      revoked_at: null,
+    }];
+    const req = createRequest();
+    req.headers.cookie = `__Secure-eg_refresh=${refreshToken}`;
+    const res = createResponseRecorder();
+
+    await revokeSiteSession(createSessionLifecycleAdminClient(rows), { req, res });
+
+    expect(rows[0]).toMatchObject({
+      revoke_reason: 'user_logout',
+      revoked_at: expect.any(String),
+    });
+    expect(res.headers['Set-Cookie']).toHaveLength(2);
+  });
+
+  it('revokes a rotated session family through a historical refresh hash', async () => {
+    process.env.APP_SESSION_SECRET = 'site-session-test-secret';
+    const oldRefreshToken = 'stolen-old-refresh-token';
+    const oldRefreshHash = createHmac('sha256', process.env.APP_SESSION_SECRET)
+      .update(`refresh:${oldRefreshToken}`, 'utf8')
+      .digest('hex');
+    const rows = [{
+      id: 'rotated-session',
+      user_id: 'user-1',
+      session_token_hash: 'current-session-token-hash',
+      refresh_token_hash: 'current-refresh-token-hash',
+      refresh_token_aliases: [oldRefreshHash],
+      revoked_at: null,
+    }];
+    const req = createRequest();
+    req.headers.cookie = `__Secure-eg_refresh=${oldRefreshToken}`;
+
+    const result = await revokeSiteSession(createSessionLifecycleAdminClient(rows), {
+      req,
+      res: createResponseRecorder(),
+    });
+
+    expect(result).toEqual({ ok: true, revokedCount: 1 });
+    expect(rows[0].revoked_at).toEqual(expect.any(String));
+  });
+
+  it('reports database revocation errors while still clearing cookies', async () => {
+    process.env.APP_SESSION_SECRET = 'site-session-test-secret';
+    const req = createRequest();
+    req.headers.cookie = '__Secure-eg_refresh=refresh-token';
+    const res = createResponseRecorder();
+    const adminClient = {
+      rpc: vi.fn(async () => ({
+        data: null,
+        error: { code: 'database_unavailable', message: 'database unavailable' },
+      })),
+    };
+
+    const result = await revokeSiteSession(adminClient, { req, res });
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'database_unavailable',
+    });
+    expect(res.headers['Set-Cookie']).toHaveLength(2);
   });
 
   it('loads redacted site-managed OAuth identities for the settings page', async () => {
@@ -890,8 +1028,10 @@ describe('siteSession utilities', () => {
       refreshRow: {
         id: 'session-id',
         user_id: '00000000-0000-4000-8000-000000000001',
+        compat_session_binding: '10000000-0000-4000-8000-0000000000ab',
         session_token_hash: 'old-session-hash',
         refresh_token_hash: oldRefreshHash,
+        revoked_at: null,
         absolute_expires_at: new Date(Date.now() + 3600000).toISOString(),
         expires_at: new Date(Date.now() - 1000).toISOString(),
         last_seen_at: new Date(Date.now() - 1000).toISOString(),
@@ -941,7 +1081,13 @@ describe('siteSession utilities', () => {
     expect(result.session.id).toBe('session-id');
     expect(result.user.id).toBe('00000000-0000-4000-8000-000000000001');
     expect(result.identities).toHaveLength(1);
-    expect(adminClient.__mocks.update).toHaveBeenCalled();
+    expect(adminClient.__mocks.rpc).toHaveBeenCalledWith(
+      'rotate_app_session_tokens',
+      expect.objectContaining({
+        p_session_id: 'session-id',
+        p_expected_refresh_token_hash: oldRefreshHash,
+      })
+    );
     expect(res.headers['Set-Cookie']).toHaveLength(2);
     expect(res.headers['Set-Cookie'][1]).toContain('__Secure-eg_refresh=');
     expect(res.headers['Set-Cookie'][1]).toContain('Path=/api/auth/session');
@@ -1162,15 +1308,121 @@ describe('siteSession utilities', () => {
     expect(result.ok).toBe(true);
     expect(result.created).toBe(false);
     expect(adminClient.auth.admin.createUser).not.toHaveBeenCalled();
-    expect(adminClient.rpc).toHaveBeenCalledWith('claim_oauth_identity', expect.objectContaining({
+    expect(adminClient.rpc).toHaveBeenCalledWith('claim_oauth_identity_v2', expect.objectContaining({
       p_current_hash: 'current-subject-hash',
       p_current_version: 'v2',
-      p_previous_hash: 'previous-subject-hash',
-      p_previous_version: 'v1',
+      p_candidate_hashes: ['previous-subject-hash'],
     }));
     expect(adminClient.__mocks.identities[0]).toMatchObject({
       user_id: userId,
       provider_subject_hash: 'current-subject-hash',
+      provider_subject_hash_key_version: 'v2',
+    });
+  });
+
+  it('reuses an account stored with the real legacy state-secret hash', async () => {
+    process.env.APP_SESSION_SECRET = 'site-session-test-secret';
+    const userId = '00000000-0000-4000-8000-000000000001';
+    const adminClient = createSiteIdentityMutationAdminClient({
+      withIdentityRpc: true,
+      profileRow: {
+        id: userId,
+        username: 'legacy-user',
+        email: 'legacy@example.com',
+        role: 'user',
+      },
+      identityRows: [{
+        id: 'identity-real-legacy',
+        user_id: userId,
+        provider: 'github',
+        provider_subject_hash: 'real-legacy-state-hash',
+        provider_subject_hash_key_version: 'legacy_state_v1',
+        display_name: 'Legacy User',
+        disabled_at: null,
+      }],
+      authUserById: {
+        [userId]: {
+          id: userId,
+          email: 'legacy@example.com',
+          email_confirmed_at: '2026-06-01T00:00:00.000Z',
+          encrypted_password: '$2a$10$hash',
+        },
+      },
+    });
+
+    const result = await createOrLinkOAuthUserAndSession(adminClient, {
+      profile: {
+        provider: 'github',
+        subject: '123',
+        username: 'legacy-user',
+        displayName: 'Legacy User',
+      },
+      subjectHash: 'current-dedicated-hash',
+      subjectHashVersion: 'v2',
+      previousSubjectHash: 'previous-dedicated-hash',
+      previousSubjectHashVersion: 'v1',
+      legacySubjectHash: 'real-legacy-state-hash',
+      legacySubjectHashVersion: 'legacy_state_v1',
+      profileHash: 'profile-hash-v2',
+      req: createRequest(),
+      res: createResponseRecorder(),
+    });
+
+    expect(result).toMatchObject({ ok: true, created: false });
+    expect(adminClient.auth.admin.createUser).not.toHaveBeenCalled();
+    expect(adminClient.rpc).toHaveBeenCalledWith('claim_oauth_identity_v2', expect.objectContaining({
+      p_current_hash: 'current-dedicated-hash',
+      p_candidate_hashes: ['previous-dedicated-hash', 'real-legacy-state-hash'],
+    }));
+    expect(adminClient.__mocks.identities[0]).toMatchObject({
+      user_id: userId,
+      provider_subject_hash: 'current-dedicated-hash',
+      provider_subject_hash_key_version: 'v2',
+    });
+  });
+
+  it('recovers an old orphan Auth user that predates identity hash metadata', async () => {
+    process.env.APP_SESSION_SECRET = 'site-session-test-secret';
+    const userId = '00000000-0000-4000-8000-000000000077';
+    const legacyHash = 'a'.repeat(64);
+    const oldAuthUser = {
+      id: userId,
+      email: buildSyntheticOAuthEmail('github', legacyHash),
+      email_confirmed_at: '2026-05-01T00:00:00.000Z',
+      user_metadata: {
+        auth_provider: 'github',
+        synthetic_oauth_email: true,
+        username: 'legacy-orphan',
+      },
+    };
+    const adminClient = createSiteIdentityMutationAdminClient({
+      withIdentityRpc: true,
+      profileRow: null,
+      authUsersForRecovery: [oldAuthUser],
+      authUserById: { [userId]: oldAuthUser },
+    });
+
+    const result = await createOrLinkOAuthUserAndSession(adminClient, {
+      profile: {
+        provider: 'github',
+        subject: '123',
+        username: 'legacy-orphan',
+        displayName: 'Legacy Orphan',
+      },
+      subjectHash: 'b'.repeat(64),
+      subjectHashVersion: 'v2',
+      legacySubjectHash: legacyHash,
+      legacySubjectHashVersion: 'legacy_state_v1',
+      profileHash: 'profile-hash-v2',
+      req: createRequest(),
+      res: createResponseRecorder(),
+    });
+
+    expect(result).toMatchObject({ ok: true, created: false });
+    expect(adminClient.auth.admin.createUser).not.toHaveBeenCalled();
+    expect(adminClient.__mocks.identities[0]).toMatchObject({
+      user_id: userId,
+      provider_subject_hash: 'b'.repeat(64),
       provider_subject_hash_key_version: 'v2',
     });
   });
@@ -1221,9 +1473,10 @@ describe('siteSession utilities', () => {
 
     expect(result.ok).toBe(true);
     expect(result.created).toBe(false);
-    expect(adminClient.rpc).toHaveBeenCalledWith('has_verified_password_login', {
-      p_user_id: userId,
-    });
+    expect(adminClient.rpc).toHaveBeenCalledWith(
+      'refresh_oauth_account_security_state',
+      expect.objectContaining({ p_user_id: userId })
+    );
     expect(adminClient.__mocks.securityStates).toEqual([]);
   });
 

@@ -3,6 +3,7 @@ import { normalizeOAuthProvider } from './oauthProviders.js';
 
 const MIN_IDENTITY_KEY_LENGTH = 32;
 const DEFAULT_CURRENT_VERSION = 'v2';
+const LEGACY_STATE_VERSION = 'legacy_state_v1';
 
 function normalizeSecret(value) {
   return String(value || '').trim();
@@ -23,6 +24,30 @@ export function hashOAuthIdentitySubject(provider, subject, key) {
   return createHmac('sha256', normalizedKey)
     .update(`endfield-gacha:oauth-identity:v1:${normalizedProvider}:${normalizedSubject}`, 'utf8')
     .digest('hex');
+}
+
+export function hashLegacyOAuthIdentitySubject(provider, subject, stateSecret) {
+  const normalizedProvider = normalizeOAuthProvider(provider);
+  const normalizedSubject = String(subject || '').trim();
+  const normalizedSecret = normalizeSecret(stateSecret);
+  if (!normalizedProvider || !normalizedSubject || !normalizedSecret) {
+    throw new Error('oauth_legacy_identity_hash_input_invalid');
+  }
+
+  return createHmac('sha256', normalizedSecret)
+    .update(`${normalizedProvider}:${normalizedSubject}`, 'utf8')
+    .digest('hex');
+}
+
+export function getLegacyOAuthIdentityHashSecret(env = globalThis.process?.env || {}) {
+  return normalizeSecret(
+    env.AUTH_IDENTITY_HASH_KEY_LEGACY_STATE
+    || env.OAUTH_STATE_SECRET
+    || env.AUTH_SECURITY_HASH_SECRET
+    || env.MAIL_ABUSE_HASH_SECRET
+    || env.SUPABASE_JWT_SECRET
+    || ''
+  );
 }
 
 export function getOAuthIdentityHashKeyring(env = globalThis.process?.env || {}) {
@@ -86,16 +111,29 @@ export function buildOAuthIdentityHashCandidates(provider, subject, env = global
     version: keyring.previous.version,
     hash: hashOAuthIdentitySubject(provider, subject, keyring.previous.key),
   } : null;
+  const legacyStateSecret = getLegacyOAuthIdentityHashSecret(env);
+  const legacy = legacyStateSecret ? {
+    version: LEGACY_STATE_VERSION,
+    hash: hashLegacyOAuthIdentitySubject(provider, subject, legacyStateSecret),
+  } : null;
+  const distinctLegacy = legacy
+    && legacy.hash !== current.hash
+    && legacy.hash !== previous?.hash
+    ? legacy
+    : null;
 
   return {
     ok: true,
     current,
     previous: previous?.hash === current.hash ? null : previous,
+    legacy: distinctLegacy,
   };
 }
 
 export default {
   buildOAuthIdentityHashCandidates,
+  getLegacyOAuthIdentityHashSecret,
   getOAuthIdentityHashKeyring,
+  hashLegacyOAuthIdentitySubject,
   hashOAuthIdentitySubject,
 };

@@ -20,7 +20,7 @@ function buildSupabaseSessionPayload(payload) {
     token_type: payload.supabase.tokenType || 'bearer',
     expires_in: payload.supabase.expiresIn || 3600,
     expires_at: payload.supabase.expiresAt || Math.floor(Date.now() / 1000) + 3600,
-    refresh_token: `site_session_${payload?.session?.id || user.id}`,
+    refresh_token: 'site_session_compat',
     user,
   };
 }

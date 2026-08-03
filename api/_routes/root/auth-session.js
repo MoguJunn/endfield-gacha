@@ -73,7 +73,7 @@ function buildSessionPayload(sessionResult) {
   const compatToken = createSupabaseCompatAccessToken({
     user: sessionResult.user,
     profile: sessionResult.profile,
-    sessionId: sessionResult.session?.id,
+    sessionBinding: sessionResult.session?.compat_session_binding || '',
     ttlSeconds: sessionResult.config?.compatJwtTtlSeconds,
   });
 
@@ -86,7 +86,6 @@ function buildSessionPayload(sessionResult) {
       profile: sessionResult.profile,
       identities: sessionResult.identities || [],
       session: {
-        id: sessionResult.session?.id || null,
         expiresAt: sessionResult.session?.expires_at || null,
         absoluteExpiresAt: sessionResult.session?.absolute_expires_at || null,
         lastSeenAt: sessionResult.session?.last_seen_at || null,
@@ -195,18 +194,30 @@ export async function authSessionLogoutHandler(req, res) {
   }
 
   const adminClient = getSupabaseAdminClient();
-  if (adminClient) {
-    await revokeSiteSession(adminClient, {
-      req,
+  if (!adminClient) {
+    clearSiteSessionCookies(res, req);
+    return sendJsonError(res, 503, 'supabase_admin_not_configured', 'Session revocation service is not configured.');
+  }
+
+  const revokeResult = await revokeSiteSession(adminClient, {
+    req,
+    res,
+    reason: 'user_logout',
+  });
+  if (!revokeResult.ok) {
+    return sendJsonError(
       res,
-      reason: 'user_logout',
-    });
+      500,
+      revokeResult.code || 'site_session_revoke_failed',
+      revokeResult.reason || 'Failed to revoke the site session.'
+    );
   }
 
   return res.status(200).json({
     success: true,
     data: {
       signedOut: true,
+      revokedCount: revokeResult.revokedCount,
     },
     meta: {
       cache: 'no-store',

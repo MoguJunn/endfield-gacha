@@ -419,27 +419,25 @@ async function rotateSessionTokens(adminClient, {
   const absoluteExpiresAtMs = new Date(sessionRow.absolute_expires_at).getTime();
   const expiresAt = new Date(Math.min(expiresAtMs, absoluteExpiresAtMs));
 
-  const updatePayload = {
-    last_seen_at: now.toISOString(),
-    expires_at: expiresAt.toISOString(),
-    absolute_expires_at: new Date(absoluteExpiresAtMs).toISOString(),
-  };
-
   const sessionToken = createRandomToken();
   const refreshToken = createRandomToken();
-  updatePayload.session_token_hash = hashToken(sessionToken, config.secret, 'session');
-  updatePayload.refresh_token_hash = hashToken(refreshToken, config.secret, 'refresh');
-
-  const query = adminClient
-    .from('app_sessions')
-    .update(updatePayload)
-    .eq('id', sessionRow.id)
-    .eq('refresh_token_hash', expectedRefreshTokenHash)
-    .is('revoked_at', null)
-    .select('*');
-  const { data: rotatedSession, error } = typeof query.maybeSingle === 'function'
-    ? await query.maybeSingle()
-    : await query.single();
+  if (typeof adminClient?.rpc !== 'function') {
+    throw Object.assign(new Error('Atomic session rotation RPC is unavailable'), {
+      code: 'site_session_rotation_unavailable',
+    });
+  }
+  const rotateQuery = adminClient.rpc('rotate_app_session_tokens', {
+    p_session_id: sessionRow.id,
+    p_expected_refresh_token_hash: expectedRefreshTokenHash,
+    p_new_session_token_hash: hashToken(sessionToken, config.secret, 'session'),
+    p_new_refresh_token_hash: hashToken(refreshToken, config.secret, 'refresh'),
+    p_expires_at: expiresAt.toISOString(),
+    p_idle_cutoff: new Date(now.getTime() - config.idleTtlSeconds * 1000).toISOString(),
+  });
+  const { data, error } = typeof rotateQuery?.maybeSingle === 'function'
+    ? await rotateQuery.maybeSingle()
+    : await rotateQuery;
+  const rotatedSession = Array.isArray(data) ? data[0] || null : data || null;
 
   if (error) {
     throw error;
@@ -448,8 +446,8 @@ async function rotateSessionTokens(adminClient, {
     return null;
   }
 
-    appendSetCookieHeader(res, serializeCookie(config.sessionCookieName, sessionToken, {
-      maxAgeSeconds: config.sessionTtlSeconds,
+  appendSetCookieHeader(res, serializeCookie(config.sessionCookieName, sessionToken, {
+    maxAgeSeconds: config.sessionTtlSeconds,
     secure,
   }));
   appendSetCookieHeader(res, serializeCookie(config.refreshCookieName, refreshToken, {
@@ -518,6 +516,24 @@ async function upsertOAuthSecurityState(adminClient, {
   }
 
   const requiresEmail = !hasUsableEmail(profile, authUser);
+  if (typeof adminClient?.rpc === 'function') {
+    const refreshQuery = adminClient.rpc('refresh_oauth_account_security_state', {
+      p_user_id: userId,
+      p_requires_email: requiresEmail,
+      p_created: created,
+      p_capability_id: created ? randomUUID() : null,
+    });
+    const { data, error } = typeof refreshQuery?.maybeSingle === 'function'
+      ? await refreshQuery.maybeSingle()
+      : await refreshQuery;
+    if (error) {
+      throw Object.assign(new Error(error.message || 'oauth_security_state_refresh_failed'), {
+        code: error.code || 'oauth_security_state_refresh_failed',
+      });
+    }
+    return Array.isArray(data) ? data[0] || null : data || null;
+  }
+
   const requiresPassword = created
     ? !hasSitePassword(authUser)
     : !await hasVerifiedPasswordLogin(adminClient, {
@@ -701,6 +717,8 @@ async function recoverOAuthAuthUser(adminClient, {
   subjectHashVersion,
   previousSubjectHash = '',
   previousSubjectHashVersion = '',
+  legacySubjectHash = '',
+  legacySubjectHashVersion = '',
 }) {
   if (typeof adminClient?.auth?.admin?.listUsers !== 'function') {
     return null;
@@ -709,6 +727,7 @@ async function recoverOAuthAuthUser(adminClient, {
   const candidates = [
     { hash: subjectHash, version: subjectHashVersion },
     { hash: previousSubjectHash, version: previousSubjectHashVersion },
+    { hash: legacySubjectHash, version: legacySubjectHashVersion },
   ].filter((candidate) => candidate.hash && candidate.version);
 
   for (const candidate of candidates) {
@@ -718,11 +737,17 @@ async function recoverOAuthAuthUser(adminClient, {
       continue;
     }
     const metadata = authUser.user_metadata || authUser.raw_user_meta_data || {};
+    const authEmail = normalizeString(authUser.email, 320).toLowerCase();
+    const matchesVersionedMetadata = metadata.oauth_identity_hash === candidate.hash
+      && metadata.oauth_identity_hash_key_version === candidate.version;
+    const matchesUnversionedLegacyMetadata = candidate.version === 'legacy_state_v1'
+      && !metadata.oauth_identity_hash
+      && !metadata.oauth_identity_hash_key_version;
     if (
-      metadata.auth_provider === profile.provider
+      authEmail === syntheticEmail
+      && metadata.auth_provider === profile.provider
       && metadata.synthetic_oauth_email === true
-      && metadata.oauth_identity_hash === candidate.hash
-      && metadata.oauth_identity_hash_key_version === candidate.version
+      && (matchesVersionedMetadata || matchesUnversionedLegacyMetadata)
     ) {
       return authUser;
     }
@@ -751,7 +776,7 @@ async function upsertOAuthIdentity(adminClient, {
   subjectHash,
   subjectHashVersion = '',
   previousSubjectHash = '',
-  previousSubjectHashVersion = '',
+  legacySubjectHash = '',
   profileHash,
   secret,
 }) {
@@ -781,13 +806,12 @@ async function upsertOAuthIdentity(adminClient, {
       unavailableError.code = 'oauth_identity_claim_unavailable';
       throw unavailableError;
     }
-    const claimQuery = adminClient.rpc('claim_oauth_identity', {
+    const claimQuery = adminClient.rpc('claim_oauth_identity_v2', {
       p_user_id: userId,
       p_provider: profile.provider,
       p_current_hash: subjectHash,
       p_current_version: subjectHashVersion,
-      p_previous_hash: previousSubjectHash || null,
-      p_previous_version: previousSubjectHashVersion || null,
+      p_candidate_hashes: [previousSubjectHash, legacySubjectHash].filter(Boolean),
     });
     const { data: claimData, error: claimError } = typeof claimQuery?.maybeSingle === 'function'
       ? await claimQuery.maybeSingle()
@@ -874,32 +898,25 @@ async function resolveOAuthIdentity(adminClient, {
   provider,
   subjectHash,
   previousSubjectHash = '',
+  legacySubjectHash = '',
 }) {
-  const { data, error } = await adminClient
-    .from('app_auth_identities')
-    .select('*')
-    .eq('provider', provider)
-    .eq('provider_subject_hash', subjectHash)
-    .maybeSingle();
-
-  if (error) {
-    throw error;
+  const candidates = [subjectHash, previousSubjectHash, legacySubjectHash]
+    .filter((hash, index, hashes) => hash && hashes.indexOf(hash) === index);
+  for (const candidateHash of candidates) {
+    const { data, error } = await adminClient
+      .from('app_auth_identities')
+      .select('*')
+      .eq('provider', provider)
+      .eq('provider_subject_hash', candidateHash)
+      .maybeSingle();
+    if (error) {
+      throw error;
+    }
+    if (data) {
+      return data;
+    }
   }
-  if (data || !previousSubjectHash || previousSubjectHash === subjectHash) {
-    return data || null;
-  }
-
-  const { data: previousData, error: previousError } = await adminClient
-    .from('app_auth_identities')
-    .select('*')
-    .eq('provider', provider)
-    .eq('provider_subject_hash', previousSubjectHash)
-    .maybeSingle();
-
-  if (previousError) {
-    throw previousError;
-  }
-  return previousData || null;
+  return null;
 }
 
 async function loadSiteIdentityById(adminClient, identityId) {
@@ -1218,23 +1235,38 @@ export async function revokeSiteSession(adminClient, {
   const secure = isSecureRequest(req, env);
   const config = getSiteSessionConfig(env, { secure });
   const cookies = parseCookieHeader(req?.headers?.cookie || '');
-  const token = cookies[config.sessionCookieName];
-  if (token && config.secret && adminClient?.from) {
-    await adminClient
-      .from('app_sessions')
-      .update({
-        revoked_at: new Date().toISOString(),
-        revoke_reason: reason,
-      })
-      .eq('session_token_hash', hashToken(token, config.secret, 'session'))
-      .is('revoked_at', null);
-  }
-
+  const sessionToken = cookies[config.sessionCookieName];
+  const refreshToken = cookies[config.refreshCookieName];
   if (res) {
     clearSiteSessionCookies(res, req, env);
   }
 
-  return { ok: true };
+  if (!sessionToken && !refreshToken) {
+    return { ok: true, revokedCount: 0 };
+  }
+  if (!config.secret || typeof adminClient?.rpc !== 'function') {
+    return { ok: false, code: 'site_session_revoke_unavailable' };
+  }
+
+  const { data, error } = await adminClient.rpc('revoke_app_session_by_token_hashes', {
+    p_session_token_hash: sessionToken
+      ? hashToken(sessionToken, config.secret, 'session')
+      : null,
+    p_refresh_token_hash: refreshToken
+      ? hashToken(refreshToken, config.secret, 'refresh')
+      : null,
+    p_reason: normalizeString(reason, 120) || 'user_logout',
+    p_revoked_at: new Date().toISOString(),
+  });
+  if (error) {
+    return {
+      ok: false,
+      code: error.code || 'site_session_revoke_failed',
+      reason: error.message,
+    };
+  }
+
+  return { ok: true, revokedCount: Math.max(0, Number(data) || 0) };
 }
 
 export async function loadActiveSiteSessionById(adminClient, {
@@ -1253,6 +1285,44 @@ export async function loadActiveSiteSessionById(adminClient, {
     .from('app_sessions')
     .select('id, user_id, expires_at, absolute_expires_at')
     .eq('id', normalizedSessionId)
+    .eq('user_id', normalizedUserId)
+    .is('revoked_at', null)
+    .gt('expires_at', nowIso)
+    .gt('absolute_expires_at', nowIso)
+    .maybeSingle();
+
+  if (error) {
+    return {
+      ok: false,
+      active: false,
+      code: error.code || 'site_session_lookup_failed',
+      reason: error.message,
+    };
+  }
+
+  return {
+    ok: true,
+    active: Boolean(data?.id),
+    session: data || null,
+  };
+}
+
+export async function loadActiveSiteSessionByBinding(adminClient, {
+  sessionBinding,
+  userId,
+  now = Date.now(),
+} = {}) {
+  const normalizedBinding = normalizeString(sessionBinding, 80);
+  const normalizedUserId = normalizeString(userId, 80);
+  if (!adminClient?.from || !normalizedBinding || !normalizedUserId) {
+    return { ok: false, active: false, code: 'site_session_lookup_invalid' };
+  }
+
+  const nowIso = new Date(Number(now)).toISOString();
+  const { data, error } = await adminClient
+    .from('app_sessions')
+    .select('id, user_id, expires_at, absolute_expires_at')
+    .eq('compat_session_binding', normalizedBinding)
     .eq('user_id', normalizedUserId)
     .is('revoked_at', null)
     .gt('expires_at', nowIso)
@@ -1308,7 +1378,7 @@ export async function revokeAllSiteSessionsForUser(adminClient, {
 export function createSupabaseCompatAccessToken({
   user,
   profile = null,
-  sessionId = '',
+  sessionBinding = '',
   env = readEnvironment(),
   ttlSeconds,
 } = {}) {
@@ -1341,7 +1411,7 @@ export function createSupabaseCompatAccessToken({
       site_session: true,
     },
     aal: 'aal1',
-    session_id: sessionId || '',
+    session_binding: sessionBinding || '',
     iat: nowSeconds,
     exp: nowSeconds + expiresIn,
   };
@@ -1360,6 +1430,8 @@ export async function createOrLinkOAuthUserAndSession(adminClient, {
   subjectHashVersion = '',
   previousSubjectHash = '',
   previousSubjectHashVersion = '',
+  legacySubjectHash = '',
+  legacySubjectHashVersion = '',
   profileHash,
   req,
   res,
@@ -1380,6 +1452,7 @@ export async function createOrLinkOAuthUserAndSession(adminClient, {
     provider: profile.provider,
     subjectHash,
     previousSubjectHash,
+    legacySubjectHash,
   });
   let authUser = null;
   let created = false;
@@ -1406,6 +1479,8 @@ export async function createOrLinkOAuthUserAndSession(adminClient, {
       subjectHashVersion,
       previousSubjectHash,
       previousSubjectHashVersion,
+      legacySubjectHash,
+      legacySubjectHashVersion,
     });
     if (!authUser) {
       authUser = await createOAuthAuthUser(adminClient, {
@@ -1422,7 +1497,7 @@ export async function createOrLinkOAuthUserAndSession(adminClient, {
         subjectHash,
         subjectHashVersion,
         previousSubjectHash,
-        previousSubjectHashVersion,
+        legacySubjectHash,
         profileHash,
         secret,
       });
@@ -1442,7 +1517,7 @@ export async function createOrLinkOAuthUserAndSession(adminClient, {
       subjectHash,
       subjectHashVersion,
       previousSubjectHash,
-      previousSubjectHashVersion,
+      legacySubjectHash,
       profileHash,
       secret,
     });
@@ -1515,7 +1590,7 @@ export async function linkOAuthIdentityToSiteSession(adminClient, {
   subjectHash,
   subjectHashVersion = '',
   previousSubjectHash = '',
-  previousSubjectHashVersion = '',
+  legacySubjectHash = '',
   profileHash,
   req,
   env = readEnvironment(),
@@ -1557,6 +1632,7 @@ export async function linkOAuthIdentityToSiteSession(adminClient, {
     provider: profile.provider,
     subjectHash,
     previousSubjectHash,
+    legacySubjectHash,
   });
 
   if (existingIdentity?.user_id && existingIdentity.user_id !== sessionResult.user.id) {
@@ -1580,7 +1656,7 @@ export async function linkOAuthIdentityToSiteSession(adminClient, {
     subjectHash,
     subjectHashVersion,
     previousSubjectHash,
-    previousSubjectHashVersion,
+    legacySubjectHash,
     profileHash,
     secret,
   });

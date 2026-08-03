@@ -132,7 +132,7 @@ describe('siteSessionService', () => {
           },
           identities: [],
           session: {
-            id: 'site-session-id',
+            expiresAt: '2026-08-03T08:00:00.000Z',
           },
           supabase: {
             accessToken: 'compat-access-token',
@@ -176,7 +176,7 @@ describe('siteSessionService', () => {
           },
           identities: [],
           session: {
-            id: 'site-session-id',
+            expiresAt: '2026-08-03T08:00:00.000Z',
           },
           supabase: {
             accessToken: 'compat-access-token',
@@ -194,7 +194,7 @@ describe('siteSessionService', () => {
     expect(result.supabaseSessionSynced).toBe(true);
     expect(supabase.auth.setSession).toHaveBeenCalledWith(expect.objectContaining({
       access_token: 'compat-access-token',
-      refresh_token: 'site_session_site-session-id',
+      refresh_token: 'site_session_compat',
       user: expect.objectContaining({
         id: '00000000-0000-4000-8000-000000000001',
       }),
@@ -217,7 +217,7 @@ describe('siteSessionService', () => {
           },
           identities: [],
           session: {
-            id: 'site-session-id',
+            expiresAt: '2026-08-03T08:00:00.000Z',
           },
           supabase: {
             accessToken: 'compat-access-token',

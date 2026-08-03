@@ -83,7 +83,9 @@ CREATE TABLE storage.objects (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
-CREATE OR REPLACE FUNCTION auth.uid() RETURNS UUID LANGUAGE sql STABLE AS $$ SELECT NULL::UUID $$;
+CREATE OR REPLACE FUNCTION auth.uid() RETURNS UUID LANGUAGE sql STABLE AS $$
+  SELECT (NULLIF(current_setting('request.jwt.claims', TRUE), '')::JSONB ->> 'sub')::UUID
+$$;
 CREATE OR REPLACE FUNCTION auth.role() RETURNS TEXT LANGUAGE sql STABLE AS $$ SELECT CURRENT_USER::TEXT $$;
 `.trim();
 }
@@ -190,6 +192,24 @@ SELECT 'password_finish=' || public.finish_oauth_password_setup_capability(
   NULL
 );
 
+SELECT 'password_finish_replay=' || public.finish_oauth_password_setup_capability(
+  '00000000-0000-4000-8000-000000000001',
+  '20000000-0000-4000-8000-000000000001',
+  'completed',
+  NULL
+);
+
+SELECT 'oauth_password_race_closed=' || (
+  password_change_required IS FALSE
+  AND password_setup_capability_status = 'completed'
+)
+FROM public.refresh_oauth_account_security_state(
+  '00000000-0000-4000-8000-000000000001',
+  FALSE,
+  FALSE,
+  NULL
+);
+
 DO $$
 BEGIN
   BEGIN
@@ -249,6 +269,63 @@ SELECT 'expired_credential_allowed=' || public.is_account_credential_allowed(
 
 RESET ROLE;
 
+INSERT INTO public.official_import_tasks (
+  id,
+  user_id,
+  source,
+  import_mode,
+  game_uid,
+  server_id,
+  status,
+  access_key_hash,
+  expires_at
+)
+VALUES (
+  '60000000-0000-4000-8000-000000000001',
+  '00000000-0000-4000-8000-000000000002',
+  'cn',
+  'full',
+  'security-gate-uid',
+  '1',
+  'confirming',
+  'security-gate-access-key-hash',
+  NOW() + INTERVAL '30 minutes'
+);
+
+SET ROLE service_role;
+
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.commit_official_import_records(
+      '60000000-0000-4000-8000-000000000001',
+      '00000000-0000-4000-8000-000000000002',
+      '[{"pool_id":"security_gate_pool","name":"Security Gate","type":"limited"}]'::JSONB,
+      '[{"record_id":"security-gate-record","pool_id":"security_gate_pool","seq_id":"1","game_uid":"security-gate-uid","rarity":4,"timestamp":"2026-08-03T00:00:00Z","server_id":"1","item_name":"Security Gate"}]'::JSONB
+    );
+    RAISE EXCEPTION 'expired credential committed official import records';
+  EXCEPTION WHEN invalid_authorization_specification THEN NULL;
+  END;
+END $$;
+
+RESET ROLE;
+
+SELECT 'expired_commit_blocked=' || (
+  import_task.status = 'confirming'
+  AND NOT EXISTS (
+    SELECT 1 FROM public.pools
+    WHERE user_id = import_task.user_id
+      AND pool_id = 'security_gate_pool'
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM public.history
+    WHERE user_id = import_task.user_id
+      AND record_id = 'security-gate-record'
+  )
+)
+FROM public.official_import_tasks AS import_task
+WHERE import_task.id = '60000000-0000-4000-8000-000000000001';
+
 UPDATE auth.users
 SET
   encrypted_password = 'temporary-password-hash',
@@ -293,6 +370,31 @@ FROM public.claim_oauth_identity(
   'v2',
   'previous-subject-hash',
   'v1'
+);
+
+INSERT INTO public.app_auth_identities (
+  id,
+  user_id,
+  provider,
+  provider_subject_hash,
+  provider_subject_hash_key_version
+)
+VALUES (
+  '40000000-0000-4000-8000-000000000003',
+  '00000000-0000-4000-8000-000000000003',
+  'github',
+  'real-legacy-state-hash',
+  'legacy_state_v1'
+);
+
+SELECT 'legacy_identity_migrated=' || user_id || ':'
+  || provider_subject_hash || ':' || provider_subject_hash_key_version
+FROM public.claim_oauth_identity_v2(
+  '00000000-0000-4000-8000-000000000003',
+  'github',
+  'current-dedicated-hash',
+  'v2',
+  ARRAY['previous-dedicated-hash', 'real-legacy-state-hash']
 );
 
 DO $$
@@ -346,12 +448,182 @@ BEGIN
   END IF;
   IF has_function_privilege('authenticated', 'public.claim_oauth_identity(uuid,text,text,text,text,text)', 'EXECUTE')
     OR has_function_privilege('authenticated', 'public.consume_account_email_challenge(text,text,uuid)', 'EXECUTE')
-    OR has_function_privilege('authenticated', 'public.has_verified_password_login(uuid)', 'EXECUTE') THEN
+    OR has_function_privilege('authenticated', 'public.has_verified_password_login(uuid)', 'EXECUTE')
+    OR has_function_privilege('authenticated', 'public.claim_oauth_identity_v2(uuid,text,text,text,text[])', 'EXECUTE')
+    OR has_function_privilege('authenticated', 'public.rotate_app_session_tokens(uuid,text,text,text,timestamptz,timestamptz)', 'EXECUTE')
+    OR has_function_privilege('authenticated', 'public.revoke_app_session_by_token_hashes(text,text,text,timestamptz)', 'EXECUTE')
+    OR has_function_privilege('authenticated', 'public.admin_upsert_pool_with_aliases(text,jsonb,jsonb,jsonb,jsonb,uuid)', 'EXECUTE')
+    OR has_function_privilege('authenticated', 'public.admin_upsert_pool_with_aliases(text,text,text,text,timestamptz,timestamptz,text,text[],text,jsonb,jsonb,uuid)', 'EXECUTE') THEN
     RAISE EXCEPTION 'authenticated can execute private credential RPCs';
+  END IF;
+  IF has_table_privilege('authenticated', 'public.app_session_refresh_token_aliases', 'SELECT') THEN
+    RAISE EXCEPTION 'authenticated can read refresh token aliases';
   END IF;
 END $$;
 
 RESET ROLE;
+
+INSERT INTO public.app_sessions (
+  id,
+  user_id,
+  compat_session_binding,
+  session_token_hash,
+  refresh_token_hash,
+  created_at,
+  last_seen_at,
+  expires_at,
+  absolute_expires_at
+)
+VALUES (
+  '50000000-0000-4000-8000-000000000001',
+  '00000000-0000-4000-8000-000000000001',
+  '50000000-0000-4000-8000-0000000000b1',
+  'rls-session-token-hash',
+  'rls-refresh-token-hash',
+  NOW(),
+  NOW(),
+  NOW() + INTERVAL '1 hour',
+  NOW() + INTERVAL '1 day'
+);
+
+GRANT SELECT ON public.profiles TO authenticated;
+
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claims', jsonb_build_object(
+  'sub', '00000000-0000-4000-8000-000000000001',
+  'session_binding', '50000000-0000-4000-8000-0000000000b1',
+  'iat', EXTRACT(EPOCH FROM NOW())::BIGINT,
+  'app_metadata', jsonb_build_object('provider', 'site_session'),
+  'user_metadata', jsonb_build_object('site_session', TRUE)
+)::TEXT, FALSE);
+SELECT 'active_direct_rls_rows=' || COUNT(*)
+FROM public.profiles
+WHERE id = '00000000-0000-4000-8000-000000000001';
+RESET ROLE;
+
+UPDATE public.app_sessions
+SET revoked_at = NOW(), revoke_reason = 'verification_revoke'
+WHERE id = '50000000-0000-4000-8000-000000000001';
+
+SET ROLE authenticated;
+SELECT 'revoked_direct_rls_rows=' || COUNT(*)
+FROM public.profiles
+WHERE id = '00000000-0000-4000-8000-000000000001';
+RESET ROLE;
+
+DO $$
+BEGIN
+  IF public.get_user_ranking_stats('00000000-0000-4000-8000-000000000002') IS NOT NULL THEN
+    RAISE EXCEPTION 'cross-user ranking stats unexpectedly succeeded';
+  END IF;
+EXCEPTION WHEN insufficient_privilege THEN NULL;
+END $$;
+
+SET ROLE service_role;
+SELECT 'own_ranking_stats_ok=' || (
+  public.get_user_ranking_stats('00000000-0000-4000-8000-000000000001') IS NOT NULL
+);
+RESET ROLE;
+
+SET ROLE authenticated;
+SELECT set_config('request.jwt.claims', jsonb_build_object(
+  'sub', '00000000-0000-4000-8000-000000000001',
+  'session_binding', '50000000-0000-4000-8000-0000000000b1',
+  'iat', EXTRACT(EPOCH FROM NOW())::BIGINT,
+  'app_metadata', jsonb_build_object('provider', 'site_session'),
+  'user_metadata', jsonb_build_object('site_session', TRUE)
+)::TEXT, FALSE);
+SELECT 'own_ranking_stats_auth_ok=' || (
+  public.get_user_ranking_stats('00000000-0000-4000-8000-000000000001') IS NOT NULL
+);
+RESET ROLE;
+
+SELECT 'public_security_definer_rpc_grants=' || COUNT(*)
+FROM pg_proc AS procedure
+JOIN pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
+WHERE namespace.nspname = 'public'
+  AND procedure.prosecdef IS TRUE
+  AND procedure.proname IN (
+    'cleanup_rate_limit_logs',
+    'log_rate_limit',
+    'increment_urgent_clicks',
+    'increment_urgent_clicks_batch',
+    'increment_puzzle_solve',
+    'review_puzzle',
+    'update_puzzle_difficulty',
+    'delete_puzzle',
+    'current_profile_email',
+    'get_ticket_stats',
+    'get_user_ranking_stats',
+    'get_user_ranking_stats_cached'
+  )
+  AND has_function_privilege('anon', procedure.oid, 'EXECUTE');
+
+SELECT 'missing_restrictive_rls_policies=' || COUNT(*)
+FROM pg_class AS relation
+JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+WHERE relation.relkind IN ('r', 'p')
+  AND relation.relrowsecurity IS TRUE
+  AND namespace.nspname IN ('public', 'storage')
+  AND NOT EXISTS (
+    SELECT 1
+    FROM pg_policy AS policy
+    WHERE policy.polrelid = relation.oid
+      AND policy.polname = 'authenticated_session_must_be_active'
+      AND policy.polpermissive IS FALSE
+  );
+
+INSERT INTO public.app_sessions (
+  id,
+  user_id,
+  session_token_hash,
+  refresh_token_hash,
+  created_at,
+  last_seen_at,
+  expires_at,
+  absolute_expires_at
+)
+VALUES (
+  '50000000-0000-4000-8000-000000000002',
+  '00000000-0000-4000-8000-000000000001',
+  'family-session-hash-old',
+  'family-refresh-hash-old',
+  NOW(),
+  NOW(),
+  NOW() + INTERVAL '1 hour',
+  NOW() + INTERVAL '1 day'
+);
+
+SET ROLE service_role;
+SELECT 'refresh_family_rotated=' || COUNT(*)
+FROM public.rotate_app_session_tokens(
+  '50000000-0000-4000-8000-000000000002',
+  'family-refresh-hash-old',
+  'family-session-hash-new',
+  'family-refresh-hash-new',
+  NOW() + INTERVAL '1 hour',
+  NOW() - INTERVAL '1 day'
+);
+
+SELECT 'historical_refresh_logout_revoked=' || public.revoke_app_session_by_token_hashes(
+  NULL,
+  'family-refresh-hash-old',
+  'verification_logout',
+  NOW()
+);
+RESET ROLE;
+
+SELECT 'refresh_family_inactive=' || (revoked_at IS NOT NULL)
+FROM public.app_sessions
+WHERE id = '50000000-0000-4000-8000-000000000002';
+
+SELECT 'admin_security_definer_browser_grants=' || COUNT(*)
+FROM pg_proc AS procedure
+JOIN pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
+WHERE namespace.nspname = 'public'
+  AND procedure.prosecdef IS TRUE
+  AND procedure.proname LIKE 'admin\_%' ESCAPE '\'
+  AND has_function_privilege('authenticated', procedure.oid, 'EXECUTE');
 `.trim();
 }
 
@@ -392,12 +664,26 @@ async function main() {
       'canonical_email=new.owner@example.com',
       'password_claim=claimed',
       'password_finish=completed',
+      'password_finish_replay=completed',
+      'oauth_password_race_closed=true',
       'expired_credential_allowed=false',
+      'expired_commit_blocked=true',
       'atomic_temporary_state=true',
       'identity_migrated=current-subject-hash:v2',
+      'legacy_identity_migrated=00000000-0000-4000-8000-000000000003:current-dedicated-hash:v2',
       'verified_password_login=true',
       'missing_password_login=false',
       'identity_owner=00000000-0000-4000-8000-000000000001',
+      'active_direct_rls_rows=1',
+      'revoked_direct_rls_rows=0',
+      'missing_restrictive_rls_policies=0',
+      'refresh_family_rotated=1',
+      'historical_refresh_logout_revoked=1',
+      'refresh_family_inactive=true',
+      'admin_security_definer_browser_grants=0',
+      'own_ranking_stats_ok=true',
+      'own_ranking_stats_auth_ok=true',
+      'public_security_definer_rpc_grants=0',
     ];
     const missing = markers.filter((marker) => !output.includes(marker));
     if (missing.length > 0) {
