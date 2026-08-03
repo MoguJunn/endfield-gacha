@@ -57,6 +57,22 @@
 
 LinuxDo 代码、配置和验收矩阵由独立分支 `feat/linuxdo-oauth` 维护，不进入本认证候选。外部申请条件恢复前保持关闭，也不阻塞本次认证发布。
 
+## OAuth 邮箱旧空壳自助修复（migration 169）
+
+- [x] `npm run test:auth-hardening-phase-cd` 已在临时 PostgreSQL 17 中完成候选识别、错码计数与持久预算、一次性验证、claim 原子占用、归属转移、完成及 restrictive RLS 门禁闭环
+- [x] API 专项覆盖：先提示可修复、重新核对候选、发送 6 位验证码、验证和显式确认分离、协调状态不暴露内部错误、确认必须绑定发起时的站点会话
+- [x] 验证后到确认前目标账号可能变化的竞态已收口：claim 阶段在数据库内重新执行完整空壳检查，claim 后通过 Auth 触发器与业务表触发器冻结空壳；任何检查失败都不会进入隔离
+- [x] 确认时先原子占用（claim）并撤销双方原生 Auth Session，再隔离空壳、转移归属、绑定源账号；Auth Admin 更新失败或响应丢失时按数据库最终状态决定继续、回滚或进入人工协调，不再盲目补偿
+- [x] 响应丢失恢复：完成后重试确认会撤销旧 handoff 会话并创建新会话，旧 Cookie 不再残留
+- [x] 验证码预算持久化：按“源用户 + 目标邮箱”在数据库内累计发送（≤5 次/24h）与失败（≤8 次后锁定 24h），更换 intent 无法绕过
+- [x] 空壳识别要求 operator 在 `account_email_artifact_merge_approvals` 中逐条人工批准（绑定邮箱 hash、事件版本、批准引用），事件证据还要求精确脱敏收件人匹配；任意真实账号、MFA、额外身份、Session、封禁或数据引用都会拒绝
+- [x] 桌面和移动端共用同一确认组件；用户必须先控制目标邮箱，再阅读修复内容并单独确认
+- [x] 普通浏览器不能读取 `account_email_merge_intents` / 批准表 / 预算表，不能直接执行任何迁移 169 RPC
+- [ ] 生产应用迁移 169 前：创建完整备份和 schema-only 备份，记录迁移 SHA-256；对 16 个历史冲突做匿名化只读分类，只把严格满足空壳证据链的账号写入批准表（绑定邮箱 SHA-256 与批准引用，不存明文邮箱/用户 ID）
+- [ ] 先生产执行迁移 169 与批准回填，再部署依赖新 RPC 的 API/前端；不得反序
+- [ ] 部署后使用隔离测试账号完成“冲突提示 → 验证码 → 显式确认 → 继续设密 → 重新登录”的真实浏览器闭环
+- [ ] 生产历史账号不批量自动修复；只有用户本人在有效 OAuth Session 中主动发起并完成验证/确认才会写入
+
 ## 文档
 
 - [ ] README 已保持 GitHub 首页短摘要，并链接到专题文档
@@ -69,13 +85,13 @@ LinuxDo 代码、配置和验收矩阵由独立分支 `feat/linuxdo-oauth` 维�
 
 ## 部署
 
-- [x] Supabase baseline / migration 状态已确认到本分支 168
+- [x] Supabase baseline / migration 状态已确认到本分支 169；生产当前到 168
 - [x] 迁移前已通过 SSH 只读核对生产 schema；独立抽奖 160–165 存在且不属于主站 baseline，认证结构当时不存在
 - [x] 认证初始迁移已定为 166/167，审查修复使用前向迁移 168；baseline 已重新生成并在临时 PostgreSQL 中完整验证
 - [x] 生产数据库已按 166 → 167 执行；3,095 个邮箱归属、83 条 identity key 版本、权限/触发器/函数断言和 `site_version=v4.5.4` 均核对通过
-- [ ] 生产执行迁移 168，并核对 restrictive RLS policy 数量、RPC 权限、首页/bootstrap 和 Auth 健康；本 PR 不自动执行生产迁移
-- [ ] 确认迁移 168 完成后再部署依赖 `claim_oauth_identity_v2` / `refresh_oauth_account_security_state` 的 API；LinuxDo/QQ 开关继续关闭
-- [x] 生产迁移 166/167 已获明确授权并完成；该授权没有扩展到本 PR 新增的 168、合并、API 部署或生产账号修改
+- [x] 生产已执行迁移 168，并核对 restrictive RLS policy 数量、RPC 权限、首页/bootstrap 和 Auth 健康
+- [x] 迁移 168 完成后已部署依赖 `claim_oauth_identity_v2` / `refresh_oauth_account_security_state` 的 API；LinuxDo/QQ 开关继续关闭
+- [x] 生产迁移 166/167/168 已分别获授权并完成；历史授权没有扩展到本分支新增的 169、合并、部署或生产账号批量修改
 - [ ] CN / INTL 私有导入后端版本一致，`/health` 返回正确 `sourceMode`、版本和 `fullImport: true`
 - [ ] 官方导入已验证“`import-full` → 后台获取 / 内部暂存 → 自动原子写入 → `import-status` 轮询 → 异常标记 → 现在 / 稍后处理”；缺少安全归属字段的记录会跳过，任务重试保持幂等，浏览器不调用同步 `import-confirm`
 - [ ] 历史编辑已验证乐观锁冲突、变更审计、受影响作用域保底重算，以及旧批量删除对跨账号重复 ID 的整笔拒绝

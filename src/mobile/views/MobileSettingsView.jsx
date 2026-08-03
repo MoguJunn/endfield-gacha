@@ -15,6 +15,7 @@ import LocaleSwitcher from '../../components/common/LocaleSwitcher.jsx';
 import PlatformBindingsSection from '../../components/settings/PlatformBindingsSection.jsx';
 import DeveloperApiSection from '../../components/settings/DeveloperApiSection.jsx';
 import LoginIdentitiesSection from '../../components/settings/LoginIdentitiesSection.jsx';
+import OAuthEmailMergeFlow from '../../components/settings/OAuthEmailMergeFlow.jsx';
 import UsernameEditDialog from '../../components/settings/UsernameEditDialog.jsx';
 import { Toast } from '../../components/ui';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -191,6 +192,7 @@ function MobileSettingsView() {
   const [emailVerificationDeferred, setEmailVerificationDeferred] = useState(false);
   const [emailError, setEmailError] = useState('');
   const [emailSuccess, setEmailSuccess] = useState('');
+  const [emailMergeOffer, setEmailMergeOffer] = useState(null);
   const [serverLabelUpdatingAccount, setServerLabelUpdatingAccount] = useState(null);
   const [serverLabelError, setServerLabelError] = useState('');
   const [serverMergeSelections, setServerMergeSelections] = useState({});
@@ -479,6 +481,16 @@ function MobileSettingsView() {
         setPasswordError(t('settings.error.passwordChangeRateLimited', { minutes: retryMinutes }));
       } else if (isInvalidCurrentPasswordError(error)) {
         setPasswordError(t('settings.error.currentPasswordIncorrect'));
+      } else if (error?.code === 'oauth_email_merge_available') {
+        const targetEmail = accountSecurityState?.emailVerificationTargetEmail || user?.email || '';
+        setEmailMergeOffer({
+          targetEmail,
+          maskedEmail: error?.details?.maskedEmail || '',
+        });
+        setNewEmail(targetEmail);
+        setShowPasswordModal(false);
+        resetPasswordModalState();
+        setShowEmailModal(true);
       } else {
         setPasswordError(
           error?.code === 'verified_email_required'
@@ -496,6 +508,7 @@ function MobileSettingsView() {
     setEmailSuccess('');
     setNewEmail('');
     setEmailCurrentPassword('');
+    setEmailMergeOffer(null);
   };
 
   const handleVerifyEmail = async () => {
@@ -625,7 +638,15 @@ function MobileSettingsView() {
         resetEmailModalState();
       }, 2400);
     } catch (error) {
-      setEmailError(getAccountEmailErrorMessage(error, t));
+      if (error?.code === 'oauth_email_merge_available') {
+        setEmailMergeOffer({
+          targetEmail: newEmail.trim().toLowerCase(),
+          maskedEmail: error?.details?.maskedEmail || '',
+        });
+        setEmailError('');
+      } else {
+        setEmailError(getAccountEmailErrorMessage(error, t));
+      }
     } finally {
       setEmailLoading(false);
     }
@@ -1292,6 +1313,34 @@ function MobileSettingsView() {
               </button>
             </div>
             <div className="p-5 space-y-4">
+              {emailMergeOffer ? (
+                <OAuthEmailMergeFlow
+                  targetEmail={emailMergeOffer.targetEmail}
+                  initialMaskedEmail={emailMergeOffer.maskedEmail}
+                  variant="mobile"
+                  onCancel={() => setEmailMergeOffer(null)}
+                  onCompleted={(result) => {
+                    const nextUser = result?.session?.user;
+                    if (nextUser?.id) {
+                      setUser(nextUser);
+                    }
+                    setAccountSecurityState((prev) => ({
+                      ...(prev || {}),
+                      emailVerificationRequired: false,
+                      emailVerificationVerifiedAt: new Date().toISOString(),
+                      emailVerificationTargetEmail: result?.data?.email || emailMergeOffer.targetEmail,
+                    }));
+                    setEmailSuccess(t('settings.oauthEmailMerge.completedMessage'));
+                    showToast(t('settings.oauthEmailMerge.completedMessage'), 'success');
+                  }}
+                  onDone={() => {
+                    setShowEmailModal(false);
+                    resetEmailModalState();
+                    setShowPasswordModal(true);
+                  }}
+                />
+              ) : (
+                <>
               <p className="text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
                 {oauthPasswordSetupRequired ? t('settings.oauthEmailSetupModalDesc') : t('settings.emailModalDesc')}
               </p>
@@ -1344,6 +1393,8 @@ function MobileSettingsView() {
               >
                 {emailLoading ? t('settings.emailChangeSending') : emailSuccess ? t('settings.emailChangeSent') : t('settings.emailChangeAction')}
               </button>
+                </>
+              )}
             </div>
           </div>
         </div>

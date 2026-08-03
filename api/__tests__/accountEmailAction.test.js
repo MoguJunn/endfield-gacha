@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   findAuthUserByEmail: vi.fn(),
   createMailProviderAdapter: vi.fn(),
   resolveAuthenticatedRequestUser: vi.fn(),
+  inspectOAuthEmailArtifactMerge: vi.fn(),
+  startOAuthEmailArtifactMerge: vi.fn(),
 }));
 
 vi.mock('../_lib/http.js', () => ({
@@ -35,6 +37,11 @@ vi.mock('../_lib/mailProviderAdapter.js', () => ({
 
 vi.mock('../_lib/siteAuth.js', () => ({
   resolveAuthenticatedRequestUser: mocks.resolveAuthenticatedRequestUser,
+}));
+
+vi.mock('../_lib/oauthEmailArtifactMerge.js', () => ({
+  inspectOAuthEmailArtifactMerge: mocks.inspectOAuthEmailArtifactMerge,
+  startOAuthEmailArtifactMerge: mocks.startOAuthEmailArtifactMerge,
 }));
 
 import accountEmailActionHandler from '../_routes/root/account-email-action.js';
@@ -278,6 +285,8 @@ describe('api/account-email-action handler', () => {
 
     mocks.getBearerToken.mockReturnValue('access-token');
     mocks.findAuthUserByEmail.mockResolvedValue(null);
+    mocks.inspectOAuthEmailArtifactMerge.mockResolvedValue({ eligible: false });
+    mocks.startOAuthEmailArtifactMerge.mockResolvedValue(null);
     mocks.createMailProviderAdapter.mockReturnValue(createMailAdapter());
     mocks.createSupabaseAccessTokenClient.mockReturnValue(createCallerClient());
     mocks.getSupabaseAnonServerClient.mockReturnValue(createCallerClient());
@@ -295,6 +304,7 @@ describe('api/account-email-action handler', () => {
         ok: true,
         source: 'supabase',
         user: data.user,
+        session: { id: 'session-1' },
         adminClient,
         callerClient,
       };
@@ -742,6 +752,120 @@ describe('api/account-email-action handler', () => {
     expect(adapter.sentMessages).toHaveLength(1);
     expect(adapter.sentMessages[0].text).toContain('验证码: ');
     expect(adapter.sentMessages[0].text).not.toContain('localhost:8000');
+  }));
+
+  it('offers repair when an OAuth email is blocked only by a verified legacy artifact', withAuthMailEnv(async () => {
+    const accountSecurityState = {
+      email_verification_required: false,
+      email_verification_verified_at: '2026-07-24T00:01:00.000Z',
+      email_verification_target_email: 'legacy@example.com',
+      password_change_required: true,
+      password_change_reason: 'oauth_password_setup_required:github',
+    };
+    const adminClient = createAdminClient({ accountSecurityState });
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    mocks.createSupabaseAccessTokenClient.mockReturnValue(createCallerClient({
+      user: {
+        id: 'user-1',
+        email: 'github.subject@oauth.local.invalid',
+        email_confirmed_at: '2026-07-24T00:00:00.000Z',
+      },
+    }));
+    mocks.findAuthUserByEmail.mockResolvedValue({ id: 'artifact-user' });
+    mocks.inspectOAuthEmailArtifactMerge.mockResolvedValue({
+      eligible: true,
+      artifactUserId: 'artifact-user',
+      maskedEmail: 'l***y@example.com',
+    });
+
+    const res = createJsonResponseRecorder();
+    await accountEmailActionHandler(createRequest({
+      body: {
+        action: 'change_email',
+        newEmail: 'legacy@example.com',
+        locale: 'zh-CN',
+      },
+    }), res);
+
+    expect(res.statusCode).toBe(409);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'oauth_email_merge_available',
+      details: {
+        mergeAvailable: true,
+        maskedEmail: 'l***y@example.com',
+      },
+    });
+  }));
+
+  it('starts a one-time repair challenge only after rechecking the legacy artifact', withAuthMailEnv(async () => {
+    const adminClient = createAdminClient({
+      accountSecurityState: {
+        email_verification_required: false,
+        email_verification_verified_at: '2026-07-24T00:01:00.000Z',
+        email_verification_target_email: 'legacy@example.com',
+        password_change_required: true,
+        password_change_reason: 'oauth_password_setup_required:github',
+      },
+    });
+    const adapter = createMailAdapter();
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    mocks.createSupabaseAccessTokenClient.mockReturnValue(createCallerClient({
+      user: {
+        id: 'user-1',
+        email: 'legacy@example.com',
+        email_confirmed_at: '2026-07-24T00:00:00.000Z',
+      },
+    }));
+    mocks.findAuthUserByEmail.mockResolvedValue({ id: 'artifact-user' });
+    mocks.inspectOAuthEmailArtifactMerge.mockResolvedValue({
+      eligible: true,
+      artifactUserId: 'artifact-user',
+      maskedEmail: 'l***y@example.com',
+    });
+    mocks.startOAuthEmailArtifactMerge.mockImplementation(async (_client, input) => ({
+      id: input.intentId,
+      expires_at: input.expiresAt,
+    }));
+    mocks.createMailProviderAdapter.mockReturnValue(adapter);
+
+    const res = createJsonResponseRecorder();
+    await accountEmailActionHandler(createRequest({
+      body: {
+        action: 'prepare_oauth_email_merge',
+        newEmail: 'legacy@example.com',
+        locale: 'zh-CN',
+      },
+    }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      data: {
+        nextStep: 'enter_merge_verification_code',
+        maskedEmail: 'l***y@example.com',
+        mergeIntentId: expect.any(String),
+      },
+    });
+    expect(mocks.startOAuthEmailArtifactMerge).toHaveBeenCalledWith(
+      adminClient,
+      expect.objectContaining({
+        sourceUserId: 'user-1',
+        startedSessionId: 'session-1',
+        targetEmail: 'legacy@example.com',
+        verificationCode: expect.stringMatching(/^\d{6}$/),
+      })
+    );
+    expect(adapter.sentMessages).toHaveLength(1);
+    expect(adapter.sentMessages[0]).toMatchObject({
+      to: 'legacy@example.com',
+      templateKey: 'auth.email-verification',
+      eventType: 'email_verification',
+    });
+    expect(adapter.sentMessages[0].payload).toMatchObject({
+      verificationMode: 'oauth_email_artifact_merge',
+      codeEntry: true,
+    });
   }));
 
   it('respects runtime disabled mail events for account email actions', withAuthMailEnv(async () => {

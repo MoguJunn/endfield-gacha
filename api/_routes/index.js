@@ -1,5 +1,6 @@
 import accountRecoveryRequestHandler from './root/account-recovery-request.js';
 import accountEmailActionHandler from './root/account-email-action.js';
+import accountEmailMergeHandler from './root/account-email-merge.js';
 import accountEmailVerifyHandler from './root/account-email-verify.js';
 import accountGachaDataHandler from './root/account-gacha-data.js';
 import accountLastSeenHandler from './root/account-last-seen.js';
@@ -106,6 +107,7 @@ function normalizeRoutePath(path) {
 export const API_ROUTE_ENTRIES = [
   ['/api/account-recovery-request', accountRecoveryRequestHandler],
   ['/api/account-email-action', accountEmailActionHandler],
+  ['/api/account-email-merge', accountEmailMergeHandler],
   ['/api/account-email-verify', accountEmailVerifyHandler],
   ['/api/account-gacha-data', accountGachaDataHandler],
   ['/api/account-last-seen', accountLastSeenHandler],

@@ -65,8 +65,24 @@ CREATE TABLE auth.users (
   email TEXT,
   email_confirmed_at TIMESTAMPTZ,
   encrypted_password TEXT,
+  phone TEXT,
+  is_anonymous BOOLEAN NOT NULL DEFAULT FALSE,
+  invited_at TIMESTAMPTZ,
+  confirmation_sent_at TIMESTAMPTZ,
+  last_sign_in_at TIMESTAMPTZ,
+  recovery_sent_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  banned_until TIMESTAMPTZ,
+  role TEXT NOT NULL DEFAULT 'authenticated',
   raw_app_meta_data JSONB DEFAULT '{}'::jsonb,
   raw_user_meta_data JSONB DEFAULT '{}'::jsonb
+);
+CREATE TABLE auth.identities (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  identity_data JSONB DEFAULT '{}'::jsonb
 );
 CREATE TABLE auth.sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -617,6 +633,244 @@ SELECT 'refresh_family_inactive=' || (revoked_at IS NOT NULL)
 FROM public.app_sessions
 WHERE id = '50000000-0000-4000-8000-000000000002';
 
+INSERT INTO auth.users (
+  id,
+  email,
+  email_confirmed_at,
+  encrypted_password,
+  created_at,
+  raw_app_meta_data,
+  raw_user_meta_data
+)
+VALUES
+  (
+    '00000000-0000-4000-8000-000000000010',
+    'github.subject@oauth.local.invalid',
+    NOW(),
+    NULL,
+    TIMESTAMPTZ '2026-07-24 09:55:00+00',
+    '{"provider":"email","providers":["email"]}'::JSONB,
+    '{"synthetic_oauth_email":true}'::JSONB
+  ),
+  (
+    '00000000-0000-4000-8000-000000000011',
+    'legacy.merge@example.com',
+    TIMESTAMPTZ '2026-07-24 10:00:00+00',
+    NULL,
+    TIMESTAMPTZ '2026-07-24 10:00:00+00',
+    '{"provider":"email","providers":["email"]}'::JSONB,
+    '{"email_verified":true}'::JSONB
+  );
+
+UPDATE auth.users
+SET confirmation_sent_at = TIMESTAMPTZ '2026-07-24 10:00:00+00',
+    updated_at = TIMESTAMPTZ '2026-07-24 10:00:01+00'
+WHERE id = '00000000-0000-4000-8000-000000000011';
+
+UPDATE public.profiles
+SET
+  username = 'oauth-merge-source',
+  email = 'legacy.merge@example.com',
+  role = 'user',
+  created_at = TIMESTAMPTZ '2026-07-24 09:55:00+00',
+  updated_at = TIMESTAMPTZ '2026-07-24 09:58:00+00'
+WHERE id = '00000000-0000-4000-8000-000000000010';
+
+-- Reproduce the historical artifact: the Auth user survived the old
+-- verification action while its automatically-created profile did not.
+DELETE FROM public.profiles
+WHERE id = '00000000-0000-4000-8000-000000000011';
+
+INSERT INTO public.account_security_states (
+  user_id,
+  password_change_required,
+  password_change_reason,
+  password_change_source,
+  password_change_requested_at,
+  email_verification_required,
+  email_verification_reason,
+  email_verification_verified_at,
+  email_verification_target_email,
+  password_setup_capability_id,
+  password_setup_capability_status
+)
+VALUES (
+  '00000000-0000-4000-8000-000000000010',
+  TRUE,
+  'oauth_password_setup_required:github',
+  'oauth',
+  TIMESTAMPTZ '2026-07-24 09:55:00+00',
+  FALSE,
+  NULL,
+  TIMESTAMPTZ '2026-07-24 09:59:00+00',
+  'legacy.merge@example.com',
+  '20000000-0000-4000-8000-000000000010',
+  'available'
+);
+
+INSERT INTO public.app_auth_identities (
+  id,
+  user_id,
+  provider,
+  provider_subject_hash,
+  provider_subject_hash_key_version
+)
+VALUES (
+  '40000000-0000-4000-8000-000000000010',
+  '00000000-0000-4000-8000-000000000010',
+  'github',
+  'oauth-email-merge-subject-hash',
+  'v2'
+);
+
+INSERT INTO public.mail_delivery_events (
+  id,
+  event_type,
+  event_payload_redacted_json,
+  created_at
+)
+VALUES (
+  '70000000-0000-4000-8000-000000000010',
+  'email_verification_accepted',
+  '{"action":"resend_verification","relatedEntityId":"resend_verification","verificationMode":"auth_magiclink","recipientDomain":"example.com","recipientRedacted":"l***e@e***e.com"}'::JSONB,
+  TIMESTAMPTZ '2026-07-24 10:00:00+00'
+);
+
+INSERT INTO auth.identities (id, user_id, provider, identity_data)
+VALUES (
+  '90000000-0000-4000-8000-000000000011',
+  '00000000-0000-4000-8000-000000000011',
+  'email',
+  '{"email":"legacy.merge@example.com","email_verified":true}'::JSONB
+);
+
+INSERT INTO public.account_email_artifact_merge_approvals (
+  artifact_user_id,
+  target_email_hash,
+  evidence_version,
+  approval_reference_hash,
+  approved_at,
+  expires_at
+)
+VALUES (
+  '00000000-0000-4000-8000-000000000011',
+  ENCODE(DIGEST('legacy.merge@example.com', 'sha256'), 'hex'),
+  'legacy_magiclink_v1',
+  'test-approval-reference',
+  NOW(),
+  NOW() + INTERVAL '30 days'
+);
+
+INSERT INTO public.app_sessions (
+  id,
+  user_id,
+  session_token_hash,
+  refresh_token_hash,
+  created_at,
+  last_seen_at,
+  expires_at,
+  absolute_expires_at
+)
+VALUES (
+  '50000000-0000-4000-8000-000000000010',
+  '00000000-0000-4000-8000-000000000010',
+  'merge-started-session-hash',
+  'merge-started-refresh-hash',
+  NOW(),
+  NOW(),
+  NOW() + INTERVAL '1 hour',
+  NOW() + INTERVAL '1 day'
+);
+
+SET ROLE service_role;
+
+SELECT 'oauth_email_merge_eligible=' || eligible
+FROM public.inspect_oauth_email_artifact_merge(
+  '00000000-0000-4000-8000-000000000010',
+  'legacy.merge@example.com'
+);
+
+SELECT 'oauth_email_merge_started=' || status
+FROM public.start_oauth_email_artifact_merge(
+  '80000000-0000-4000-8000-000000000010',
+  '00000000-0000-4000-8000-000000000010',
+  '50000000-0000-4000-8000-000000000010',
+  'legacy.merge@example.com',
+  'merge-code-hash',
+  NOW() + INTERVAL '15 minutes'
+);
+
+SELECT 'oauth_email_merge_wrong_code=' || COUNT(*)
+FROM public.verify_oauth_email_artifact_merge(
+  '80000000-0000-4000-8000-000000000010',
+  '00000000-0000-4000-8000-000000000010',
+  'wrong-code-hash'
+);
+
+SELECT 'oauth_email_merge_attempts=' || verification_attempt_count
+FROM public.account_email_merge_intents
+WHERE id = '80000000-0000-4000-8000-000000000010';
+
+SELECT 'oauth_email_merge_verified=' || status
+FROM public.verify_oauth_email_artifact_merge(
+  '80000000-0000-4000-8000-000000000010',
+  '00000000-0000-4000-8000-000000000010',
+  'merge-code-hash'
+);
+
+SELECT 'oauth_email_merge_claimed=' || status
+FROM public.claim_oauth_email_artifact_merge(
+  '80000000-0000-4000-8000-000000000010',
+  '00000000-0000-4000-8000-000000000010',
+  '50000000-0000-4000-8000-000000000010'
+);
+
+RESET ROLE;
+
+SELECT 'oauth_email_merge_source_auth_sessions=' || COUNT(*)
+FROM auth.sessions
+WHERE user_id = '00000000-0000-4000-8000-000000000010';
+
+UPDATE auth.users
+SET
+  email = 'legacy.merge.00000000000040008000000000000011@oauth.local.invalid',
+  raw_user_meta_data = raw_user_meta_data || JSONB_BUILD_OBJECT(
+    'legacy_email_action_artifact', TRUE,
+    'oauth_email_merge_intent_id', '80000000-0000-4000-8000-000000000010'
+  )
+WHERE id = '00000000-0000-4000-8000-000000000011';
+
+SET ROLE service_role;
+
+SELECT 'oauth_email_merge_transferred=' || status
+FROM public.prepare_oauth_email_artifact_ownership_transfer(
+  '80000000-0000-4000-8000-000000000010',
+  '00000000-0000-4000-8000-000000000010'
+);
+
+RESET ROLE;
+
+UPDATE auth.users
+SET
+  email = 'legacy.merge@example.com',
+  email_confirmed_at = NOW(),
+  raw_user_meta_data = raw_user_meta_data || '{"synthetic_oauth_email":false,"legacy_email_conflict_repaired":true}'::JSONB
+WHERE id = '00000000-0000-4000-8000-000000000010';
+
+SET ROLE service_role;
+
+SELECT 'oauth_email_merge_completed=' || status
+FROM public.complete_oauth_email_artifact_merge(
+  '80000000-0000-4000-8000-000000000010',
+  '00000000-0000-4000-8000-000000000010'
+);
+
+SELECT 'oauth_email_merge_owner=' || user_id
+FROM public.account_email_ownerships
+WHERE normalized_email = 'legacy.merge@example.com';
+
+RESET ROLE;
+
 SELECT 'admin_security_definer_browser_grants=' || COUNT(*)
 FROM pg_proc AS procedure
 JOIN pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
@@ -680,6 +934,16 @@ async function main() {
       'refresh_family_rotated=1',
       'historical_refresh_logout_revoked=1',
       'refresh_family_inactive=true',
+      'oauth_email_merge_eligible=true',
+      'oauth_email_merge_started=pending',
+      'oauth_email_merge_wrong_code=0',
+      'oauth_email_merge_attempts=1',
+      'oauth_email_merge_verified=verified',
+      'oauth_email_merge_claimed=claimed',
+      'oauth_email_merge_source_auth_sessions=0',
+      'oauth_email_merge_transferred=ownership_transferred',
+      'oauth_email_merge_completed=completed',
+      'oauth_email_merge_owner=00000000-0000-4000-8000-000000000010',
       'admin_security_definer_browser_grants=0',
       'own_ranking_stats_ok=true',
       'own_ranking_stats_auth_ok=true',

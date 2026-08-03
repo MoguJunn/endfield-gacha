@@ -30,19 +30,20 @@
 
 2026-08-01 的真实本地 Supabase/PostgreSQL 17 空库导入已补齐两项此前静态检查未覆盖的边界：`archive/004_tickets_system.sql` 必须在表不存在时也能执行清理；Phase A/B 必须显式授予 `service_role` 访问 `profiles` 与私有 Session 撤销状态所需的 DML 权限，同时保持 `anon/authenticated` 对私有撤销状态的拒绝。`test:supabase-baseline:smoke` 与 `test:auth-hardening-phase-a` 已加入对应回归断言。
 
-本认证集成树的 baseline 覆盖到 `active/168_close_auth_review_findings.sql` 后，不要再把 `001~168` 的主站标准迁移重复叠加到同版本 baseline。主站发布链原到 158；共享生产 schema 另含独立抽奖 160–165。认证 166/167 已于 2026-08-02 按顺序生产应用并通过回填、权限、函数和触发器核验；审查修复迁移 168 尚未生产应用。
+本分支 baseline 覆盖到 `active/169_add_oauth_email_artifact_merge.sql` 后，不要再把 `001~169` 的主站标准迁移重复叠加到同版本 baseline。主站发布链原到 158；共享生产 schema 另含独立抽奖 160–165。认证 166/167/168 已按顺序生产应用并通过回填、权限、函数、RLS 与触发器核验；迁移 169 是本分支新增候选，尚未生产应用。
 
 ### migration 编号说明
 
 - **本分支 166：** `migrations/166_harden_admin_profile_and_oauth_transactions.sql`（认证 admin RPC + OAuth transaction）。
 - **本分支 167：** `migrations/167_harden_account_credentials_and_identity_keys.sql`（认证 Phase C/D 数据库面）。
 - **本分支 168：** `migrations/168_close_auth_review_findings.sql`（历史 identity 哈希兼容、直连 RLS Session 门禁和首次设密并发收口；必须先于依赖新 RPC 的 API 部署）。
+- **本分支 169：** `migrations/169_add_oauth_email_artifact_merge.sql`（只针对旧版验证流程产生且经严格证据确认无任何站内数据的 Auth 空壳，提供一次性邮箱验证、显式确认、归属转移、会话撤销和补偿账本；不是通用账号合并）。
 - **其他 worktree 仍占用同号文件名（不得与本文件一起部署）：**
   - 主脏树性能线：`159_add_history_scope_read_models.sql`
   - 邮箱候选树：`159_bind_email_verification_to_target.sql`
-- 生产库没有主站应用级 migration ledger；166/167 的执行记录、迁移文件校验和、迁移前备份和迁移后核验结果保存在受限运维备份中。168 需另行授权和记录，性能线 159 仍未应用。
+- 生产库没有主站应用级 migration ledger；166/167/168 的执行记录、迁移文件校验和、迁移前备份和迁移后核验结果保存在受限运维备份中。169 需另行授权和记录，性能线 159 仍未应用。
 
-`AUTH-HARDEN-001` Phase A–D 与本地候选验收已完成，代码由 `5dd8505` 固化；生产迁移 166/167 已完成，审查修复迁移 168、主线合入和 API 部署仍由 `AUTH-HARDEN-RELEASE-001` 跟踪。LinuxDo provider 不新增数据库迁移，其实现保持在独立分支；因外部申请条件下调为 P3，真实浏览器验收前保持关闭且不阻塞认证发布。
+`AUTH-HARDEN-001` Phase A–D、生产迁移 166/167/168、主线合入和 API/前端部署已经完成。迁移 169 及配套自助修复流程作为后续修复独立发布；LinuxDo provider 不新增数据库迁移，其实现保持在独立分支，真实浏览器验收前保持关闭且不阻塞本修复。
 
 `site_config.public_cache_epoch` 是公共数据缓存版本源；公共 API / 首屏不应回退成浏览器直连 Supabase 读写。
 公共卡池统计读取 `public_pool_analytics_cache` 和 `public_pool_trend_cache`；受控刷新入口是 `refresh_public_analytics_cache()`，请求期不应扫描原始 `history` 生成趋势点。
@@ -87,6 +88,16 @@
 - `is_request_auth_session_allowed()` 读取 JWT 的 `sub/session_id/iat`，同时核对站点兼容 Session 或原生 Auth Session、用户撤销边界与临时凭据状态。迁移为 `public/storage` 中所有已启用 RLS 的现有表附加 `AS RESTRICTIVE TO authenticated` 策略，旧 JWT 不能绕过同源 API 直连 PostgREST。
 - `refresh_oauth_account_security_state()` 与首次设密 claim/finish 共用用户级 advisory lock，并在锁内重新检查 `has_verified_password_login()`，避免陈旧 OAuth callback 把已完成能力回退为待设密。
 - 新 API 会调用本迁移新增 RPC，因此发布顺序固定为：先执行并核验 168，再部署 API；不得反序。
+
+`169_add_oauth_email_artifact_merge.sql`（OAuth 邮箱旧空壳自助修复）：
+
+- `inspect_oauth_email_artifact_merge()` 只对白名单化历史事故形态返回可修复：当前账号必须是待首次设密的 GitHub OAuth 合成账号；冲突方必须位于已知事故窗口、只有 email provider（`providers` 精确等于 `["email"]` 且 `auth.identities` 恰好一条 email identity）、无密码/MFA/登录活动/Profile/业务外键/封禁/异常角色/Session，并有收件人脱敏值、事件类型和时间完全匹配的旧验证事件。
+- 所有可修复判定还要求 `account_email_artifact_merge_approvals` 中存在 operator 人工批准（绑定邮箱 SHA-256、证据版本 `legacy_magiclink_v1`、批准引用与有效期）；没有批准一律拒绝，避免仅凭有损脱敏值判定归属。
+- `account_email_merge_intents` 保存一次性验证码 hash、阶段、过期时间、补偿快照和发起站点会话；`account_email_merge_budgets` 按“源用户 + 目标邮箱”持久累计发送（≤5 次/24h）与失败（≤8 次后锁定 24h），更换 intent 无法绕过。
+- 验证邮箱后仍需在桌面或移动端再次明确确认。确认先由 `claim_oauth_email_artifact_merge()` 在数据库内重新执行完整空壳检查并原子占用（同时撤销双方原生 Auth Session、冻结空壳），再隔离空壳 Auth 用户、原子转移 `account_email_ownerships`、更新当前 OAuth 用户 canonical email，最后建立新站点会话并撤销发起会话。
+- claim 后通过 `auth.users` 与全部业务外键表触发器冻结空壳，普通注册或业务写入无法占用保留邮箱；完成后的确认重试会撤销旧 handoff 会话并重建新会话，响应丢失可恢复。
+- Auth Admin API 与 PostgreSQL 无法组成同一事务，因此实现包含结果核对、可重试账本和反向补偿；无法确定最终状态时进入 `coordination_required`，不得自动重开或覆盖。
+- 任一真实账号数据、MFA、额外 provider、非事故时间窗或证据不完整都会继续安全拒绝，并转人工处理；本迁移不会自动扫描或批量修改生产账号。
 
 `scripts/backfill-history-anomalies.mjs` 是已知异常扫描 / 回填入口。默认模式只读；正式写入必须同时提供 `--apply` 和脚本要求的 `CONFIRM_HISTORY_ANOMALY_BACKFILL=<记录数>:<用户数>` 精确快照。记录数或用户数变化时应停止、重新审计候选范围，不得跳过 guard。
 
