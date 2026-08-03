@@ -50,7 +50,9 @@ async function cleanup() {
 
 function buildSupabaseStubSql() {
   return `
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+ALTER DATABASE postgres SET search_path = public, extensions;
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon; END IF;
@@ -87,7 +89,26 @@ CREATE TABLE auth.identities (
 CREATE TABLE auth.sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  not_after TIMESTAMPTZ
+);
+CREATE TABLE auth.refresh_tokens (
+  id BIGSERIAL PRIMARY KEY,
+  token TEXT NOT NULL UNIQUE,
+  user_id TEXT NOT NULL,
+  revoked BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  parent TEXT,
+  session_id UUID REFERENCES auth.sessions(id) ON DELETE CASCADE
+);
+CREATE TABLE auth.audit_log_entries (
+  instance_id UUID,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  payload JSON NOT NULL DEFAULT '{}'::JSON,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  ip_address TEXT
 );
 CREATE TABLE storage.objects (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -660,6 +681,15 @@ VALUES
     TIMESTAMPTZ '2026-07-24 10:00:00+00',
     '{"provider":"email","providers":["email"]}'::JSONB,
     '{"email_verified":true}'::JSONB
+  ),
+  (
+    '00000000-0000-4000-8000-000000000020',
+    'merge.operator@example.com',
+    TIMESTAMPTZ '2026-07-01 00:00:00+00',
+    'operator-password-hash',
+    TIMESTAMPTZ '2026-07-01 00:00:00+00',
+    '{"provider":"email","providers":["email"]}'::JSONB,
+    '{"email_verified":true,"site_password_set":true}'::JSONB
   );
 
 UPDATE auth.users
@@ -675,6 +705,38 @@ SET
   created_at = TIMESTAMPTZ '2026-07-24 09:55:00+00',
   updated_at = TIMESTAMPTZ '2026-07-24 09:58:00+00'
 WHERE id = '00000000-0000-4000-8000-000000000010';
+
+UPDATE public.profiles
+SET
+  username = 'oauth-merge-operator',
+  role = 'super_admin',
+  updated_at = TIMESTAMPTZ '2026-07-24 09:58:00+00'
+WHERE id = '00000000-0000-4000-8000-000000000020';
+
+INSERT INTO public.tickets (
+  id,
+  user_id,
+  target_role,
+  type,
+  title,
+  content,
+  status,
+  priority,
+  created_at,
+  updated_at
+)
+VALUES (
+  '81000000-0000-4000-8000-000000000010',
+  '00000000-0000-4000-8000-000000000010',
+  'admin',
+  'bug',
+  'OAuth email artifact merge test',
+  'Database verification fixture.',
+  'processing',
+  'medium',
+  TIMESTAMPTZ '2026-07-24 10:01:00+00',
+  TIMESTAMPTZ '2026-07-24 10:01:00+00'
+);
 
 -- Reproduce the historical artifact: the Auth user survived the old
 -- verification action while its automatically-created profile did not.
@@ -746,17 +808,28 @@ VALUES (
 
 INSERT INTO public.account_email_artifact_merge_approvals (
   artifact_user_id,
+  source_user_id,
+  approval_ticket_id,
+  approved_by,
   target_email_hash,
   evidence_version,
   approval_reference_hash,
+  evidence_snapshot_hash,
   approved_at,
   expires_at
 )
 VALUES (
   '00000000-0000-4000-8000-000000000011',
-  ENCODE(DIGEST('legacy.merge@example.com', 'sha256'), 'hex'),
+  '00000000-0000-4000-8000-000000000010',
+  '81000000-0000-4000-8000-000000000010',
+  '00000000-0000-4000-8000-000000000020',
+  ENCODE(extensions.DIGEST('legacy.merge@example.com', 'sha256'), 'hex'),
   'legacy_magiclink_v1',
-  'test-approval-reference',
+  ENCODE(extensions.DIGEST('ticket:81000000-0000-4000-8000-000000000010', 'sha256'), 'hex'),
+  public.oauth_email_artifact_evidence_snapshot_hash(
+    '00000000-0000-4000-8000-000000000011',
+    'legacy.merge@example.com'
+  ),
   NOW(),
   NOW() + INTERVAL '30 days'
 );
@@ -871,6 +944,482 @@ WHERE normalized_email = 'legacy.merge@example.com';
 
 RESET ROLE;
 
+INSERT INTO auth.users (
+  id,
+  email,
+  email_confirmed_at,
+  encrypted_password,
+  confirmation_sent_at,
+  last_sign_in_at,
+  recovery_sent_at,
+  created_at,
+  updated_at,
+  raw_app_meta_data,
+  raw_user_meta_data
+)
+VALUES
+  (
+    '00000000-0000-4000-8000-000000000012',
+    'github.consumed@oauth.local.invalid',
+    TIMESTAMPTZ '2026-07-22 13:00:00+00',
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    TIMESTAMPTZ '2026-07-22 13:00:00+00',
+    TIMESTAMPTZ '2026-07-22 13:00:00+00',
+    '{"provider":"email","providers":["email"]}'::JSONB,
+    '{"synthetic_oauth_email":true}'::JSONB
+  ),
+  (
+    '00000000-0000-4000-8000-000000000013',
+    'consumed.magiclink@example.com',
+    TIMESTAMPTZ '2026-07-22 13:05:10+00',
+    '$2b$10$' || REPEAT('a', 53),
+    TIMESTAMPTZ '2026-07-22 13:05:00+00',
+    TIMESTAMPTZ '2026-07-22 14:45:03+00',
+    TIMESTAMPTZ '2026-07-22 14:44:50+00',
+    TIMESTAMPTZ '2026-07-22 13:05:00+00',
+    TIMESTAMPTZ '2026-07-22 14:45:03+00',
+    '{"provider":"email","providers":["email"]}'::JSONB,
+    '{"email_verified":true}'::JSONB
+  );
+
+UPDATE public.profiles
+SET
+  username = 'oauth-consumed-source',
+  email = 'consumed.magiclink@example.com',
+  role = 'user',
+  created_at = TIMESTAMPTZ '2026-07-22 13:00:00+00',
+  updated_at = TIMESTAMPTZ '2026-07-22 13:04:00+00'
+WHERE id = '00000000-0000-4000-8000-000000000012';
+
+INSERT INTO public.tickets (
+  id,
+  user_id,
+  target_role,
+  type,
+  title,
+  content,
+  status,
+  priority,
+  created_at,
+  updated_at
+)
+VALUES (
+  '81000000-0000-4000-8000-000000000012',
+  '00000000-0000-4000-8000-000000000012',
+  'admin',
+  'bug',
+  'Consumed OAuth email artifact merge test',
+  'Database verification fixture.',
+  'processing',
+  'medium',
+  TIMESTAMPTZ '2026-07-22 15:00:00+00',
+  TIMESTAMPTZ '2026-07-22 15:00:00+00'
+);
+
+DELETE FROM public.profiles
+WHERE id = '00000000-0000-4000-8000-000000000013';
+
+INSERT INTO public.account_security_states (
+  user_id,
+  password_change_required,
+  password_change_reason,
+  password_change_source,
+  password_change_requested_at,
+  email_verification_required,
+  email_verification_reason,
+  email_verification_verified_at,
+  email_verification_target_email,
+  password_setup_capability_id,
+  password_setup_capability_status
+)
+VALUES (
+  '00000000-0000-4000-8000-000000000012',
+  TRUE,
+  'oauth_password_setup_required:github',
+  'oauth',
+  TIMESTAMPTZ '2026-07-22 13:00:00+00',
+  FALSE,
+  NULL,
+  TIMESTAMPTZ '2026-07-22 13:04:00+00',
+  'consumed.magiclink@example.com',
+  '20000000-0000-4000-8000-000000000012',
+  'available'
+);
+
+INSERT INTO public.app_auth_identities (
+  id,
+  user_id,
+  provider,
+  provider_subject_hash,
+  provider_subject_hash_key_version
+)
+VALUES (
+  '40000000-0000-4000-8000-000000000012',
+  '00000000-0000-4000-8000-000000000012',
+  'github',
+  'oauth-consumed-email-merge-subject-hash',
+  'v2'
+);
+
+INSERT INTO public.mail_delivery_events (
+  id,
+  event_type,
+  event_payload_redacted_json,
+  created_at
+)
+VALUES (
+  '70000000-0000-4000-8000-000000000012',
+  'email_verification_accepted',
+  '{"action":"resend_verification","relatedEntityId":"resend_verification","verificationMode":"auth_magiclink","recipientDomain":"example.com","recipientRedacted":"c***k@e***e.com"}'::JSONB,
+  TIMESTAMPTZ '2026-07-22 13:05:00+00'
+);
+
+INSERT INTO auth.identities (id, user_id, provider, identity_data)
+VALUES (
+  '90000000-0000-4000-8000-000000000013',
+  '00000000-0000-4000-8000-000000000013',
+  'email',
+  '{"email":"consumed.magiclink@example.com","email_verified":true}'::JSONB
+);
+
+INSERT INTO auth.sessions (id, user_id, created_at, updated_at)
+VALUES
+  (
+    '30000000-0000-4000-8000-000000000013',
+    '00000000-0000-4000-8000-000000000013',
+    TIMESTAMPTZ '2026-07-22 13:05:10+00',
+    TIMESTAMPTZ '2026-07-22 13:05:10+00'
+  ),
+  (
+    '30000000-0000-4000-8000-000000000014',
+    '00000000-0000-4000-8000-000000000013',
+    TIMESTAMPTZ '2026-07-22 14:45:03+00',
+    TIMESTAMPTZ '2026-07-22 14:45:03+00'
+  );
+
+INSERT INTO auth.refresh_tokens (
+  token,
+  user_id,
+  revoked,
+  created_at,
+  updated_at,
+  parent,
+  session_id
+)
+VALUES
+  (
+    'consumed-refresh-token-1',
+    '00000000-0000-4000-8000-000000000013',
+    FALSE,
+    TIMESTAMPTZ '2026-07-22 13:05:10+00',
+    TIMESTAMPTZ '2026-07-22 13:05:10+00',
+    NULL,
+    '30000000-0000-4000-8000-000000000013'
+  ),
+  (
+    'consumed-refresh-token-2',
+    '00000000-0000-4000-8000-000000000013',
+    FALSE,
+    TIMESTAMPTZ '2026-07-22 14:45:03+00',
+    TIMESTAMPTZ '2026-07-22 14:45:03+00',
+    NULL,
+    '30000000-0000-4000-8000-000000000014'
+  );
+
+INSERT INTO auth.audit_log_entries (id, payload, created_at)
+VALUES
+  (
+    '91000000-0000-4000-8000-000000000013',
+    '{"action":"user_signedup","actor_id":"00000000-0000-4000-8000-000000000013","log_type":"team","traits":{"provider":"email"}}'::JSON,
+    TIMESTAMPTZ '2026-07-22 13:05:10+00'
+  ),
+  (
+    '91000000-0000-4000-8000-000000000014',
+    '{"action":"user_recovery_requested","actor_id":"00000000-0000-4000-8000-000000000013","log_type":"user"}'::JSON,
+    TIMESTAMPTZ '2026-07-22 14:44:50+00'
+  ),
+  (
+    '91000000-0000-4000-8000-000000000015',
+    '{"action":"login","actor_id":"00000000-0000-4000-8000-000000000013","log_type":"account"}'::JSON,
+    TIMESTAMPTZ '2026-07-22 14:45:03+00'
+  );
+
+INSERT INTO public.app_sessions (
+  id,
+  user_id,
+  session_token_hash,
+  refresh_token_hash,
+  created_at,
+  last_seen_at,
+  expires_at,
+  absolute_expires_at
+)
+VALUES (
+  '50000000-0000-4000-8000-000000000012',
+  '00000000-0000-4000-8000-000000000012',
+  'consumed-merge-started-session-hash',
+  'consumed-merge-started-refresh-hash',
+  NOW(),
+  NOW(),
+  NOW() + INTERVAL '1 hour',
+  NOW() + INTERVAL '1 day'
+);
+
+SET ROLE service_role;
+
+SELECT 'oauth_email_consumed_preapproval=' || reason
+FROM public.inspect_oauth_email_artifact_merge(
+  '00000000-0000-4000-8000-000000000012',
+  'consumed.magiclink@example.com'
+);
+
+SELECT 'oauth_email_approval_service_insert=' || has_table_privilege(
+  'service_role',
+  'public.account_email_artifact_merge_approvals',
+  'INSERT'
+);
+
+RESET ROLE;
+
+UPDATE auth.refresh_tokens
+SET revoked = NULL, created_at = NULL, updated_at = NULL
+WHERE token = 'consumed-refresh-token-1';
+
+SET ROLE service_role;
+
+SELECT 'oauth_email_consumed_null_refresh=' || reason
+FROM public.inspect_oauth_email_artifact_merge(
+  '00000000-0000-4000-8000-000000000012',
+  'consumed.magiclink@example.com',
+  FALSE
+);
+
+RESET ROLE;
+
+UPDATE auth.refresh_tokens
+SET
+  revoked = FALSE,
+  created_at = TIMESTAMPTZ '2026-07-22 13:05:10+00',
+  updated_at = TIMESTAMPTZ '2026-07-22 13:05:10+00'
+WHERE token = 'consumed-refresh-token-1';
+
+UPDATE auth.refresh_tokens
+SET
+  session_id = '30000000-0000-4000-8000-000000000013',
+  created_at = TIMESTAMPTZ '2026-07-22 13:05:10+00',
+  updated_at = TIMESTAMPTZ '2026-07-22 13:05:10+00'
+WHERE token = 'consumed-refresh-token-2';
+
+SET ROLE service_role;
+
+SELECT 'oauth_email_consumed_duplicate_refresh_session=' || reason
+FROM public.inspect_oauth_email_artifact_merge(
+  '00000000-0000-4000-8000-000000000012',
+  'consumed.magiclink@example.com',
+  FALSE
+);
+
+RESET ROLE;
+
+UPDATE auth.refresh_tokens
+SET
+  session_id = '30000000-0000-4000-8000-000000000014',
+  created_at = TIMESTAMPTZ '2026-07-22 14:45:03+00',
+  updated_at = TIMESTAMPTZ '2026-07-22 14:45:03+00'
+WHERE token = 'consumed-refresh-token-2';
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO public.account_email_artifact_merge_approvals (
+      artifact_user_id,
+      source_user_id,
+      approval_ticket_id,
+      approved_by,
+      target_email_hash,
+      evidence_version,
+      approval_reference_hash,
+      evidence_snapshot_hash,
+      approved_at,
+      expires_at
+    )
+    VALUES (
+      '00000000-0000-4000-8000-000000000013',
+      '00000000-0000-4000-8000-000000000012',
+      '81000000-0000-4000-8000-000000000012',
+      '00000000-0000-4000-8000-000000000012',
+      ENCODE(extensions.DIGEST('consumed.magiclink@example.com', 'sha256'), 'hex'),
+      'legacy_magiclink_consumed_v2',
+      ENCODE(extensions.DIGEST('ticket:81000000-0000-4000-8000-000000000012', 'sha256'), 'hex'),
+      public.oauth_email_artifact_evidence_snapshot_hash(
+        '00000000-0000-4000-8000-000000000013',
+        'consumed.magiclink@example.com'
+      ),
+      NOW(),
+      NOW() + INTERVAL '30 days'
+    );
+    RAISE EXCEPTION 'non-admin approval unexpectedly succeeded';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+END $$;
+
+SELECT 'oauth_email_approval_rows_after_forgery=' || COUNT(*)
+FROM public.account_email_artifact_merge_approvals
+WHERE artifact_user_id = '00000000-0000-4000-8000-000000000013';
+
+INSERT INTO public.account_email_artifact_merge_approvals (
+  artifact_user_id,
+  source_user_id,
+  approval_ticket_id,
+  approved_by,
+  target_email_hash,
+  evidence_version,
+  approval_reference_hash,
+  evidence_snapshot_hash,
+  approved_at,
+  expires_at
+)
+VALUES (
+  '00000000-0000-4000-8000-000000000013',
+  '00000000-0000-4000-8000-000000000012',
+  '81000000-0000-4000-8000-000000000012',
+  '00000000-0000-4000-8000-000000000020',
+  ENCODE(extensions.DIGEST('consumed.magiclink@example.com', 'sha256'), 'hex'),
+  'legacy_magiclink_v1',
+  ENCODE(extensions.DIGEST('ticket:81000000-0000-4000-8000-000000000012', 'sha256'), 'hex'),
+  public.oauth_email_artifact_evidence_snapshot_hash(
+    '00000000-0000-4000-8000-000000000013',
+    'consumed.magiclink@example.com'
+  ),
+  NOW(),
+  NOW() + INTERVAL '30 days'
+);
+
+SET ROLE service_role;
+
+SELECT 'oauth_email_consumed_wrong_approval=' || reason
+FROM public.inspect_oauth_email_artifact_merge(
+  '00000000-0000-4000-8000-000000000012',
+  'consumed.magiclink@example.com'
+);
+
+RESET ROLE;
+
+DELETE FROM public.account_email_artifact_merge_approvals
+WHERE artifact_user_id = '00000000-0000-4000-8000-000000000013';
+
+INSERT INTO public.account_email_artifact_merge_approvals (
+  artifact_user_id,
+  source_user_id,
+  approval_ticket_id,
+  approved_by,
+  target_email_hash,
+  evidence_version,
+  approval_reference_hash,
+  evidence_snapshot_hash,
+  approved_at,
+  expires_at
+)
+VALUES (
+  '00000000-0000-4000-8000-000000000013',
+  '00000000-0000-4000-8000-000000000012',
+  '81000000-0000-4000-8000-000000000012',
+  '00000000-0000-4000-8000-000000000020',
+  ENCODE(extensions.DIGEST('consumed.magiclink@example.com', 'sha256'), 'hex'),
+  'legacy_magiclink_consumed_v2',
+  ENCODE(extensions.DIGEST('ticket:81000000-0000-4000-8000-000000000012', 'sha256'), 'hex'),
+  public.oauth_email_artifact_evidence_snapshot_hash(
+    '00000000-0000-4000-8000-000000000013',
+    'consumed.magiclink@example.com'
+  ),
+  NOW(),
+  NOW() + INTERVAL '30 days'
+);
+
+UPDATE auth.refresh_tokens
+SET token = 'consumed-refresh-token-1-mutated'
+WHERE token = 'consumed-refresh-token-1';
+
+SET ROLE service_role;
+
+SELECT 'oauth_email_consumed_snapshot_changed=' || reason
+FROM public.inspect_oauth_email_artifact_merge(
+  '00000000-0000-4000-8000-000000000012',
+  'consumed.magiclink@example.com'
+);
+
+RESET ROLE;
+
+UPDATE auth.refresh_tokens
+SET token = 'consumed-refresh-token-1'
+WHERE token = 'consumed-refresh-token-1-mutated';
+
+INSERT INTO auth.audit_log_entries (id, payload, created_at)
+VALUES (
+  '91000000-0000-4000-8000-000000000016',
+  '{"action":"password_changed","actor_id":"00000000-0000-4000-8000-000000000013","log_type":"account"}'::JSON,
+  TIMESTAMPTZ '2026-07-22 14:45:04+00'
+);
+
+SET ROLE service_role;
+
+SELECT 'oauth_email_consumed_password_audit=' || reason
+FROM public.inspect_oauth_email_artifact_merge(
+  '00000000-0000-4000-8000-000000000012',
+  'consumed.magiclink@example.com',
+  FALSE
+);
+
+RESET ROLE;
+
+DELETE FROM auth.audit_log_entries
+WHERE id = '91000000-0000-4000-8000-000000000016';
+
+SET ROLE service_role;
+
+SELECT 'oauth_email_consumed_merge_eligible=' || eligible || ':' || reason
+FROM public.inspect_oauth_email_artifact_merge(
+  '00000000-0000-4000-8000-000000000012',
+  'consumed.magiclink@example.com'
+);
+
+SELECT 'oauth_email_consumed_merge_started=' || status
+FROM public.start_oauth_email_artifact_merge(
+  '80000000-0000-4000-8000-000000000012',
+  '00000000-0000-4000-8000-000000000012',
+  '50000000-0000-4000-8000-000000000012',
+  'consumed.magiclink@example.com',
+  'consumed-merge-code-hash',
+  NOW() + INTERVAL '15 minutes'
+);
+
+SELECT 'oauth_email_consumed_merge_verified=' || status
+FROM public.verify_oauth_email_artifact_merge(
+  '80000000-0000-4000-8000-000000000012',
+  '00000000-0000-4000-8000-000000000012',
+  'consumed-merge-code-hash'
+);
+
+SELECT 'oauth_email_consumed_merge_claimed=' || status
+FROM public.claim_oauth_email_artifact_merge(
+  '80000000-0000-4000-8000-000000000012',
+  '00000000-0000-4000-8000-000000000012',
+  '50000000-0000-4000-8000-000000000012'
+);
+
+RESET ROLE;
+
+SELECT 'oauth_email_consumed_auth_sessions=' || COUNT(*)
+FROM auth.sessions
+WHERE user_id = '00000000-0000-4000-8000-000000000013';
+
+SELECT 'oauth_email_consumed_refresh_tokens=' || COUNT(*)
+FROM auth.refresh_tokens
+WHERE user_id = '00000000-0000-4000-8000-000000000013';
+
 SELECT 'admin_security_definer_browser_grants=' || COUNT(*)
 FROM pg_proc AS procedure
 JOIN pg_namespace AS namespace ON namespace.oid = procedure.pronamespace
@@ -944,6 +1493,20 @@ async function main() {
       'oauth_email_merge_transferred=ownership_transferred',
       'oauth_email_merge_completed=completed',
       'oauth_email_merge_owner=00000000-0000-4000-8000-000000000010',
+      'oauth_email_consumed_preapproval=artifact_operator_approval_required',
+      'oauth_email_approval_service_insert=false',
+      'oauth_email_consumed_null_refresh=artifact_consumed_refresh_token_mismatch',
+      'oauth_email_consumed_duplicate_refresh_session=artifact_consumed_refresh_token_mismatch',
+      'oauth_email_approval_rows_after_forgery=0',
+      'oauth_email_consumed_wrong_approval=artifact_operator_approval_required',
+      'oauth_email_consumed_snapshot_changed=artifact_operator_approval_required',
+      'oauth_email_consumed_password_audit=artifact_consumed_audit_mismatch',
+      'oauth_email_consumed_merge_eligible=true:legacy_email_artifact_magiclink_consumed',
+      'oauth_email_consumed_merge_started=pending',
+      'oauth_email_consumed_merge_verified=verified',
+      'oauth_email_consumed_merge_claimed=claimed',
+      'oauth_email_consumed_auth_sessions=0',
+      'oauth_email_consumed_refresh_tokens=0',
       'admin_security_definer_browser_grants=0',
       'own_ranking_stats_ok=true',
       'own_ranking_stats_auth_ok=true',
