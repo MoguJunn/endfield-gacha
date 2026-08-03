@@ -649,6 +649,7 @@ describe('executeFullImport import mode metadata', () => {
     };
     await expect(savePostImportAnomalies(supabase, stagedRecords, 'user-1')).resolves.toEqual({
       anomalyRecords: 1,
+      skippedAnomalyRecords: 0,
       anomalyPoolIds: ['special_test'],
       anomalyItems: [expect.objectContaining({
         recordId: 'record-unknown',
@@ -664,6 +665,68 @@ describe('executeFullImport import mode metadata', () => {
         ignoreDuplicates: true,
       }
     );
+  });
+
+  it('isolates an anomaly with no matching history parent without dropping valid markers', async () => {
+    const { savePostImportAnomalies } = await import('../../backend/fullImportService.js');
+    const issues = [{ code: 'MISSING_ITEM_NAME', severity: 'review' }];
+    const stagedRecords = [
+      {
+        historyRecord: {
+          record_id: 'record-valid',
+          game_uid: '10001',
+          server_id: '1',
+          pool_id: 'special_test',
+          seq_id: '42',
+          rarity: 4,
+          timestamp: '2026-07-16T12:00:00.000Z',
+        },
+        issues,
+      },
+      {
+        historyRecord: {
+          record_id: 'record-missing-parent',
+          game_uid: '10001',
+          server_id: '1',
+          pool_id: 'special_test',
+          seq_id: '43',
+          rarity: 4,
+          timestamp: '2026-07-16T12:01:00.000Z',
+        },
+        issues,
+      },
+    ];
+    const parentError = {
+      code: '23503',
+      message: 'violates foreign key constraint "history_anomalies_user_id_game_uid_server_scope_pool_id_se_fkey"',
+    };
+    const upsert = vi.fn(async (rows) => {
+      if (rows.length > 1 || rows[0]?.record_id === 'record-missing-parent') {
+        return { error: parentError };
+      }
+      return { error: null };
+    });
+    const supabase = {
+      from: vi.fn(() => ({ upsert })),
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(savePostImportAnomalies(supabase, stagedRecords, 'user-1')).resolves.toEqual({
+      anomalyRecords: 1,
+      skippedAnomalyRecords: 1,
+      anomalyPoolIds: ['special_test'],
+      anomalyItems: [expect.objectContaining({
+        recordId: 'record-valid',
+        poolId: 'special_test',
+        seqId: '42',
+      })],
+    });
+    expect(upsert).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledWith(
+      '[FullImportService] 跳过无法匹配正式历史的异常提醒:',
+      1
+    );
+    warn.mockRestore();
   });
 
   it('recognizes only an exact unknown four-star artifact at the official non-pull locator', async () => {

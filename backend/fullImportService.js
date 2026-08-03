@@ -945,6 +945,52 @@ export function buildPostImportAnomalyItems(anomalyRows = []) {
   }));
 }
 
+const HISTORY_ANOMALY_PARENT_CONSTRAINT =
+  'history_anomalies_user_id_game_uid_server_scope_pool_id_se_fkey';
+
+function isMissingHistoryAnomalyParentError(error) {
+  if (String(error?.code || '') !== '23503') {
+    return false;
+  }
+
+  return [error?.constraint, error?.message, error?.details]
+    .some((value) => String(value || '').includes(HISTORY_ANOMALY_PARENT_CONSTRAINT));
+}
+
+async function upsertPostImportAnomalyBatch(supabase, anomalyRows) {
+  const rows = Array.isArray(anomalyRows) ? anomalyRows : [];
+  if (rows.length === 0) {
+    return { savedRows: [], skippedRows: [] };
+  }
+
+  const { error } = await supabase
+    .from('history_anomalies')
+    .upsert(rows, {
+      onConflict: 'user_id,game_uid,server_scope,pool_id,seq_id,issue_code',
+      ignoreDuplicates: true,
+    });
+
+  if (!error) {
+    return { savedRows: rows, skippedRows: [] };
+  }
+  if (!isMissingHistoryAnomalyParentError(error)) {
+    throw error;
+  }
+  if (rows.length === 1) {
+    return { savedRows: [], skippedRows: rows };
+  }
+
+  const midpoint = Math.ceil(rows.length / 2);
+  const [left, right] = await Promise.all([
+    upsertPostImportAnomalyBatch(supabase, rows.slice(0, midpoint)),
+    upsertPostImportAnomalyBatch(supabase, rows.slice(midpoint)),
+  ]);
+  return {
+    savedRows: [...left.savedRows, ...right.savedRows],
+    skippedRows: [...left.skippedRows, ...right.skippedRows],
+  };
+}
+
 export function resolveOfficialImportStorageQuality(normalized = {}) {
   if (
     normalized.quality === null
@@ -958,20 +1004,29 @@ export function resolveOfficialImportStorageQuality(normalized = {}) {
 
 export async function savePostImportAnomalies(supabase, stagedRecords, userId) {
   const anomalyRows = buildPostImportAnomalyRows(stagedRecords, userId);
+  const savedRows = [];
+  const skippedRows = [];
   for (let index = 0; index < anomalyRows.length; index += 200) {
-    const { error } = await supabase
-      .from('history_anomalies')
-      .upsert(anomalyRows.slice(index, index + 200), {
-        onConflict: 'user_id,game_uid,server_scope,pool_id,seq_id,issue_code',
-        ignoreDuplicates: true,
-      });
-    if (error) throw error;
+    const result = await upsertPostImportAnomalyBatch(
+      supabase,
+      anomalyRows.slice(index, index + 200)
+    );
+    savedRows.push(...result.savedRows);
+    skippedRows.push(...result.skippedRows);
+  }
+
+  if (skippedRows.length > 0) {
+    console.warn(
+      '[FullImportService] 跳过无法匹配正式历史的异常提醒:',
+      skippedRows.length
+    );
   }
 
   return {
-    anomalyRecords: anomalyRows.length,
-    anomalyPoolIds: [...new Set(anomalyRows.map((row) => row.pool_id))],
-    anomalyItems: buildPostImportAnomalyItems(anomalyRows),
+    anomalyRecords: savedRows.length,
+    skippedAnomalyRecords: skippedRows.length,
+    anomalyPoolIds: [...new Set(savedRows.map((row) => row.pool_id))],
+    anomalyItems: buildPostImportAnomalyItems(savedRows),
   };
 }
 
@@ -2124,7 +2179,12 @@ export async function executeFullImport({
         .map((record) => Number(record.ordinal))
     );
     const writtenStagedRecords = processedResult.stagedRecords.filter((_record, ordinal) => writtenOrdinals.has(ordinal));
-    let anomalyResult = { anomalyRecords: 0, anomalyPoolIds: [], anomalyItems: [] };
+    let anomalyResult = {
+      anomalyRecords: 0,
+      skippedAnomalyRecords: 0,
+      anomalyPoolIds: [],
+      anomalyItems: [],
+    };
     let anomalyWarning = null;
     try {
       anomalyResult = await savePostImportAnomalies(supabase, writtenStagedRecords, userId);
@@ -2152,12 +2212,16 @@ export async function executeFullImport({
         savedRecords: Number(commitResult.savedRecords || 0),
         skippedRecords,
         anomalyRecords: anomalyResult.anomalyRecords,
+        skippedAnomalyRecords: anomalyResult.skippedAnomalyRecords,
         anomalyPoolIds: anomalyResult.anomalyPoolIds,
         anomalyItems: anomalyResult.anomalyItems,
         warnings: [
           ...nonPullRepairResult.warnings,
           ...(anomalyResult.anomalyRecords > 0
             ? [`有 ${anomalyResult.anomalyRecords} 条已导入记录需要后续核对。`]
+            : []),
+          ...(anomalyResult.skippedAnomalyRecords > 0
+            ? [`有 ${anomalyResult.skippedAnomalyRecords} 条核对提醒找不到对应的正式记录，已跳过提醒创建。`]
             : []),
           ...(skippedRecords > 0
             ? [`有 ${skippedRecords} 条记录缺少卡池、账号、序号、时间或有效品质，无法安全写入。`]
