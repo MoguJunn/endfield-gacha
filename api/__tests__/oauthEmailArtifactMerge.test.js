@@ -27,7 +27,11 @@ const ARTIFACT_ID = '00000000-0000-4000-8000-000000000002';
 const INTENT_ID = '10000000-0000-4000-8000-000000000001';
 const SESSION_ID = '50000000-0000-4000-8000-000000000001';
 
-function createAdminClient({ failSourceBinding = false } = {}) {
+function createAdminClient({
+  failQuarantine = false,
+  quarantineCommitThenError = false,
+  failSourceBinding = false,
+} = {}) {
   const intent = {
     id: INTENT_ID,
     source_user_id: SOURCE_ID,
@@ -52,9 +56,29 @@ function createAdminClient({ failSourceBinding = false } = {}) {
       user_metadata: { email_verified: true },
     },
   };
+  let quarantineAttempts = 0;
   const rpc = vi.fn(async (name) => {
     if (name === 'claim_oauth_email_artifact_merge') {
       intent.status = 'claimed';
+      return { data: [{ ...intent }], error: null };
+    }
+    if (name === 'quarantine_oauth_email_artifact_for_merge') {
+      quarantineAttempts += 1;
+      if (failQuarantine) {
+        return { data: null, error: { code: 'quarantine_failed' } };
+      }
+      users[ARTIFACT_ID] = {
+        ...users[ARTIFACT_ID],
+        email: intent.quarantine_email,
+        user_metadata: {
+          ...users[ARTIFACT_ID].user_metadata,
+          legacy_email_action_artifact: true,
+          oauth_email_merge_intent_id: intent.id,
+        },
+      };
+      if (quarantineCommitThenError && quarantineAttempts === 1) {
+        return { data: null, error: { code: 'network_response_lost' } };
+      }
       return { data: [{ ...intent }], error: null };
     }
     if (name === 'prepare_oauth_email_artifact_ownership_transfer') {
@@ -74,6 +98,7 @@ function createAdminClient({ failSourceBinding = false } = {}) {
       return { data: [{ ...intent }], error: null };
     }
     if (name === 'mark_oauth_email_artifact_merge_coordination_required') {
+      intent.status = 'coordination_required';
       return { data: null, error: null };
     }
     throw new Error(`Unexpected RPC: ${name}`);
@@ -210,6 +235,7 @@ describe('OAuth email artifact merge helpers', () => {
     });
     expect(context.rpc.mock.calls.map(([name]) => name)).toEqual([
       'claim_oauth_email_artifact_merge',
+      'quarantine_oauth_email_artifact_for_merge',
       'prepare_oauth_email_artifact_ownership_transfer',
       'complete_oauth_email_artifact_merge',
     ]);
@@ -248,10 +274,67 @@ describe('OAuth email artifact merge helpers', () => {
     });
     expect(context.rpc.mock.calls.map(([name]) => name)).toEqual([
       'claim_oauth_email_artifact_merge',
+      'quarantine_oauth_email_artifact_for_merge',
       'prepare_oauth_email_artifact_ownership_transfer',
       'rollback_oauth_email_artifact_ownership_transfer',
     ]);
     expect(mocks.createSiteSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps a failed atomic quarantine fail-closed for operator coordination', async () => {
+    const context = createAdminClient({ failQuarantine: true });
+    mocks.loadAuthUserById.mockImplementation(async (_client, userId) => context.users[userId]);
+
+    const result = await completeOAuthEmailArtifactMerge(context.adminClient, {
+      intentId: INTENT_ID,
+      sourceUserId: SOURCE_ID,
+      startedSessionId: SESSION_ID,
+      req: { headers: {} },
+      res: { setHeader: vi.fn() },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      code: 'oauth_email_merge_coordination_required',
+    });
+    expect(context.intent.status).toBe('coordination_required');
+    expect(context.users[ARTIFACT_ID]).toMatchObject({
+      email: 'legacy@example.com',
+      user_metadata: { email_verified: true },
+    });
+    expect(context.updateUserById).not.toHaveBeenCalledWith(
+      ARTIFACT_ID,
+      expect.anything()
+    );
+    expect(context.rpc.mock.calls.map(([name]) => name)).toEqual([
+      'claim_oauth_email_artifact_merge',
+      'quarantine_oauth_email_artifact_for_merge',
+      'quarantine_oauth_email_artifact_for_merge',
+      'mark_oauth_email_artifact_merge_coordination_required',
+    ]);
+    expect(mocks.createSiteSession).not.toHaveBeenCalled();
+  });
+
+  it('retries an idempotent quarantine after the commit response is lost', async () => {
+    const context = createAdminClient({ quarantineCommitThenError: true });
+    mocks.loadAuthUserById.mockImplementation(async (_client, userId) => context.users[userId]);
+
+    const result = await completeOAuthEmailArtifactMerge(context.adminClient, {
+      intentId: INTENT_ID,
+      sourceUserId: SOURCE_ID,
+      startedSessionId: SESSION_ID,
+      req: { headers: {} },
+      res: { setHeader: vi.fn() },
+    });
+
+    expect(result).toMatchObject({ ok: true, status: 'completed' });
+    expect(context.rpc.mock.calls.map(([name]) => name)).toEqual([
+      'claim_oauth_email_artifact_merge',
+      'quarantine_oauth_email_artifact_for_merge',
+      'quarantine_oauth_email_artifact_for_merge',
+      'prepare_oauth_email_artifact_ownership_transfer',
+      'complete_oauth_email_artifact_merge',
+    ]);
   });
 
   it('requires the original site session to claim a verified intent', async () => {

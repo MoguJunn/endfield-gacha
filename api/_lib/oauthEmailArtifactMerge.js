@@ -4,7 +4,6 @@ import { loadAuthUserById } from './authAdmin.js';
 import { createSiteSession } from './siteSession.js';
 
 const SYNTHETIC_OAUTH_EMAIL_SUFFIX = '@oauth.local.invalid';
-const LONG_QUARANTINE_DURATION = '876000h';
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -377,29 +376,37 @@ export async function completeOAuthEmailArtifactMerge(adminClient, {
       return { ok: false, code: 'oauth_email_merge_source_changed' };
     }
 
-    const releasedAt = new Date().toISOString();
-    const artifactRelease = await updateAuthUserAndReconcile(
-      adminClient,
-      latestIntent.artifact_user_id,
-      {
-        email: latestIntent.quarantine_email,
-        email_confirm: true,
-        ban_duration: LONG_QUARANTINE_DURATION,
-        user_metadata: {
-          ...getUserMetadata(artifactAuthUser),
-          legacy_email_action_artifact: true,
-          legacy_email_released_at: releasedAt,
-          oauth_email_merge_intent_id: latestIntent.id,
-        },
-      },
-      (user) => (
-        normalizeAccountMergeEmail(user?.email) === latestIntent.quarantine_email
-        && getUserMetadata(user).oauth_email_merge_intent_id === latestIntent.id
-      )
-    );
-    if (!artifactRelease.ok) {
-      await releaseClaimAndRestoreArtifact(adminClient, latestIntent, artifactAuthUser, 'quarantine_failed');
-      return { ok: false, code: 'oauth_email_artifact_quarantine_failed' };
+    let quarantined = null;
+    let quarantineError = null;
+    for (let attempt = 0; attempt < 2 && !quarantined?.id; attempt += 1) {
+      try {
+        quarantined = await runRpc(adminClient, 'quarantine_oauth_email_artifact_for_merge', {
+          p_intent_id: latestIntent.id,
+          p_source_user_id: latestIntent.source_user_id,
+        });
+      } catch (error) {
+        quarantineError = error;
+      }
+    }
+    if (!quarantined?.id) {
+      const currentArtifact = await loadAuthUserById(
+        adminClient,
+        latestIntent.artifact_user_id
+      ).catch(() => null);
+      const reconciled = (
+        normalizeAccountMergeEmail(currentArtifact?.email) === latestIntent.quarantine_email
+        && getUserMetadata(currentArtifact).oauth_email_merge_intent_id === latestIntent.id
+      );
+      if (reconciled) {
+        quarantined = latestIntent;
+      } else {
+        await markCoordinationRequired(
+          adminClient,
+          latestIntent,
+          quarantineError?.code || 'quarantine_result_unknown'
+        );
+        return { ok: false, code: 'oauth_email_merge_coordination_required' };
+      }
     }
 
     let transferred;
