@@ -2,7 +2,9 @@
 
 > 2026-08-03 发布后更新：认证迁移 166/167/168、PR #14 和对应 API/前端已经生产完成。本文后续部分保留发布前候选审查快照；新的 `169_add_oauth_email_artifact_merge.sql` 及配套接口只处理旧版邮箱验证流程产生、且经严格证据确认没有任何站内数据的 Auth 空壳。用户必须在当前 GitHub Session 中验证目标邮箱并再次明确确认；真实已有账号、证据不全或任何数据归属冲突继续安全拒绝并转人工处理。安全复核后进一步收口：可修复判定要求 operator 逐条人工批准、验证码预算按源用户+邮箱持久累计、确认阶段在数据库内重新原子占用并冻结空壳（含双方原生 Auth Session 撤销）、按数据库最终状态决策补偿、完成后支持会话交接重试；这些都已在临时 PostgreSQL 17 与专项测试中验证。
 
-> 跟进迁移 `171_allow_consumed_magiclink_email_artifact.sql`（2026-08-04 候选，尚未生产应用）：识别旧缺陷的第二种精确形状——用户点击过旧 Magic Link、留下占位 bcrypt 密码与原生 Session/refresh token 的 email-only Auth 空壳。该形状要求独立的 operator 证据版本 `legacy_magiclink_consumed_v2`，并绑定：真实源用户、真实工单、super_admin 批准人、不可变的完整证据快照哈希（覆盖 Auth 用户、identities、sessions、refresh tokens、审计与邮件投递证据）。`service_role` 对批准表只读；claim 先锁定批准行再复核；refresh token 必须非空、未撤销、未轮换且每个 Session 恰好一条。任何自动形状检查均不把 bcrypt 外形当作 Magic Link 占位密码的唯一证明，证据快照在批准与 claim 时逐字节一致。
+> 跟进迁移 `171_allow_consumed_magiclink_email_artifact.sql`（2026-08-04 已生产应用）：识别旧缺陷的第二种精确形状——用户点击过旧 Magic Link、留下占位 bcrypt 密码与原生 Session/refresh token 的 email-only Auth 空壳。该形状要求独立的 operator 证据版本 `legacy_magiclink_consumed_v2`，并绑定：真实源用户、真实工单、super_admin 批准人、不可变的完整证据快照哈希（覆盖 Auth 用户、identities、sessions、refresh tokens、审计与邮件投递证据）。`service_role` 对批准表只读；claim 先锁定批准行再复核；refresh token 必须非空、未撤销、未轮换且每个 Session 恰好一条。任何自动形状检查均不把 bcrypt 外形当作 Magic Link 占位密码的唯一证明，证据快照在批准与 claim 时逐字节一致。
+
+> 2026-08-04 生产跟进：迁移 171 与 operator 批准已生产应用。真实确认请求暴露出 GoTrue v2.188.1 Admin 更新用户会依次修改 email identity、Auth email、metadata 与封禁状态，活动 intent 的冻结触发器因此正确拒绝中间状态。迁移 `172_quarantine_oauth_email_artifact_atomically.sql` 将空壳用户、唯一 email identity、intent metadata 与长期封禁收口为同一数据库事务，并为活动空壳 identity 增加精确冻结触发器；应用层改用该 RPC，结果不明时先幂等重试，仍无法确认则进入人工协调状态，不再错误释放 claim。专项测试同时覆盖 identity 并发新增拒绝、用户更新失败后的整笔回滚，以及 v1/v2 最终隔离不变量。
 
 状态：`AUTH-HARDEN-001` 本地安全实现与候选验收已完成；远端审查和生产发布由 `AUTH-HARDEN-RELEASE-001` 继续跟踪。本地提交不等于已发布或允许部署。
 

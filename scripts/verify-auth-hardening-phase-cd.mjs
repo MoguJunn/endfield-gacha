@@ -84,7 +84,9 @@ CREATE TABLE auth.identities (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   provider TEXT NOT NULL,
-  identity_data JSONB DEFAULT '{}'::jsonb
+  identity_data JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE TABLE auth.sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -904,14 +906,99 @@ SELECT 'oauth_email_merge_source_auth_sessions=' || COUNT(*)
 FROM auth.sessions
 WHERE user_id = '00000000-0000-4000-8000-000000000010';
 
-UPDATE auth.users
-SET
-  email = 'legacy.merge.00000000000040008000000000000011@oauth.local.invalid',
-  raw_user_meta_data = raw_user_meta_data || JSONB_BUILD_OBJECT(
-    'legacy_email_action_artifact', TRUE,
-    'oauth_email_merge_intent_id', '80000000-0000-4000-8000-000000000010'
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO auth.identities (id, user_id, provider, identity_data)
+    VALUES (
+      '40000000-0000-4000-8000-000000000099',
+      '00000000-0000-4000-8000-000000000011',
+      'github',
+      '{"email":"unexpected@example.com"}'::JSONB
+    );
+    RAISE EXCEPTION 'identity insert unexpectedly succeeded';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL;
+  END;
+END $$;
+
+SELECT 'oauth_email_merge_identity_insert_blocked=' || COUNT(*)
+FROM auth.identities
+WHERE id = '40000000-0000-4000-8000-000000000099';
+
+CREATE OR REPLACE FUNCTION public.test_fail_oauth_artifact_quarantine_user_update()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.id = '00000000-0000-4000-8000-000000000011'
+    AND public.normalize_account_email(NEW.email) LIKE '%@oauth.local.invalid' THEN
+    RAISE EXCEPTION 'test_quarantine_user_update_failed' USING ERRCODE = 'P0001';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER aaa_test_fail_oauth_artifact_quarantine_user_update
+  BEFORE UPDATE ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.test_fail_oauth_artifact_quarantine_user_update();
+
+SET ROLE service_role;
+
+DO $$
+BEGIN
+  BEGIN
+    PERFORM *
+    FROM public.quarantine_oauth_email_artifact_for_merge(
+      '80000000-0000-4000-8000-000000000010',
+      '00000000-0000-4000-8000-000000000010'
+    );
+    RAISE EXCEPTION 'quarantine unexpectedly succeeded';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'test_quarantine_user_update_failed' THEN RAISE; END IF;
+  END;
+END $$;
+
+RESET ROLE;
+
+DROP TRIGGER aaa_test_fail_oauth_artifact_quarantine_user_update ON auth.users;
+DROP FUNCTION public.test_fail_oauth_artifact_quarantine_user_update();
+
+SELECT 'oauth_email_merge_atomic_rollback=' || (
+  public.normalize_account_email(auth_user.email) = 'legacy.merge@example.com'
+  AND public.normalize_account_email(identity.identity_data ->> 'email') = 'legacy.merge@example.com'
+  AND auth_user.banned_until IS NULL
+  AND NOT (auth_user.raw_user_meta_data ? 'oauth_email_merge_intent_id')
+)
+FROM auth.users AS auth_user
+JOIN auth.identities AS identity ON identity.user_id = auth_user.id
+WHERE auth_user.id = '00000000-0000-4000-8000-000000000011';
+
+SET ROLE service_role;
+
+SELECT 'oauth_email_merge_quarantined=' || status
+FROM public.quarantine_oauth_email_artifact_for_merge(
+  '80000000-0000-4000-8000-000000000010',
+  '00000000-0000-4000-8000-000000000010'
+);
+
+RESET ROLE;
+
+SELECT 'oauth_email_merge_quarantine_state=' || (
+  public.normalize_account_email(auth_user.email) = 'legacy.merge.00000000000040008000000000000011@oauth.local.invalid'
+  AND auth_user.banned_until > NOW()
+  AND auth_user.raw_user_meta_data ->> 'oauth_email_merge_intent_id' = '80000000-0000-4000-8000-000000000010'
+  AND COUNT(identity.id) = 1
+  AND BOOL_AND(identity.provider = 'email')
+  AND BOOL_AND(
+    public.normalize_account_email(identity.identity_data ->> 'email')
+      = 'legacy.merge.00000000000040008000000000000011@oauth.local.invalid'
   )
-WHERE id = '00000000-0000-4000-8000-000000000011';
+  AND BOOL_AND(LOWER(identity.identity_data ->> 'email_verified') = 'true')
+)
+FROM auth.users AS auth_user
+JOIN auth.identities AS identity ON identity.user_id = auth_user.id
+WHERE auth_user.id = '00000000-0000-4000-8000-000000000011'
+GROUP BY auth_user.id, auth_user.email, auth_user.banned_until, auth_user.raw_user_meta_data;
 
 SET ROLE service_role;
 
@@ -1410,7 +1497,29 @@ FROM public.claim_oauth_email_artifact_merge(
   '50000000-0000-4000-8000-000000000012'
 );
 
+SELECT 'oauth_email_consumed_quarantined=' || status
+FROM public.quarantine_oauth_email_artifact_for_merge(
+  '80000000-0000-4000-8000-000000000012',
+  '00000000-0000-4000-8000-000000000012'
+);
+
 RESET ROLE;
+
+SELECT 'oauth_email_consumed_quarantine_state=' || (
+  public.normalize_account_email(auth_user.email) = 'legacy.merge.00000000000040008000000000000013@oauth.local.invalid'
+  AND auth_user.banned_until > NOW()
+  AND auth_user.raw_user_meta_data ->> 'oauth_email_merge_intent_id' = '80000000-0000-4000-8000-000000000012'
+  AND COUNT(identity.id) = 1
+  AND BOOL_AND(identity.provider = 'email')
+  AND BOOL_AND(
+    public.normalize_account_email(identity.identity_data ->> 'email')
+      = 'legacy.merge.00000000000040008000000000000013@oauth.local.invalid'
+  )
+)
+FROM auth.users AS auth_user
+JOIN auth.identities AS identity ON identity.user_id = auth_user.id
+WHERE auth_user.id = '00000000-0000-4000-8000-000000000013'
+GROUP BY auth_user.id, auth_user.email, auth_user.banned_until, auth_user.raw_user_meta_data;
 
 SELECT 'oauth_email_consumed_auth_sessions=' || COUNT(*)
 FROM auth.sessions
@@ -1490,6 +1599,10 @@ async function main() {
       'oauth_email_merge_verified=verified',
       'oauth_email_merge_claimed=claimed',
       'oauth_email_merge_source_auth_sessions=0',
+      'oauth_email_merge_identity_insert_blocked=0',
+      'oauth_email_merge_atomic_rollback=true',
+      'oauth_email_merge_quarantined=claimed',
+      'oauth_email_merge_quarantine_state=true',
       'oauth_email_merge_transferred=ownership_transferred',
       'oauth_email_merge_completed=completed',
       'oauth_email_merge_owner=00000000-0000-4000-8000-000000000010',
@@ -1505,6 +1618,8 @@ async function main() {
       'oauth_email_consumed_merge_started=pending',
       'oauth_email_consumed_merge_verified=verified',
       'oauth_email_consumed_merge_claimed=claimed',
+      'oauth_email_consumed_quarantined=claimed',
+      'oauth_email_consumed_quarantine_state=true',
       'oauth_email_consumed_auth_sessions=0',
       'oauth_email_consumed_refresh_tokens=0',
       'admin_security_definer_browser_grants=0',
