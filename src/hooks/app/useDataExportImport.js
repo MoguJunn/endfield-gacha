@@ -13,6 +13,7 @@ import {
 } from '../../utils/importPendingDraft.js';
 import { buildImportResultNotification } from '../../utils/notificationModel.js';
 import { resolveImportResultActionHref } from '../../utils/importResultSummary.js';
+import { characterCache } from '../../utils/characterUtils.js';
 import { useI18n } from '../../i18n/index.js';
 
 function normalizeImportAccountOverride(accountOverride = null) {
@@ -169,12 +170,14 @@ export function useDataExportImport({
   const exportByFormat = useCallback(async (scopeOrOptions, formatId) => {
     try {
       const { buildExportContent, buildExportPayload } = await import('../../utils/dataExport.js');
+      await characterCache.load();
       const payload = buildExportPayload({
         history,
         pools: Array.isArray(pools) ? pools : [],
         currentPoolId,
         currentGameUid,
         currentUserId: user?.id || null,
+        characterCatalog: characterCache.getAll(),
         options: scopeOrOptions
       });
       if (payload.history.length === 0) {

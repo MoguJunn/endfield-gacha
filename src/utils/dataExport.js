@@ -6,9 +6,15 @@ import {
 import { strToU8, zipSync } from 'fflate';
 import {
   buildGameAccountServerTag,
+  getHistoryRecordAccountKey,
+  isGameAccountSelectionMatch,
   loadGameAccountMetadataMap,
   normalizeGameAccountMetadata
 } from './gameAccountMetadata.js';
+import {
+  classifyCharacterIdSource,
+  normalizeEntityNameForMatch
+} from './canonicalEntityUtils.js';
 import { getDataFormatById } from './dataFormatRegistry.js';
 
 export const EXPORT_SCHEMA_VERSION = '3.0.0';
@@ -49,6 +55,48 @@ function getHistoryPoolId(record) {
 
 function getHistoryGameUid(record) {
   return record?.game_uid || record?.gameUid || null;
+}
+
+function getHistoryRecordItemName(record) {
+  return record?.item_name
+    || record?.itemName
+    || record?.name
+    || record?.character_name
+    || record?.characterName
+    || record?.weapon_name
+    || record?.weaponName
+    || '';
+}
+
+function getHistoryRecordItemId(record) {
+  return [
+    record?.character_id,
+    record?.characterId,
+    record?.item_id,
+    record?.itemId,
+    record?.charId,
+    record?.weaponId
+  ]
+    .map((value) => String(value ?? '').trim())
+    .find(Boolean) || '';
+}
+
+function getHistoryAccountSelectionValue(record) {
+  const explicitAccountKey = record?.accountKey || record?.account_key;
+  if (explicitAccountKey) {
+    return String(explicitAccountKey).trim();
+  }
+
+  return getHistoryRecordAccountKey(record) || getHistoryGameUid(record) || null;
+}
+
+function isHistoryRecordInAccountScope(record, selectedAccountValue) {
+  if (!selectedAccountValue) {
+    return true;
+  }
+
+  return isGameAccountSelectionMatch(record, selectedAccountValue)
+    || getHistoryAccountSelectionValue(record) === selectedAccountValue;
 }
 
 function getHistoryTimestampMs(record) {
@@ -154,7 +202,7 @@ function serializeInternalJsonHistoryRecord(record) {
     timestamp: record?.timestamp,
     poolId: getHistoryPoolId(record),
     name: itemName,
-    character_id: record?.character_id || record?.item_id,
+    character_id: getHistoryRecordItemId(record),
     batchId: record?.batchId || record?.batch_id,
     seqId: getHistorySeqId(record),
     pity: record?.pity,
@@ -189,20 +237,24 @@ function buildAccountLookup(history) {
       return;
     }
 
+    const accountSelectionValue = getHistoryAccountSelectionValue(record) || gameUid;
+    const storedMetadata = metadataMap[accountSelectionValue] || metadataMap[gameUid] || {};
+
     const metadata = normalizeGameAccountMetadata({
-      ...(metadataMap[gameUid] || {}),
+      ...storedMetadata,
       gameUid,
-      nickName: record?.nick_name || record?.nickName || metadataMap[gameUid]?.nickName || gameUid,
-      channelName: record?.channel_name || record?.channelName || metadataMap[gameUid]?.channelName,
-      hgUid: record?.hg_uid || record?.hgUid || metadataMap[gameUid]?.hgUid,
-      channelMasterId: record?.channel_master_id || record?.channelMasterId || metadataMap[gameUid]?.channelMasterId,
-      serverId: record?.server_id || record?.serverId || metadataMap[gameUid]?.serverId,
-      region: record?.region || record?.serverRegion || metadataMap[gameUid]?.region,
-      isOfficial: record?.is_official ?? record?.isOfficial ?? metadataMap[gameUid]?.isOfficial
+      nickName: record?.nick_name || record?.nickName || storedMetadata.nickName || gameUid,
+      channelName: record?.channel_name || record?.channelName || storedMetadata.channelName,
+      hgUid: record?.hg_uid || record?.hgUid || storedMetadata.hgUid,
+      channelMasterId: record?.channel_master_id || record?.channelMasterId || storedMetadata.channelMasterId,
+      serverId: record?.server_id || record?.serverId || storedMetadata.serverId,
+      region: record?.region || record?.serverRegion || storedMetadata.region,
+      isOfficial: record?.is_official ?? record?.isOfficial ?? storedMetadata.isOfficial
     });
 
-    accountMap.set(gameUid, {
-      ...(accountMap.get(gameUid) || {}),
+    accountMap.set(accountSelectionValue, {
+      ...(accountMap.get(accountSelectionValue) || {}),
+      accountKey: accountSelectionValue,
       gameUid,
       nickName: metadata?.nickName || gameUid,
       channelName: metadata?.channelName || null,
@@ -216,6 +268,12 @@ function buildAccountLookup(history) {
   });
 
   return accountMap;
+}
+
+function resolveAccountForHistoryRecord(accountLookup, record) {
+  return accountLookup.get(getHistoryAccountSelectionValue(record))
+    || accountLookup.get(getHistoryGameUid(record))
+    || null;
 }
 
 function resolvePoolFilterIds(options, pools, currentPoolId) {
@@ -247,6 +305,15 @@ function resolveTargetGameUid(options, currentGameUid) {
   return null;
 }
 
+function getLegacyGameUidFromSelection(selectionValue) {
+  const normalized = String(selectionValue ?? '').trim();
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.split('::', 1)[0] || normalized;
+}
+
 function buildDateBoundary(dateString, isEnd) {
   if (!dateString) {
     return null;
@@ -255,6 +322,80 @@ function buildDateBoundary(dateString, isEnd) {
   const suffix = isEnd ? 'T23:59:59.999' : 'T00:00:00.000';
   const timestamp = new Date(`${dateString}${suffix}`).getTime();
   return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function buildExportEntityIdLookup(entities = []) {
+  const candidatesByName = new Map();
+
+  (Array.isArray(entities) ? entities : []).forEach((entity) => {
+    const entityId = String(entity?.id ?? '').trim();
+    if (!entityId || classifyCharacterIdSource(entityId) === 'manual_placeholder') {
+      return;
+    }
+
+    const names = [
+      entity?.name,
+      ...(Array.isArray(entity?.aliases) ? entity.aliases : [])
+    ];
+
+    names.forEach((name) => {
+      const normalizedName = normalizeEntityNameForMatch(name);
+      if (!normalizedName) {
+        return;
+      }
+
+      if (!candidatesByName.has(normalizedName)) {
+        candidatesByName.set(normalizedName, new Set());
+      }
+      candidatesByName.get(normalizedName).add(entityId);
+    });
+  });
+
+  return new Map(
+    Array.from(candidatesByName.entries())
+      .filter(([, ids]) => ids.size === 1)
+      .map(([name, ids]) => [name, Array.from(ids)[0]])
+  );
+}
+
+function normalizeExportEntityCatalog(catalog) {
+  if (Array.isArray(catalog)) {
+    return catalog;
+  }
+
+  if (Array.isArray(catalog?.characters)) {
+    return catalog.characters;
+  }
+
+  if (Array.isArray(catalog?.rows)) {
+    return catalog.rows;
+  }
+
+  return [];
+}
+
+function enrichHistoryWithMissingItemIds(records, characterCatalog) {
+  const entityIdLookup = buildExportEntityIdLookup(normalizeExportEntityCatalog(characterCatalog));
+  if (entityIdLookup.size === 0) {
+    return records;
+  }
+
+  return records.map((record) => {
+    if (getHistoryRecordItemId(record)) {
+      return record;
+    }
+
+    const itemName = getHistoryRecordItemName(record);
+    const resolvedId = entityIdLookup.get(normalizeEntityNameForMatch(itemName));
+    if (!resolvedId) {
+      return record;
+    }
+
+    return {
+      ...record,
+      character_id: resolvedId,
+    };
+  });
 }
 
 function isGiftRecord(record) {
@@ -273,7 +414,7 @@ function buildPitySequence(filteredHistory) {
   });
 
   sortedHistory.forEach(record => {
-    const gameUid = getHistoryGameUid(record) || '__all__';
+    const gameUid = getHistoryAccountSelectionValue(record) || '__all__';
     const poolId = getHistoryPoolId(record) || '__unknown__';
     const key = `${gameUid}::${poolId}`;
     const currentPity = groupedPity.get(key) || 0;
@@ -303,8 +444,9 @@ function buildSummary(records, poolLookup, accountLookup) {
   records.forEach(record => {
     const poolId = getHistoryPoolId(record) || 'unknown';
     const gameUid = getHistoryGameUid(record) || 'unknown';
+    const accountKey = getHistoryAccountSelectionValue(record) || gameUid;
     const pool = poolLookup.get(poolId);
-    const account = accountLookup.get(gameUid);
+    const account = resolveAccountForHistoryRecord(accountLookup, record);
     const isGift = isGiftRecord(record);
 
     if (!byPoolMap.has(poolId)) {
@@ -321,8 +463,9 @@ function buildSummary(records, poolLookup, accountLookup) {
       });
     }
 
-    if (!byAccountMap.has(gameUid)) {
-      byAccountMap.set(gameUid, {
+    if (!byAccountMap.has(accountKey)) {
+      byAccountMap.set(accountKey, {
+        accountKey,
         gameUid,
         nickName: account?.nickName || gameUid,
         serverTag: account?.serverTag || null,
@@ -335,7 +478,7 @@ function buildSummary(records, poolLookup, accountLookup) {
     }
 
     const poolEntry = byPoolMap.get(poolId);
-    const accountEntry = byAccountMap.get(gameUid);
+    const accountEntry = byAccountMap.get(accountKey);
 
     poolEntry.recordCount += 1;
     accountEntry.recordCount += 1;
@@ -421,7 +564,8 @@ export function buildExportPayload({
   currentPoolId,
   currentGameUid,
   currentUserId,
-  options
+  options,
+  characterCatalog = []
 }) {
   const resolvedOptions = normalizeExportOptions(options, { currentGameUid });
   const poolLookup = buildPoolLookup(pools);
@@ -431,20 +575,19 @@ export function buildExportPayload({
   const startTime = buildDateBoundary(resolvedOptions.dateFrom, false);
   const endTime = buildDateBoundary(resolvedOptions.dateTo, true);
 
-  const filteredHistory = (history || []).filter(record => {
+  const filteredHistoryBeforeEntityResolution = (history || []).filter(record => {
     if (currentUserId && record?.user_id && record.user_id !== currentUserId) {
       return false;
     }
 
     const poolId = getHistoryPoolId(record);
-    const gameUid = getHistoryGameUid(record);
     const timestamp = getHistoryTimestampMs(record);
 
     if (allowedPoolIds && !allowedPoolIds.has(poolId)) {
       return false;
     }
 
-    if (targetGameUid && gameUid !== targetGameUid) {
+    if (targetGameUid && !isHistoryRecordInAccountScope(record, targetGameUid)) {
       return false;
     }
 
@@ -459,8 +602,13 @@ export function buildExportPayload({
     return true;
   });
 
+  const filteredHistory = enrichHistoryWithMissingItemIds(
+    filteredHistoryBeforeEntityResolution,
+    characterCatalog
+  );
+
   const referencedPoolIds = new Set(filteredHistory.map(getHistoryPoolId).filter(Boolean));
-  const referencedGameUids = new Set(filteredHistory.map(getHistoryGameUid).filter(Boolean));
+  const referencedAccountKeys = new Set(filteredHistory.map(getHistoryAccountSelectionValue).filter(Boolean));
   const pityMap = buildPitySequence(filteredHistory);
   const summary = buildSummary(filteredHistory, poolLookup, accountLookup);
 
@@ -468,9 +616,11 @@ export function buildExportPayload({
     .map(poolId => poolLookup.get(poolId))
     .filter(Boolean);
 
-  const exportedAccounts = Array.from(referencedGameUids)
-    .map(gameUid => accountLookup.get(gameUid))
+  const exportedAccounts = Array.from(referencedAccountKeys)
+    .map(accountKey => accountLookup.get(accountKey))
     .filter(Boolean);
+
+  const exportedAccountKeys = Array.from(referencedAccountKeys);
 
   return {
     formatId: EXPORT_FORMAT_ID,
@@ -481,7 +631,8 @@ export function buildExportPayload({
       poolFilter: resolvedOptions.poolFilter,
       poolId: resolvedOptions.poolId,
       accountFilter: resolvedOptions.accountFilter,
-      gameUid: targetGameUid,
+      gameUid: getLegacyGameUidFromSelection(targetGameUid),
+      accountKey: targetGameUid || null,
       dateFrom: resolvedOptions.dateFrom || null,
       dateTo: resolvedOptions.dateTo || null
     },
@@ -489,6 +640,7 @@ export function buildExportPayload({
     pools: exportedPools,
     accounts: exportedAccounts,
     history: filteredHistory,
+    accountKeys: exportedAccountKeys,
     pityMap
   };
 }
@@ -523,13 +675,22 @@ function escapeCsvValue(value) {
 
 export function buildExportCsvContent(payload) {
   const poolLookup = buildPoolLookup(payload.pools);
-  const accountLookup = new Map((payload.accounts || []).map(account => [account.gameUid, account]));
+  const accountLookup = new Map();
+  (payload.accounts || []).forEach((account) => {
+    const accountKey = account?.accountKey || account?.account_key || account?.gameUid;
+    if (accountKey) {
+      accountLookup.set(accountKey, account);
+    }
+    if (account?.gameUid && !accountLookup.has(account.gameUid)) {
+      accountLookup.set(account.gameUid, account);
+    }
+  });
   const rows = (payload.history || []).map(record => {
     const poolId = getHistoryPoolId(record);
     const gameUid = getHistoryGameUid(record);
-    const account = accountLookup.get(gameUid);
+    const account = resolveAccountForHistoryRecord(accountLookup, record);
     const pool = poolLookup.get(poolId);
-    const pityKey = `${gameUid || '__all__'}::${poolId || '__unknown__'}::${getHistoryId(record)}`;
+    const pityKey = `${getHistoryAccountSelectionValue(record) || '__all__'}::${poolId || '__unknown__'}::${getHistoryId(record)}`;
     const isoTime = getHistoryTimestampIso(record);
 
     return [
@@ -544,7 +705,7 @@ export function buildExportCsvContent(payload) {
       getHistoryId(record),
       getHistorySeqId(record),
       record?.rarity || '',
-      record?.item_name || record?.itemName || '',
+      getHistoryRecordItemName(record),
       normalizeIsStandard(record) === null ? '' : normalizeIsStandard(record) ? '常驻' : '限定',
       normalizeSpecialType(record) || '',
       normalizeIsFree(record) ? '是' : '否',
@@ -895,11 +1056,11 @@ function getEndfieldGachaCharacterPoolBucket(poolType) {
 }
 
 function getEndfieldGachaRecordItemName(record) {
-  return record?.item_name || record?.itemName || record?.name || record?.character_name || record?.characterName || '';
+  return getHistoryRecordItemName(record);
 }
 
 function getEndfieldGachaRecordItemId(record) {
-  return record?.character_id || record?.characterId || record?.item_id || record?.itemId || '';
+  return getHistoryRecordItemId(record);
 }
 
 function getEndfieldGachaTimestampText(record) {
@@ -1220,7 +1381,7 @@ function buildEndfieldGachaHelperRecordGroups(payload) {
       const helperUid = buildEndfieldGachaHelperUid(rawGameUid, accountLookup.get(rawGameUid) || record);
       const recordUid = String(getHistoryId(record) || getHistorySeqId(record) || `${poolId}:${record?.item_name || record?.name || index}`);
       const seqId = getHistorySeqId(record) || '';
-      const itemId = record?.character_id || record?.characterId || record?.item_id || record?.itemId || '';
+      const itemId = getHistoryRecordItemId(record);
       const itemName = record?.item_name || record?.itemName || record?.name || record?.character_name || record?.characterName || '';
       const base = {
         uid: helperUid,

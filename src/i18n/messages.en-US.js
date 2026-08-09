@@ -1609,6 +1609,8 @@ const messages = {
   "records.export.summaryPool": "Current banner: {value}",
   "records.export.summaryAccount": "Account scope: {value}",
   "records.export.csvNote": "CSV uses UTF-8 BOM and flattened columns so it can be opened directly in Excel.",
+  "records.export.helperWarningTitle": "EndfieldGachaHelper warning",
+  "records.export.helperWarningDescription": "The EndfieldGachaHelper repository has been deleted, so its software and export format may no longer be maintained. Use it with caution and keep the original export files safely backed up.",
   "records.export.json": "Export JSON",
   "records.export.csv": "Export CSV",
   "records.export.endfieldGachaUserDataZip": "Export EndfieldGacha userData",

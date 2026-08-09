@@ -87,7 +87,9 @@ function RecordsSectionTitleBar({
     poolFilter: exportOptions.poolFilter,
     poolId: exportOptions.poolFilter === 'specific' ? exportOptions.poolId || null : null,
     accountFilter: exportOptions.accountFilter,
-    gameUid: exportOptions.accountFilter === 'specific' ? exportOptions.gameUid || null : null,
+    gameUid: ['current', 'specific'].includes(exportOptions.accountFilter)
+      ? exportOptions.gameUid || null
+      : null,
     dateFrom: exportOptions.dateFrom,
     dateTo: exportOptions.dateTo,
   });
@@ -270,7 +272,9 @@ export default function DesktopDashboardWorkspace({
     poolFilter: quickExportOptions.poolFilter,
     poolId: quickExportOptions.poolFilter === 'specific' ? quickExportOptions.poolId || null : null,
     accountFilter: quickExportOptions.accountFilter,
-    gameUid: quickExportOptions.accountFilter === 'specific' ? quickExportOptions.gameUid || null : null,
+    gameUid: ['current', 'specific'].includes(quickExportOptions.accountFilter)
+      ? quickExportOptions.gameUid || null
+      : null,
     dateFrom: quickExportOptions.dateFrom,
     dateTo: quickExportOptions.dateTo,
   });

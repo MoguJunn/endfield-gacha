@@ -1,9 +1,13 @@
 import { createElement, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CalendarRange, CheckCircle, Database, Download, ExternalLink, FileJson, Filter, RotateCcw, X } from 'lucide-react';
+import { AlertTriangle, CalendarRange, CheckCircle, Database, Download, ExternalLink, FileJson, Filter, RotateCcw, X } from 'lucide-react';
 import { useI18n } from '../../i18n/index.js';
 import { localizePoolName } from '../../utils/gameDataI18n.js';
-import { localizeGameAccountServerTag } from '../../utils/gameAccountMetadata.js';
+import {
+  getGameAccountSelectionValue,
+  isGameAccountSelectionMatch,
+  localizeGameAccountServerTag
+} from '../../utils/gameAccountMetadata.js';
 
 function ExportActionCard({
   icon,
@@ -114,6 +118,13 @@ export default function DataExportOptionsModal({
     onUpdateOption(key, value);
   };
 
+  const updateAccountFilter = (nextFilter) => {
+    updateOptionAndClearCompletion('accountFilter', nextFilter);
+    if (nextFilter === 'current') {
+      updateOptionAndClearCompletion('gameUid', currentGameUid || '');
+    }
+  };
+
   const runExportAction = async (actionId, handler) => {
     if (!canExport || typeof handler !== 'function' || exportingActionId) {
       return;
@@ -164,12 +175,17 @@ export default function DataExportOptionsModal({
     }
 
     if (exportOptions.accountFilter === 'specific') {
-      const selectedAccount = gameAccounts.find((account) => account.gameUid === exportOptions.gameUid);
+      const selectedAccount = gameAccounts.find((account) => (
+        isGameAccountSelectionMatch(account, exportOptions.gameUid)
+      ));
       return formatAccountLabel(selectedAccount) || exportOptions.gameUid || t('records.export.accountPlaceholder');
     }
 
-    const currentAccount = gameAccounts.find((account) => account.gameUid === currentGameUid);
-    return formatAccountLabel(currentAccount) || currentGameUid || t('records.export.accountScopeCurrent');
+    const currentAccountValue = exportOptions.gameUid || currentGameUid;
+    const currentAccount = gameAccounts.find((account) => (
+      isGameAccountSelectionMatch(account, currentAccountValue)
+    ));
+    return formatAccountLabel(currentAccount) || currentAccountValue || t('records.export.accountScopeCurrent');
   };
 
   const modal = (
@@ -253,7 +269,7 @@ export default function DataExportOptionsModal({
             </label>
             <select
               value={exportOptions.accountFilter}
-              onChange={(event) => updateOptionAndClearCompletion('accountFilter', event.target.value)}
+              onChange={(event) => updateAccountFilter(event.target.value)}
               className="w-full border border-zinc-200 bg-white px-3 py-2.5 text-sm text-slate-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
             >
               <option value="all">{t('records.export.accountScopeAll')}</option>
@@ -268,7 +284,10 @@ export default function DataExportOptionsModal({
               >
                 <option value="">{t('records.export.accountPlaceholder')}</option>
                 {gameAccounts.map(account => (
-                  <option key={account.gameUid} value={account.gameUid}>
+                  <option
+                    key={getGameAccountSelectionValue(account) || account.gameUid}
+                    value={getGameAccountSelectionValue(account) || account.gameUid}
+                  >
                     {account.nickName} · {account.gameUid}{account.serverTag ? ` · ${localizeGameAccountServerTag(account.serverTag, locale)}` : ''}
                   </option>
                 ))}
@@ -305,6 +324,13 @@ export default function DataExportOptionsModal({
         </div>
 
         <div className="border-t border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-[#101012]">
+          <div className="mb-4 flex items-start gap-2 border border-amber-300/70 bg-amber-50 px-3 py-2.5 text-[11px] leading-5 text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-300">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <div>
+              <div className="font-black">{t('records.export.helperWarningTitle')}</div>
+              <div className="mt-0.5 opacity-90">{t('records.export.helperWarningDescription')}</div>
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-2">
             <ExportActionCard
               icon={FileJson}

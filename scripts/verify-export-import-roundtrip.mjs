@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildExportJsonContent, buildExportPayload } from '../src/utils/dataExport.js';
+import { buildExportContent, buildExportJsonContent, buildExportPayload } from '../src/utils/dataExport.js';
 import { getHistoryImportDedupKey, validateAndNormalizeImportData } from '../src/utils/dataImport.js';
 
 const baseHistory = [
@@ -54,6 +54,10 @@ const payload = buildExportPayload({
   currentPoolId: 'special_1_0_1',
   currentGameUid: '1000123456',
   currentUserId: 'source-user',
+  characterCatalog: [
+    { id: 'chr_0016_laevat', name: '莱万汀', type: 'character' },
+    { id: 'chr_test_five_star', name: '五星角色', type: 'character' },
+  ],
   options: {
     format: 'json',
     poolFilter: 'current',
@@ -74,6 +78,91 @@ assert.equal(roundTripValidation.normalizedData.pools[0].user_id, 'target-user',
 assert.equal(roundTripValidation.normalizedData.history[0].user_id, 'target-user', '导入后的记录归属应重绑到当前用户');
 assert.equal(roundTripValidation.normalizedData.history[0].name, '莱万汀', '当前运行时 name 字段应被接受');
 assert.equal(roundTripValidation.normalizedData.history[0].pool_id, 'special_1_0_1', '当前运行时 poolId 字段应归一化为 pool_id');
+assert.equal(payload.history[0].character_id, 'chr_0016_laevat', '导出应按角色目录补齐缺失的 canonical CharID');
+assert.equal(payload.history[1].character_id, 'chr_test_five_star', '导出应补齐早期历史记录的角色 ID');
+
+const sampleLegacyPayload = buildExportPayload({
+  history: [
+    { id: 'sample-chen', user_id: 'source-user', poolId: 'special_1_0_3', name: '陈千语', gameUid: '1000123456' },
+    { id: 'sample-aitela', user_id: 'source-user', poolId: 'special_1_0_3', name: '埃特拉', gameUid: '1000123456' },
+    { id: 'sample-fluorite', user_id: 'source-user', poolId: 'special_1_0_3', name: '萤石', gameUid: '1000123456' },
+    { id: 'sample-antal', user_id: 'source-user', poolId: 'special_1_0_3', name: '安塔尔', gameUid: '1000123456' },
+  ],
+  pools: [{ id: 'special_1_0_3', name: '轻飘飘的信使', type: 'limited' }],
+  currentPoolId: 'special_1_0_3',
+  currentGameUid: '1000123456',
+  currentUserId: 'source-user',
+  characterCatalog: [
+    { id: 'chr_0005_chen', name: '陈千语', type: 'character' },
+    { id: 'chr_0021_whiten', name: '埃特拉', type: 'character' },
+    { id: 'chr_0022_bounda', name: '萤石', type: 'character' },
+    { id: 'chr_0023_antal', name: '安塔尔', type: 'character' },
+    { id: 'manual_character_char_placeholder', name: '未确认角色', type: 'character' },
+  ],
+  options: { poolFilter: 'current', accountFilter: 'current' },
+});
+assert.deepEqual(
+  sampleLegacyPayload.history.map((record) => record.character_id),
+  ['chr_0005_chen', 'chr_0021_whiten', 'chr_0022_bounda', 'chr_0023_antal'],
+  '用户样例中的早期角色应按公开目录补齐 canonical CharID，不能使用手动占位 ID'
+);
+
+const helperPayload = buildExportPayload({
+  history: [{
+    ...baseHistory[0],
+    character_id: null,
+  }],
+  pools: basePools,
+  currentPoolId: 'special_1_0_1',
+  currentGameUid: '1000123456',
+  currentUserId: 'source-user',
+  characterCatalog: [{ id: 'chr_0016_laevat', name: '莱万汀', type: 'character' }],
+  options: {
+    poolFilter: 'current',
+    accountFilter: 'current',
+  },
+});
+const helperFile = await buildExportContent('endfield_gacha_helper_json', helperPayload);
+const helperJson = JSON.parse(helperFile.content);
+assert.equal(helperJson.records[0].charId, 'chr_0016_laevat', 'EndfieldGachaHelper JSON 应输出补齐后的 CharID');
+
+const sameUidDifferentServerHistory = [
+  {
+    id: 'cn-record',
+    user_id: 'source-user',
+    poolId: 'special_1_0_1',
+    name: '国服角色',
+    rarity: 4,
+    gameUid: '1000123456',
+    serverId: '1',
+    timestamp: '2026-02-01T08:00:00.000Z',
+  },
+  {
+    id: 'intl-record',
+    user_id: 'source-user',
+    poolId: 'special_1_0_1',
+    name: '国际服角色',
+    rarity: 4,
+    gameUid: '1000123456',
+    serverId: '2',
+    timestamp: '2026-02-01T08:01:00.000Z',
+  },
+];
+const scopedPayload = buildExportPayload({
+  history: sameUidDifferentServerHistory,
+  pools: basePools,
+  currentPoolId: 'special_1_0_1',
+  currentGameUid: '1000123456::server:1',
+  currentUserId: 'source-user',
+  options: {
+    poolFilter: 'current',
+    accountFilter: 'current',
+    gameUid: '1000123456::server:2',
+  },
+});
+assert.deepEqual(scopedPayload.history.map((record) => record.id), ['intl-record'], '导出当前账号应尊重复合 accountKey 作用域');
+assert.equal(scopedPayload.filters.gameUid, '1000123456', '兼容字段仍应输出纯 gameUid');
+assert.equal(scopedPayload.filters.accountKey, '1000123456::server:2', '导出筛选摘要应保留复合 accountKey');
 
 const legacyValidation = validateAndNormalizeImportData({
   version: '2.0',

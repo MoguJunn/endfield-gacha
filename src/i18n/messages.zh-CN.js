@@ -1563,6 +1563,8 @@ const messages = {
   "records.export.summaryPool": "当前卡池：{value}",
   "records.export.summaryAccount": "账号范围：{value}",
   "records.export.csvNote": "CSV 采用 UTF-8 BOM 与平铺字段，便于 Excel 直接打开。",
+  "records.export.helperWarningTitle": "EndfieldGachaHelper 风险提示",
+  "records.export.helperWarningDescription": "EndfieldGachaHelper 项目仓库已被删除，相关软件和导出格式可能无人维护。请谨慎使用，并妥善保留导出的原始文件。",
   "records.export.json": "导出 JSON",
   "records.export.csv": "导出 CSV",
   "records.export.endfieldGachaUserDataZip": "导出 EndfieldGacha userData",
