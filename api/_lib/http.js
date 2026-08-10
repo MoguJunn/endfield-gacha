@@ -1,5 +1,6 @@
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://ef-gacha.mogujun.icu',
+  'https://ef.nepst.cn',
   'https://endfield.15963574.xyz',
   'https://endfield-gacha.vercel.app',
   'https://ef-cal.mogujun.icu',

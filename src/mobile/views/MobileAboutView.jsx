@@ -15,6 +15,7 @@ import {
 import useSiteConfigStore from '../../stores/useSiteConfigStore';
 import { APP_BUILD_INFO, APP_VERSION_LABEL } from '../../constants/appMeta';
 import { useI18n } from '../../i18n/index.js';
+import { resolveSiteLegalConfig } from '../../utils/siteLegalConfig.js';
 import { MobileSectionTitle, MobileStickyHeader } from '../components/ux/MobilePrimitives.jsx';
 
 function MobileAboutSection({ title, icon, children }) {
@@ -35,10 +36,7 @@ function MobileAboutView() {
   const authorName = config.author_name || '';
   const authorBilibili = config.author_bilibili || '';
   const githubUrl = config.github_url || '';
-  const icpNumber = config.icp_number || '';
-  const icpUrl = config.icp_url || 'https://beian.miit.gov.cn/';
-  const policeNumber = config.police_number || '';
-  const policeUrl = config.police_url || 'https://www.beian.gov.cn/';
+  const { icpNumber, icpUrl, policeNumber, policeUrl } = resolveSiteLegalConfig(config);
   const features = [
     { Icon: Star, label: t('about.feature.pool.label'), desc: t('about.feature.pool.desc') },
     { Icon: Calculator, label: t('about.feature.simulator.label'), desc: t('about.feature.simulator.desc') },
@@ -105,6 +103,24 @@ function MobileAboutView() {
             </div>
           </div>
         )}
+
+        <div className="mb-4 flex items-center gap-4 rounded-[1.05rem] border border-zinc-200 bg-zinc-50/75 p-4 transition-colors hover:border-zinc-300 dark:border-white/10 dark:bg-white/[0.04] dark:hover:border-white/15">
+          <div className="relative">
+            <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-[1rem] border border-zinc-300 bg-zinc-200 dark:border-zinc-600 dark:bg-zinc-700">
+              <img
+                src="/neptune.jpg"
+                alt="Neptune"
+                className="h-full w-full object-cover"
+                loading="lazy"
+              />
+            </div>
+            <div className="absolute -bottom-1 -right-1 h-3 w-3 border border-white bg-green-500 dark:border-zinc-900" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h4 className="text-sm font-bold uppercase text-slate-900 dark:text-zinc-100">Neptune</h4>
+            <p className="mt-1 font-mono text-[10px] uppercase text-slate-500 dark:text-zinc-400">{t('about.neptuneRole')}</p>
+          </div>
+        </div>
 
         <div className="border-t border-zinc-200 pt-4 dark:border-white/8">
           <p className="mb-3 flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">

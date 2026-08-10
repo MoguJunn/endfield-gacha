@@ -8,6 +8,7 @@ import useSiteConfigStore, {
 } from '../../../stores/useSiteConfigStore';
 import { loadAdminSiteConfigItems } from '../../../services/admin/siteConfigService.js';
 import { ENTITY_LOCALIZATION_CONFIG_KEY, POOL_LOCALIZATION_CONFIG_KEY } from '../../../utils/gameDataI18n.js';
+import { DOMAIN_LEGAL_CONFIG_KEY } from '../../../utils/siteLegalConfig.js';
 import {
   buildHomeVersionTimelineEditorPreview,
   createHomeVersionTimelineRows,
@@ -29,6 +30,21 @@ const FIELD_INPUT_CLASS = 'w-full rounded-none border border-zinc-300 bg-white p
 const FIELD_INPUT_MONO_CLASS = `${FIELD_INPUT_CLASS} font-mono`;
 
 const VIRTUAL_CONFIG_ITEMS = [
+  {
+    key: DOMAIN_LEGAL_CONFIG_KEY,
+    label: '按域名备案信息',
+    category: 'legal',
+    value: JSON.stringify({
+      'ef.nepst.cn': {
+        icp_number: '',
+        icp_url: 'https://beian.miit.gov.cn/',
+        police_number: '',
+        police_url: 'https://www.beian.gov.cn/'
+      }
+    }, null, 2),
+    format: 'json',
+    description: '按当前访问域名选择 ICP 和公安备案号。备用网址未配置独立备案号时保持空白，不会复用主域名备案号。'
+  },
   {
     key: POOL_LOCALIZATION_CONFIG_KEY,
     label: '卡池名称本地化',

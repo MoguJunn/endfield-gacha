@@ -3,6 +3,7 @@ import { Heart, Code, ExternalLink } from 'lucide-react';
 import useSiteConfigStore from '../../stores/useSiteConfigStore';
 import { APP_VERSION_LABEL } from '../../constants/appMeta';
 import { useI18n } from '../../i18n/index.js';
+import { resolveSiteLegalConfig } from '../../utils/siteLegalConfig.js';
 
 /**
  * 全局页脚组件
@@ -18,10 +19,7 @@ const Footer = React.memo(() => {
   const authorName = config.author_name || '';
   const authorBilibili = config.author_bilibili || '';
   const githubUrl = config.github_url || '';
-  const icpNumber = config.icp_number || '';
-  const icpUrl = config.icp_url || 'https://beian.miit.gov.cn/';
-  const policeNumber = config.police_number || '';
-  const policeUrl = config.police_url || 'https://www.beian.gov.cn/';
+  const { icpNumber, icpUrl, policeNumber, policeUrl } = resolveSiteLegalConfig(config);
 
   return (
     <footer className="mt-8 py-6 border-t border-zinc-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950">

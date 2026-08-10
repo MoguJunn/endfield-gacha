@@ -121,6 +121,25 @@ const AboutPanel = React.memo(() => {
             </div>
           </div>
 
+          {/* 备案域名支持者 */}
+          <div className="flex items-center gap-5 p-5 bg-gradient-to-r from-zinc-50 to-white dark:from-zinc-900 dark:to-zinc-900 border border-zinc-200 dark:border-zinc-700 group hover:border-pink-300 dark:hover:border-pink-900 transition-colors">
+            <div className="relative">
+              <div className="w-16 h-16 bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center overflow-hidden border border-zinc-300 dark:border-zinc-600">
+                <img
+                  src="/neptune.jpg"
+                  alt="Neptune"
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                />
+              </div>
+              <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 border-2 border-white dark:border-zinc-900"></div>
+            </div>
+            <div className="flex-1">
+              <h4 className="text-lg font-bold text-zinc-800 dark:text-zinc-100">Neptune</h4>
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400 font-mono">{t('about.neptuneRole')}</p>
+            </div>
+          </div>
+
           {/* AI 助手 */}
           <div className="border-t border-zinc-100 dark:border-zinc-800 pt-6">
             <p className="text-xs font-bold text-zinc-500 dark:text-zinc-500 mb-4 flex items-center gap-2 uppercase tracking-wider">

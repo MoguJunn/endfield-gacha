@@ -682,6 +682,7 @@ const messages = {
   "about.teamSection": "Team",
   "about.leadBadge": "Lead",
   "about.leadDesc": "Product Design & Development",
+  "about.neptuneRole": "Backup domain provider",
   "about.aiSection": "AI Collaboration Unit",
   "about.ai.claudeFocus": "Architecture & Logic",
   "about.ai.geminiFocus": "Interface & Frontend",

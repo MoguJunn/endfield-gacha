@@ -633,6 +633,7 @@ const messages = {
   "about.teamSection": "项目团队",
   "about.leadBadge": "负责人",
   "about.leadDesc": "产品设计与开发",
+  "about.neptuneRole": "备用网址提供",
   "about.aiSection": "AI 协作单元",
   "about.ai.claudeFocus": "架构与逻辑",
   "about.ai.geminiFocus": "界面与前端",
