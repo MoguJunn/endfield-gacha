@@ -5,6 +5,7 @@ import {
   BarChart3,
   Bell,
   ChevronUp,
+  ExternalLink,
   Image,
   Maximize2,
   Shield,
@@ -337,6 +338,27 @@ const HomePage = React.memo(() => {
                 {t('home.loginHint')}
               </p>
             )}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-2 self-end md:max-w-[420px] md:self-center">
+            <a
+              href="https://ef-gacha.mogujun.icu/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 border border-endfield-yellow/40 bg-endfield-yellow/5 px-3 py-2 text-[10px] font-bold tracking-wider text-endfield-yellow transition-colors hover:bg-endfield-yellow/15"
+            >
+              <span>{t('home.siteLinks.main')}</span>
+              <ExternalLink size={11} />
+            </a>
+            <a
+              href="https://ef.nepst.cn/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 border border-zinc-600 bg-black/10 px-3 py-2 text-[10px] font-bold tracking-wider text-zinc-300 transition-colors hover:border-zinc-400 hover:bg-white/10 hover:text-white"
+            >
+              <span>{t('home.siteLinks.backup')}</span>
+              <ExternalLink size={11} />
+            </a>
           </div>
 
           <div className="flex items-center gap-3 self-end md:self-center animate-fade-in-up">
