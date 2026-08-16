@@ -321,13 +321,37 @@ const HomePage = React.memo(() => {
     <div className="space-y-6 animate-fade-in relative">
       <div className="relative overflow-hidden border-l-4 transition-all duration-500 bg-gradient-to-r from-zinc-800 to-zinc-900 dark:from-zinc-900 dark:to-black border-endfield-yellow p-6 text-white">
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div>
-            <h2 className="text-2xl font-bold mb-2 flex flex-wrap items-center gap-x-4 gap-y-2">
-              <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <h2 className="flex items-center gap-3 text-2xl font-bold">
                 <BarChart3 size={28} />
                 <span>{t('app.brand')}</span>
+              </h2>
+              <div className="flex flex-wrap items-center gap-2 font-mono">
+                <a
+                  href="https://ef-gacha.mogujun.icu/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`${t('home.siteLinks.main')}: ef-gacha.mogujun.icu`}
+                  className="group inline-flex items-center gap-2 border border-endfield-yellow/50 bg-black/20 px-2.5 py-1 text-[10px] font-medium tracking-wide text-zinc-100 transition-colors hover:bg-endfield-yellow/15 hover:text-endfield-yellow"
+                >
+                  <span className="h-1.5 w-1.5 bg-endfield-yellow shadow-[0_0_6px_rgba(250,204,21,0.7)]" />
+                  <span>ef-gacha.mogujun.icu</span>
+                  <ExternalLink size={10} className="text-zinc-500 transition-colors group-hover:text-endfield-yellow" />
+                </a>
+                <a
+                  href="https://ef.nepst.cn/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`${t('home.siteLinks.backup')}: ef.nepst.cn`}
+                  className="group inline-flex items-center gap-2 border border-zinc-600 bg-black/20 px-2.5 py-1 text-[10px] font-medium tracking-wide text-zinc-300 transition-colors hover:border-zinc-400 hover:bg-white/10 hover:text-white"
+                >
+                  <span className="h-1.5 w-1.5 bg-zinc-400" />
+                  <span>ef.nepst.cn</span>
+                  <ExternalLink size={10} className="text-zinc-600 transition-colors group-hover:text-zinc-300" />
+                </a>
               </div>
-            </h2>
+            </div>
             <p className="text-sm text-indigo-100">
               {t('home.heroSubtitle')}
             </p>
@@ -339,28 +363,7 @@ const HomePage = React.memo(() => {
             )}
           </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-2 self-end md:max-w-[420px] md:self-center">
-            <a
-              href="https://ef-gacha.mogujun.icu/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 border border-endfield-yellow/40 bg-endfield-yellow/5 px-3 py-2 text-[10px] font-bold tracking-wider text-endfield-yellow transition-colors hover:bg-endfield-yellow/15"
-            >
-              <span>{t('home.siteLinks.main')}</span>
-              <ExternalLink size={11} />
-            </a>
-            <a
-              href="https://ef.nepst.cn/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 border border-zinc-600 bg-black/10 px-3 py-2 text-[10px] font-bold tracking-wider text-zinc-300 transition-colors hover:border-zinc-400 hover:bg-white/10 hover:text-white"
-            >
-              <span>{t('home.siteLinks.backup')}</span>
-              <ExternalLink size={11} />
-            </a>
-          </div>
-
-          <div className="flex items-center gap-3 self-end md:self-center animate-fade-in-up">
+          <div className="flex shrink-0 items-center gap-3 self-end md:self-center animate-fade-in-up">
             <button
               onClick={handleCelebrationClick}
               className="group flex items-center gap-3 px-4 py-2 rounded-full transition-all cursor-pointer border bg-yellow-500/10 hover:bg-yellow-500/20 border-yellow-500/50 text-endfield-yellow"
