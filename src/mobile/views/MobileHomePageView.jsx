@@ -27,9 +27,6 @@ import {
 } from '../../utils/homeVersionTimeline.js';
 import { getAnnouncementTypeLabel, splitSiteAnnouncements } from '../../utils/announcementMeta.js';
 import { DEFAULT_HOME_ROADMAP_SUMMARY, normalizeHomeRoadmapItems } from '../../constants/homeRoadmap.js';
-import SummerLotteryBanner from '../../components/home/SummerLotteryBanner.jsx';
-
-
 const DEFAULT_LINKS = [
   { id: 'yituliu-calculator', title: '一图流攒抽计算器', url: 'https://ef.yituliu.cn/tools/gacha-calculator', icon: 'bar-chart-2' }, 
   { id: 'opendfield-map', title: '地图（国际服可用）', url: 'https://opendfieldmap.cn/', icon: 'map' },
@@ -301,8 +298,6 @@ export default function MobileHomePageView() {
           </div>
           <Star size={120} className="absolute -right-6 -bottom-6 text-slate-900 dark:text-white opacity-[0.03]" />
       </div>
-
-      <SummerLotteryBanner compact />
 
       {/* Security & Community */}
       <div className="grid grid-cols-2 gap-3 mb-6">
