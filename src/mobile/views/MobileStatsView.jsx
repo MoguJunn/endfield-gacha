@@ -125,9 +125,6 @@ function MobileStatsView() {
   const loading = dataSource === 'global' ? (globalStatsLoading || !currentStats) : !currentStats;
   const totalContributors = Number(currentStats?.totalContributors ?? currentStats?.totalUsers ?? 0) || 0;
   const contributorRegionStats = currentStats?.contributorsByRegion || null;
-  const activeUsers30d = Number(currentStats?.activeUsers30d || 0);
-  const newUsers30d = Number(currentStats?.newUsers30d || 0);
-  const hasContributorActivityStats = activeUsers30d > 0 || newUsers30d > 0;
   const pageOptions = [
     { value: 'overview', label: t('summary.page.overview', {}, '统计概览'), icon: BarChart3 },
     { value: 'catalog', label: t('characterCatalog.title', {}, '角色图鉴'), icon: BookOpen }
@@ -283,12 +280,6 @@ function MobileStatsView() {
                     <span>{t('summary.metric.intl')}: {formatNumber(contributorRegionStats.intl || 0)}</span>
                   </div>
                 ) : null}
-                {hasContributorActivityStats ? (
-                  <div className="mt-1 flex flex-wrap justify-end gap-1 font-mono text-[9px] text-slate-500 dark:text-zinc-500">
-                    <span>{t('summary.metric.activeUsers30d', {}, '30日活跃')}: {formatNumber(activeUsers30d)}</span>
-                    <span>{t('summary.metric.newUsers30d', {}, '30日新增')}: {formatNumber(newUsers30d)}</span>
-                  </div>
-                ) : null}
               </div>
             </div>
 
@@ -311,7 +302,7 @@ function MobileStatsView() {
                     avgPity={formatAverageValue(getPoolAverageSixValue(characterStats))}
                     avgPityUp={formatAverageValue(characterStats.avgPityUp || characterStats.avgPityTarget)}
                     targetVsOff={<><span className="text-emerald-500">{formatCount(characterStats.limitedSix ?? characterStats.sixStarLimited ?? 0)}</span><span className="mx-1 text-zinc-400">/</span><span className="text-rose-500">{formatCount(Math.max(Number(characterStats.six || 0) - Number(characterStats.limitedSix ?? characterStats.sixStarLimited ?? 0), 0))}</span></>}
-                    targetRate={formatPercent(Number(characterStats.six || 0) > 0 ? (Number(characterStats.limitedSix ?? characterStats.sixStarLimited ?? 0) / Number(characterStats.six || 0)) * 100 : 0)}
+                    targetRate={formatPercent((Number(characterStats.six || 0) - Number(characterStats.sparkCount || 0)) > 0 ? (Math.max(Number(characterStats.limitedSix ?? characterStats.sixStarLimited ?? 0) - Number(characterStats.sparkCount || 0), 0) / (Number(characterStats.six || 0) - Number(characterStats.sparkCount || 0))) * 100 : 0)}
                     breakdownLines={[
                       { colorClass: 'bg-cyan-500/60', label: t('summary.scope.extra', {}, '附加寻访'), total: `${formatCount(extraStats.total || 0)} ${t('summary.metric.pullsUnit', {}, '抽')}`, avg: `${formatAverageValue(getPoolAverageSixValue(extraStats))} ${t('summary.metric.averageShort', {}, '平均')}` },
                       { colorClass: 'bg-emerald-500/60', label: t('summary.scope.limited', {}, '限定角色池'), total: `${formatCount(limitedStats.total || 0)} ${t('summary.metric.pullsUnit', {}, '抽')}`, avg: `${formatAverageValue(getPoolAverageSixValue(limitedStats))} ${t('summary.metric.averageShort', {}, '平均')}` },
@@ -325,7 +316,7 @@ function MobileStatsView() {
                     avgPity={formatAverageValue(getPoolAverageSixValue(weaponStats))}
                     avgPityUp={formatAverageValue(weaponStats.avgPityUp || weaponStats.avgPityTarget)}
                     targetVsOff={<><span className="text-emerald-500">{formatCount(weaponStats.limitedSix ?? weaponStats.sixStarLimited ?? 0)}</span><span className="mx-1 text-zinc-400">/</span><span className="text-rose-500">{formatCount(Math.max(Number(weaponStats.six || 0) - Number(weaponStats.limitedSix ?? weaponStats.sixStarLimited ?? 0), 0))}</span></>}
-                    targetRate={formatPercent(Number(weaponStats.six || 0) > 0 ? (Number(weaponStats.limitedSix ?? weaponStats.sixStarLimited ?? 0) / Number(weaponStats.six || 0)) * 100 : 0)}
+                    targetRate={formatPercent((Number(weaponStats.six || 0) - Number(weaponStats.sparkCount || 0)) > 0 ? (Math.max(Number(weaponStats.limitedSix ?? weaponStats.sixStarLimited ?? 0) - Number(weaponStats.sparkCount || 0), 0) / (Number(weaponStats.six || 0) - Number(weaponStats.sparkCount || 0))) * 100 : 0)}
                   />
                 </div>
 
@@ -348,7 +339,7 @@ function MobileStatsView() {
                   avgPity={formatAverageValue(getPoolAverageSixValue(currentStats?.byType?.[poolTypeFilter]))}
                   avgPityUp={formatAverageValue(currentStats?.byType?.[poolTypeFilter]?.avgPityUp)}
                   targetVsOff={<><span className="text-emerald-500">{formatCount(currentStats?.byType?.[poolTypeFilter]?.limitedSix ?? currentStats?.byType?.[poolTypeFilter]?.sixStarLimited ?? 0)}</span><span className="mx-1 text-zinc-400">/</span><span className="text-rose-500">{formatCount(Math.max(Number(currentStats?.byType?.[poolTypeFilter]?.six || 0) - Number(currentStats?.byType?.[poolTypeFilter]?.limitedSix ?? currentStats?.byType?.[poolTypeFilter]?.sixStarLimited ?? 0), 0))}</span></>}
-                  targetRate={formatPercent(Number(currentStats?.byType?.[poolTypeFilter]?.six || 0) > 0 ? (Number(currentStats?.byType?.[poolTypeFilter]?.limitedSix ?? currentStats?.byType?.[poolTypeFilter]?.sixStarLimited ?? 0) / Number(currentStats?.byType?.[poolTypeFilter]?.six || 0)) * 100 : 0)}
+                  targetRate={formatPercent((Number(currentStats?.byType?.[poolTypeFilter]?.six || 0) - Number(currentStats?.byType?.[poolTypeFilter]?.sparkCount || 0)) > 0 ? (Math.max(Number(currentStats?.byType?.[poolTypeFilter]?.limitedSix ?? currentStats?.byType?.[poolTypeFilter]?.sixStarLimited ?? 0) - Number(currentStats?.byType?.[poolTypeFilter]?.sparkCount || 0), 0) / (Number(currentStats?.byType?.[poolTypeFilter]?.six || 0) - Number(currentStats?.byType?.[poolTypeFilter]?.sparkCount || 0))) * 100 : 0)}
                 />
                 {currentStats?.resources && (
                   <ResourceSummaryPanel

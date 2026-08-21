@@ -40,11 +40,6 @@ function StatsHeader({
   formatCount,
   tt
 }) {
-  const safeStats = currentStats || {};
-  const activeUsers30d = Number(safeStats.activeUsers30d || 0);
-  const newUsers30d = Number(safeStats.newUsers30d || 0);
-  const hasContributorActivityStats = activeUsers30d > 0 || newUsers30d > 0;
-
   return (
     <div className="mb-6 flex items-center justify-between border-b border-zinc-100 pb-4 dark:border-zinc-800">
       <div className="flex items-center gap-3">
@@ -57,38 +52,32 @@ function StatsHeader({
         </div>
         <div>
           <h2 className="flex items-center gap-2 text-lg font-bold uppercase tracking-wider text-slate-800 dark:text-white">
-            {safeStats.title}
+            {currentStats.title}
             <span className="rounded-sm border border-zinc-200 px-1.5 py-0.5 font-mono text-[10px] text-zinc-500 dark:border-zinc-700">
               {dataSource === 'global' ? tt('summary.badge.global', '全服') : tt('summary.badge.local', '本地')}
             </span>
           </h2>
           <span className="mt-0.5 block font-mono text-xs text-zinc-500">
-            {tt('summary.metric.scopeLabel', '范围')} // {safeStats.subtitle}
+            {tt('summary.metric.scopeLabel', '范围')} // {currentStats.subtitle}
           </span>
         </div>
       </div>
 
-      {safeStats.totalUsers ? (
+      {currentStats.totalUsers ? (
         <div className="text-right">
           <span className="block font-mono text-[10px] uppercase tracking-widest text-zinc-400">{tt('summary.metric.contributors', '贡献者')}</span>
           <span className="font-mono text-xl font-bold text-slate-700 dark:text-zinc-300">
-            {formatCount(safeStats.totalContributors || safeStats.totalUsers)}
+            {formatCount(currentStats.totalContributors || currentStats.totalUsers)}
           </span>
-          {safeStats.totalContributors && safeStats.totalContributors !== safeStats.totalUsers && (
+          {currentStats.totalContributors && currentStats.totalContributors !== currentStats.totalUsers && (
             <span className="block font-mono text-[10px] text-zinc-500">
-              {tt('summary.metric.registered', '注册')}: {formatCount(safeStats.totalUsers)}
+              {tt('summary.metric.registered', '注册')}: {formatCount(currentStats.totalUsers)}
             </span>
           )}
           {contributorRegionStats && (
             <div className="mt-1 flex flex-wrap justify-end gap-1 font-mono text-[10px] text-zinc-500">
               <span>{tt('summary.metric.cn', '国服')}: {formatCount(contributorRegionStats.cn || 0)}</span>
               <span>{tt('summary.metric.intl', '国际服')}: {formatCount(contributorRegionStats.intl || 0)}</span>
-            </div>
-          )}
-          {hasContributorActivityStats && (
-            <div className="mt-1 flex flex-wrap justify-end gap-2 font-mono text-[10px] text-zinc-500">
-              <span>{tt('summary.metric.activeUsers30d', '30日活跃')}: {formatCount(activeUsers30d)}</span>
-              <span>{tt('summary.metric.newUsers30d', '30日新增')}: {formatCount(newUsers30d)}</span>
             </div>
           )}
         </div>
@@ -106,10 +95,19 @@ function OverviewAllPoolsLegacy({ currentStats, dataSource, ranking, formatCount
 
   const totalCharacterSix = Number(characterStats.six || 0);
   const totalCharacterTargets = Number(characterStats.sixStarLimited ?? characterStats.limitedSix ?? 0);
-  const characterTargetRate = totalCharacterSix > 0 ? (totalCharacterTargets / totalCharacterSix) * 100 : 0;
+  // 真不歪率（对齐 gui.cpp 50/50）：分子分母均剔除硬保底强制 UP（spark）。
+  // 展示的「不歪/歪」计数保持总数不变；仅此率为 50/50 条件率。
+  // 注：全服数据来自服务端无 spark 字段 → spark=0，退化为旧口径（含保底），待 SQL 跟进。
+  const characterSpark = Number(characterStats.sparkCount || 0);
+  const characterTargetRate = (totalCharacterSix - characterSpark) > 0
+    ? (Math.max(totalCharacterTargets - characterSpark, 0) / (totalCharacterSix - characterSpark)) * 100
+    : 0;
   const weaponSix = Number(weaponStats.six || 0);
   const weaponTargets = Number(weaponStats.sixStarLimited ?? weaponStats.limitedSix ?? 0);
-  const weaponTargetRate = weaponSix > 0 ? (weaponTargets / weaponSix) * 100 : 0;
+  const weaponSpark = Number(weaponStats.sparkCount || 0);
+  const weaponTargetRate = (weaponSix - weaponSpark) > 0
+    ? (Math.max(weaponTargets - weaponSpark, 0) / (weaponSix - weaponSpark)) * 100
+    : 0;
   const characterSixDisplay = (() => {
     const extraSixTotal = Number(extraStats.six || 0);
     const limitedSixTotal = Number(limitedStats.six || 0);
@@ -264,8 +262,8 @@ function OverviewSinglePool({ currentStats, formatCount, formatPercent, tt }) {
         label={tt('summary.metric.targetVsOff', '不歪/歪')}
         value={`${formatCount(currentStats.sixStarLimited || 0)} / ${formatCount(currentStats.sixStarStandard || 0)}`}
         hint={`${tt('summary.metric.targetRate', '不歪率')}: ${
-          currentStats.sixStar > 0
-            ? formatPercent(((currentStats.sixStarLimited || 0) / currentStats.sixStar) * 100)
+          (Number(currentStats.sixStar || 0) - Number(currentStats.sparkCount || 0)) > 0
+            ? formatPercent((Math.max(Number(currentStats.sixStarLimited || 0) - Number(currentStats.sparkCount || 0), 0) / (Number(currentStats.sixStar || 0) - Number(currentStats.sparkCount || 0))) * 100)
             : formatPercent(0)
         }`}
         tone="text-slate-800 dark:text-white"

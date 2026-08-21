@@ -5,6 +5,7 @@ import { buildQuotaLedgerFromHistory } from '../../utils/quotaEconomy.js';
 import { annotateInfoBookPulls, isInfoBookHistoryPull } from '../../utils/historyInfoBook.js';
 import { classifyGameAccountRegionBucket } from '../../utils/gameAccountMetadata.js';
 import { characterCache } from '../../utils/characterUtils.js';
+import { getHardPityFloor } from '../../utils/forcedUpDetection.js';
 
 const PITY_LIMITS = {
   extra: EXTRA_POOL_RULES.sixStarPity,
@@ -340,20 +341,16 @@ export function useSummaryStats(history, pools, user) {
     // ── Phase 2: 按池独立计算保底/区间/赠送/分布 ──
     // 每个池独立追踪保底计数器，与时间线视图一致
     const upCountByType = { extra: 0, limited: 0, weapon: 0 };
+    // 各池型硬保底强制 UP（吃井/spark）次数；用于「吃井次数」展示及真不歪率剔除
+    const sparkCountByType = { extra: 0, limited: 0, weapon: 0, standard: 0 };
 
     const globalDistBuckets = {};
     const typeDistBuckets = { extra: {}, limited: {}, weapon: {}, standard: {} };
 
-    const typePitySums = {
-      extra: { sum: 0, count: 0 },
-      limited: { sum: 0, count: 0 },
-      weapon: { sum: 0, count: 0 },
-      standard: { sum: 0, count: 0 }
-    };
-    let limitedNonFreeNonSparkSum = 0, limitedNonFreeNonSparkCount = 0;
-    let limitedNonFreeSum = 0, limitedNonFreeCount = 0;
-    let allSixStarPitySum = 0, allSixStarPityCount = 0;
-    let allSixStarExclFreePitySum = 0, allSixStarExclFreePityCount = 0;
+    let limitedNonFreeNonSparkCount = 0;
+    let limitedNonFreeCount = 0;
+    let allSixStarPityCount = 0;
+    let allSixStarExclFreePityCount = 0;
     let globalMaxPity = 0;
 
     let charGiftCount = 0;
@@ -381,9 +378,8 @@ export function useSummaryStats(history, pools, user) {
       }
 
       let tempCounter = 0;
-      let tempCounterExcludingFree = 0;
       let cumulativePullCount = 0;
-      let hasGotUpBefore120 = false;
+      let hasGotUpBefore = false;
 
       for (let j = 0; j < sortedPulls.length; j++) {
         const pull = sortedPulls[j];
@@ -391,20 +387,22 @@ export function useSummaryStats(history, pools, user) {
 
         const isFree = pull.isFree || pull.is_free;
         tempCounter++;
-        if (!isFree) tempCounterExcludingFree++;
         cumulativePullCount++;
 
         if (pull.rarity === 6) {
           const isUp = isTargetSixStarByPoolType(pull, type);
+          // 硬保底强制 UP（spark）：限定 120 / 武器第 8 申领（71~80）。阈值取自 forcedUpDetection。
+          const hardPityFloor = getHardPityFloor(type);
           let isSpark = false;
-          if (type === 'limited' && isUp && cumulativePullCount === 120 && !hasGotUpBefore120) {
+          if (isUp && !hasGotUpBefore && Number.isFinite(hardPityFloor) && cumulativePullCount >= hardPityFloor) {
             isSpark = true;
           }
-          if (isUp && cumulativePullCount < 120) {
-            hasGotUpBefore120 = true;
+          if (isUp && Number.isFinite(hardPityFloor) && cumulativePullCount < hardPityFloor) {
+            hasGotUpBefore = true;
           }
 
-          allSixStarPitySum += tempCounter;
+          if (isSpark && sparkCountByType[type] !== undefined) sparkCountByType[type]++;
+
           allSixStarPityCount++;
           if (tempCounter > globalMaxPity) globalMaxPity = tempCounter;
 
@@ -422,24 +420,17 @@ export function useSummaryStats(history, pools, user) {
           if (isUp) typeDistBuckets[type][bucketIdx].limited++;
           else typeDistBuckets[type][bucketIdx].standard++;
 
-          typePitySums[type].sum += tempCounter;
-          typePitySums[type].count++;
-
           if (type === 'limited') {
             if (!isFree && !isSpark) {
-              limitedNonFreeNonSparkSum += tempCounter;
               limitedNonFreeNonSparkCount++;
             }
             if (!isFree) {
-              limitedNonFreeSum += tempCounter;
               limitedNonFreeCount++;
             }
           }
 
           if (!isFree) {
-            allSixStarExclFreePitySum += tempCounterExcludingFree;
             allSixStarExclFreePityCount++;
-            tempCounterExcludingFree = 0;
           }
 
           data.byType[type].pityList.push({
@@ -449,10 +440,11 @@ export function useSummaryStats(history, pools, user) {
             isSpark
           });
 
+          // 硬保底强制 UP 不计入「排除保底」的 UP 均值分母（与卡池分析页同口径）
           if (type === 'extra') {
-            upCountByType.extra++;
+            if (!isSpark) upCountByType.extra++;
           } else if ((type === 'limited' || type === 'weapon') && matchesPoolTarget(pull, poolMeta)) {
-            if (upCountByType[type] !== undefined) upCountByType[type]++;
+            if (!isSpark && upCountByType[type] !== undefined) upCountByType[type]++;
           }
           tempCounter = 0;
         }
@@ -468,20 +460,24 @@ export function useSummaryStats(history, pools, user) {
     ['extra', 'limited', 'weapon', 'standard'].forEach(t => {
       data.byType[t].distribution = buildDistFromBuckets(typeDistBuckets[t], PITY_LIMITS[t]);
       data.byType[t].chartData = generatePieData(data.byType[t].counts);
-      if (typePitySums[t].count > 0) {
-        data.byType[t].avgPity = (typePitySums[t].sum / typePitySums[t].count).toFixed(1);
+      data.byType[t].sparkCount = sparkCountByType[t] || 0;
+      if (data.byType[t].six > 0) {
+        // 「全部6★ 抽/个」= 该池型总抽 / 6★ 总数（与字段标签「抽/个」及 UP 均值口径 total/count 一致）
+        data.byType[t].avgPity = (data.byType[t].total / data.byType[t].six).toFixed(1);
       }
       if (t === 'limited') {
         if (limitedNonFreeNonSparkCount > 0) {
-          data.byType[t].avgPityExcludingFree = (limitedNonFreeNonSparkSum / limitedNonFreeNonSparkCount).toFixed(1);
+          // 排除保底(spark)的平均出货：池总抽 / 非保底6★数（与 avgPity 同口径 total/count）
+          data.byType[t].avgPityExcludingFree = (data.byType[t].total / limitedNonFreeNonSparkCount).toFixed(1);
         }
         if (limitedNonFreeCount > 0) {
-          data.byType[t].avgPityWithSpark = (limitedNonFreeSum / limitedNonFreeCount).toFixed(1);
+          // 含保底的平均出货：池总抽 / 全部6★数（total/count，等同 avgPity）
+          data.byType[t].avgPityWithSpark = (data.byType[t].total / limitedNonFreeCount).toFixed(1);
         }
       }
     });
 
-    // BUG-035: UP 平均出货 = 池总抽 / UP 6★ 数
+    // BUG-035: UP 平均出货 = 池总抽 / UP 6★ 数（分母已排除硬保底强制 UP，与卡池分析页同口径）
     data.byType.extra.avgPityUp = upCountByType.extra > 0
       ? (data.byType.extra.total / upCountByType.extra).toFixed(1)
       : null;
@@ -522,26 +518,23 @@ export function useSummaryStats(history, pools, user) {
     const limitedPityListExcludingFree = [...data.byType.extra.pityList, ...data.byType.limited.pityList].filter(p => !p.isFree);
     const characterPityListExcludingFree = characterPityList.filter(p => !p.isFree && !p.isSpark);
 
-    const charPitySum = typePitySums.extra.sum + typePitySums.limited.sum + typePitySums.standard.sum;
-    const charPityCount = typePitySums.extra.count + typePitySums.limited.count + typePitySums.standard.count;
+    const characterTotalPulls = data.byType.extra.total + data.byType.limited.total + data.byType.standard.total;
+    const characterSixCount = data.byType.extra.six + data.byType.limited.six + data.byType.standard.six;
 
-    let charExclFreePitySum = 0, charExclFreePityCount = 0;
-    for (let i = 0; i < characterPityListExcludingFree.length; i++) {
-      charExclFreePitySum += characterPityListExcludingFree[i].count;
-      charExclFreePityCount++;
-    }
+    const charExclFreePityCount = characterPityListExcludingFree.length;
 
     data.byType.character = {
       total: data.byType.extra.total + data.byType.limited.total + data.byType.standard.total,
       six: data.byType.extra.six + data.byType.limited.six + data.byType.standard.six,
       limitedSix: data.byType.extra.limitedSix + data.byType.limited.limitedSix,
+      sparkCount: sparkCountByType.extra + sparkCountByType.limited + sparkCountByType.standard,
       counts: characterCounts,
       pityList: characterPityList,
       pityListExcludingFree: characterPityListExcludingFree,
       distribution: buildDistFromBuckets(charDistBuckets, PITY_LIMITS.limited),
       chartData: generatePieData(characterCounts),
-      avgPity: charPityCount > 0
-        ? (charPitySum / charPityCount).toFixed(1)
+      avgPity: characterSixCount > 0
+        ? (characterTotalPulls / characterSixCount).toFixed(1)
         : '-',
       avgPityUp: (() => {
         const totalCharacterTargets = upCountByType.extra + upCountByType.limited;
@@ -556,7 +549,7 @@ export function useSummaryStats(history, pools, user) {
           : null;
       })(),
       avgPityExcludingFree: charExclFreePityCount > 0
-        ? (charExclFreePitySum / charExclFreePityCount).toFixed(1)
+        ? (characterTotalPulls / charExclFreePityCount).toFixed(1)
         : null
     };
 
@@ -603,12 +596,12 @@ export function useSummaryStats(history, pools, user) {
 
     data.byType.limited.pityListExcludingFree = limitedPityListExcludingFree;
 
-    data.avgPity = allSixStarPityCount > 0
-      ? (allSixStarPitySum / allSixStarPityCount).toFixed(1)
+    data.avgPity = data.sixStar > 0
+      ? (data.total / data.sixStar).toFixed(1)
       : '-';
 
     data.avgPityExcludingFree = allSixStarExclFreePityCount > 0
-      ? (allSixStarExclFreePitySum / allSixStarExclFreePityCount).toFixed(1)
+      ? (data.total / allSixStarExclFreePityCount).toFixed(1)
       : '-';
 
     data.charGift = charGiftCount;

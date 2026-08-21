@@ -14,6 +14,7 @@ import {
 } from '../../utils/pityIntervals.js';
 import { buildPoolResourceSummary } from '../../utils/resourceEconomy.js';
 import { buildQuotaLedgerFromHistory } from '../../utils/quotaEconomy.js';
+import { buildForcedUpRecordKeys } from '../../utils/forcedUpDetection.js';
 import { useCurrentPoolGroupedHistory } from './useCurrentPoolGroupedHistory.js';
 
 function isGiftPull(pull) {
@@ -130,40 +131,36 @@ function getHistoryRecordKey(item) {
   return value == null ? null : String(value);
 }
 
-function buildLimitedSparkRecordKeys(history, getPullPoolType, isGroupMode) {
-  const sparkRecordKeys = new Set();
-  if (isGroupMode) {
-    return sparkRecordKeys;
+// 硬保底强制 UP（spark）识别：限定 120 抽 / 武器第 8 申领（71~80 抽）。
+// 阈值单一来源 forcedUpDetection；覆盖限定与武器两类硬保底。
+// 单池：直接按该期序列判定。
+// 池组聚合（全部限定角色池 / 全部限定武器池 / 全部卡池总览）：按「期」(poolId) 分组
+// 逐期独立判定再合并——硬保底是每期重置的，跨期合并的累计抽数无意义，必须分期算。
+// 这样聚合视图的不歪率与单池、与 gui.cpp（按期 forced_by_hardpity）口径一致，
+// 修复此前聚合模式完全跳过 spark、导致聚合不歪率把保底 UP 也算作「不歪」的问题。
+function buildForcedUpRecordKeysForPool(history, getPullPoolType, isGroupMode) {
+  const isUp = (pull, pullPoolType) => isTargetSixStarPull(pull, pullPoolType);
+  const getRecordKey = (pull) => getHistoryRecordKey(pull);
+  const isExcluded = (pull) => isGiftPull(pull) || isFreePull(pull);
+
+  if (!isGroupMode) {
+    return buildForcedUpRecordKeys({ history, getPoolType: getPullPoolType, isUp, getRecordKey, isExcluded });
   }
 
-  let cumulativePullCount = 0;
-  let hasGotUpBefore120 = false;
-
-  history.forEach((pull) => {
-    if (isGiftPull(pull) || isFreePull(pull)) {
-      return;
-    }
-
-    cumulativePullCount += 1;
-    const pullPoolType = getPullPoolType(pull);
-    if (Number(pull?.rarity) !== 6 || pullPoolType !== 'limited') {
-      return;
-    }
-
-    const isUp = isTargetSixStarPull(pull, pullPoolType);
-    if (isUp && cumulativePullCount === 120 && !hasGotUpBefore120) {
-      const recordKey = getHistoryRecordKey(pull);
-      if (recordKey) {
-        sparkRecordKeys.add(recordKey);
-      }
-    }
-
-    if (isUp && cumulativePullCount < 120) {
-      hasGotUpBefore120 = true;
-    }
+  // 按期分组（history 已按时间排序，分组后各期内部仍为时间序）
+  const historyByBanner = new Map();
+  (Array.isArray(history) ? history : []).forEach((pull) => {
+    const bannerId = getHistoryPoolId(pull) || '__unknown__';
+    if (!historyByBanner.has(bannerId)) historyByBanner.set(bannerId, []);
+    historyByBanner.get(bannerId).push(pull);
   });
 
-  return sparkRecordKeys;
+  const merged = new Set();
+  historyByBanner.forEach((bannerHistory) => {
+    const keys = buildForcedUpRecordKeys({ history: bannerHistory, getPoolType: getPullPoolType, isUp, getRecordKey, isExcluded });
+    keys.forEach((key) => merged.add(key));
+  });
+  return merged;
 }
 
 /**
@@ -228,7 +225,7 @@ export function usePoolStats({
 
       return normalizedPoolType;
     };
-    const limitedSparkRecordKeys = buildLimitedSparkRecordKeys(
+    const forcedUpRecordKeys = buildForcedUpRecordKeysForPool(
       normalizedCurrentPoolHistory,
       getPullPoolType,
       currentPool?.isGroupMode
@@ -319,7 +316,7 @@ export function usePoolStats({
        if (pull.rarity === 6 && !isGiftPull(pull) && !isFreePull(pull)) {
           const pullPoolType = getPullPoolType(pull);
           const recordKey = getHistoryRecordKey(pull);
-          if (shouldExcludeFromWinRate(pull, pullPoolType) || (recordKey && limitedSparkRecordKeys.has(recordKey))) {
+          if (shouldExcludeFromWinRate(pull, pullPoolType) || (recordKey && forcedUpRecordKeys.has(recordKey))) {
             return;
           }
           if (isTargetSixStarPull(pull, pullPoolType)) {
@@ -394,12 +391,13 @@ export function usePoolStats({
         limitedScopeTotal++;
       }
       if (pull.rarity === 6) {
-        // 判断是否为120抽Spark触发（FEAT-014）
-        // Spark条件: 限定池 + UP角色 + 累计恰好第120抽 + 之前未获得过UP
-        // 池组聚合模式下跳过Spark判定（跨池合并后累计抽数无意义）
+        // 判断是否为硬保底强制 UP（spark）触发（FEAT-014）
+        // Spark条件: 限定池累计第120抽 / 武器池第8申领(71~80抽) + UP角色 + 之前未获得过UP
+        // 具体阈值由 forcedUpDetection 统一判定（见上 buildForcedUpRecordKeysForPool）
+        // 池组聚合模式按「期」分组逐期判定（保底每期重置），聚合不歪率与单池口径一致
         const isUp = isTargetSixStarPull(pull, pullPoolType);
         const recordKey = getHistoryRecordKey(pull);
-        const isSpark = recordKey ? limitedSparkRecordKeys.has(recordKey) : false;
+        const isSpark = recordKey ? forcedUpRecordKeys.has(recordKey) : false;
 
         // UI-007: 判断歪出的6星是否为限定角色
         const isActuallyLimited = isLimitedSixStarPull(pull, pullPoolType);
@@ -439,8 +437,11 @@ export function usePoolStats({
       ? (pullCounts.reduce((a, b) => a + b, 0) / pullCounts.length).toFixed(1)
       : 0;
 
-    const avgAllSixStar = pullCounts.length > 0
-      ? (pullCounts.reduce((sum, value) => sum + value, 0) / pullCounts.length).toFixed(2)
+    // 「全部6★ 抽/个」= 池总抽 / 6★ 总数（与 UP 均值同口径 total/count、与总览分栏页一致，
+    // 也与字段标签「抽/个」一致）。修复此前用区间均值导致辉光庆典(extra)池「全部6★均值」
+    // 与「UP均值」对同一量给出两个不同数字的自相矛盾。
+    const avgAllSixStar = totalSixStar > 0
+      ? (total / totalSixStar).toFixed(2)
       : '0';
 
     const sparkCount = upSixStarHits.filter(p => p.isSpark).length;

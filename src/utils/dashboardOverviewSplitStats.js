@@ -3,6 +3,7 @@ import { isInfoBookHistoryPull } from './historyInfoBook.js';
 import { buildResourceSummaryFromAggregates } from './resourceEconomy.js';
 import { buildQuotaLedgerFromHistory } from './quotaEconomy.js';
 import { resolveCharacterRecordByName } from './characterUtils.js';
+import { getHardPityFloor } from './forcedUpDetection.js';
 
 const CHAR_PITY_LIMIT = LIMITED_POOL_RULES.sixStarPity;
 const WEAPON_PITY_LIMIT = WEAPON_POOL_RULES.sixStarPity;
@@ -214,6 +215,9 @@ export function buildDashboardOverviewSplitStats({
     const bucket = buckets[bucketKey];
 
     let tempCounter = 0;
+    // 硬保底强制 UP（spark）按「期」累计：每池(期)独立，不计入免费/赠送抽。
+    let cumulativePullCount = 0;
+    let hasGotUpBefore = false;
 
     sortedPulls.forEach((item) => {
       const isGift = item?.specialType === 'gift' || item?.special_type === 'gift';
@@ -226,6 +230,7 @@ export function buildDashboardOverviewSplitStats({
       bucket.total += 1;
       if (!isFree) {
         tempCounter += 1;
+        cumulativePullCount += 1;
       }
       if (isTargetCapablePool(poolType)) {
         bucket._targetScopePulls += 1;
@@ -249,6 +254,17 @@ export function buildDashboardOverviewSplitStats({
         const isLimitedSixStar = isLimitedCharacterPool(poolType)
           && (isTargetSixStar || isLimitedCharacterOffrate(item));
 
+        // 硬保底强制 UP（限定 120 / 武器 71~80）：不是独立判定，需剔除出不歪率与「排除保底」均值。
+        // 此前总览分栏页完全没算 spark（连限定 120 都没算、武器 80 更没算）。
+        const hardPityFloor = getHardPityFloor(poolType);
+        let isSpark = false;
+        if (isTargetSixStar && !hasGotUpBefore && Number.isFinite(hardPityFloor) && cumulativePullCount >= hardPityFloor) {
+          isSpark = true;
+        }
+        if (isTargetSixStar && Number.isFinite(hardPityFloor) && cumulativePullCount < hardPityFloor) {
+          hasGotUpBefore = true;
+        }
+
         if (isTargetSixStar) {
           bucket.counts[6] += 1;
         } else {
@@ -259,7 +275,7 @@ export function buildDashboardOverviewSplitStats({
           bucket._arsenalGainCounts[isTargetSixStar ? 6 : '6_std'] += 1;
         }
 
-        if (!shouldExcludeFromWinRate(item, poolType)) {
+        if (!shouldExcludeFromWinRate(item, poolType) && !isSpark) {
           bucket._winRateTotalCount += 1;
           if (isTargetSixStar) {
             bucket._winRateTargetCount += 1;
@@ -268,11 +284,12 @@ export function buildDashboardOverviewSplitStats({
 
         bucket._allSixStarPulls.push({
           count: isFree ? 30 : tempCounter,
-          isStandard: !isTargetSixStar
+          isStandard: !isTargetSixStar,
+          isSpark
         });
 
-        if (isTargetSixStar) bucket._upCount += 1;
-        if (isLimitedSixStar) bucket._limitedSixCount += 1;
+        if (isTargetSixStar && !isSpark) bucket._upCount += 1;
+        if (isLimitedSixStar && !isSpark) bucket._limitedSixCount += 1;
 
         if (!isFree) {
           tempCounter = 0;
