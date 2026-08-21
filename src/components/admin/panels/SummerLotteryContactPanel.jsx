@@ -35,6 +35,8 @@ export default function SummerLotteryContactPanel({
   showOperationControls = true,
   showPermissionManager = false,
 }) {
+  const [selectedCampaignId, setSelectedCampaignId] = useState('');
+  const [campaignIdDraft, setCampaignIdDraft] = useState('');
   const [campaign, setCampaign] = useState(null);
   const [operationStatus, setOperationStatus] = useState(null);
   const [operationConfirmation, setOperationConfirmation] = useState('');
@@ -53,7 +55,10 @@ export default function SummerLotteryContactPanel({
   const [revealedContact, setRevealedContact] = useState(null);
   const revealTimerRef = useRef(null);
   const showToastRef = useRef(showToast);
-  showToastRef.current = showToast;
+
+  useEffect(() => {
+    showToastRef.current = showToast;
+  }, [showToast]);
 
   const clearRevealedContact = useCallback(() => {
     if (revealTimerRef.current) window.clearTimeout(revealTimerRef.current);
@@ -65,12 +70,12 @@ export default function SummerLotteryContactPanel({
     setLoading(true);
     clearRevealedContact();
     const [contactResult, statusResult, grantsResult] = await Promise.allSettled([
-      loadSummerLotteryContactTargets(),
+      loadSummerLotteryContactTargets(selectedCampaignId),
       showOperationControls
-        ? loadSummerLotteryOperationStatus()
+        ? loadSummerLotteryOperationStatus(selectedCampaignId)
         : Promise.resolve(null),
       showPermissionManager
-        ? loadSummerLotteryOperatorGrants()
+        ? loadSummerLotteryOperatorGrants(selectedCampaignId)
         : Promise.resolve(null),
     ]);
 
@@ -115,11 +120,12 @@ export default function SummerLotteryContactPanel({
       );
     }
     setLoading(false);
-  }, [clearRevealedContact, showOperationControls, showPermissionManager]);
+  }, [clearRevealedContact, selectedCampaignId, showOperationControls, showPermissionManager]);
 
   useEffect(() => {
-    loadTargets();
+    const loadTimer = window.setTimeout(() => void loadTargets(), 0);
     return () => {
+      window.clearTimeout(loadTimer);
       if (revealTimerRef.current) window.clearTimeout(revealTimerRef.current);
       revealTimerRef.current = null;
     };
@@ -133,6 +139,19 @@ export default function SummerLotteryContactPanel({
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [clearRevealedContact]);
 
+  const handleCampaignSelection = () => {
+    const normalizedCampaignId = campaignIdDraft.trim();
+    if (normalizedCampaignId && !/^[a-z0-9][a-z0-9_-]{2,79}$/u.test(normalizedCampaignId)) {
+      showToastRef.current?.('活动 ID 只允许小写字母、数字、下划线和连字符', 'error');
+      return;
+    }
+    if (normalizedCampaignId === selectedCampaignId) {
+      void loadTargets();
+      return;
+    }
+    setSelectedCampaignId(normalizedCampaignId);
+  };
+
   const handleRead = async (target, reason) => {
     setActionEntryId(target.entryId);
     clearRevealedContact();
@@ -140,7 +159,7 @@ export default function SummerLotteryContactPanel({
       const contact = await readSummerLotteryContact({
         entryId: target.entryId,
         reason,
-        campaignId: campaign?.campaignId || 'community-lottery',
+        campaignId: campaign?.campaignId || selectedCampaignId,
       });
       setRevealedContact(contact);
       revealTimerRef.current = window.setTimeout(clearRevealedContact, REVEAL_TTL_MS);
@@ -162,7 +181,7 @@ export default function SummerLotteryContactPanel({
     try {
       await purgeSummerLotteryContact(
         target.entryId,
-        campaign?.campaignId || 'community-lottery',
+        campaign?.campaignId || selectedCampaignId,
       );
       showToastRef.current?.('联系方式密文已删除，公开中奖记录保持不变', 'success');
       await loadTargets();
@@ -176,7 +195,11 @@ export default function SummerLotteryContactPanel({
   const handlePermission = async ({ targetUserId, capability, enabled }) => {
     const campaignId = operationStatus?.campaignId
       || campaign?.campaignId
-      || 'community-lottery';
+      || selectedCampaignId;
+    if (!campaignId) {
+      showToastRef.current?.('尚未读取到可操作的活动 ID', 'error');
+      return;
+    }
     const actionLabel = enabled ? '授予' : '撤销';
     const capabilityLabel = capability === 'contact_read'
       ? '查看与单条读取'
@@ -216,7 +239,11 @@ export default function SummerLotteryContactPanel({
   };
 
   const handleOperation = async (action) => {
-    const campaignId = operationStatus?.campaignId || 'community-lottery';
+    const campaignId = operationStatus?.campaignId || campaign?.campaignId || selectedCampaignId;
+    if (!campaignId) {
+      showToastRef.current?.('尚未读取到可操作的活动 ID', 'error');
+      return;
+    }
     const expected = `${action.toUpperCase()} ${campaignId}`;
     if (operationConfirmation.trim() !== expected) {
       showToastRef.current?.(`请输入完整确认词：${expected}`, 'error');
@@ -252,6 +279,39 @@ export default function SummerLotteryContactPanel({
 
   return (
     <div className="space-y-4">
+      <section className="border border-sky-300 p-4 dark:border-sky-800">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+          <div className="min-w-0 flex-1">
+            <label htmlFor="lottery-campaign-id" className="text-xs font-bold text-zinc-700 dark:text-zinc-200">
+              当前操作活动
+            </label>
+            <p className="mt-1 text-[11px] text-zinc-500">
+              留空时跟随服务端 LOTTERY_CAMPAIGN_ID；填写历史活动 ID 可切换查看，但所有操作均按活动隔离。
+            </p>
+            <input
+              id="lottery-campaign-id"
+              value={campaignIdDraft}
+              onChange={(event) => setCampaignIdDraft(event.target.value.toLowerCase())}
+              placeholder="留空跟随当前部署活动"
+              autoComplete="off"
+              spellCheck={false}
+              className="mt-2 w-full border border-zinc-300 bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-sky-500 dark:border-zinc-700"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleCampaignSelection}
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 border border-sky-400 px-4 py-2 text-xs font-bold text-sky-700 disabled:opacity-40 dark:text-sky-300"
+          >
+            <RefreshCw size={13} /> 切换并读取
+          </button>
+        </div>
+        <p className="mt-2 break-all font-mono text-[11px] text-zinc-500">
+          已加载：{operationStatus?.campaignId || campaign?.campaignId || '等待服务端响应'}
+        </p>
+      </section>
+
       {showOperationControls && (
         <section className="border border-zinc-300 p-4 dark:border-zinc-700">
         <div className="flex items-start gap-3">
@@ -274,7 +334,7 @@ export default function SummerLotteryContactPanel({
               <input
                 value={operationConfirmation}
                 onChange={(event) => setOperationConfirmation(event.target.value)}
-                placeholder={`输入 PREPARE 或 DRAW + 空格 + ${operationStatus?.campaignId || 'community-lottery'}`}
+                placeholder={`输入 PREPARE 或 DRAW + 空格 + ${operationStatus?.campaignId || campaign?.campaignId || '当前活动 ID'}`}
                 autoComplete="off"
                 spellCheck={false}
                 className="min-w-0 flex-1 border border-zinc-300 bg-transparent px-3 py-2 font-mono text-xs outline-none focus:border-sky-500 dark:border-zinc-700"
