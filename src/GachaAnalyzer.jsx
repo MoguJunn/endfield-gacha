@@ -1,17 +1,16 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Footer from './components/layout/Footer';
-import GachaModals from './components/modals/GachaModals';
-import DataImportWizardModal from './components/modals/DataImportWizardModal';
 import { LoadingBar, NotificationCenter } from './components/ui';
-import { useToast, useConfirm, useCloudSync, useCurrentPoolData, useNotificationBadges, useAppInitialization, useAuthenticatedSessionSync, usePoolOperations, useHistoryOperations, useDataExportImport, usePoolRealtimeSubscription, useUserRole, useScrollToHighlight, useDurableNotifications } from './hooks';
-import { useAuthStore, useAppStore, useHistoryStore, usePoolStore } from './stores';
+import { useToast, useConfirm, useCloudSync, useNotificationBadges, useAppInitialization, useAuthenticatedSessionSync, usePoolOperations, useHistoryOperations, usePersonalGameAccounts, useDataExportImport, usePoolRealtimeSubscription, useUserRole, useScrollToHighlight, useDurableNotifications } from './hooks';
+import { useAuthStore, useAppStore, usePoolStore, useUIStore } from './stores';
 import { getDesktopPathForTab, getDesktopTabFromPath, normalizeAppTab } from './constants/appRoutes';
 import AppHeader from './components/layout/AppHeader';
 import DesktopAppRoutes from './components/app/DesktopAppRoutes';
 import { extractDrawerFromPoolName } from './utils';
-import { isPoolGroupId } from './stores/usePoolStore';
+import { getPoolGroupType, isPoolGroupId } from './stores/usePoolStore';
 import { getPreferredPool } from './utils/poolSelectionUtils';
+import { getPoolTypeLabel } from './utils/poolSelectorDisplay.js';
 import { STORAGE_KEYS, writeStorageValue } from './utils/storageUtils.js';
 import { subscribePublicCacheWarnings } from './services/admin/publicCacheService.js';
 import { buildPublicCacheWarningNotification } from './utils/notificationModel.js';
@@ -23,18 +22,23 @@ import {
 } from './utils/gameAccountMetadata.js';
 import { useSummerLotterySsoContinuation } from './hooks/auth/useSummerLotterySsoContinuation.js';
 
+const GachaModals = React.lazy(() => import('./components/modals/GachaModals'));
+const DataImportWizardModal = React.lazy(() => import('./components/modals/DataImportWizardModal'));
+
 export default function GachaAnalyzer() {
   // --- 从 Zustand Stores 获取状态 ---
   const location = useLocation();
   const navigate = useNavigate();
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
 
   // 认证状态
   const user = useAuthStore(state => state.user);
   const userRole = useAuthStore(state => state.userRole);
   const authResolved = useAuthStore(state => state.authResolved);
   const syncing = useAuthStore(state => state.syncing);
+  const showAuthModal = useAuthStore(state => state.showAuthModal);
   const openAuthModal = useAuthStore(state => state.openAuthModal);
+  const modalType = useUIStore(state => state.modalState.type);
   useSummerLotterySsoContinuation({ user, authResolved, openAuthModal });
 
   // 应用全局状态
@@ -42,19 +46,31 @@ export default function GachaAnalyzer() {
   // 卡池状态
   const currentPoolId = usePoolStore(state => state.currentPoolId);
   const currentGameUid = usePoolStore(state => state.currentGameUid);
+  const pools = usePoolStore(state => state.pools);
   const switchPool = usePoolStore(state => state.switchPool);
   const switchGameAccount = usePoolStore(state => state.switchGameAccount);
-  const history = useHistoryStore(state => state.history);
-  const getGameAccountsFromHistory = useHistoryStore(state => state.getGameAccountsFromHistory);
+  const poolsArray = useMemo(() => (Array.isArray(pools) ? pools : []), [pools]);
+  const currentPool = useMemo(() => {
+    if (isPoolGroupId(currentPoolId)) {
+      const groupType = getPoolGroupType(currentPoolId);
+      return {
+        id: currentPoolId,
+        name: groupType === 'all'
+          ? t('dashboard.timeline.title.overview')
+          : t('pool.card.allGroupTitle', { label: getPoolTypeLabel(groupType, locale) }),
+        type: groupType || 'all',
+        isGroupMode: true,
+        isAllPoolsOverview: groupType === 'all',
+        locked: true,
+      };
+    }
 
-  const {
-    poolsArray,
-    currentPool
-  } = useCurrentPoolData();
-  const gameAccounts = useMemo(() => {
-    void history;
-    return getGameAccountsFromHistory();
-  }, [getGameAccountsFromHistory, history]);
+    return getPreferredPool(poolsArray, {
+      preferredPoolId: currentPoolId,
+      includeDefaultPool: true,
+    });
+  }, [currentPoolId, locale, poolsArray, t]);
+  const gameAccounts = usePersonalGameAccounts();
 
   const activeTab = getDesktopTabFromPath(location.pathname);
   const [editItemState, setEditItemState] = useState(null);
@@ -92,7 +108,7 @@ export default function GachaAnalyzer() {
 
   // 云同步 Hook - 提供所有云端数据操作函数
   const {
-    loadCloudData,
+    refreshPersonalData,
     loadPublicPools,
     savePoolToCloud,
     saveHistoryToCloud,
@@ -103,7 +119,7 @@ export default function GachaAnalyzer() {
     migrateLocalToCloud
   } = useCloudSync({ showToast });
 
-  const { applySiteSession } = useAuthenticatedSessionSync({ loadCloudData });
+  const { applySiteSession } = useAuthenticatedSessionSync({ refreshPersonalData });
   const handleOAuthSessionSynced = useCallback(async (siteSession) => {
     await applySiteSession(siteSession, {
       source: 'oauth_callback',
@@ -119,7 +135,22 @@ export default function GachaAnalyzer() {
   });
 
   // 应用初始化 Hook - 处理会话、全局统计、last_seen 更新
-  useAppInitialization({ loadCloudData, loadPublicPools });
+  useAppInitialization({ refreshPersonalData, loadPublicPools });
+  const retryPersonalData = useCallback(async () => {
+    if (!user?.id) {
+      return;
+    }
+    const result = await refreshPersonalData(user, {
+      kind: 'explicit',
+      reason: 'dashboard_retry',
+    });
+    if (!result?.ok && !result?.stale) {
+      showToast(
+        result?.error?.message || '个人数据刷新失败',
+        'error'
+      );
+    }
+  }, [refreshPersonalData, showToast, user]);
 
   // 权限判断
   const canEdit = userRole === 'admin' || userRole === 'super_admin';
@@ -130,21 +161,6 @@ export default function GachaAnalyzer() {
   // 使用 ref 和防抖防止快速切换时的竞态条件
   const pendingSwitchRef = useRef(null);
   const lastSwitchTimeRef = useRef(0);
-
-  useEffect(() => {
-    const preferredAccountValue = getGameAccountSelectionValue(gameAccounts[0]);
-    if (!preferredAccountValue) {
-      return;
-    }
-
-    const hasValidCurrentAccount = currentGameUid
-      ? gameAccounts.some((account) => isGameAccountSelectionMatch(account, currentGameUid))
-      : false;
-
-    if (!hasValidCurrentAccount) {
-      switchGameAccount(preferredAccountValue);
-    }
-  }, [currentGameUid, gameAccounts, switchGameAccount]);
 
   useEffect(() => {
     // 卡池列表为空时不做任何操作
@@ -222,7 +238,7 @@ export default function GachaAnalyzer() {
 
   // 组合 cloudSync 函数为对象，供其他 hooks 使用
   const cloudSync = {
-    loadPublicPools,
+    loadPublicPools, refreshPersonalData,
     savePoolToCloud, saveHistoryToCloud,
     deletePoolFromCloud, deletePoolHistoryFromCloud, deleteHistoryFromCloud,
     deleteUserDataFromCloud
@@ -339,6 +355,14 @@ export default function GachaAnalyzer() {
 
   // 迁移弹窗状态
   const [showMigrateModal, setShowMigrateModal] = useState(false);
+  const shouldMountModalHost = Boolean(
+    showAuthModal
+    || modalType
+    || pendingImport
+    || showMigrateModal
+    || confirmState.isOpen
+    || toasts.length > 0
+  );
 
   // 注意：历史记录和卡池列表不再保存到 localStorage，只存储在服务器端
   // 仅保留 UI 状态（当前选中卡池ID）在 localStorage
@@ -350,7 +374,7 @@ export default function GachaAnalyzer() {
   // --- 组件 ---
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-800 dark:text-zinc-100 font-sans pb-20 md:pb-10 relative">
+    <div data-testid="desktop-app-shell" className="min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-800 dark:text-zinc-100 font-sans pb-20 md:pb-10 relative">
       {/* 全局加载进度条 */}
       <LoadingBar isLoading={syncing || globalStatsLoading} />
 
@@ -374,6 +398,7 @@ export default function GachaAnalyzer() {
           userRole={userRole}
           authResolved={authResolved}
           showToast={showToast}
+          onRetryPersonalData={retryPersonalData}
           isSuperAdmin={isSuperAdmin}
           currentPool={currentPool}
           canEdit={canEdit}
@@ -401,36 +426,44 @@ export default function GachaAnalyzer() {
       <Footer />
 
       {/* --- 全局弹窗 --- */}
-      <DataImportWizardModal
-        isOpen={importWizardOpen}
-        onClose={closeImportWizard}
-        onImportFile={handleImportFile}
-      />
+      {importWizardOpen && (
+        <React.Suspense fallback={null}>
+          <DataImportWizardModal
+            isOpen={importWizardOpen}
+            onClose={closeImportWizard}
+            onImportFile={handleImportFile}
+          />
+        </React.Suspense>
+      )}
 
-      <GachaModals
-        knownDrawers={knownDrawers}
-        showToast={showToast}
-        toasts={toasts}
-        removeToast={removeToast}
-        confirmState={confirmState}
-        handleConfirm={handleConfirm}
-        handleCancel={handleCancel}
-        closeModalAndClear={closeModalAndClear}
-        confirmCreatePool={confirmCreatePool}
-        confirmEditPool={confirmEditPool}
-        confirmDeletePool={confirmDeletePool}
-        confirmDeleteData={confirmDeleteData}
-        confirmRealDeleteItem={confirmRealDeleteItem}
-        confirmRealDeleteGroup={confirmRealDeleteGroup}
-        pendingImport={pendingImport}
-        setPendingImport={setPendingImport}
-        confirmImport={confirmImport}
-        addDurableNotification={addDurableNotification}
-        showMigrateModal={showMigrateModal}
-        setShowMigrateModal={setShowMigrateModal}
-        migrateLocalToCloud={migrateLocalToCloud}
-        canEdit={canEdit}
-      />
+      {shouldMountModalHost && (
+        <React.Suspense fallback={null}>
+          <GachaModals
+            knownDrawers={knownDrawers}
+            showToast={showToast}
+            toasts={toasts}
+            removeToast={removeToast}
+            confirmState={confirmState}
+            handleConfirm={handleConfirm}
+            handleCancel={handleCancel}
+            closeModalAndClear={closeModalAndClear}
+            confirmCreatePool={confirmCreatePool}
+            confirmEditPool={confirmEditPool}
+            confirmDeletePool={confirmDeletePool}
+            confirmDeleteData={confirmDeleteData}
+            confirmRealDeleteItem={confirmRealDeleteItem}
+            confirmRealDeleteGroup={confirmRealDeleteGroup}
+            pendingImport={pendingImport}
+            setPendingImport={setPendingImport}
+            confirmImport={confirmImport}
+            addDurableNotification={addDurableNotification}
+            showMigrateModal={showMigrateModal}
+            setShowMigrateModal={setShowMigrateModal}
+            migrateLocalToCloud={migrateLocalToCloud}
+            canEdit={canEdit}
+          />
+        </React.Suspense>
+      )}
 
       <NotificationCenter
         notifications={durableNotifications}

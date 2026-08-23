@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import {
   ChevronDown, Star, Layers, Swords, User, Lock, Check, Upload, Search, X
 } from 'lucide-react';
-import { usePoolStore, useHistoryStore, useAuthStore } from '../../stores';
+import { usePoolStore, useHistoryStore, useAuthStore, usePersonalAnalysisStore } from '../../stores';
+import { usePersonalGameAccounts } from '../../hooks/app/usePersonalGameAccounts.js';
 import { isPoolGroupId, POOL_GROUP_PREFIX } from '../../stores/usePoolStore';
 import ImportManager from '../../features/import/ImportManager';
 import { getImportAnomalyCount } from '../../features/import/importCompletionPolicy.js';
@@ -26,7 +27,11 @@ import { getMobilePathForTab } from '../../constants/appRoutes';
 import { useI18n } from '../../i18n/index.js';
 import { MobileGlassPanel, MobileStatusBadge } from './ux/MobilePrimitives.jsx';
 import { localizeEntityName, localizePoolName } from '../../utils/gameDataI18n.js';
-import { localizeGameAccountServerTag } from '../../utils/gameAccountMetadata.js';
+import {
+  getGameAccountSelectionValue,
+  isGameAccountSelectionMatch,
+  localizeGameAccountServerTag,
+} from '../../utils/gameAccountMetadata.js';
 import { filterHistoryForEffectiveGameUid, resolveEffectiveGameUid } from '../../utils/accountScopeUtils.js';
 
 function getFreshnessToneClasses(tone) {
@@ -57,7 +62,9 @@ function MobilePoolSelector() {
   const currentGameUid = usePoolStore(state => state.currentGameUid);
   const switchGameAccount = usePoolStore(state => state.switchGameAccount);
   const history = useHistoryStore(state => state.history);
-  const getGameAccountsFromHistory = useHistoryStore(state => state.getGameAccountsFromHistory);
+  const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
+  const analysisScope = usePersonalAnalysisStore((state) => state.scope);
+  const hasAnalysisSnapshot = ['ready', 'stale', 'empty'].includes(analysisAvailability);
   const user = useAuthStore(state => state.user);
 
   // UI 状态
@@ -71,10 +78,7 @@ function MobilePoolSelector() {
   const accountDropdownRef = useRef(null);
 
   // 获取所有游戏账号
-  const gameAccounts = useMemo(() => {
-    void history;
-    return getGameAccountsFromHistory();
-  }, [history, getGameAccountsFromHistory]);
+  const gameAccounts = usePersonalGameAccounts();
 
   const effectiveGameUid = useMemo(() => resolveEffectiveGameUid({
     currentGameUid,
@@ -88,7 +92,7 @@ function MobilePoolSelector() {
   ), [history, effectiveGameUid]);
 
   // 计算每个卡池的抽数
-  const poolPullCounts = useMemo(() => {
+  const historyPoolPullCounts = useMemo(() => {
     const counts = {};
     filteredHistory.forEach(h => {
       const poolId = h.poolId || h.pool_id;
@@ -98,6 +102,13 @@ function MobilePoolSelector() {
     });
     return counts;
   }, [filteredHistory]);
+  const isAnalysisScopeCurrent = analysisScope?.account?.accountKey === effectiveGameUid;
+  const poolPullCounts = hasAnalysisSnapshot
+    && isAnalysisScopeCurrent
+    && analysisScope?.selector?.poolPullCounts
+    && typeof analysisScope.selector.poolPullCounts === 'object'
+    ? analysisScope.selector.poolPullCounts
+    : historyPoolPullCounts;
 
   const zeroPullPoolCount = useMemo(() => (
     pools.filter((pool) => (poolPullCounts[pool.id] || 0) === 0).length
@@ -150,7 +161,7 @@ function MobilePoolSelector() {
   // 当前选中的账号
   const currentAccount = useMemo(() => {
     if (effectiveGameUid) {
-      return gameAccounts.find((account) => account.gameUid === effectiveGameUid) || null;
+      return gameAccounts.find((account) => isGameAccountSelectionMatch(account, effectiveGameUid)) || null;
     }
 
     if (gameAccounts.length === 1) {
@@ -176,18 +187,33 @@ function MobilePoolSelector() {
   // 统计
   const totalPools = pools?.length || 0;
   const visiblePools = selectorPools.length;
-  const totalPulls = Object.values(poolPullCounts).reduce((a, b) => a + b, 0);
+  const totalPulls = hasAnalysisSnapshot
+    && isAnalysisScopeCurrent
+    && Number.isFinite(Number(analysisScope?.selector?.totalPulls))
+    ? Number(analysisScope.selector.totalPulls)
+    : Object.values(poolPullCounts).reduce((a, b) => a + b, 0);
   const showOverviewOptions = Boolean(effectiveGameUid);
   const allOverviewId = `${POOL_GROUP_PREFIX}all`;
 
   const currentViewLatestRecordAt = useMemo(() => {
+    if (hasAnalysisSnapshot && isAnalysisScopeCurrent && analysisScope?.selector?.latestRecordAt) {
+      return analysisScope.selector.latestRecordAt;
+    }
     const latestTimestamp = getLatestHistoryTimestampMs(filteredHistory);
     return latestTimestamp ? new Date(latestTimestamp).toISOString() : null;
-  }, [filteredHistory]);
+  }, [analysisScope, filteredHistory, hasAnalysisSnapshot, isAnalysisScopeCurrent]);
 
   const currentPoolLatestRecordAt = useMemo(() => {
     if (!currentPoolId || isPoolGroupId(currentPoolId)) {
       return currentViewLatestRecordAt;
+    }
+
+    if (
+      hasAnalysisSnapshot
+      && isAnalysisScopeCurrent
+      && analysisScope?.selector?.poolLatestRecordAt?.[currentPoolId]
+    ) {
+      return analysisScope.selector.poolLatestRecordAt[currentPoolId];
     }
 
     const latestTimestamp = getLatestHistoryTimestampMs(
@@ -195,7 +221,7 @@ function MobilePoolSelector() {
     );
 
     return latestTimestamp ? new Date(latestTimestamp).toISOString() : null;
-  }, [currentPoolId, currentViewLatestRecordAt, filteredHistory]);
+  }, [analysisScope, currentPoolId, currentViewLatestRecordAt, filteredHistory, hasAnalysisSnapshot, isAnalysisScopeCurrent]);
 
   const currentPoolFreshnessLabel = selectedPool?.isGroupMode
     ? t('pool.selector.currentFilter')
@@ -261,8 +287,8 @@ function MobilePoolSelector() {
     setSearchQuery('');
   };
 
-  const handleSelectAccount = (gameUid) => {
-    switchGameAccount(gameUid);
+  const handleSelectAccount = (accountValue) => {
+    switchGameAccount(accountValue);
     setIsAccountOpen(false);
   };
 
@@ -329,19 +355,22 @@ function MobilePoolSelector() {
             {isAccountOpen && (
               <div className="mobile-ux-dropdown absolute top-full left-0 right-0 z-50 mt-2 max-h-60 overflow-y-auto animate-scale-up">
                 {/* 账号列表 */}
-                {gameAccounts.map(account => (
+                {gameAccounts.map(account => {
+                  const accountValue = getGameAccountSelectionValue(account) || account.gameUid;
+                  const isSelected = effectiveGameUid === accountValue;
+                  return (
                   <button
-                    key={account.gameUid}
-                    onClick={() => handleSelectAccount(account.gameUid)}
+                    key={accountValue}
+                    onClick={() => handleSelectAccount(accountValue)}
                     className={`w-full px-3 py-2.5 text-left transition-colors touch-feedback ${
-                      effectiveGameUid === account.gameUid
+                      isSelected
                         ? 'bg-endfield-yellow/10'
                         : 'hover:bg-white/5'
                     }`}
                     >
                     <div className="flex items-center gap-2">
                       <div className={`text-xs font-bold ${
-                        effectiveGameUid === account.gameUid ? 'text-endfield-yellow' : 'text-zinc-200'
+                        isSelected ? 'text-endfield-yellow' : 'text-zinc-200'
                       }`}>
                         {account.nickName}
                       </div>
@@ -363,7 +392,8 @@ function MobilePoolSelector() {
                       })}
                     </div>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

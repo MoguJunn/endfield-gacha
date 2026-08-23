@@ -3,6 +3,7 @@ import { renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { usePoolStats } from '../usePoolStats.js';
+import { buildPoolStats } from '../../../utils/poolStats.js';
 import { buildPoolResourceSummary } from '../../../utils/resourceEconomy.js';
 
 vi.mock('../../../stores/useHistoryStore.js', () => ({
@@ -672,5 +673,148 @@ describe('usePoolStats', () => {
       limitedCount: 1,
       standardCount: 0,
     });
+  });
+
+  it('keeps pure and hook outputs identical for inherited, free, gift, and guarantee rules', () => {
+    const paidFourStars = Array.from({ length: 238 }, (_, index) => ({
+      id: `paid-${index + 1}`,
+      rarity: 4,
+      poolId: 'pool_new',
+      timestamp: new Date(Date.UTC(2026, 4, 20, 10, index, 0)).toISOString(),
+      seqId: String(index + 5),
+    }));
+    const normalizedCurrentPoolHistory = [
+      {
+        id: 'gift-six',
+        rarity: 6,
+        isStandard: false,
+        specialType: 'gift',
+        poolId: 'pool_new',
+        seqId: '1',
+      },
+      {
+        id: 'free-six',
+        rarity: 6,
+        isStandard: false,
+        isFreePull: true,
+        poolId: 'pool_new',
+        seqId: '2',
+      },
+      {
+        id: 'off-limited-six',
+        rarity: 6,
+        isStandard: true,
+        character_id: 'chr_off_limited',
+        character_name: '歪限定角色',
+        poolId: 'pool_new',
+        seqId: '3',
+      },
+      {
+        id: 'guaranteed-up-six',
+        rarity: 6,
+        isStandard: false,
+        isGuaranteed: true,
+        poolId: 'pool_new',
+        seqId: '4',
+      },
+      ...paidFourStars,
+    ];
+    const props = {
+      normalizedCurrentPoolHistory,
+      currentPool: {
+        id: 'pool_new',
+        type: 'limited',
+        isGroupMode: false,
+      },
+      allLimitedHistory: [
+        {
+          id: 'old-six',
+          rarity: 6,
+          isStandard: false,
+          poolId: 'pool_old',
+          seqId: 'old-1',
+        },
+        {
+          id: 'new-four-1',
+          rarity: 4,
+          poolId: 'pool_new',
+          seqId: 'new-1',
+        },
+        {
+          id: 'new-four-2',
+          rarity: 4,
+          poolId: 'pool_new',
+          seqId: 'new-2',
+        },
+      ],
+      currentPoolId: 'pool_new',
+      selectedPools: [
+        { id: 'pool_new', type: 'limited' },
+      ],
+      includeFreePullsInStats: true,
+    };
+
+    const pureResult = buildPoolStats(props);
+    const { result } = renderHook(() => usePoolStats(props));
+
+    expect({
+      stats: result.current.stats,
+      inheritedPityInfo: result.current.inheritedPityInfo,
+      effectivePity: result.current.effectivePity,
+    }).toEqual(pureResult);
+    expect(pureResult.inheritedPityInfo).toEqual({
+      inheritedPity: 2,
+      inheritedPity5: 2,
+      hasInheritedPity: true,
+    });
+    expect(pureResult.stats).toMatchObject({
+      total: 241,
+      paidTotal: 240,
+      freePullCount: 1,
+      counts: {
+        6: 2,
+        '6_std': 1,
+        5: 0,
+        4: 238,
+      },
+      offLimitedCount: 1,
+      offStandardCount: 0,
+      gifts: {
+        count: 1,
+        limitedCount: 1,
+        standardCount: 0,
+      },
+    });
+    expect(pureResult.stats.pityStats.history).toEqual(expect.arrayContaining([
+      expect.objectContaining({ count: 30 }),
+      expect.objectContaining({ isGuaranteed: true }),
+    ]));
+  });
+
+  it('uses an explicitly injected character resolver', () => {
+    const resolveCharacter = vi.fn(() => ({
+      id: 'worker-character',
+      type: 'character',
+      is_limited: true,
+    }));
+
+    const result = buildPoolStats({
+      normalizedCurrentPoolHistory: [{
+        id: 'offrate-six',
+        rarity: 6,
+        isStandard: true,
+        character_name: 'Worker 角色',
+        poolId: 'pool_limited',
+      }],
+      currentPool: {
+        id: 'pool_limited',
+        type: 'limited',
+        isGroupMode: false,
+      },
+      resolveCharacter,
+    });
+
+    expect(resolveCharacter).toHaveBeenCalledWith('Worker 角色', { fuzzy: true });
+    expect(result.stats.offLimitedCount).toBe(1);
   });
 });

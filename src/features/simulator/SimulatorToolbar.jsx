@@ -517,7 +517,7 @@ const SimulatorToolbar = ({
                 <div className="absolute right-0 sm:left-0 top-full mt-1 w-60 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-lg z-50 rounded-md overflow-hidden">
                   {gameAccounts.map((account) => (
                     <button
-                      key={account.gameUid}
+                      key={account.accountKey || account.account_key || account.gameUid}
                       type="button"
                       onClick={() => {
                         onInheritRealState(account);

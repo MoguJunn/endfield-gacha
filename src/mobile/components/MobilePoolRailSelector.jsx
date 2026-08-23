@@ -1,14 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, Layers, Search, SlidersHorizontal, Star, Swords, Upload, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useAuthStore, useHistoryStore, usePoolStore } from '../../stores';
 import { POOL_GROUP_PREFIX, isPoolGroupId } from '../../stores/usePoolStore';
 import ImportManager from '../../features/import/ImportManager';
 import { getImportAnomalyCount } from '../../features/import/importCompletionPolicy.js';
 import { getMobilePathForTab } from '../../constants/appRoutes';
 import { useI18n } from '../../i18n/index.js';
 import {
-  buildPoolSelectorGroups,
   getPoolSelectorFeaturedCharacters,
   getPoolTypeLabel,
   shouldShowPoolFeaturedSummary
@@ -17,7 +15,7 @@ import { getPreferredPool } from '../../utils/poolSelectionUtils';
 import { formatFreshnessRelative, getFreshnessTone, getLatestHistoryTimestampMs } from '../../utils/dataFreshness.js';
 import { MobileGlassPanel } from './ux/MobilePrimitives.jsx';
 import { localizeEntityName, localizePoolName } from '../../utils/gameDataI18n.js';
-import { filterHistoryForEffectiveGameUid, resolveEffectiveGameUid } from '../../utils/accountScopeUtils.js';
+import { usePoolScopeSelectorState } from '../../hooks/app/usePoolScopeSelectorState.js';
 
 function cx(...classes) {
   return classes.filter(Boolean).join(' ');
@@ -49,15 +47,6 @@ function getPoolTypeConfig(pool) {
 export default function MobilePoolRailSelector() {
   const { t, locale, formatNumber } = useI18n();
   const navigate = useNavigate();
-  const pools = usePoolStore((state) => state.pools);
-  const currentPoolId = usePoolStore((state) => state.currentPoolId);
-  const switchPool = usePoolStore((state) => state.switchPool);
-  const switchToPoolGroup = usePoolStore((state) => state.switchToPoolGroup);
-  const currentGameUid = usePoolStore((state) => state.currentGameUid);
-  const switchGameAccount = usePoolStore((state) => state.switchGameAccount);
-  const history = useHistoryStore((state) => state.history);
-  const getGameAccountsFromHistory = useHistoryStore((state) => state.getGameAccountsFromHistory);
-  const user = useAuthStore((state) => state.user);
   const [showImportManager, setShowImportManager] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [hideZeroPullPools, setHideZeroPullPools] = useState(true);
@@ -65,26 +54,24 @@ export default function MobilePoolRailSelector() {
   const [showPoolMenu, setShowPoolMenu] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState({});
   const poolMenuRef = React.useRef(null);
-
-  const gameAccounts = useMemo(() => {
-    void history;
-    return getGameAccountsFromHistory();
-  }, [getGameAccountsFromHistory, history]);
-  const effectiveGameUid = useMemo(() => resolveEffectiveGameUid({
-    currentGameUid,
-    gameAccounts,
-    historyRecords: history,
-  }), [currentGameUid, gameAccounts, history]);
-  const filteredHistory = useMemo(() => (
-    filterHistoryForEffectiveGameUid(history, effectiveGameUid)
-  ), [effectiveGameUid, history]);
-  const poolPullCounts = useMemo(() => filteredHistory.reduce((acc, item) => {
-    const poolId = item.poolId || item.pool_id;
-    if (poolId) acc[poolId] = (acc[poolId] || 0) + 1;
-    return acc;
-  }, {}), [filteredHistory]);
-  const zeroPullPoolCount = useMemo(() => pools.filter((pool) => (poolPullCounts[pool.id] || 0) === 0).length, [poolPullCounts, pools]);
-  const selectorPools = useMemo(() => pools.filter((pool) => !hideZeroPullPools || (poolPullCounts[pool.id] || 0) > 0 || pool.id === currentPoolId), [currentPoolId, hideZeroPullPools, poolPullCounts, pools]);
+  const {
+    user,
+    pools,
+    currentPoolId,
+    switchPool,
+    switchToPoolGroup,
+    filteredHistory,
+    poolPullCounts,
+    zeroPullPoolCount,
+    selectorPools,
+    groupedPools,
+    totalPulls,
+    showOverviewOptions,
+  } = usePoolScopeSelectorState({
+    locale,
+    searchQuery,
+    hideZeroPullPools,
+  });
   const selectedPool = useMemo(() => {
     if (isPoolGroupId(currentPoolId)) {
       const groupType = currentPoolId.slice(POOL_GROUP_PREFIX.length);
@@ -98,9 +85,6 @@ export default function MobilePoolRailSelector() {
         }
       : preferredPool;
   }, [currentPoolId, locale, pools, t]);
-  const groupedPools = useMemo(() => buildPoolSelectorGroups({ pools: selectorPools, poolPullCounts, searchQuery, locale }), [locale, poolPullCounts, searchQuery, selectorPools]);
-  const totalPulls = Object.values(poolPullCounts).reduce((sum, count) => sum + count, 0);
-  const showOverviewOptions = Boolean(effectiveGameUid);
   const allOverviewId = `${POOL_GROUP_PREFIX}all`;
   const currentViewLatestRecordAt = useMemo(() => {
     const timestamp = getLatestHistoryTimestampMs(filteredHistory);
@@ -144,22 +128,6 @@ export default function MobilePoolRailSelector() {
 
     return poolPullCounts[currentPoolId] || 0;
   }, [allOverviewId, currentPoolId, groupedPools, poolPullCounts, totalPulls]);
-
-  useEffect(() => {
-    if (!effectiveGameUid) {
-      return;
-    }
-
-    if (effectiveGameUid && currentGameUid !== effectiveGameUid) {
-      switchGameAccount(effectiveGameUid);
-    }
-  }, [currentGameUid, effectiveGameUid, gameAccounts.length, switchGameAccount]);
-
-  useEffect(() => {
-    if (showOverviewOptions || !isPoolGroupId(currentPoolId)) return;
-    const fallbackPool = getPreferredPool(pools, { preferredPoolId: null, includeDefaultPool: true });
-    if (fallbackPool?.id) switchPool(fallbackPool.id);
-  }, [currentPoolId, pools, showOverviewOptions, switchPool]);
 
   useEffect(() => {
     if (!showPoolMenu) {

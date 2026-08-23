@@ -7,8 +7,7 @@ import ImportManager from '../ImportManager.jsx';
 const harness = vi.hoisted(() => ({
   result: null,
   user: { id: 'user-1' },
-  loadCloudData: vi.fn(),
-  applyCloudDataToStores: vi.fn(),
+  refreshPersonalData: vi.fn(),
   loadAccountSecurityState: vi.fn(),
   notifyOfficialBotImportUpdated: vi.fn(),
   navigate: vi.fn(),
@@ -39,7 +38,7 @@ vi.mock('../../../stores', () => ({
 }));
 
 vi.mock('../../../hooks', () => ({
-  useCloudSync: () => ({ loadCloudData: harness.loadCloudData }),
+  useCloudSync: () => ({ refreshPersonalData: harness.refreshPersonalData }),
 }));
 
 vi.mock('../../../utils/gameAccountMetadata.js', () => ({
@@ -48,10 +47,6 @@ vi.mock('../../../utils/gameAccountMetadata.js', () => ({
   buildHistorySeqDedupeKeys: () => [],
   isGameAccountSelectionMatch: () => true,
   saveGameAccountMetadata: vi.fn(),
-}));
-
-vi.mock('../../../utils/cloudDataSync.js', () => ({
-  applyCloudDataToStores: harness.applyCloudDataToStores,
 }));
 
 vi.mock('../../../services/accountGachaDataService.js', () => ({
@@ -161,7 +156,13 @@ describe('ImportManager completion behavior', () => {
     vi.clearAllMocks();
     harness.user = { id: 'user-1' };
     harness.result = makeResult();
-    harness.loadCloudData.mockResolvedValue({ pools: [], history: [] });
+    harness.refreshPersonalData.mockResolvedValue({
+      ok: true,
+      data: { pools: [], history: [] },
+      error: null,
+      stale: false,
+      applied: true,
+    });
     harness.loadAccountSecurityState.mockResolvedValue({});
     harness.notifyOfficialBotImportUpdated.mockResolvedValue({});
   });
@@ -181,7 +182,7 @@ describe('ImportManager completion behavior', () => {
   });
 
   it('记录已保存但云端刷新失败时保留结果并显示明确提示', async () => {
-    harness.loadCloudData.mockRejectedValue(new Error('network down'));
+    harness.refreshPersonalData.mockRejectedValue(new Error('network down'));
     const onClose = vi.fn();
     const onImportComplete = vi.fn();
     render(<ImportManager isOpen onClose={onClose} onImportComplete={onImportComplete} />);
@@ -252,7 +253,7 @@ describe('ImportManager completion behavior', () => {
 
   it('云端刷新完成前禁止关闭，避免迟到回调污染下一次弹窗', async () => {
     const cloudRefresh = createDeferred();
-    harness.loadCloudData.mockReturnValue(cloudRefresh.promise);
+    harness.refreshPersonalData.mockReturnValue(cloudRefresh.promise);
     const onClose = vi.fn();
     const onImportComplete = vi.fn();
     render(<ImportManager isOpen onClose={onClose} onImportComplete={onImportComplete} />);
@@ -264,7 +265,13 @@ describe('ImportManager completion behavior', () => {
     fireEvent.click(closeButton);
     expect(onClose).not.toHaveBeenCalled();
 
-    cloudRefresh.resolve({ pools: [], history: [] });
+    cloudRefresh.resolve({
+      ok: true,
+      data: { pools: [], history: [] },
+      error: null,
+      stale: false,
+      applied: true,
+    });
     await waitFor(() => {
       expect(onImportComplete).toHaveBeenCalledTimes(1);
       expect(onClose).toHaveBeenCalledTimes(1);

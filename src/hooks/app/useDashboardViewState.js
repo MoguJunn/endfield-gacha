@@ -1,15 +1,14 @@
 import { useMemo, useState } from 'react';
-import { useAuthStore } from '../../stores';
+import { useAuthStore, usePersonalAnalysisStore, usePoolStore } from '../../stores';
 import { getCurrentUpPoolInfo } from '../../utils/poolTimeUtils';
 import { getCharacterAvatarUrl } from '../../utils/characterUtils';
-import { isInfoBookHistoryPull } from '../../utils/historyInfoBook';
-import { buildResourceSummaryFromAggregates } from '../../utils/resourceEconomy';
-import { buildQuotaLedgerFromHistory } from '../../utils/quotaEconomy.js';
 import { buildCharacterStats } from '../../utils/dashboardCharacterStats';
+import { buildDashboardResourceSummary } from '../../utils/dashboardResourceSummary.js';
 import { getPoolFeaturedLead } from '../../utils/poolFeaturedResolver.js';
 import { useCurrentPoolData } from './useCurrentPoolData';
 import { usePoolStats } from './usePoolStats';
 import { readBooleanStorageValue, STORAGE_KEYS, writeBooleanStorageValue } from '../../utils/storageUtils.js';
+import { useI18n } from '../../i18n/index.js';
 
 function normalizePoolType(type) {
   if (type === 'extra') return 'extra';
@@ -24,7 +23,11 @@ function isLimitedPoolType(type) {
 }
 
 export function useDashboardViewState() {
+  const { locale } = useI18n();
   const user = useAuthStore(state => state.user);
+  const currentGameUid = usePoolStore((state) => state.currentGameUid);
+  const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
+  const analysisScope = usePersonalAnalysisStore((state) => state.scope);
   const [charViewMode, setCharViewMode] = useState('waterfall');
   const [includeFreePullsInStats, setIncludeFreePullsInStatsState] = useState(() => (
     readBooleanStorageValue(STORAGE_KEYS.DASHBOARD_INCLUDE_FREE_PULLS, false, { raw: true })
@@ -68,7 +71,11 @@ export function useDashboardViewState() {
     )
   ), [selectedPools]);
 
-  const { stats, effectivePity, groupedHistory } = usePoolStats({
+  const {
+    stats: computedStats,
+    effectivePity: computedEffectivePity,
+    groupedHistory
+  } = usePoolStats({
     normalizedCurrentPoolHistory: normalizedPoolHistory,
     currentPool,
     allLimitedHistory,
@@ -77,7 +84,7 @@ export function useDashboardViewState() {
     includeFreePullsInStats
   });
 
-  const characterStats = useMemo(() => (
+  const computedCharacterStats = useMemo(() => (
     buildCharacterStats({
       history: normalizedPoolHistory,
       isLimitedPool: isLimited,
@@ -87,11 +94,7 @@ export function useDashboardViewState() {
     })
   ), [crossPoolPityMap, includeFreePullsInStats, isGroupMode, isLimited, normalizedPoolHistory, visibleLimitedPoolIds]);
 
-  const totalCharacterCount = useMemo(() => {
-    return characterStats.reduce((sum, char) => sum + char.count, 0);
-  }, [characterStats]);
-
-  const checkLimitedInFirstN = useMemo(() => {
+  const computedCheckLimitedInFirstN = useMemo(() => {
     const sortedHistory = [...normalizedPoolHistory].sort((a, b) => {
       const timeA = typeof a.timestamp === 'number' ? a.timestamp : new Date(a.timestamp).getTime();
       const timeB = typeof b.timestamp === 'number' ? b.timestamp : new Date(b.timestamp).getTime();
@@ -117,9 +120,48 @@ export function useDashboardViewState() {
     return { firstLimitedIndex120, firstLimitedIndex80, validPullCount: pullCount };
   }, [normalizedPoolHistory]);
 
-  const hasReceivedFreeTen = useMemo(() => {
+  const computedHasReceivedFreeTen = useMemo(() => {
     return normalizedPoolHistory.some(item => item.isFree || item.is_free);
   }, [normalizedPoolHistory]);
+
+  const analysisScopeAccountKey = String(analysisScope?.account?.accountKey || '').trim();
+  const isAnalysisScopeCurrent = !currentGameUid || analysisScopeAccountKey === currentGameUid;
+  const snapshotView = isAnalysisScopeCurrent
+    && ['ready', 'stale', 'empty'].includes(analysisAvailability)
+    ? analysisScope?.dashboard?.views?.[currentPool?.id]
+    : null;
+  const snapshotVariant = snapshotView?.[
+    includeFreePullsInStats ? 'includeFree' : 'excludeFree'
+  ] || null;
+  const isAnalysisBacked = Boolean(snapshotVariant);
+  const stats = isAnalysisBacked && snapshotVariant.stats
+    ? snapshotVariant.stats
+    : computedStats;
+  const effectivePity = isAnalysisBacked && snapshotVariant.effectivePity
+    ? snapshotVariant.effectivePity
+    : computedEffectivePity;
+  const characterStats = isAnalysisBacked && Array.isArray(snapshotVariant.characterStats)
+    ? snapshotVariant.characterStats
+    : computedCharacterStats;
+  const checkLimitedInFirstN = isAnalysisBacked && snapshotVariant.checkLimitedInFirstN
+    ? snapshotVariant.checkLimitedInFirstN
+    : computedCheckLimitedInFirstN;
+  const hasReceivedFreeTen = isAnalysisBacked
+    && typeof snapshotVariant.hasReceivedFreeTen === 'boolean'
+    ? snapshotVariant.hasReceivedFreeTen
+    : computedHasReceivedFreeTen;
+  const snapshotSplitOverviewStats = isAnalysisBacked
+    ? snapshotVariant.splitOverviewStats ?? null
+    : null;
+  const snapshotTimelineSections = isAnalysisBacked
+    ? analysisScope?.dashboard?.timelineViews?.[locale]?.[currentPool?.id]
+      || analysisScope?.dashboard?.timelineViews?.['zh-CN']?.[currentPool?.id]
+      || null
+    : null;
+
+  const totalCharacterCount = useMemo(() => {
+    return characterStats.reduce((sum, char) => sum + char.count, 0);
+  }, [characterStats]);
 
   const weaponGifts = useMemo(() => {
     if (normalizedPoolType !== 'weapon') {
@@ -192,83 +234,19 @@ export function useDashboardViewState() {
     return getCharacterAvatarUrl(name);
   };
 
-  const dashboardResourceSummary = useMemo(() => {
-    if (!isAllPoolsOverview) {
-      return stats.resourceSummary;
-    }
-
-    const poolTypeById = new Map(
-      selectedPools.flatMap((pool) => (
-        [pool?.id, pool?.pool_id].map((poolId) => [poolId, normalizePoolType(pool?.type)])
-      )).filter(([poolId]) => Boolean(poolId))
-    );
-    const counts = { 6: 0, '6_std': 0, 5: 0, 4: 0 };
-    const arsenalGainCounts = { 6: 0, '6_std': 0, 5: 0, 4: 0 };
-    const quotaHistory = [];
-    let characterPulls = 0;
-    let weaponPulls = 0;
-    let chargedCharacterPulls = 0;
-    let chargedWeaponPulls = 0;
-
-    currentPoolHistory.forEach((item) => {
-      const isGift = item?.specialType === 'gift' || item?.special_type === 'gift';
-      const isFree = item?.isFree === true || item?.is_free === true;
-      if (isGift) {
-        return;
-      }
-
-      quotaHistory.push(item);
-      if (!includeFreePullsInStats && isFree) {
-        return;
-      }
-
-      const poolId = item?.poolId || item?.pool_id || null;
-      const poolType = poolTypeById.get(poolId) || 'standard';
-      const rarity = Number(item?.rarity) || 0;
-      const targetCounts = poolType === 'weapon' ? counts : arsenalGainCounts;
-
-      if (poolType === 'weapon') {
-        weaponPulls += 1;
-        if (!isFree && !isInfoBookHistoryPull(item)) {
-          chargedWeaponPulls += 1;
-        }
-      } else {
-        characterPulls += 1;
-        if (!isFree && !isInfoBookHistoryPull(item)) {
-          chargedCharacterPulls += 1;
-        }
-      }
-
-      if (rarity >= 6) {
-        if (item?.isStandard) {
-          targetCounts['6_std'] += 1;
-        } else {
-          targetCounts[6] += 1;
-        }
-      } else if (rarity === 5) {
-        targetCounts[5] += 1;
-      } else if (rarity >= 1) {
-        targetCounts[4] += 1;
-      }
-    });
-
-    return buildResourceSummaryFromAggregates({
-      characterPulls,
-      weaponPulls,
-      chargedCharacterPulls,
-      chargedWeaponPulls,
-      counts: {
-        6: arsenalGainCounts[6] + counts[6],
-        '6_std': arsenalGainCounts['6_std'] + counts['6_std'],
-        5: arsenalGainCounts[5] + counts[5],
-        4: arsenalGainCounts[4] + counts[4]
-      },
-      arsenalGainCounts,
-      quotaLedger: buildQuotaLedgerFromHistory(quotaHistory, {
-        pools: selectedPools,
-      })
-    });
-  }, [currentPoolHistory, includeFreePullsInStats, isAllPoolsOverview, selectedPools, stats.resourceSummary]);
+  const computedDashboardResourceSummary = useMemo(() => (
+    buildDashboardResourceSummary({
+      isAllPoolsOverview,
+      pools: selectedPools,
+      history: currentPoolHistory,
+      includeFreePullsInStats,
+      stats: computedStats
+    })
+  ), [computedStats, currentPoolHistory, includeFreePullsInStats, isAllPoolsOverview, selectedPools]);
+  const dashboardResourceSummary = isAnalysisBacked
+    && Object.prototype.hasOwnProperty.call(snapshotVariant, 'dashboardResourceSummary')
+    ? snapshotVariant.dashboardResourceSummary
+    : computedDashboardResourceSummary;
 
   const resourceSummaryVariant = useMemo(() => {
     if (isAllPoolsOverview) {
@@ -315,7 +293,10 @@ export function useDashboardViewState() {
     getProgressClass,
     getCharacterAvatar,
     dashboardResourceSummary,
-    resourceSummaryVariant
+    resourceSummaryVariant,
+    isAnalysisBacked,
+    snapshotSplitOverviewStats,
+    snapshotTimelineSections
   };
 }
 

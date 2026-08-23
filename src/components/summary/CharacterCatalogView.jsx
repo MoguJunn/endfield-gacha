@@ -30,9 +30,15 @@ import {
   buildTimelineAcquisitionIndex
 } from '../../utils/poolTimelineView.js';
 import { getDesktopPathForTab, getMobilePathForTab } from '../../constants/appRoutes.js';
-import { useHistoryStore, usePoolStore } from '../../stores';
+import { usePoolStore } from '../../stores';
+import { usePersonalGameAccounts } from '../../hooks/app/usePersonalGameAccounts.js';
 import { RARITY_CONFIG } from '../../constants/index.js';
-import { getHistoryRecordGameUid, localizeGameAccountServerTag } from '../../utils/gameAccountMetadata.js';
+import {
+  getGameAccountSelectionValue,
+  getHistoryRecordGameUid,
+  isGameAccountSelectionMatch,
+  localizeGameAccountServerTag,
+} from '../../utils/gameAccountMetadata.js';
 import {
   attachRankingInfoToCatalogRows,
   buildCharacterCatalogRows,
@@ -56,6 +62,7 @@ import {
 } from '../../utils/resourceEconomy.js';
 import RankingCard from './RankingCard.jsx';
 import LimitedUpAnalysisStrip from './LimitedUpAnalysisStrip.jsx';
+import { loadAllAccountGachaHistoryForAccounts } from '../../services/accountGachaDataService.js';
 
 const RARITY_OPTIONS = ['all', '6', '5', '4'];
 const LIMITED_OPTIONS = ['all', 'limited', 'standard'];
@@ -91,7 +98,8 @@ function normalizeHistoryForUser(history = [], user, currentGameUid = null) {
     if (!currentGameUid) {
       return true;
     }
-  return getHistoryRecordGameUid(record) === currentGameUid;
+    return isGameAccountSelectionMatch(record, currentGameUid)
+      || getHistoryRecordGameUid(record) === currentGameUid;
   });
 }
 
@@ -336,7 +344,10 @@ function AccountSelect({ accounts = [], currentGameUid, onChange, locale, tt, mo
     return null;
   }
 
-  const selectedAccount = accounts.find((account) => account.gameUid === currentGameUid) || accounts[0] || null;
+  const selectedAccount = accounts.find((account) => (
+    getGameAccountSelectionValue(account) === currentGameUid
+  )) || accounts[0] || null;
+  const selectedValue = getGameAccountSelectionValue(selectedAccount) || '';
   const selectedServerTag = selectedAccount?.serverTag
     ? localizeGameAccountServerTag(selectedAccount.serverTag, locale)
     : null;
@@ -346,10 +357,10 @@ function AccountSelect({ accounts = [], currentGameUid, onChange, locale, tt, mo
       <span className="sr-only">{tt('pool.selector.switchAccountHint', '切换游戏账号')}</span>
       <div className={`pointer-events-none absolute left-2 top-1/2 z-10 flex -translate-y-1/2 items-center gap-1 ${disabled ? 'opacity-50' : ''}`}>
         <User size={mobile ? 11 : 12} className="text-yellow-500" />
-        {selectedAccount && currentGameUid === selectedAccount.gameUid ? <Check size={mobile ? 10 : 11} className="text-emerald-500" /> : null}
+        {selectedAccount && currentGameUid === selectedValue ? <Check size={mobile ? 10 : 11} className="text-emerald-500" /> : null}
       </div>
       <select
-        value={currentGameUid || selectedAccount?.gameUid || ''}
+        value={currentGameUid || selectedValue}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
         className={`w-full appearance-none border border-zinc-200 bg-white py-2 pl-10 pr-7 font-bold text-slate-800 outline-none transition focus:border-yellow-500 focus:ring-1 focus:ring-yellow-500/50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-[#0c0c0e] dark:text-zinc-200 ${mobile ? 'text-[10px]' : 'text-xs'}`}
@@ -357,10 +368,11 @@ function AccountSelect({ accounts = [], currentGameUid, onChange, locale, tt, mo
         title={selectedAccount ? `${selectedAccount.nickName || selectedAccount.gameUid} · ${selectedAccount.gameUid}` : undefined}
       >
         {accounts.map((account) => {
+          const accountValue = getGameAccountSelectionValue(account) || account.gameUid;
           const serverTag = account.serverTag ? localizeGameAccountServerTag(account.serverTag, locale) : '';
           const label = [serverTag, account.nickName || account.gameUid].filter(Boolean).join(' · ');
           return (
-            <option key={account.gameUid} value={account.gameUid}>
+            <option key={accountValue} value={accountValue}>
               {label}
             </option>
           );
@@ -1023,7 +1035,6 @@ export default function CharacterCatalogView({
   const location = useLocation();
   const currentGameUid = usePoolStore((state) => state.currentGameUid);
   const switchGameAccount = usePoolStore((state) => state.switchGameAccount);
-  const getGameAccountsFromHistory = useHistoryStore((state) => state.getGameAccountsFromHistory);
   const { t, locale, formatNumber, formatDateTime } = useI18n();
   const tt = React.useCallback((key, fallback, params = {}) => t(key, params, fallback), [t]);
   const [filters, setFilters] = React.useState(DEFAULT_CHARACTER_CATALOG_FILTERS);
@@ -1033,6 +1044,10 @@ export default function CharacterCatalogView({
   const [showManualEditor, setShowManualEditor] = React.useState(false);
   const [manualOverrides, setManualOverrides] = React.useState({});
   const [characters, setCharacters] = React.useState(() => characterCache.getAll({ type: 'character' }));
+  const [loadedLocalHistory, setLoadedLocalHistory] = React.useState(null);
+  const [localHistoryLoading, setLocalHistoryLoading] = React.useState(false);
+  const [localHistoryError, setLocalHistoryError] = React.useState(null);
+  const [localHistoryReloadKey, setLocalHistoryReloadKey] = React.useState(0);
 
   React.useEffect(() => {
     let mounted = true;
@@ -1047,16 +1062,58 @@ export default function CharacterCatalogView({
   }, []);
 
   const activeDataSource = dataSource === 'local' ? 'local' : 'global';
-  const gameAccounts = React.useMemo(() => {
-    void history;
-    return getGameAccountsFromHistory();
-  }, [getGameAccountsFromHistory, history]);
+  const gameAccounts = usePersonalGameAccounts();
   const effectiveGameUid = React.useMemo(() => {
-    if (gameAccounts.some((account) => account.gameUid === currentGameUid)) {
-      return currentGameUid;
+    const currentAccount = gameAccounts.find((account) => (
+      isGameAccountSelectionMatch(account, currentGameUid)
+    ));
+    if (currentAccount) {
+      return getGameAccountSelectionValue(currentAccount) || currentGameUid;
     }
-    return gameAccounts[0]?.gameUid || currentGameUid || null;
+    return getGameAccountSelectionValue(gameAccounts[0]) || currentGameUid || null;
   }, [currentGameUid, gameAccounts]);
+  const selectedGameAccount = React.useMemo(() => (
+    gameAccounts.find((account) => isGameAccountSelectionMatch(account, effectiveGameUid)) || null
+  ), [effectiveGameUid, gameAccounts]);
+  React.useEffect(() => {
+    let cancelled = false;
+
+    if (activeDataSource !== 'local' || !user?.id || !selectedGameAccount) {
+      setLoadedLocalHistory(null);
+      setLocalHistoryLoading(false);
+      setLocalHistoryError(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setLoadedLocalHistory(null);
+    setLocalHistoryLoading(true);
+    setLocalHistoryError(null);
+    loadAllAccountGachaHistoryForAccounts({
+      accounts: [selectedGameAccount],
+      expectedOwnerId: user.id,
+    })
+      .then((result) => {
+        if (!cancelled) {
+          setLoadedLocalHistory(Array.isArray(result?.history) ? result.history : []);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLocalHistoryError(error);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLocalHistoryLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDataSource, localHistoryReloadKey, selectedGameAccount, user?.id]);
   const manualOverrideScopeKey = React.useMemo(() => getManualOverrideScopeKey(user, effectiveGameUid), [effectiveGameUid, user]);
   React.useEffect(() => {
     const stored = getStorageItem(STORAGE_KEYS.CHARACTER_CATALOG_MANUAL_OVERRIDES, {});
@@ -1067,7 +1124,11 @@ export default function CharacterCatalogView({
       switchGameAccount(effectiveGameUid);
     }
   }, [currentGameUid, effectiveGameUid, switchGameAccount]);
-  const localHistory = React.useMemo(() => normalizeHistoryForUser(history, user, effectiveGameUid), [effectiveGameUid, history, user]);
+  const localHistorySource = Array.isArray(loadedLocalHistory) ? loadedLocalHistory : history;
+  const localHistory = React.useMemo(
+    () => normalizeHistoryForUser(localHistorySource, user, effectiveGameUid),
+    [effectiveGameUid, localHistorySource, user]
+  );
   const localTimelineHistory = React.useMemo(() => {
     const poolById = new Map();
     (Array.isArray(pools) ? pools : []).forEach((pool) => {
@@ -1216,6 +1277,7 @@ export default function CharacterCatalogView({
 
     await characterCache.refresh();
     setCharacters(characterCache.getAll({ type: 'character' }));
+    setLocalHistoryReloadKey((value) => value + 1);
   }, [activeDataSource, fetchGlobalStats]);
   const handleSelectRow = React.useCallback((row) => {
     setSelectedId(row.id || row.name);
@@ -1354,6 +1416,24 @@ export default function CharacterCatalogView({
           </div>
         </div>
       </div>
+
+      {activeDataSource === 'local' && localHistoryLoading && (
+        <div className="border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-200">
+          {tt('characterCatalog.local.loadingHistory', '正在按需读取该账号的完整记录…')}
+        </div>
+      )}
+      {activeDataSource === 'local' && localHistoryError && (
+        <div className="flex items-center justify-between gap-3 border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900/70 dark:bg-rose-950/30 dark:text-rose-300">
+          <span>{tt('characterCatalog.local.historyFailed', '完整记录读取失败，请重试。')}</span>
+          <button
+            type="button"
+            onClick={() => setLocalHistoryReloadKey((value) => value + 1)}
+            className="shrink-0 border border-current px-3 py-1.5 text-xs font-bold"
+          >
+            {tt('common.retry', '重试')}
+          </button>
+        </div>
+      )}
 
       <div className={`grid ${mobile ? 'grid-cols-2 gap-2' : 'grid-cols-2 xl:grid-cols-6 gap-3'}`}>
         <StatTile icon={BookOpen} label={tt('characterCatalog.metric.totalCharacters', '图鉴角色总数')} value={formatNumber(summary.totalCharacters || rows.length || 0)} mobile={mobile} tone="text-cyan-600 dark:text-cyan-400" />

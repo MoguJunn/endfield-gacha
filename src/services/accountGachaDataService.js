@@ -1,26 +1,24 @@
-import { getSupabaseAccessToken } from './authFetchService.js';
+import { getSameOriginAuthHeaders } from './authFetchService.js';
 import { fetchJsonWithTimeout } from './supabaseRequest.js';
 
 async function buildAccountGachaHeaders() {
-  const accessToken = await getSupabaseAccessToken({
+  const baseHeaders = {
+    Accept: 'application/json',
+  };
+  const result = await getSameOriginAuthHeaders(baseHeaders, {
     syncSiteSession: false,
     useSiteSessionCache: true,
     allowSiteSessionToken: false,
-  }).catch(() => null);
+  }).catch(() => ({ headers: baseHeaders }));
 
-  const headers = {
-    Accept: 'application/json',
-  };
-  if (accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
-  }
-  return headers;
+  return result.headers;
 }
 
 function createAccountGachaDataError(data, response, fallbackMessage, fallbackCode) {
   const error = new Error(data?.error || `${fallbackMessage} (${response.status})`);
   error.code = data?.code || fallbackCode;
   error.status = response.status;
+  error.requestId = data?.requestId || response?.headers?.get?.('x-request-id') || null;
   throw error;
 }
 
@@ -42,6 +40,41 @@ export async function loadAccountGachaData() {
 
   return {
     history: Array.isArray(data?.history) ? data.history : [],
+    source: data?.source || 'unknown',
+    meta: data?.meta || null,
+    warnings: Array.isArray(data?.warnings) ? data.warnings : [],
+  };
+}
+
+export async function loadAccountGachaAnalysis({ accountKey = '' } = {}) {
+  const headers = await buildAccountGachaHeaders();
+  const params = new URLSearchParams({ mode: 'analysis' });
+  if (accountKey) {
+    params.set('accountKey', accountKey);
+  }
+
+  const { response, data } = await fetchJsonWithTimeout(`/api/account-gacha-data?${params.toString()}`, {
+    method: 'GET',
+    credentials: 'same-origin',
+    headers,
+  }, {
+    label: 'account-gacha-data-analysis',
+    retries: 1,
+  });
+
+  if (!response.ok || data?.success === false) {
+    createAccountGachaDataError(data, response, '账号抽卡分析读取失败', 'account_gacha_analysis_load_failed');
+  }
+
+  const availability = ['ready', 'stale', 'building', 'empty'].includes(data?.availability)
+    ? data.availability
+    : 'building';
+
+  return {
+    availability,
+    schemaVersion: Math.max(1, Number(data?.schemaVersion) || 1),
+    owner: data?.owner && typeof data.owner === 'object' ? data.owner : null,
+    scope: data?.scope && typeof data.scope === 'object' ? data.scope : null,
     source: data?.source || 'unknown',
     meta: data?.meta || null,
     warnings: Array.isArray(data?.warnings) ? data.warnings : [],
@@ -82,6 +115,258 @@ export async function loadAccountGachaSeqKeys({ gameUid = '', accountKey = '', s
     source: data?.source || 'unknown',
     meta: data?.meta || null,
     warnings: Array.isArray(data?.warnings) ? data.warnings : [],
+  };
+}
+
+export async function loadAccountGachaHistoryPage({
+  gameUid = '',
+  accountKey = '',
+  serverScope = '',
+  poolId = '',
+  region = '',
+  cursor = '',
+  limit = 50,
+} = {}) {
+  const headers = await buildAccountGachaHeaders();
+  const params = new URLSearchParams({
+    mode: 'history',
+    gameUid: String(gameUid || '').trim(),
+    serverScope: String(serverScope || '').trim(),
+    limit: String(limit || 50),
+  });
+  if (accountKey) {
+    params.set('accountKey', accountKey);
+  }
+  if (poolId) {
+    params.set('poolId', poolId);
+  }
+  if (region) {
+    params.set('region', region);
+  }
+  if (cursor) {
+    params.set('cursor', cursor);
+  }
+
+  const { response, data } = await fetchJsonWithTimeout(`/api/account-gacha-data?${params.toString()}`, {
+    method: 'GET',
+    credentials: 'same-origin',
+    headers,
+  }, {
+    label: 'account-gacha-data-history-page',
+    retries: 1,
+  });
+
+  if (!response.ok || data?.success === false) {
+    createAccountGachaDataError(data, response, '账号抽卡记录读取失败', 'account_gacha_history_page_failed');
+  }
+
+  const pageTotal = data?.page?.total;
+
+  return {
+    records: Array.isArray(data?.records) ? data.records : [],
+    page: {
+      limit: Number(data?.page?.limit || limit || 50),
+      nextCursor: data?.page?.nextCursor || null,
+      hasMore: data?.page?.hasMore === true,
+      total: pageTotal !== null && pageTotal !== undefined && Number.isFinite(Number(pageTotal))
+        ? Number(pageTotal)
+        : null,
+      revision: data?.page?.revision !== null && data?.page?.revision !== undefined
+        ? String(data.page.revision)
+        : data?.meta?.revision !== null && data?.meta?.revision !== undefined
+          ? String(data.meta.revision)
+          : null,
+    },
+    scope: data?.scope || null,
+    source: data?.source || 'unknown',
+    meta: data?.meta || null,
+    warnings: Array.isArray(data?.warnings) ? data.warnings : [],
+  };
+}
+
+function createHistoryExportError(message, code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function normalizeHistoryExportAccount(account, accountIndex) {
+  const normalized = {
+    ...(account && typeof account === 'object' ? account : {}),
+    accountKey: String(account?.accountKey || account?.account_key || '').trim(),
+    gameUid: String(account?.gameUid || account?.game_uid || '').trim(),
+    serverScope: String(account?.serverScope || account?.server_scope || '').trim(),
+    region: String(account?.region || '').trim(),
+  };
+
+  if (!normalized.accountKey || !normalized.gameUid || !normalized.serverScope) {
+    throw createHistoryExportError(
+      `第 ${accountIndex + 1} 个导出账号缺少 accountKey、gameUid 或 serverScope`,
+      'account_gacha_history_account_invalid'
+    );
+  }
+
+  return normalized;
+}
+
+function buildHistoryExportRecordKey(record) {
+  return JSON.stringify([
+    record?.id ?? record?.recordId ?? record?.record_id ?? '',
+    record?.gameUid ?? record?.game_uid ?? '',
+    record?.serverScope ?? record?.server_scope ?? '',
+    record?.poolId ?? record?.pool_id ?? '',
+    record?.seqId ?? record?.seq_id ?? '',
+  ].map((value) => String(value ?? '')));
+}
+
+export async function loadAllAccountGachaHistoryForAccounts({
+  accounts = [],
+  expectedOwnerId = '',
+  onProgress = null,
+  pageLimit = 200,
+  maxPagesPerAccount = 5000,
+} = {}) {
+  const normalizedAccounts = (Array.isArray(accounts) ? accounts : [])
+    .map(normalizeHistoryExportAccount);
+
+  if (normalizedAccounts.length === 0) {
+    return { history: [], accounts: [], warnings: [] };
+  }
+
+  const normalizedExpectedOwnerId = String(expectedOwnerId || '').trim();
+  if (!normalizedExpectedOwnerId) {
+    throw createHistoryExportError(
+      '全量读取抽卡记录时缺少 expectedOwnerId',
+      'account_gacha_history_owner_required'
+    );
+  }
+
+  const normalizedPageLimit = Math.max(1, Number.parseInt(String(pageLimit || ''), 10) || 200);
+  const normalizedMaxPages = Math.max(
+    1,
+    Number.parseInt(String(maxPagesPerAccount || ''), 10) || 5000
+  );
+  const declaredTotal = normalizedAccounts.every((account) => (
+    Number.isFinite(Number(account.recordCount)) && Number(account.recordCount) >= 0
+  ))
+    ? normalizedAccounts.reduce((sum, account) => sum + Number(account.recordCount), 0)
+    : null;
+  const history = [];
+  const historyKeys = new Set();
+  const warnings = [];
+
+  for (let accountIndex = 0; accountIndex < normalizedAccounts.length; accountIndex += 1) {
+    const account = normalizedAccounts[accountIndex];
+    let revisionRetryUsed = false;
+
+    while (true) {
+      const accountHistory = [];
+      const accountHistoryKeys = new Set();
+      const accountWarnings = [];
+      const seenCursors = new Set();
+      let cursor = '';
+      let pageCount = 0;
+      let accountRevision = null;
+      let accountTotal = null;
+
+      try {
+        while (true) {
+          if (pageCount >= normalizedMaxPages) {
+            throw createHistoryExportError(
+              `第 ${accountIndex + 1} 个账号的抽卡记录超过分页读取上限`,
+              'account_gacha_history_page_limit_exceeded'
+            );
+          }
+
+          // eslint-disable-next-line no-await-in-loop -- export pages must remain ordered and cursor-bound
+          const result = await loadAccountGachaHistoryPage({
+            accountKey: account.accountKey,
+            gameUid: account.gameUid,
+            serverScope: account.serverScope,
+            region: account.region,
+            cursor,
+            limit: normalizedPageLimit,
+          });
+          pageCount += 1;
+
+          const responseOwnerId = String(result?.meta?.ownerId || '').trim();
+          if (responseOwnerId !== normalizedExpectedOwnerId) {
+            throw createHistoryExportError(
+              '分页读取返回了不属于当前用户的抽卡记录',
+              'account_gacha_history_owner_mismatch'
+            );
+          }
+
+          const pageRevision = result?.page?.revision === null || result?.page?.revision === undefined
+            ? null
+            : String(result.page.revision);
+          if (accountRevision !== null && pageRevision !== accountRevision) {
+            throw createHistoryExportError(
+              '抽卡记录在分页读取期间发生变化，请重新导出',
+              'history_revision_changed'
+            );
+          }
+          if (accountRevision === null) {
+            accountRevision = pageRevision;
+          }
+          if (pageCount === 1 && Number.isFinite(Number(result?.page?.total))) {
+            accountTotal = Math.max(0, Number(result.page.total));
+          }
+
+          (Array.isArray(result?.records) ? result.records : []).forEach((record) => {
+            const recordKey = buildHistoryExportRecordKey(record);
+            if (!accountHistoryKeys.has(recordKey)) {
+              accountHistoryKeys.add(recordKey);
+              accountHistory.push(record);
+            }
+          });
+          accountWarnings.push(...(Array.isArray(result?.warnings) ? result.warnings : []));
+
+          onProgress?.({
+            accountIndex,
+            accountCount: normalizedAccounts.length,
+            loaded: history.length + accountHistory.length,
+            total: declaredTotal ?? (history.length + (accountTotal ?? accountHistory.length)),
+          });
+
+          if (result?.page?.hasMore !== true) {
+            break;
+          }
+
+          const nextCursor = String(result?.page?.nextCursor || '').trim();
+          if (!nextCursor || seenCursors.has(nextCursor)) {
+            throw createHistoryExportError(
+              `第 ${accountIndex + 1} 个账号返回了重复的分页游标`,
+              'account_gacha_history_cursor_repeated'
+            );
+          }
+          seenCursors.add(nextCursor);
+          cursor = nextCursor;
+        }
+
+        accountHistory.forEach((record) => {
+          const recordKey = buildHistoryExportRecordKey(record);
+          if (!historyKeys.has(recordKey)) {
+            historyKeys.add(recordKey);
+            history.push(record);
+          }
+        });
+        warnings.push(...accountWarnings);
+        break;
+      } catch (error) {
+        if (error?.code === 'history_revision_changed' && !revisionRetryUsed) {
+          revisionRetryUsed = true;
+          continue;
+        }
+        throw error;
+      }
+    }
+  }
+
+  return {
+    history,
+    accounts: normalizedAccounts,
+    warnings,
   };
 }
 
@@ -298,7 +583,10 @@ export default {
   deleteAccountGachaRecord,
   deleteAccountGachaRecords,
   deleteAllAccountGachaData,
+  loadAccountGachaAnalysis,
   loadAccountGachaData,
+  loadAllAccountGachaHistoryForAccounts,
+  loadAccountGachaHistoryPage,
   loadAccountGachaSeqKeys,
   resolveAccountGachaAliases,
   saveAccountGachaData,

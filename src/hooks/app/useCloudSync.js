@@ -1,23 +1,50 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { getBootstrapVisiblePools } from '../../services/bootstrapService';
 import {
   loadAllPoolsForCatalog,
   loadVisiblePools,
-  loadPoolsByIds,
   mergePoolCollections,
-  normalizeRemotePoolType,
 } from '../../services/poolReadService';
 import {
   deleteAccountGachaPool,
   deleteAccountGachaPoolHistory,
   deleteAccountGachaRecords,
   deleteAllAccountGachaData,
-  loadAccountGachaData,
+  loadAccountGachaAnalysis,
   saveAccountGachaData,
 } from '../../services/accountGachaDataService.js';
-import { useAuthStore, usePoolStore, useHistoryStore } from '../../stores';
-import { getPoolTypeFromId } from '../../stores/usePoolStore';
+import {
+  useAuthStore,
+  useHistoryStore,
+  usePersonalAnalysisStore,
+  usePersonalDataStore,
+  usePoolStore,
+} from '../../stores';
 import { getMessage } from '../../i18n/index.js';
+import {
+  applyCloudAnalysisToStores,
+  prepareCloudAnalysisSnapshot,
+} from '../../utils/cloudDataSync.js';
+import personalDataRequestCoordinator from '../../services/personalDataRequestCoordinator.js';
+
+let activePersonalRefreshCalls = 0;
+
+function setPersonalRefreshActivity(active) {
+  activePersonalRefreshCalls = Math.max(0, activePersonalRefreshCalls + (active ? 1 : -1));
+  useAuthStore.getState().setSyncing(activePersonalRefreshCalls > 0);
+}
+
+export function assertPersonalDataOwner(accountData, targetUser) {
+  const responseOwnerId = String(accountData?.meta?.ownerId || '').trim();
+  const targetOwnerId = String(targetUser?.id || '').trim();
+  if (responseOwnerId && responseOwnerId !== targetOwnerId) {
+    const error = new Error('个人数据响应 owner 与当前登录用户不一致');
+    error.code = 'personal_data_owner_mismatch';
+    error.responseOwnerId = responseOwnerId;
+    error.targetOwnerId = targetOwnerId;
+    throw error;
+  }
+}
 
 async function loadLatestVisiblePools(options = {}) {
   const { preferBootstrap = false } = options;
@@ -56,146 +83,181 @@ export function useCloudSync({ showToast }) {
   const setLastSyncAt = useAuthStore((state) => state.setLastSyncAt);
   const pools = usePoolStore((state) => state.pools);
   const setPools = usePoolStore((state) => state.setPools);
+  const switchPool = usePoolStore((state) => state.switchPool);
+  const switchGameAccount = usePoolStore((state) => state.switchGameAccount);
+  const restoreOwnerSelection = usePoolStore((state) => state.restoreOwnerSelection);
+  const currentGameUid = usePoolStore((state) => state.currentGameUid);
   const history = useHistoryStore((state) => state.history);
+  const setHistory = useHistoryStore((state) => state.setHistory);
+  const personalDataHasSnapshot = usePersonalDataStore((state) => state.hasSnapshot);
+  const personalDataPhase = usePersonalDataStore((state) => state.phase);
+  const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
+  const analysisAccountKey = usePersonalAnalysisStore((state) => state.meta?.accountKey || null);
+  const accountScopeRequestRef = useRef(null);
 
-  // DR-B05: 防止并发调用 loadCloudData 导致请求加倍
-  const loadingPromiseRef = useRef(null);
-
-  // 从云端加载数据（只加载当前用户的数据）
+  // 只准备快照；请求合并、token 校验和提交由 refreshPersonalData 统一负责。
   const loadCloudData = useCallback(
-    async (targetUser = null) => {
+    async (targetUser = null, options = {}) => {
       const currentUser = targetUser || useAuthStore.getState().user;
-      if (!currentUser) {
-        return { pools: [], history: [] };
+      if (!currentUser?.id) {
+        const error = new Error('个人数据读取需要明确的目标用户');
+        error.code = 'personal_data_owner_required';
+        throw error;
       }
 
-      // DR-B05: 如果已有正在执行的请求，复用同一个 Promise
-      if (loadingPromiseRef.current) {
-        return loadingPromiseRef.current;
-      }
+      const fallbackPools = usePersonalDataStore.getState().publicPools;
+      const preferredGameUid = options.preferredGameUid
+        ?? usePoolStore.getState().currentGameUid
+        ?? '';
+      const analysisRequest = loadAccountGachaAnalysis({ accountKey: preferredGameUid })
+        .catch((error) => {
+          if (preferredGameUid && error?.code === 'personal_analysis_account_not_found') {
+            return loadAccountGachaAnalysis({});
+          }
+          throw error;
+        });
+      const [latestVisiblePools, catalogPools, analysis] = await Promise.all([
+        loadLatestVisiblePools(),
+        loadAllPoolsForCatalog().catch(() => []),
+        analysisRequest,
+      ]);
+      assertPersonalDataOwner(analysis, currentUser);
 
-      const doLoad = async () => {
-        setSyncing(true);
-        setSyncError(null);
+      const visiblePools =
+        Array.isArray(latestVisiblePools) && latestVisiblePools.length > 0
+          ? latestVisiblePools
+          : Array.isArray(fallbackPools)
+            ? fallbackPools
+            : [];
+      const analysisPools = Array.isArray(analysis.scope?.poolManifest)
+        ? analysis.scope.poolManifest
+        : [];
 
-        try {
-          const fallbackPools = usePoolStore.getState().pools;
-          const [latestVisiblePools, catalogPools, accountData] = await Promise.all([
-            loadLatestVisiblePools(),
-            loadAllPoolsForCatalog().catch(() => []),
-            loadAccountGachaData(),
-          ]);
-          const visiblePools =
-            Array.isArray(latestVisiblePools) && latestVisiblePools.length > 0
-              ? latestVisiblePools
-              : Array.isArray(fallbackPools)
-                ? fallbackPools
-                : [];
-
-          const formattedHistory = accountData.history;
-
-          const knownPoolsMap = new Map();
-          [...catalogPools, ...visiblePools].forEach((pool) => {
-            if (pool?.id) {
-              knownPoolsMap.set(pool.id, pool);
-            }
+      const knownPoolsMap = new Map();
+      [...analysisPools, ...catalogPools, ...visiblePools].forEach((pool) => {
+        const poolId = pool?.id || pool?.pool_id;
+        if (poolId) {
+          const existing = knownPoolsMap.get(poolId) || {};
+          knownPoolsMap.set(poolId, {
+            ...existing,
+            ...pool,
+            id: poolId,
           });
-          const historyPoolIds = [...new Set(formattedHistory.map((h) => h.poolId))];
-          const missingPoolIds = historyPoolIds.filter((pid) => pid && !knownPoolsMap.has(pid));
-          const hydratedHistoryPools =
-            missingPoolIds.length > 0 ? await loadPoolsByIds(missingPoolIds).catch(() => []) : [];
-
-          hydratedHistoryPools.forEach((pool) => {
-            if (pool?.id) {
-              knownPoolsMap.set(pool.id, pool);
-            }
-          });
-
-          const knownPoolIds = new Set(knownPoolsMap.keys());
-
-          // 补占位池
-          const placeholderPools = historyPoolIds
-            .filter((pid) => !knownPoolIds.has(pid))
-            .map((pid) => {
-              const rawType = getPoolTypeFromId(pid);
-              const inferredType = normalizeRemotePoolType(rawType);
-              const defaultName = (() => {
-                switch (inferredType) {
-                  case 'extra':
-                    return getMessage('pool.group.extra');
-                  case 'limited_character':
-                  case 'limited':
-                    return getMessage('cloudSync.placeholder.limitedCharacterBanner');
-                  case 'standard':
-                    return getMessage('cloudSync.placeholder.standardBanner');
-                  case 'beginner':
-                    return getMessage('cloudSync.placeholder.beginnerBanner');
-                  case 'limited_weapon':
-                  case 'weapon':
-                    return getMessage('cloudSync.placeholder.weaponBanner');
-                  default:
-                    return pid || getMessage('cloudSync.placeholder.unknownBanner');
-                }
-              })();
-              return {
-                id: pid,
-                name: defaultName,
-                type: inferredType === 'unknown' ? 'standard' : inferredType,
-                locked: false,
-                isLimitedWeapon: rawType === 'limited_weapon' || inferredType === 'weapon',
-                created_at: null,
-                updated_at: null,
-                user_id: null,
-                creator_username: null,
-                up_character: null,
-                description: null,
-                banner_url: null,
-                start_time: null,
-                end_time: null,
-                featured_characters: null,
-              };
-            });
-
-          const allPools = [...knownPoolsMap.values(), ...placeholderPools];
-
-          // 根据池类型回填历史记录的 isStandard
-          const poolTypeLookup = new Map(allPools.map((p) => [p.id, p.type]));
-          const normalizedHistory = formattedHistory.map((h) => {
-            const poolType = poolTypeLookup.get(h.poolId);
-            const inferredIsStandard =
-              poolType === 'standard' || poolType === 'beginner'
-                ? true
-                : poolType === 'extra' ||
-                    poolType === 'limited' ||
-                    poolType === 'limited_character' ||
-                    poolType === 'weapon' ||
-                    poolType === 'limited_weapon'
-                  ? false
-                  : null;
-            const isStandard = inferredIsStandard !== null ? inferredIsStandard : Boolean(h.isStandard);
-            return { ...h, isStandard };
-          });
-
-          setLastSyncAt(new Date().toISOString());
-          return { pools: allPools, history: normalizedHistory };
-        } catch (error) {
-          setSyncError(error.message);
-          return null;
-        } finally {
-          setSyncing(false);
         }
-      };
+      });
 
-      // DR-B05: 缓存 Promise，并发调用共享同一个请求
-      loadingPromiseRef.current = doLoad();
-      try {
-        return await loadingPromiseRef.current;
-      } finally {
-        loadingPromiseRef.current = null;
-      }
+      return prepareCloudAnalysisSnapshot({
+        kind: 'analysis',
+        ownerId: currentUser.id,
+        pools: [...knownPoolsMap.values()],
+        analysis,
+        meta: analysis.meta || null,
+        source: analysis.source || 'unknown',
+        warnings: analysis.warnings || [],
+      });
     },
-    [setLastSyncAt, setSyncError, setSyncing]
+    []
   );
+
+  const refreshPersonalData = useCallback(async (targetUser = null, options = {}) => {
+    const currentUser = targetUser || useAuthStore.getState().user;
+    if (!currentUser?.id) {
+      const error = new Error('个人数据刷新需要明确的目标用户');
+      error.code = 'personal_data_owner_required';
+      return { ok: false, data: null, error, stale: false, applied: false };
+    }
+
+    const personalDataState = usePersonalDataStore.getState();
+    const ownerChanged = personalDataState.ownerId !== currentUser.id;
+    if (ownerChanged) {
+      personalDataState.switchOwner(currentUser.id);
+      setHistory([]);
+      usePersonalAnalysisStore.getState().clearAnalysis('owner_changed');
+      setPools(usePersonalDataStore.getState().publicPools);
+      restoreOwnerSelection(currentUser.id);
+    }
+
+    const ownerState = usePersonalDataStore.getState();
+    const preferredPoolId = options.preferredPoolId ?? usePoolStore.getState().currentPoolId;
+    const preferredGameUid = options.preferredGameUid ?? usePoolStore.getState().currentGameUid;
+
+    setSyncError(null);
+    setPersonalRefreshActivity(true);
+    try {
+      const result = await personalDataRequestCoordinator.run({
+        ownerId: currentUser.id,
+        ownerGeneration: ownerState.ownerGeneration,
+        kind: options.kind || 'explicit',
+        reason: options.reason || options.kind || 'explicit',
+        request: () => loadCloudData(currentUser, { preferredGameUid }),
+        apply: (snapshot) => applyCloudAnalysisToStores(snapshot, {
+          setPools,
+          switchPool,
+          switchGameAccount,
+          preferredPoolId,
+        }),
+      });
+
+      if (result.ok && result.applied) {
+        setLastSyncAt(new Date().toISOString());
+      } else if (!result.stale && result.error) {
+        setSyncError(result.error.message);
+      }
+      return result;
+    } finally {
+      setPersonalRefreshActivity(false);
+    }
+  }, [
+    loadCloudData,
+    restoreOwnerSelection,
+    setHistory,
+    setLastSyncAt,
+    setPools,
+    setSyncError,
+    switchGameAccount,
+    switchPool,
+  ]);
+
+  useEffect(() => {
+    const ownerId = String(user?.id || '').trim();
+    const preferredGameUid = String(currentGameUid || '').trim();
+    const currentAnalysisAccountKey = String(analysisAccountKey || '').trim();
+    const isBuilding = personalDataPhase === 'building' || analysisAvailability === 'building';
+
+    if (
+      !ownerId
+      || !personalDataHasSnapshot
+      || !preferredGameUid
+      || preferredGameUid === currentAnalysisAccountKey
+      || isBuilding
+    ) {
+      if (preferredGameUid && preferredGameUid === currentAnalysisAccountKey) {
+        accountScopeRequestRef.current = null;
+      }
+      return;
+    }
+
+    const requestKey = JSON.stringify([ownerId, preferredGameUid]);
+    if (accountScopeRequestRef.current === requestKey) {
+      return;
+    }
+    accountScopeRequestRef.current = requestKey;
+    void refreshPersonalData(user, {
+      // Include the target in the coordinator key so rapid B → C switches
+      // cannot reuse B's in-flight promise for C.
+      kind: `account-scope:${preferredGameUid}`,
+      reason: 'account_scope_changed',
+      preferredGameUid,
+    });
+  }, [
+    analysisAccountKey,
+    analysisAvailability,
+    currentGameUid,
+    personalDataHasSnapshot,
+    personalDataPhase,
+    refreshPersonalData,
+    user,
+  ]);
 
   // 加载公共卡池数据（无需登录，用于首页轮换计划/倒计时）
   const loadPublicPools = useCallback(async () => {
@@ -208,7 +270,11 @@ export function useCloudSync({ showToast }) {
       );
 
       if (mergedPools.length > 0) {
-        setPools(mergedPools);
+        const personalDataState = usePersonalDataStore.getState();
+        personalDataState.setPublicPools(mergedPools);
+        if (!personalDataState.ownerId || !personalDataState.hasSnapshot) {
+          setPools(mergedPools);
+        }
         return mergedPools;
       }
     } catch {
@@ -410,6 +476,7 @@ export function useCloudSync({ showToast }) {
 
   return {
     loadCloudData,
+    refreshPersonalData,
     loadPublicPools,
     savePoolToCloud,
     saveHistoryToCloud,

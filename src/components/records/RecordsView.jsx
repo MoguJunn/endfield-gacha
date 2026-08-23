@@ -1,8 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { CalendarRange, Filter, RotateCcw } from 'lucide-react';
-import { useHistoryStore, useAuthStore } from '../../stores';
-import { useCurrentPoolData, useCurrentPoolGroupedHistory } from '../../hooks';
-import BatchCard from '../BatchCard';
+import { useAuthStore } from '../../stores';
+import { useCurrentPoolData, useCurrentPoolGroupedHistory, useScopedHistoryPages } from '../../hooks';
 import { useI18n } from '../../i18n/index.js';
 import { localizePoolName } from '../../utils/gameDataI18n.js';
 import {
@@ -11,6 +10,7 @@ import {
   isInfoBookHistoryPull,
 } from '../../utils/historyInfoBook.js';
 import HistoryAnomalyReview from './HistoryAnomalyReview.jsx';
+import VirtualizedRecordGroupList from './VirtualizedRecordGroupList.jsx';
 
 const DEFAULT_RECORD_FILTERS = {
   dateFrom: '',
@@ -132,14 +132,19 @@ const RecordsView = ({
   onDeleteItem,
   onDeleteGroup
 }) => {
-  const { t, formatNumber, locale } = useI18n();
+  const { t, formatNumber, isEnglish, locale } = useI18n();
   // 从 stores 获取状态
-  const visibleHistoryCount = useHistoryStore(state => state.visibleHistoryCount);
-  const loadMoreHistory = useHistoryStore(state => state.loadMoreHistory);
-  const setVisibleHistoryCount = useHistoryStore(state => state.setVisibleHistoryCount);
-
   const user = useAuthStore(state => state.user);
   const canEdit = Boolean(user);
+  const {
+    phase: historyPagePhase,
+    hasMore: hasMoreHistoryPages,
+    total: historyPageTotal,
+    error: historyPageError,
+    loadedCount: loadedHistoryCount,
+    loadMore: loadMoreHistory,
+    retry: retryHistoryPage,
+  } = useScopedHistoryPages();
 
   const {
     currentPool,
@@ -188,13 +193,11 @@ const RecordsView = ({
       ...prev,
       [key]: value
     }));
-    setVisibleHistoryCount(20);
-  }, [setVisibleHistoryCount]);
+  }, []);
 
   const resetRecordFilters = useCallback(() => {
     setRecordFilters(DEFAULT_RECORD_FILTERS);
-    setVisibleHistoryCount(20);
-  }, [setVisibleHistoryCount]);
+  }, []);
 
   const applyDatePreset = useCallback((preset) => {
     const range = buildDatePresetRange(preset);
@@ -202,8 +205,7 @@ const RecordsView = ({
       ...prev,
       ...range
     }));
-    setVisibleHistoryCount(20);
-  }, [setVisibleHistoryCount]);
+  }, []);
   const hasActiveRecordFilters = useMemo(() => (
     Object.entries(recordFilters).some(([key, value]) => {
       if (key === 'poolType' && !isAllPoolsOverview) {
@@ -212,7 +214,7 @@ const RecordsView = ({
       return value && value !== 'all';
     })
   ), [isAllPoolsOverview, recordFilters]);
-  const displayedGroupCount = Math.min(visibleHistoryCount, filteredGroupedHistory.length);
+  const displayedGroupCount = filteredGroupedHistory.length;
   const filterStats = useMemo(
     () => buildFilterStats(filteredGroupedHistory),
     [filteredGroupedHistory]
@@ -292,6 +294,13 @@ const RecordsView = ({
 
     return chips;
   }, [displayedGroupCount, filterStats, formatNumber, groupedHistory.length, recordFilters.method, t]);
+  const isInitialHistoryLoading = (
+    historyPagePhase === 'unloaded' || historyPagePhase === 'loading'
+  ) && loadedHistoryCount === 0;
+  const isLoadingMoreHistory = historyPagePhase === 'loading' && loadedHistoryCount > 0;
+  const loadedHistoryLabel = isEnglish
+    ? `Loaded ${formatNumber(loadedHistoryCount)}${historyPageTotal === null ? '' : ` / ${formatNumber(historyPageTotal)}`}`
+    : `已加载 ${formatNumber(loadedHistoryCount)}${historyPageTotal === null ? '' : ` / ${formatNumber(historyPageTotal)}`}`;
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-none shadow-sm border border-zinc-200 dark:border-zinc-800 overflow-hidden animate-fade-in relative">
@@ -440,39 +449,54 @@ const RecordsView = ({
       </div>
 
       {/* 记录列表 */}
-      <div className="max-h-[800px] overflow-y-auto bg-slate-50 dark:bg-zinc-950/50">
-        {filteredGroupedHistory.length === 0 ? (
+      <div className="bg-slate-50 dark:bg-zinc-950/50">
+        {isInitialHistoryLoading ? (
+          <div className="p-12 text-center text-slate-400 dark:text-zinc-500">
+            {isEnglish ? 'Loading records…' : '正在加载记录…'}
+          </div>
+        ) : historyPagePhase === 'error' ? (
+          <div className="flex flex-col items-center gap-3 p-12 text-center text-red-500 dark:text-red-400">
+            <span>{historyPageError?.message || (isEnglish ? 'Failed to load records' : '记录加载失败')}</span>
+            <button
+              type="button"
+              onClick={() => void retryHistoryPage()}
+              className="border border-red-300 bg-white px-4 py-2 text-xs font-bold text-red-600 transition-colors hover:border-red-500 dark:border-red-500/40 dark:bg-zinc-900 dark:text-red-300"
+            >
+              {isEnglish ? 'Retry' : '重试'}
+            </button>
+          </div>
+        ) : historyPagePhase === 'ready' && filteredGroupedHistory.length === 0 ? (
           <div className="p-12 text-center text-slate-400 dark:text-zinc-500">
             {hasActiveRecordFilters ? t('records.empty.filtered') : t('records.empty.all')}
           </div>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {filteredGroupedHistory.slice(0, visibleHistoryCount).map((group, idx) => (
-              <BatchCard
-                key={idx}
-                group={group}
-                onEdit={onEdit}
-                onDeleteGroup={onDeleteGroup}
-                poolType={currentPool?.type}
-                canEdit={canEditCurrentPool}
-                showPoolName={shouldShowRecordPoolName}
-                poolMetaById={poolMetaById}
-              />
-            ))}
-
-            {/* 加载更多按钮 */}
-            {visibleHistoryCount < filteredGroupedHistory.length && (
-              <div className="p-4 flex justify-center">
-                <button
-                  onClick={loadMoreHistory}
-                  className="text-sm text-slate-500 dark:text-zinc-500 hover:text-yellow-600 dark:hover:text-endfield-yellow font-medium px-6 py-2 rounded-sm border border-zinc-200 dark:border-zinc-800 hover:border-yellow-200 dark:hover:border-yellow-800 bg-white dark:bg-zinc-900 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 transition-all shadow-sm"
-                >
-                  {t('records.loadMore', { count: filteredGroupedHistory.length - visibleHistoryCount })}
-                </button>
-              </div>
-            )}
+        ) : filteredGroupedHistory.length > 0 ? (
+          <VirtualizedRecordGroupList
+            groups={filteredGroupedHistory}
+            onEdit={onEdit}
+            onDeleteGroup={onDeleteGroup}
+            poolType={currentPool?.type}
+            canEdit={canEditCurrentPool}
+            showPoolName={shouldShowRecordPoolName}
+            poolMetaById={poolMetaById}
+          />
+        ) : null}
+        {historyPagePhase !== 'error' && !isInitialHistoryLoading ? (
+          <div className="flex flex-wrap items-center justify-center gap-3 border-t border-zinc-200 bg-white px-4 py-3 text-xs text-slate-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+            <span>{loadedHistoryLabel}</span>
+            {hasMoreHistoryPages ? (
+              <button
+                type="button"
+                onClick={() => void loadMoreHistory()}
+                disabled={isLoadingMoreHistory}
+                className="border border-zinc-300 bg-slate-50 px-4 py-2 font-bold text-slate-700 transition-colors hover:border-yellow-500 hover:text-yellow-600 disabled:cursor-wait disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:text-endfield-yellow"
+              >
+                {isLoadingMoreHistory
+                  ? (isEnglish ? 'Loading…' : '加载中…')
+                  : (isEnglish ? 'Load more' : '加载更多')}
+              </button>
+            ) : null}
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

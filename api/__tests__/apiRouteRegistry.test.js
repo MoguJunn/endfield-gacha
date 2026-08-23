@@ -33,6 +33,7 @@ const INTERNAL_OPERATION_PATHS = [
   '/api/mail-delivery-feedback',
   '/api/mail-inbound',
   '/api/mail-outbox-worker',
+  '/api/personal-analysis-worker',
   '/api/status-admin',
   '/api/status-endpoint-probe',
   '/api/status-probe',

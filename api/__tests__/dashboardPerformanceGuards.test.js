@@ -21,7 +21,8 @@ describe('dashboard performance guards', () => {
     const dashboard = readSource('src/components/dashboard/DashboardView.jsx');
     const timelinePanel = readSource('src/components/dashboard/PoolTimelinePanel.jsx');
 
-    expect(dashboard).toContain("const shouldBuildCustomShareData = shareMode === 'custom';");
+    expect(dashboard).toContain("const shouldBuildCustomShareData = shareMode === 'custom'");
+    expect(dashboard).toContain('&& (!isAnalysisBacked || hasCompleteRawHistory);');
     expect(dashboard).toContain('if (!shouldBuildCustomShareData || customShareSelectedPools.length === 0)');
     expect(dashboard).toContain('sections={timelineSections}');
     expect(timelinePanel).toContain('sections: precomputedSections = null');

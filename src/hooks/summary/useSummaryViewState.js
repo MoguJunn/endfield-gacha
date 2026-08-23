@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RARITY_CONFIG } from '../../constants';
 import { useI18n } from '../../i18n/index.js';
+import { usePersonalAnalysisStore } from '../../stores/index.js';
 import { useRankingData } from './useRankingData';
 import { useSummaryStats } from './useSummaryStats';
 
@@ -127,7 +128,12 @@ export function useSummaryViewState({
   const isGlobalSource = dataSource === 'global';
 
   const { characterRanking, rankingLoading, userRanking, userRankingLoading } = useRankingData(dataSource, user);
-  const localStats = useSummaryStats(history, pools, user);
+  const computedLocalStats = useSummaryStats(history, pools, user);
+  const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
+  const analysisSummary = usePersonalAnalysisStore((state) => state.owner?.summary || null);
+  const localStats = ['ready', 'stale', 'empty'].includes(analysisAvailability) && analysisSummary
+    ? analysisSummary
+    : computedLocalStats;
 
   useEffect(() => {
     if (!lockedDataSource) {

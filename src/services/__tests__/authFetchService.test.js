@@ -4,10 +4,15 @@ import { supabase } from '../../supabaseClient.js';
 import {
   getAuthFetchHeaders,
   getCurrentAuthenticatedUser,
+  getSameOriginAuthHeaders,
   getSupabaseAccessToken,
   withAuthenticatedSupabaseRequest,
 } from '../authFetchService.js';
-import { getCurrentSiteSession } from '../siteSessionService.js';
+import {
+  getCurrentSiteSession,
+  getKnownSiteSessionUserId,
+  hasKnownAuthenticatedSiteSession,
+} from '../siteSessionService.js';
 
 vi.mock('../../supabaseClient.js', () => ({
   supabase: {
@@ -21,6 +26,8 @@ vi.mock('../../supabaseClient.js', () => ({
 
 vi.mock('../siteSessionService.js', () => ({
   getCurrentSiteSession: vi.fn(),
+  getKnownSiteSessionUserId: vi.fn(),
+  hasKnownAuthenticatedSiteSession: vi.fn(),
 }));
 
 function toBase64UrlJson(value) {
@@ -49,6 +56,8 @@ function createSiteSessionCompatToken() {
 describe('authFetchService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hasKnownAuthenticatedSiteSession.mockReturnValue(false);
+    getKnownSiteSessionUserId.mockReturnValue('');
     getCurrentSiteSession.mockResolvedValue({
       authenticated: false,
       supabase: null,
@@ -64,6 +73,21 @@ describe('authFetchService', () => {
       },
     });
     supabase.auth.signOut.mockResolvedValue({ error: null });
+  });
+
+  it('uses the known same-origin site session without revalidating a native token', async () => {
+    hasKnownAuthenticatedSiteSession.mockReturnValue(true);
+    getKnownSiteSessionUserId.mockReturnValue('site-user-id');
+
+    await expect(getSameOriginAuthHeaders({ Accept: 'application/json' })).resolves.toEqual({
+      headers: { Accept: 'application/json' },
+      accessToken: null,
+      credentialSource: 'site_session',
+      credentialOwnerId: 'site-user-id',
+    });
+
+    expect(supabase.auth.getSession).not.toHaveBeenCalled();
+    expect(supabase.auth.getUser).not.toHaveBeenCalled();
   });
 
   it('prefers a verified native Supabase token over a site-session compatible token', async () => {

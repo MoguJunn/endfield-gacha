@@ -3,7 +3,15 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAuthenticatedSessionSync } from '../useAuthenticatedSessionSync.js';
-import { useAuthStore, useHistoryStore, usePoolStore } from '../../../stores';
+import {
+  useAuthStore,
+  useHistoryStore,
+  usePersonalAnalysisStore,
+  usePersonalDataStore,
+  usePoolStore,
+} from '../../../stores';
+import { createPersonalDataInitialState } from '../../../stores/usePersonalDataStore.js';
+import { createPersonalAnalysisInitialState } from '../../../stores/usePersonalAnalysisStore.js';
 
 vi.mock('../../../utils/appLogger.js', () => ({
   default: {
@@ -30,93 +38,143 @@ describe('useAuthenticatedSessionSync', () => {
     useHistoryStore.setState({
       history: [],
     });
+    usePersonalAnalysisStore.setState(createPersonalAnalysisInitialState());
+    usePersonalDataStore.setState(createPersonalDataInitialState());
   });
 
-  it('applies a site session user and private cloud data to the shared stores', async () => {
-    const cloudData = {
-      pools: [
-        { id: 'limited_pool', name: '特许寻访', type: 'limited_character' },
-      ],
-      history: [
-        {
-          id: 'record-1',
-          user_id: 'user-1',
-          poolId: 'limited_pool',
-          gameUid: 'game-1',
-          rarity: 6,
-        },
-      ],
-    };
-    const loadCloudData = vi.fn().mockResolvedValue(cloudData);
-    const { result } = renderHook(() => useAuthenticatedSessionSync({ loadCloudData }));
+  it('同 owner 已有成功快照时 SIGNED_IN 恢复不读取个人数据', async () => {
+    usePersonalDataStore.getState().switchOwner('user-1');
+    usePersonalDataStore.setState({
+      phase: 'ready',
+      hasSnapshot: true,
+      lastSuccessfulAt: '2026-08-17T00:00:00.000Z',
+    });
+    useHistoryStore.setState({ history: [{ id: 'existing-record' }] });
+    const refreshPersonalData = vi.fn();
+    const onUpdateLastSeen = vi.fn();
+    const { result } = renderHook(() => useAuthenticatedSessionSync({
+      refreshPersonalData,
+      onUpdateLastSeen,
+    }));
 
-    let appliedCloudData;
+    let syncResult;
     await act(async () => {
-      appliedCloudData = await result.current.applySiteSession({
-        authenticated: true,
-        user: {
-          id: 'user-1',
-          email: 'user@example.com',
-        },
-        supabase: {
-          accessToken: 'site-session-token',
-        },
+      syncResult = await result.current.applyAuthenticatedSession({
+        id: 'user-1',
+        email: 'user@example.com',
       }, {
-        source: 'oauth_callback',
+        event: 'SIGNED_IN',
+        source: 'supabase_auth_change',
       });
     });
 
-    expect(appliedCloudData).toBe(cloudData);
-    expect(loadCloudData).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'user-1',
-    }));
+    expect(syncResult).toMatchObject({ ok: true, skipped: true, applied: false });
+    expect(refreshPersonalData).not.toHaveBeenCalled();
+    expect(onUpdateLastSeen).not.toHaveBeenCalled();
+    expect(useHistoryStore.getState().history).toEqual([{ id: 'existing-record' }]);
     expect(useAuthStore.getState().user).toMatchObject({
       id: 'user-1',
       email: 'user@example.com',
     });
-    expect(useAuthStore.getState().authResolved).toBe(true);
-    expect(usePoolStore.getState().pools).toEqual(cloudData.pools);
-    expect(usePoolStore.getState().currentPoolId).toBe('limited_pool');
-    expect(useHistoryStore.getState().history).toEqual(cloudData.history);
   });
 
-  it('loads private data for a site session even when only HttpOnly cookies are available', async () => {
-    const cloudData = {
-      pools: [
-        { id: 'limited_pool', name: '特许寻访', type: 'limited_character' },
-      ],
-      history: [
-        {
-          id: 'record-1',
-          user_id: 'user-1',
-          poolId: 'limited_pool',
-          gameUid: 'game-1',
-          rarity: 6,
-        },
-      ],
-    };
-    const loadCloudData = vi.fn().mockResolvedValue(cloudData);
-    const { result } = renderHook(() => useAuthenticatedSessionSync({ loadCloudData }));
+  it('首次 SIGNED_IN 读取一次并建立 owner', async () => {
+    const publicPools = [{ id: 'public-pool' }];
+    usePersonalDataStore.getState().setPublicPools(publicPools);
+    useHistoryStore.setState({ history: [{ id: 'old-anonymous-record' }] });
+    const refreshPersonalData = vi.fn().mockResolvedValue({
+      ok: true,
+      data: { pools: publicPools, history: [] },
+      error: null,
+      stale: false,
+      applied: true,
+    });
+    const onUpdateLastSeen = vi.fn();
+    const { result } = renderHook(() => useAuthenticatedSessionSync({
+      refreshPersonalData,
+      onUpdateLastSeen,
+    }));
 
-    let appliedCloudData;
     await act(async () => {
-      appliedCloudData = await result.current.applySiteSession({
-        authenticated: true,
-        user: {
-          id: 'user-1',
-        },
-        supabaseSessionSynced: false,
-        supabase: null,
+      await result.current.applyAuthenticatedSession({ id: 'user-1' }, {
+        event: 'SIGNED_IN',
+        source: 'supabase_auth_change',
       });
     });
 
-    expect(useAuthStore.getState().user).toMatchObject({
-      id: 'user-1',
+    expect(refreshPersonalData).toHaveBeenCalledTimes(1);
+    expect(refreshPersonalData).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'user-1' }),
+      expect.objectContaining({
+        kind: 'session',
+        preferredGameUid: null,
+      })
+    );
+    expect(onUpdateLastSeen).toHaveBeenCalledTimes(1);
+    expect(usePersonalDataStore.getState().ownerId).toBe('user-1');
+    expect(useHistoryStore.getState().history).toEqual([]);
+    expect(usePoolStore.getState().pools).toEqual(publicPools);
+    expect(usePoolStore.getState().currentGameUid).toBe(null);
+  });
+
+  it('切换用户时先清除旧历史和游戏账号，再读取新 owner', async () => {
+    const publicPools = [{ id: 'public-pool' }];
+    usePersonalDataStore.getState().setPublicPools(publicPools);
+    usePersonalDataStore.getState().switchOwner('user-a');
+    usePersonalDataStore.setState({ phase: 'ready', hasSnapshot: true });
+    useHistoryStore.setState({ history: [{ id: 'user-a-record' }] });
+    usePoolStore.setState({
+      pools: [{ id: 'user-a-private-pool' }],
+      currentGameUid: 'user-a-game',
     });
-    expect(appliedCloudData).toBe(cloudData);
-    expect(loadCloudData).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'user-1',
+    usePersonalAnalysisStore.setState({
+      ...createPersonalAnalysisInitialState(),
+      ownerId: 'user-a',
+      availability: 'ready',
+      owner: { defaultAccountKey: 'user-a-game' },
+    });
+    const refreshPersonalData = vi.fn().mockImplementation(async () => {
+      expect(useHistoryStore.getState().history).toEqual([]);
+      expect(usePoolStore.getState().pools).toEqual(publicPools);
+      expect(usePoolStore.getState().currentGameUid).toBe(null);
+      return {
+        ok: true,
+        data: { pools: publicPools, history: [] },
+        error: null,
+        stale: false,
+        applied: true,
+      };
+    });
+    const onUpdateLastSeen = vi.fn();
+    const { result } = renderHook(() => useAuthenticatedSessionSync({
+      refreshPersonalData,
+      onUpdateLastSeen,
     }));
-    expect(useHistoryStore.getState().history).toEqual(cloudData.history);
+
+    await act(async () => {
+      await result.current.applyAuthenticatedSession({ id: 'user-b' }, {
+        event: 'SIGNED_IN',
+        source: 'supabase_auth_change',
+      });
+    });
+
+    expect(refreshPersonalData).toHaveBeenCalledTimes(1);
+    expect(refreshPersonalData).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'user-b' }),
+      expect.objectContaining({ preferredGameUid: null })
+    );
+    expect(onUpdateLastSeen).toHaveBeenCalledTimes(1);
+    expect(usePersonalDataStore.getState()).toMatchObject({
+      ownerId: 'user-b',
+      phase: 'idle',
+      hasSnapshot: false,
+      lastSuccessfulAt: null,
+    });
+    expect(usePersonalAnalysisStore.getState()).toMatchObject({
+      ownerId: null,
+      availability: 'idle',
+      owner: null,
+      reason: 'owner_changed',
+    });
   });
 });

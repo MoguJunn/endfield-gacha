@@ -1,21 +1,16 @@
-import React, { useState } from 'react'
+import React from 'react'
 import GachaAnalyzer from './GachaAnalyzer'
-import LoadingScreen from './LoadingScreen'
 import ErrorBoundary from './components/ErrorBoundary'
+import AppStartupGate from './components/app/AppStartupGate'
 import { ThemeProvider } from './contexts/ThemeContext'
 
 function App() {
-  const [isLoading, setIsLoading] = useState(true)
-
   return (
     <ThemeProvider>
       <ErrorBoundary>
-        {isLoading && (
-          <LoadingScreen onComplete={() => setIsLoading(false)} />
-        )}
-        <div className={`App ${isLoading ? 'hidden' : 'block'}`}>
+        <AppStartupGate>
           <GachaAnalyzer />
-        </div>
+        </AppStartupGate>
       </ErrorBoundary>
     </ThemeProvider>
   )

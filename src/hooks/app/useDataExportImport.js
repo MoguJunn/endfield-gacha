@@ -1,9 +1,16 @@
 import { useState, useCallback, useEffect } from 'react';
-import { useHistoryStore, usePoolStore, useAuthStore } from '../../stores';
+import {
+  useHistoryStore,
+  usePoolStore,
+  useAuthStore,
+  usePersonalAnalysisStore,
+} from '../../stores';
 import { supabase } from '../../supabaseClient';
+import { loadAllAccountGachaHistoryForAccounts } from '../../services/accountGachaDataService.js';
 import { applyCloudDataToStores } from '../../utils/cloudDataSync.js';
 import {
   buildImportedGameAccountMetadataEntries,
+  isGameAccountSelectionMatch,
   saveGameAccountMetadata
 } from '../../utils/gameAccountMetadata.js';
 import {
@@ -73,8 +80,10 @@ export function useDataExportImport({
   const history = useHistoryStore(state => state.history);
   const setHistory = useHistoryStore(state => state.setHistory);
   const setSyncing = useAuthStore(state => state.setSyncing);
+  const analysisAvailability = usePersonalAnalysisStore(state => state.availability);
+  const analysisAccounts = usePersonalAnalysisStore(state => state.owner?.accounts ?? null);
 
-  const { savePoolToCloud, saveHistoryToCloud, loadCloudData } = cloudSync;
+  const { savePoolToCloud, saveHistoryToCloud, refreshPersonalData } = cloudSync;
 
   const [restoredDraftInfo] = useState(() => loadPendingImportDraft());
   const [pendingImport, setPendingImportState] = useState(() => restoredDraftInfo.pendingImport);
@@ -169,16 +178,52 @@ export function useDataExportImport({
 
   const exportByFormat = useCallback(async (scopeOrOptions, formatId) => {
     try {
-      const { buildExportContent, buildExportPayload } = await import('../../utils/dataExport.js');
+      const {
+        buildExportContent,
+        buildExportPayload,
+        normalizeExportOptions,
+      } = await import('../../utils/dataExport.js');
+      const normalizedOptions = normalizeExportOptions(scopeOrOptions, {
+        currentGameUid,
+        defaultFormat: formatId,
+      });
+      const hasAnalysisSnapshot = Boolean(user) && ['ready', 'stale', 'empty'].includes(analysisAvailability);
+      let exportHistory = history;
+
+      if (hasAnalysisSnapshot) {
+        if (analysisAvailability === 'empty') {
+          exportHistory = [];
+        } else {
+          const availableAccounts = Array.isArray(analysisAccounts) ? analysisAccounts : [];
+          const selectedAccountValue = normalizedOptions.gameUid || currentGameUid;
+          const selectedAccounts = normalizedOptions.accountFilter === 'all'
+            ? availableAccounts
+            : availableAccounts.filter((account) => (
+                isGameAccountSelectionMatch(account, selectedAccountValue)
+              ));
+
+          setSyncing(true);
+          try {
+            const result = await loadAllAccountGachaHistoryForAccounts({
+              accounts: selectedAccounts,
+              expectedOwnerId: user.id,
+            });
+            exportHistory = result.history;
+          } finally {
+            setSyncing(false);
+          }
+        }
+      }
+
       await characterCache.load();
       const payload = buildExportPayload({
-        history,
+        history: exportHistory,
         pools: Array.isArray(pools) ? pools : [],
         currentPoolId,
         currentGameUid,
         currentUserId: user?.id || null,
         characterCatalog: characterCache.getAll(),
-        options: scopeOrOptions
+        options: normalizedOptions
       });
       if (payload.history.length === 0) {
         showToast('所选条件下无数据可导出', 'warning');
@@ -192,7 +237,7 @@ export function useDataExportImport({
       showToast(`导出失败：${error?.message || '导出模块加载失败'}`, 'error');
       return false;
     }
-  }, [currentGameUid, currentPoolId, history, pools, showToast, triggerFileDownload, user?.id]);
+  }, [analysisAccounts, analysisAvailability, currentGameUid, currentPoolId, history, pools, setSyncing, showToast, triggerFileDownload, user]);
 
   // 通用导出函数 - JSON
   const handleExportJSON = useCallback((scopeOrOptions) => {
@@ -432,19 +477,18 @@ export function useDataExportImport({
           await saveHistoryToCloud(batch);
         }
 
-        if (typeof loadCloudData === 'function' && user) {
-          const refreshedCloudData = await loadCloudData(user);
-          if (refreshedCloudData) {
-            applyCloudDataToStores(refreshedCloudData, {
-              setPools,
-              switchPool,
-              setHistory,
-              preferredPoolId: currentPoolId,
-              preferredGameUid: preferredImportedGameUid
-            });
-            if (preferredImportedGameUid) {
-              switchGameAccount(preferredImportedGameUid);
-            }
+        if (typeof refreshPersonalData === 'function' && user) {
+          const refreshResult = await refreshPersonalData(user, {
+            kind: 'mutation',
+            reason: 'file_import_complete',
+            preferredPoolId: currentPoolId,
+            preferredGameUid: preferredImportedGameUid,
+          });
+          if (!refreshResult?.ok && !refreshResult?.stale) {
+            throw refreshResult?.error || new Error('导入成功，但云端数据校验失败');
+          }
+          if (preferredImportedGameUid) {
+            switchGameAccount(preferredImportedGameUid);
           }
         }
 
@@ -508,7 +552,7 @@ export function useDataExportImport({
         completedAt,
       }), { locale }));
     }
-  }, [addDurableNotification, pendingImport, pools, history, currentPoolId, loadCloudData, locale, resolvePreferredImportedGameUid, savePoolToCloud, saveHistoryToCloud, setHistory, setPendingImport, setPools, setSyncing, showToast, switchGameAccount, switchPool, user]);
+  }, [addDurableNotification, pendingImport, pools, history, currentPoolId, locale, refreshPersonalData, resolvePreferredImportedGameUid, savePoolToCloud, saveHistoryToCloud, setHistory, setPendingImport, setPools, setSyncing, showToast, switchGameAccount, switchPool, user]);
 
   return {
     pendingImport,

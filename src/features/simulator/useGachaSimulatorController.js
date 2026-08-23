@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createSimulator } from '../../utils/gachaSimulator';
 import { EXTRA_POOL_RULES, WEAPON_POOL_RULES } from '../../constants';
 import { useAuthStore, useHistoryStore, usePoolStore } from '../../stores';
+import { usePersonalGameAccounts } from '../../hooks/app/usePersonalGameAccounts.js';
+import { loadAllAccountGachaHistoryForAccounts } from '../../services/accountGachaDataService.js';
 import { getBootstrapVisiblePools } from '../../services/bootstrapService';
 import { loadAllPoolsForCatalog, loadVisiblePools, mergePoolCollections } from '../../services/poolReadService';
 import {
@@ -216,7 +218,7 @@ export function useGachaSimulatorController() {
   const { t, locale } = useI18n();
   const currentUserId = useAuthStore((state) => state.user?.id || null);
   const history = useHistoryStore((state) => state.history);
-  const getGameAccountsFromHistory = useHistoryStore((state) => state.getGameAccountsFromHistory);
+  const personalGameAccounts = usePersonalGameAccounts();
   const storePools = usePoolStore((state) => state.pools);
   const currentGameUid = usePoolStore((state) => state.currentGameUid);
   const switchGameAccount = usePoolStore((state) => state.switchGameAccount);
@@ -1027,13 +1029,13 @@ export function useGachaSimulatorController() {
   }, []);
 
   const handleInheritRealState = useCallback(
-    (selectedAccount = null) => {
+    async (selectedAccount = null) => {
       if (!currentSimPoolId || !currentSimPool) {
         showToastMessage(t('simulator.toast.noInheritablePool'));
         return;
       }
 
-      const availableAccounts = getGameAccountsFromHistory();
+      const availableAccounts = personalGameAccounts;
       const resolvedAccount =
         selectedAccount ||
         (currentGameUid ? availableAccounts.find((account) => isGameAccountSelectionMatch(account, currentGameUid)) : null) ||
@@ -1051,8 +1053,22 @@ export function useGachaSimulatorController() {
         currentUserId,
         currentGameUid: selectedAccountValue,
       });
+      let inheritanceHistory = history;
+      if (currentUserId) {
+        try {
+          const loaded = await loadAllAccountGachaHistoryForAccounts({
+            accounts: [resolvedAccount],
+            expectedOwnerId: currentUserId,
+          });
+          inheritanceHistory = loaded.history;
+        } catch (error) {
+          showToastMessage(error?.message || t('simulator.toast.noRealHistory', { name: selectedAccountName }));
+          return;
+        }
+      }
+
       const inheritedSnapshot = buildInheritedSimulatorSnapshot({
-        history,
+        history: inheritanceHistory,
         realPools,
         currentGameUid: selectedAccountValue,
         currentUserId,
@@ -1145,8 +1161,8 @@ export function useGachaSimulatorController() {
       currentSimPool,
       currentSimPoolId,
       currentUserId,
-      getGameAccountsFromHistory,
       history,
+      personalGameAccounts,
       poolCharactersList,
       realPools,
       resourceSettings,

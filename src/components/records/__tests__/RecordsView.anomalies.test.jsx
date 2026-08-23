@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,6 +12,7 @@ const harness = vi.hoisted(() => ({
   setVisibleHistoryCount: vi.fn(),
   loadHistoryAnomalies: vi.fn(),
   updateHistoryAnomaly: vi.fn(),
+  historyPage: null,
 }));
 
 vi.mock('../../../stores', () => ({
@@ -26,6 +28,7 @@ vi.mock('../../../stores', () => ({
 vi.mock('../../../hooks', () => ({
   useCurrentPoolData: () => harness.poolData,
   useCurrentPoolGroupedHistory: () => ({ groupedHistory: [], filteredGroupedHistory: [] }),
+  useScopedHistoryPages: () => harness.historyPage,
 }));
 
 vi.mock('../../BatchCard', () => ({ default: () => null }));
@@ -45,6 +48,7 @@ vi.mock('../../../i18n/index.js', () => ({
         'records.anomaly.postpone': '24 小时后提醒',
       })[key] || key,
     formatNumber: String,
+    isEnglish: false,
     locale: 'zh-CN',
   }),
 }));
@@ -103,6 +107,57 @@ describe('RecordsView history anomalies', () => {
     setPool();
     harness.loadHistoryAnomalies.mockResolvedValue([makeAnomaly()]);
     harness.updateHistoryAnomaly.mockResolvedValue({});
+    harness.historyPage = {
+      phase: 'ready',
+      hasMore: false,
+      total: 1,
+      error: null,
+      loadedCount: 1,
+      loadMore: vi.fn(),
+      retry: vi.fn(),
+    };
+  });
+
+  it('分页加载中、失败和加载更多状态不会误显示空记录', () => {
+    harness.loadHistoryAnomalies.mockImplementation(() => new Promise(() => {}));
+    const { rerender } = render(
+      <RecordsView onEdit={vi.fn()} onDeleteItem={vi.fn()} onDeleteGroup={vi.fn()} />
+    );
+
+    harness.historyPage = {
+      ...harness.historyPage,
+      phase: 'loading',
+      total: null,
+      loadedCount: 0,
+    };
+    rerender(<RecordsView onEdit={vi.fn()} onDeleteItem={vi.fn()} onDeleteGroup={vi.fn()} />);
+    expect(screen.getByText('正在加载记录…')).toBeInTheDocument();
+    expect(screen.queryByText('records.empty.all')).not.toBeInTheDocument();
+
+    harness.historyPage = {
+      ...harness.historyPage,
+      phase: 'error',
+      error: new Error('网络暂时不可用'),
+      retry: vi.fn(),
+    };
+    rerender(<RecordsView onEdit={vi.fn()} onDeleteItem={vi.fn()} onDeleteGroup={vi.fn()} />);
+    expect(screen.getByText('网络暂时不可用')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    expect(harness.historyPage.retry).toHaveBeenCalledTimes(1);
+
+    harness.historyPage = {
+      ...harness.historyPage,
+      phase: 'ready',
+      error: null,
+      loadedCount: 100,
+      total: 150,
+      hasMore: true,
+      loadMore: vi.fn(),
+    };
+    rerender(<RecordsView onEdit={vi.fn()} onDeleteItem={vi.fn()} onDeleteGroup={vi.fn()} />);
+    expect(screen.getByText('已加载 100 / 150')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '加载更多' }));
+    expect(harness.historyPage.loadMore).toHaveBeenCalledTimes(1);
   });
 
   it('只在当前账号、区服和卡池显示提醒，并把精确记录交给编辑删除', async () => {

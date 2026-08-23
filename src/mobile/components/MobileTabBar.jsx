@@ -3,11 +3,19 @@ import { Gamepad2, Globe, Home, ListFilter, User } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getMobilePathForTab, getMobileTabFromPath } from '../../constants/appRoutes';
 import { useI18n } from '../../i18n/index.js';
+import { preloadRouteOnIntent } from '../../services/appWarmupService.js';
 
-function MobileTabBar() {
+const MOBILE_PRELOAD_ROUTE = {
+  overview: 'mobileOverview',
+  details: 'mobileDetails',
+  stats: 'mobileStats',
+  simulator: 'mobileSimulator',
+};
+
+function MobileTabBar({ activeTab: controlledActiveTab, onSelect }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const activeTab = getMobileTabFromPath(location.pathname);
+  const activeTab = controlledActiveTab || getMobileTabFromPath(location.pathname);
   const { t } = useI18n();
   const tabs = [
     { id: 'home', label: t('nav.home'), icon: Home },
@@ -28,7 +36,20 @@ function MobileTabBar() {
             <button
               key={tab.id}
               type="button"
-              onClick={() => navigate(getMobilePathForTab(tab.id))}
+              onClick={() => {
+                if (typeof onSelect === 'function') {
+                  onSelect(tab.id);
+                } else {
+                  navigate(getMobilePathForTab(tab.id));
+                }
+              }}
+              onPointerDown={() => {
+                void preloadRouteOnIntent(MOBILE_PRELOAD_ROUTE[tab.id] || tab.id);
+              }}
+              onFocus={() => {
+                void preloadRouteOnIntent(MOBILE_PRELOAD_ROUTE[tab.id] || tab.id);
+              }}
+              aria-current={isActive ? 'page' : undefined}
               className={`flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl transition-all duration-300 touch-feedback ${
                 isActive
                   ? '-translate-y-1 text-amber-600 dark:text-ef-yellow'

@@ -46,6 +46,21 @@ export function clearSiteSessionCache() {
   pendingSiteSessionSyncSupabase = false;
 }
 
+export function hasKnownAuthenticatedSiteSession(now = Date.now()) {
+  if (cachedSiteSession?.authenticated !== true) {
+    return false;
+  }
+
+  const expiresAt = new Date(cachedSiteSession?.session?.expiresAt || 0).getTime();
+  return !Number.isFinite(expiresAt) || expiresAt <= 0 || expiresAt > now;
+}
+
+export function getKnownSiteSessionUserId(now = Date.now()) {
+  return hasKnownAuthenticatedSiteSession(now)
+    ? String(cachedSiteSession?.user?.id || '')
+    : '';
+}
+
 function getCachedSiteSession({ syncSupabase = true } = {}) {
   if (
     cachedSiteSession
@@ -238,6 +253,8 @@ export default {
   bootstrapSiteSessionFromSupabaseToken,
   clearSiteSessionCache,
   getCurrentSiteSession,
+  getKnownSiteSessionUserId,
+  hasKnownAuthenticatedSiteSession,
   logoutSiteSession,
   revokeAllSiteSessions,
   syncSiteSessionToSupabase,

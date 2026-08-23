@@ -91,6 +91,25 @@ function readStoredUiValue(key) {
   return saved;
 }
 
+function getOwnerScopedStorageKey(key, ownerId) {
+  const normalizedOwnerId = String(ownerId || '').trim();
+  return normalizedOwnerId ? `${key}:${normalizedOwnerId}` : key;
+}
+
+function writeOwnerScopedUiValue(key, value) {
+  const ownerId = getCurrentUserId();
+  if (!ownerId) {
+    return;
+  }
+
+  const scopedKey = getOwnerScopedStorageKey(key, ownerId);
+  if (value === null || value === undefined || value === '') {
+    removeStorageValue(scopedKey, { raw: true });
+  } else {
+    writeStorageValue(scopedKey, value, { raw: true });
+  }
+}
+
 /**
  * 卡池状态管理 V3
  *
@@ -114,6 +133,21 @@ const usePoolStore = create((set, get) => ({
   // ========== 卡池搜索 ==========
   poolSearchQuery: '',
   setPoolSearchQuery: (query) => set({ poolSearchQuery: query }),
+
+  /**
+   * 用户切换时恢复该 owner 自己的 UI 范围；没有历史选择时明确
+   * 清空，避免沿用上一个站点账号的游戏 UID 或卡池。
+   */
+  restoreOwnerSelection: (ownerId) => {
+    const currentPoolId = readStoredUiValue(
+      getOwnerScopedStorageKey(STORAGE_KEYS.CURRENT_POOL_ID, ownerId)
+    );
+    const currentGameUid = readStoredUiValue(
+      getOwnerScopedStorageKey(STORAGE_KEYS.CURRENT_GAME_UID, ownerId)
+    );
+    set({ currentPoolId, currentGameUid });
+    return { currentPoolId, currentGameUid };
+  },
 
   // ========== 操作方法 ==========
 
@@ -150,6 +184,7 @@ const usePoolStore = create((set, get) => ({
   switchPool: (poolId) => {
     set({ currentPoolId: poolId });
     writeStorageValue(STORAGE_KEYS.CURRENT_POOL_ID, poolId, { raw: true });
+    writeOwnerScopedUiValue(STORAGE_KEYS.CURRENT_POOL_ID, poolId);
   },
 
   /**
@@ -159,6 +194,7 @@ const usePoolStore = create((set, get) => ({
     const id = POOL_GROUP_PREFIX + groupType;
     set({ currentPoolId: id });
     writeStorageValue(STORAGE_KEYS.CURRENT_POOL_ID, id, { raw: true });
+    writeOwnerScopedUiValue(STORAGE_KEYS.CURRENT_POOL_ID, id);
   },
 
   /**
@@ -171,8 +207,10 @@ const usePoolStore = create((set, get) => ({
 
     if (normalizedUid === null) {
       removeStorageValue(STORAGE_KEYS.CURRENT_GAME_UID, { raw: true });
+      writeOwnerScopedUiValue(STORAGE_KEYS.CURRENT_GAME_UID, null);
     } else {
       writeStorageValue(STORAGE_KEYS.CURRENT_GAME_UID, normalizedUid, { raw: true });
+      writeOwnerScopedUiValue(STORAGE_KEYS.CURRENT_GAME_UID, normalizedUid);
     }
   },
 

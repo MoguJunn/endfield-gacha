@@ -1,24 +1,25 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback } from 'react';
 import MobileLayout from './layouts/MobileLayout';
 import ErrorBoundary from '../components/ErrorBoundary';
-import MobileLoadingScreen from './components/MobileLoadingScreen';
+import AppStartupGate from '../components/app/AppStartupGate.jsx';
+import { Toast } from '../components/ui';
 import { useCloudSync, useAppInitialization, useAuthenticatedSessionSync, useNotificationBadges } from '../hooks/app';
 import { useToast } from '../hooks';
 import { ThemeProvider } from '../contexts/ThemeContext';
+import { useAuthStore } from '../stores';
 
 /**
  * 移动端应用入口
  * 与桌面端 App.jsx + GachaAnalyzer.jsx 保持一致的初始化逻辑
  */
-function MobileApp() {
-  const [isLoading, setIsLoading] = useState(true);
-
+function MobileApplicationShell() {
   // 初始化 Toast（用于 useCloudSync）
-  const { showToast } = useToast();
+  const { toasts, showToast, removeToast } = useToast();
+  const user = useAuthStore((state) => state.user);
 
-  // 云同步 Hook - 提供 loadCloudData 函数
-  const { loadCloudData, loadPublicPools } = useCloudSync({ showToast });
-  const { applySiteSession } = useAuthenticatedSessionSync({ loadCloudData });
+  // 云同步 Hook - 统一通过全局协调器刷新个人数据
+  const { refreshPersonalData, loadPublicPools } = useCloudSync({ showToast });
+  const { applySiteSession } = useAuthenticatedSessionSync({ refreshPersonalData });
   const handleOAuthSessionSynced = useCallback(async (siteSession) => {
     await applySiteSession(siteSession, {
       source: 'oauth_callback',
@@ -27,20 +28,41 @@ function MobileApp() {
   }, [applySiteSession]);
 
   // 应用初始化 Hook - 处理会话、加载云端数据到 stores
-  useAppInitialization({ loadCloudData, loadPublicPools });
+  useAppInitialization({ refreshPersonalData, loadPublicPools });
 
   // 通知徽标 Hook - 加载公告与工单等
   useNotificationBadges();
+  const retryPersonalData = useCallback(async () => {
+    if (!user?.id) {
+      return;
+    }
+    const result = await refreshPersonalData(user, {
+      kind: 'explicit',
+      reason: 'mobile_retry',
+    });
+    if (!result?.ok && !result?.stale) {
+      showToast(result?.error?.message || '个人数据刷新失败', 'error');
+    }
+  }, [refreshPersonalData, showToast, user]);
 
+  return (
+    <>
+      <MobileLayout
+        onOAuthSessionSynced={handleOAuthSessionSynced}
+        onRetryPersonalData={retryPersonalData}
+      />
+      <Toast toasts={toasts} onRemove={removeToast} />
+    </>
+  );
+}
+
+function MobileApp() {
   return (
     <ThemeProvider>
       <ErrorBoundary>
-        {isLoading && (
-          <MobileLoadingScreen onComplete={() => setIsLoading(false)} />
-        )}
-        <div className={isLoading ? 'hidden' : 'block'}>
-          <MobileLayout onOAuthSessionSynced={handleOAuthSessionSynced} />
-        </div>
+        <AppStartupGate isMobile>
+          <MobileApplicationShell />
+        </AppStartupGate>
       </ErrorBoundary>
     </ThemeProvider>
   );

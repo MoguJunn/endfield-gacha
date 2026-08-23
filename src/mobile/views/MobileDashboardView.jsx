@@ -6,7 +6,7 @@ import {
   BarChart3, LayoutGrid, Share2, Copy, Download, Sun, Moon, Monitor, Loader2, Database, RotateCcw, ChevronDown
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
-import { useDashboardViewState, useToast } from '../../hooks';
+import { useCloudSync, useDashboardViewState, useToast } from '../../hooks';
 import { RARITY_CONFIG } from '../../constants';
 import { useTheme } from '../../contexts/ThemeContext';
 import { DistributionAreaChart, RainbowGradientDefs } from '../../components/charts';
@@ -42,8 +42,7 @@ import {
 import { copyToClipboard } from '../../utils/simulatorStorage';
 import useShareActionFeedback from '../../hooks/useShareActionFeedback';
 import { useI18n } from '../../i18n/index.js';
-import { compareHistoryTimelineDesc } from '../../utils/historyTimelineSort.js';
-import { localizeEntityName, localizeHistoryItemName, localizePoolFeaturedList, localizePoolFeaturedName, localizePoolName } from '../../utils/gameDataI18n.js';
+import { localizeEntityName, localizePoolFeaturedList, localizePoolFeaturedName, localizePoolName } from '../../utils/gameDataI18n.js';
 import appLogger from '../../utils/appLogger.js';
 import {
   MobileStatusBadge
@@ -52,12 +51,13 @@ import MobileAuthRequiredView from '../components/MobileAuthRequiredView.jsx';
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from '../../utils/storageUtils.js';
 import { localizeDashboardChartItems } from '../../utils/dashboardChartLabels.js';
 import { normalizeShareThemeMode, resolveShareThemeMode } from '../../utils/shareThemeMode.js';
-import { useHistoryStore, usePoolStore } from '../../stores';
+import { useHistoryPageStore, useHistoryStore, usePoolStore } from '../../stores';
 import {
   deleteAccountGachaRecord,
-  loadAccountGachaData,
   updateAccountGachaRecord,
 } from '../../services/accountGachaDataService.js';
+
+const MobileDetailedLogList = React.lazy(() => import('../components/MobileDetailedLogList.jsx'));
 
 const PIE_LABEL_MIN_PERCENT = 0.05;
 const PIE_LABEL_RADIAN = Math.PI / 180;
@@ -140,10 +140,10 @@ function MobileDashboardView() {
   const currentPoolId = usePoolStore(state => state.currentPoolId);
   const switchPool = usePoolStore(state => state.switchPool);
   const pools = usePoolStore(state => state.pools);
-  const setHistory = useHistoryStore(state => state.setHistory);
   const { isDark } = useTheme();
-  const { t, formatNumber, isEnglish, locale, formatDateTime } = useI18n();
+  const { t, formatNumber, isEnglish, locale } = useI18n();
   const { toasts, showToast, removeToast } = useToast();
+  const { refreshPersonalData } = useCloudSync({ showToast });
   const shareCardRef = React.useRef(null);
   const [clipboardImageWarmState, setClipboardImageWarmState] = React.useState('idle');
   const [clipboardImageReadyKey, setClipboardImageReadyKey] = React.useState(null);
@@ -175,6 +175,16 @@ function MobileDashboardView() {
   });
   const resolvedShareTheme = React.useMemo(() => resolveShareThemeMode(shareThemeMode, isDark), [isDark, shareThemeMode]);
   const [showTimelineFiveStarDrops, setShowTimelineFiveStarDrops] = React.useState(true);
+  const loadedRawHistoryCount = useHistoryStore((state) => (
+    Array.isArray(state.history) ? state.history.length : 0
+  ));
+  const historyPagePhase = useHistoryPageStore((state) => state.phase);
+  const historyPageHasMore = useHistoryPageStore((state) => state.hasMore);
+  const historyPageTotal = useHistoryPageStore((state) => state.total);
+  const hasCompleteRawHistory = historyPagePhase === 'ready'
+    && historyPageHasMore === false
+    && historyPageTotal !== null
+    && loadedRawHistoryCount >= historyPageTotal;
   const {
     user,
     charViewMode,
@@ -207,7 +217,10 @@ function MobileDashboardView() {
     getProgressClass,
     getCharacterAvatar,
     dashboardResourceSummary,
-    resourceSummaryVariant
+    resourceSummaryVariant,
+    isAnalysisBacked,
+    snapshotSplitOverviewStats,
+    snapshotTimelineSections
   } = useDashboardViewState();
   React.useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
@@ -280,24 +293,36 @@ function MobileDashboardView() {
       allLimitedHistory
     });
   }, [allLimitedHistory, currentPool?.isGroupMode, normalizedPoolHistory, selectedPools]);
-  const timelineSections = React.useMemo(() => buildDashboardTimelineSections({
-    currentPool,
-    currentPoolHistory: normalizedPoolHistory,
-    groupedHistory,
-    selectedPools,
-    crossPoolPityMap,
-    isGroupMode,
-    isAllPoolsOverview,
-    effectivePity,
-    analysisPity,
-    overviewAnalysisPityMap,
-    overviewPoolFilter: 'all',
-    hasMergedAccountView,
-    locale
-  }), [analysisPity, crossPoolPityMap, currentPool, effectivePity, groupedHistory, hasMergedAccountView, isAllPoolsOverview, isGroupMode, locale, normalizedPoolHistory, overviewAnalysisPityMap, selectedPools]);
+  const timelineSections = React.useMemo(() => {
+    if (isAnalysisBacked && Array.isArray(snapshotTimelineSections)) {
+      return snapshotTimelineSections;
+    }
+    if (isAnalysisBacked && !hasCompleteRawHistory) {
+      return [];
+    }
+    return buildDashboardTimelineSections({
+      currentPool,
+      currentPoolHistory: normalizedPoolHistory,
+      groupedHistory,
+      selectedPools,
+      crossPoolPityMap,
+      isGroupMode,
+      isAllPoolsOverview,
+      effectivePity,
+      analysisPity,
+      overviewAnalysisPityMap,
+      overviewPoolFilter: 'all',
+      hasMergedAccountView,
+      locale
+    });
+  }, [analysisPity, crossPoolPityMap, currentPool, effectivePity, groupedHistory, hasCompleteRawHistory, hasMergedAccountView, isAllPoolsOverview, isAnalysisBacked, isGroupMode, locale, normalizedPoolHistory, overviewAnalysisPityMap, selectedPools, snapshotTimelineSections]);
   const overviewSplitStats = React.useMemo(() => {
     if (!isAllPoolsOverview) {
       return null;
+    }
+
+    if (isAnalysisBacked && snapshotSplitOverviewStats) {
+      return snapshotSplitOverviewStats;
     }
 
     return buildDashboardOverviewSplitStats({
@@ -305,24 +330,26 @@ function MobileDashboardView() {
       selectedPools,
       includeFreePullsInStats
     });
-  }, [includeFreePullsInStats, isAllPoolsOverview, normalizedPoolHistory, selectedPools]);
-  const detailedLogEntries = React.useMemo(() => (
-    [...(normalizedPoolHistory || [])]
-      .sort(compareHistoryTimelineDesc)
-      .map((item, index) => ({
-        id: item.id || `${item.poolId || item.pool_id || 'pool'}-${index}`,
-        name: localizeHistoryItemName(item, { locale, fallback: t('common.unknown') }),
-        rarity: Number(item.rarity || 0),
-        dateLabel: formatDateTime(item.timestamp || item.created_at, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', includeYear: false }, t('common.timeUnknown')),
-        pity: item.pity ?? item.pity_count ?? item.pityCount ?? item.pull_count ?? item.pullCount ?? null,
-        isUp: !(item.isStandard ?? item.is_standard ?? false),
-        isFree: item.isFree === true || item.is_free === true
-      }))
-  ), [formatDateTime, locale, normalizedPoolHistory, t]);
+  }, [
+    includeFreePullsInStats,
+    isAllPoolsOverview,
+    isAnalysisBacked,
+    normalizedPoolHistory,
+    selectedPools,
+    snapshotSplitOverviewStats
+  ]);
   const reloadMobileHistory = React.useCallback(async () => {
-    const result = await loadAccountGachaData();
-    setHistory(Array.isArray(result?.history) ? result.history : []);
-  }, [setHistory]);
+    useHistoryPageStore.getState().invalidate('mobile_history_mutation');
+    useHistoryStore.getState().setHistory([]);
+    const result = await refreshPersonalData(user, {
+      kind: 'mutation',
+      reason: 'mobile_history_anomaly_mutation',
+    });
+    if (!result.ok) {
+      throw result.error || new Error('个人抽卡数据刷新失败');
+    }
+    return result;
+  }, [refreshPersonalData, user]);
   const handleMobileAnomalyUpdate = React.useCallback(async (itemOrId, changes, reason = '') => {
     const record = typeof itemOrId === 'object'
       ? itemOrId
@@ -878,7 +905,15 @@ function MobileDashboardView() {
           </div>
 
           {hasDashboardShareData ? (
-            <div className="mt-4 border-t border-zinc-200 dark:border-zinc-800 pt-3">
+            <details className="group mt-4 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between text-xs font-bold text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:text-zinc-300">
+                <span className="flex items-center gap-2">
+                  <Share2 size={14} aria-hidden="true" />
+                  {t('dashboard.share.title', {}, '分享与导出')}
+                </span>
+                <ChevronDown size={16} aria-hidden="true" className="transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="pt-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-zinc-500">{t('dashboard.share.theme')}</div>
@@ -974,7 +1009,8 @@ function MobileDashboardView() {
               {shareActionFeedback.phase !== 'idle' ? (
                 <ShareActionStatus feedback={shareActionFeedback} className="mt-3" />
               ) : null}
-            </div>
+              </div>
+            </details>
           ) : null}
         </div>
       </div>
@@ -999,14 +1035,19 @@ function MobileDashboardView() {
           </button>
       </div>
 
-      <ResourceSummaryPanel
+      <MobileChartContainer
         title={resourceSummaryTitle}
-        resources={dashboardResourceSummary}
-        variant={resourceSummaryVariant}
-        compact={true}
-        mobile={true}
+        defaultExpanded={false}
         className="mx-4 mb-4"
-      />
+      >
+        <ResourceSummaryPanel
+          title={resourceSummaryTitle}
+          resources={dashboardResourceSummary}
+          variant={resourceSummaryVariant}
+          compact={true}
+          mobile={true}
+        />
+      </MobileChartContainer>
 
       {/* 保底进度（聚合模式下隐藏） */}
       {!isGroupMode && !hasMergedAccountView && (
@@ -1106,7 +1147,7 @@ function MobileDashboardView() {
       {stats.total > 0 && (
         <div className="space-y-2">
           {/* 饼图 - 分布概览 */}
-          <MobileChartContainer title={t('dashboard.chart.distribution')} defaultExpanded={true} className="mb-4 mx-4">
+          <MobileChartContainer title={t('dashboard.chart.distribution')} defaultExpanded={false} className="mb-4 mx-4">
             <div className="h-52 w-full pt-2">
               {stats.chartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={180}>
@@ -1153,7 +1194,7 @@ function MobileDashboardView() {
 
           {/* 面积图 - 6星出货趋势 */}
           {stats.pityStats.history.length > 0 && (
-            <MobileChartContainer title={t('dashboard.chart.trend')} defaultExpanded={true} className="mb-4 mx-4">
+            <MobileChartContainer title={t('dashboard.chart.trend')} defaultExpanded={false} className="mb-4 mx-4">
               <div className="h-48 w-full pt-2">
                 <DistributionAreaChart
                   data={stats.pityStats.distribution}
@@ -1214,7 +1255,7 @@ function MobileDashboardView() {
 
       {/* 特殊机制进度（聚合模式下隐藏） */}
       {!isGroupMode && (
-      <MobileChartContainer title={t('dashboard.analysis.specialProgress')} defaultExpanded={true} className="mb-4 mx-4">
+      <MobileChartContainer title={t('dashboard.analysis.specialProgress')} defaultExpanded={false} className="mb-4 mx-4">
         <div className="space-y-3 pt-2">
           {/* 限定池特殊进度 */}
           {isLimited && (
@@ -1405,7 +1446,16 @@ function MobileDashboardView() {
         ) : null}
       >
         {characterStats.length > 0 ? (
-          charViewMode === 'waterfall' ? (
+          charViewMode === 'waterfall'
+            && isAnalysisBacked
+            && !hasCompleteRawHistory
+            && !Array.isArray(snapshotTimelineSections) ? (
+            <div className="border border-zinc-200 bg-zinc-50 px-4 py-8 text-center text-sm text-slate-500 dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400">
+              {isEnglish
+                ? 'The complete timeline is available after all detailed record pages are loaded.'
+                : '完整时间线将在详细记录全部分页加载后显示。'}
+            </div>
+          ) : charViewMode === 'waterfall' ? (
             <div className="pt-2">
               <PoolTimelinePanel
                 currentPool={currentPool}
@@ -1565,6 +1615,8 @@ function MobileDashboardView() {
         <button
           type="button"
           onClick={() => setShowDetailedLogs((value) => !value)}
+          aria-expanded={showDetailedLogs}
+          aria-controls="mobile-detailed-logs-content"
           className="relative z-10 flex w-full scroll-mb-40 items-center justify-between border-b border-zinc-200/90 bg-zinc-50/85 p-4 text-slate-700 transition-colors hover:text-slate-900 dark:border-zinc-800 dark:bg-zinc-900/45 dark:text-zinc-300 dark:hover:text-white"
         >
           <div className="flex min-h-7 items-center gap-2 text-[12px] font-black tracking-[0.08em]">
@@ -1573,7 +1625,7 @@ function MobileDashboardView() {
           <ChevronDown size={14} className={`transition-transform ${showDetailedLogs ? 'rotate-180' : ''}`} />
         </button>
         {showDetailedLogs ? (
-          <div className="relative z-10 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <div id="mobile-detailed-logs-content" className="relative z-10 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
             <HistoryAnomalyReview
               history={normalizedPoolHistory}
               currentPool={currentPool}
@@ -1582,38 +1634,12 @@ function MobileDashboardView() {
               onDeleteItem={setDeleteAnomalyRecord}
               className="mb-3"
             />
-            {detailedLogEntries.length > 0 ? (
-              <div className="space-y-2">
-                {detailedLogEntries.map((entry) => (
-                  <div key={entry.id} className="mobile-ux-card-inset flex items-center gap-3 px-3 py-2.5 text-left">
-                    <div className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border font-mono text-xs font-black ${
-                      entry.rarity >= 6
-                        ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300'
-                        : entry.rarity === 5
-                          ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-300'
-                          : 'border-zinc-200 bg-white text-slate-500 dark:border-zinc-800 dark:bg-[#111] dark:text-zinc-400'
-                    }`}>
-                      {entry.rarity > 0 ? `${entry.rarity}★` : '--'}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-bold text-slate-900 dark:text-white break-words">
-                        {entry.name}
-                      </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] font-mono text-slate-500 dark:text-zinc-500">
-                        <span>{entry.dateLabel}</span>
-                        {entry.pity !== null ? <span>{t('dashboard.analysis.currentPity', { count: entry.pity })}</span> : null}
-                        {entry.isFree ? <span className="text-blue-600 dark:text-blue-400">{t('dashboard.timeline.badge.free')}</span> : null}
-                        {!entry.isFree && entry.rarity >= 6 ? <span className={entry.isUp ? 'text-amber-600 dark:text-amber-400' : 'text-rose-600 dark:text-rose-400'}>{entry.isUp ? t('dashboard.timeline.badge.up') : t('dashboard.timeline.badge.offrate')}</span> : null}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-[1rem] border border-dashed border-zinc-200 bg-zinc-50/80 px-3 py-4 text-center text-[11px] font-mono text-slate-500 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-500">
-                {t('dashboard.logsEmpty')}
-              </div>
-            )}
+            <React.Suspense fallback={<div className="p-4 text-center text-xs text-zinc-500">{t('common.loading')}</div>}>
+              <MobileDetailedLogList
+                history={normalizedPoolHistory}
+                onEdit={setEditAnomalyRecord}
+              />
+            </React.Suspense>
           </div>
         ) : null}
       </div>

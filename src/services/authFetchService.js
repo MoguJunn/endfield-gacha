@@ -1,5 +1,9 @@
 import { supabase } from '../supabaseClient.js';
-import { getCurrentSiteSession } from './siteSessionService.js';
+import {
+  getCurrentSiteSession,
+  getKnownSiteSessionUserId,
+  hasKnownAuthenticatedSiteSession,
+} from './siteSessionService.js';
 
 async function clearInvalidSupabaseSession() {
   await supabase?.auth?.signOut?.({ scope: 'local' }).catch(() => null);
@@ -168,6 +172,26 @@ export async function getAuthFetchHeaders(baseHeaders = {}, {
   };
 }
 
+export async function getSameOriginAuthHeaders(baseHeaders = {}, options = {}) {
+  if (hasKnownAuthenticatedSiteSession()) {
+    return {
+      headers: {
+        ...baseHeaders,
+      },
+      accessToken: null,
+      credentialSource: 'site_session',
+      credentialOwnerId: getKnownSiteSessionUserId(),
+    };
+  }
+
+  const result = await getAuthFetchHeaders(baseHeaders, options);
+  return {
+    ...result,
+    credentialSource: result.accessToken ? 'supabase' : 'cookie',
+    credentialOwnerId: null,
+  };
+}
+
 export async function buildAuthenticatedFetchInit(init = {}, options = {}) {
   const { headers } = await getAuthFetchHeaders(init.headers || {}, options);
   return {
@@ -223,6 +247,7 @@ export default {
   buildAuthenticatedFetchInit,
   getAuthFetchHeaders,
   getCurrentAuthenticatedUser,
+  getSameOriginAuthHeaders,
   getSupabaseAccessToken,
   getValidatedSupabaseSession,
   withAuthenticatedSupabaseRequest,

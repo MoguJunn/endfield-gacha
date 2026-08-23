@@ -1,12 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Download, Upload, User, Search, X, ChevronDown, HelpCircle } from 'lucide-react';
-import { usePoolStore, useAuthStore, useHistoryStore } from '../../stores';
 import ImportManager from '../../features/import/ImportManager';
 import { getImportAnomalyCount } from '../../features/import/importCompletionPolicy.js';
 import PoolGroupCardRail from './PoolGroupCardRail';
-import { buildPoolSelectorGroups, getPoolGroupId } from '../../utils/poolSelectorDisplay';
-import { getPreferredPool } from '../../utils/poolSelectionUtils';
+import { getPoolGroupId } from '../../utils/poolSelectorDisplay';
 import {
   formatFreshnessAbsolute,
   formatFreshnessRelative,
@@ -23,7 +21,7 @@ import {
   isGameAccountSelectionMatch,
   localizeGameAccountServerTag,
 } from '../../utils/gameAccountMetadata.js';
-import { filterHistoryForEffectiveGameUid, resolveEffectiveGameUid } from '../../utils/accountScopeUtils.js';
+import { usePoolScopeSelectorState } from '../../hooks/app/usePoolScopeSelectorState.js';
 
 function getFreshnessToneClasses(tone) {
   switch (tone) {
@@ -82,16 +80,6 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
   const { t, locale, formatNumber } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
-  // 从 stores 获取状态
-  const pools = usePoolStore(state => state.pools);
-  const currentPoolId = usePoolStore(state => state.currentPoolId);
-  const switchPool = usePoolStore(state => state.switchPool);
-  const currentGameUid = usePoolStore(state => state.currentGameUid);
-  const switchGameAccount = usePoolStore(state => state.switchGameAccount);
-  const history = useHistoryStore(state => state.history);
-  const getGameAccountsFromHistory = useHistoryStore(state => state.getGameAccountsFromHistory);
-
-  const user = useAuthStore(state => state.user);
 
   // UI状态
   const [showImportManager, setShowImportManager] = useState(false);
@@ -99,65 +87,29 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   const [showAccountHelp, setShowAccountHelp] = useState(false);
   const [hideZeroPullPools, setHideZeroPullPools] = useState(true);
-
-  // 获取所有游戏账号（从历史记录）
-  const gameAccounts = useMemo(() => {
-    void history;
-    return getGameAccountsFromHistory();
-  }, [history, getGameAccountsFromHistory]); // 依赖history而不是pools
-
-  const effectiveGameUid = useMemo(() => resolveEffectiveGameUid({
-    currentGameUid,
+  const {
+    user,
+    pools,
+    currentPoolId,
+    switchPool,
+    switchToPoolGroup,
+    switchGameAccount,
     gameAccounts,
-    historyRecords: history,
-  }), [currentGameUid, gameAccounts, history]);
-
-  // 根据当前有效账号过滤历史记录；跨账号汇总入口重开前不做隐式合并分析。
-  const filteredHistory = useMemo(() => (
-    filterHistoryForEffectiveGameUid(history, effectiveGameUid)
-  ), [effectiveGameUid, history]);
-
-  // 直接使用所有卡池（不再按账号筛选）
-  const filteredPools = pools;
-
-  // 计算每个卡池的抽数（根据当前账号过滤）
-  const poolPullCounts = useMemo(() => {
-    const counts = {};
-    filteredHistory.forEach(h => {
-      counts[h.poolId] = (counts[h.poolId] || 0) + 1;
-    });
-    return counts;
-  }, [filteredHistory]);
-
-  const zeroPullPoolCount = useMemo(() => (
-    filteredPools.filter((pool) => (poolPullCounts[pool.id] || 0) === 0).length
-  ), [filteredPools, poolPullCounts]);
-
-  const selectorPools = useMemo(() => (
-    filteredPools.filter((pool) => (
-      !hideZeroPullPools ||
-      (poolPullCounts[pool.id] || 0) > 0 ||
-      pool.id === currentPoolId
-    ))
-  ), [currentPoolId, filteredPools, hideZeroPullPools, poolPullCounts]);
-
-  // 按类型分组并排序的卡池
-  const sortedPoolsWithGroups = useMemo(() => {
-    return buildPoolSelectorGroups({
-      pools: selectorPools,
-      poolPullCounts,
-      searchQuery,
-      locale,
-    });
-  }, [locale, poolPullCounts, searchQuery, selectorPools]);
-
+    effectiveGameUid,
+    filteredHistory,
+    zeroPullPoolCount,
+    selectorPools,
+    groupedPools: sortedPoolsWithGroups,
+    totalPulls,
+    showOverviewOptions,
+  } = usePoolScopeSelectorState({
+    locale,
+    searchQuery,
+    hideZeroPullPools,
+  });
   const totalPools = pools.length;
   const visiblePools = selectorPools.length;
-  const totalPulls = Object.values(poolPullCounts).reduce((a, b) => a + b, 0);
   const allOverviewId = getPoolGroupId('all');
-  const showOverviewOptions = Boolean(effectiveGameUid);
-
-  const switchToPoolGroup = usePoolStore(state => state.switchToPoolGroup);
 
   const currentAccount = useMemo(() => {
     if (effectiveGameUid) {
@@ -214,31 +166,6 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
     return searchParams.get('import') === 'open';
   }, [location.search]);
   const isImportManagerOpen = showImportManager || importRequestedByQuery;
-
-  useEffect(() => {
-    if (!effectiveGameUid) {
-      return;
-    }
-
-    if (currentGameUid !== effectiveGameUid) {
-      switchGameAccount(effectiveGameUid);
-    }
-  }, [currentGameUid, effectiveGameUid, switchGameAccount]);
-
-  useEffect(() => {
-    if (showOverviewOptions || !isPoolGroupId(currentPoolId)) {
-      return;
-    }
-
-    const fallbackPool = getPreferredPool(filteredPools, {
-      preferredPoolId: null,
-      includeDefaultPool: true
-    });
-
-    if (fallbackPool?.id) {
-      switchPool(fallbackPool.id);
-    }
-  }, [currentPoolId, filteredPools, showOverviewOptions, switchPool]);
 
   const closeImportManager = useCallback(() => {
     setShowImportManager(false);
