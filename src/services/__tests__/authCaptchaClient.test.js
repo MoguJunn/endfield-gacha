@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildAuthCaptchaPayload,
+  buildCompletedAuthCaptchaPayload,
   getAuthCaptchaClientConfig,
   getAuthCaptchaToken,
 } from '../authCaptchaClient.js';
@@ -159,14 +160,17 @@ describe('authCaptchaClient', () => {
     });
   });
 
-  it('can execute a loaded Turnstile widget with an invisible site key', async () => {
+  it('can execute a loaded Turnstile widget with supported deferred options', async () => {
     vi.useFakeTimers();
     try {
+      let completeChallenge;
       const render = vi.fn((_container, options) => {
-        window.setTimeout(() => options.callback('turnstile-executed-token'), 0);
+        completeChallenge = options.callback;
         return 'widget-id';
       });
-      const execute = vi.fn();
+      const execute = vi.fn(() => {
+        window.setTimeout(() => completeChallenge('turnstile-executed-token'), 0);
+      });
       const reset = vi.fn();
 
       const payloadPromise = buildAuthCaptchaPayload('register', {
@@ -189,9 +193,11 @@ describe('authCaptchaClient', () => {
       expect(render).toHaveBeenCalledWith(expect.any(HTMLElement), expect.objectContaining({
         sitekey: 'turnstile-site-key',
         action: 'register',
-        size: 'invisible',
+        size: 'normal',
+        appearance: 'interaction-only',
+        execution: 'execute',
       }));
-      expect(execute).not.toHaveBeenCalled();
+      expect(execute).toHaveBeenCalledWith('widget-id', undefined);
       expect(reset).toHaveBeenCalledWith('widget-id');
       expect(document.querySelector('[data-auth-captcha-container]')).toBeNull();
       expect(payload).toEqual({
@@ -204,7 +210,7 @@ describe('authCaptchaClient', () => {
     }
   });
 
-  it('loads the Turnstile script on demand before executing an invisible widget', async () => {
+  it('loads the Turnstile script on demand before executing a deferred widget', async () => {
     const appendChild = vi.spyOn(document.head, 'appendChild');
     const tokenPromise = getAuthCaptchaToken('register', {
       env: createEnv({
@@ -256,6 +262,40 @@ describe('authCaptchaClient', () => {
       },
     });
     expect(document.querySelector('script[data-auth-captcha-script="turnstile"]')).toBeNull();
+  });
+
+  it('reuses a completed visible Turnstile token for the matching action', () => {
+    expect(buildCompletedAuthCaptchaPayload('register', {
+      action: 'register',
+      provider: 'turnstile',
+      token: 'visible-turnstile-token',
+    })).toEqual({
+      captchaToken: 'visible-turnstile-token',
+      captchaProvider: 'turnstile',
+      captchaAction: 'register',
+    });
+  });
+
+  it('does not reuse a completed token for a different action', () => {
+    expect(buildCompletedAuthCaptchaPayload('password_reset', {
+      action: 'register',
+      provider: 'turnstile',
+      token: 'stale-register-token',
+    })).toEqual({});
+  });
+
+  it('reuses a completed local verification payload', () => {
+    const powPayload = { challengeId: 'challenge-id', nonce: 42 };
+
+    expect(buildCompletedAuthCaptchaPayload('register', {
+      action: 'register',
+      provider: 'pow',
+      powPayload,
+    })).toEqual({
+      captchaProvider: 'pow',
+      captchaAction: 'register',
+      powPayload,
+    });
   });
 
   it('respects custom action coverage for login preflight', async () => {

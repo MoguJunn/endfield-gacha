@@ -1,6 +1,9 @@
 import React from 'react';
 import { supabase } from './supabaseClient';
-import { buildAuthCaptchaPayload } from './services/authCaptchaClient.js';
+import {
+  buildAuthCaptchaPayload,
+  buildCompletedAuthCaptchaPayload,
+} from './services/authCaptchaClient.js';
 import { getEnabledOAuthProviders, startOAuthLogin } from './services/authOAuthService.js';
 import { bootstrapSiteSessionFromSupabaseToken } from './services/siteSessionService.js';
 import { fetchJsonWithTimeout } from './services/supabaseRequest.js';
@@ -86,6 +89,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, addDurableNo
   const [recoveryRequestError, setRecoveryRequestError] = React.useState('');
   const [recoveryRequestSuccess, setRecoveryRequestSuccess] = React.useState(null);
   const [captchaState, setCaptchaState] = React.useState(null);
+  const [captchaResetKey, setCaptchaResetKey] = React.useState(0);
   const [emailLoginCaptchaVisible, setEmailLoginCaptchaVisible] = React.useState(false);
   const [emailCodeState, setEmailCodeState] = React.useState({
     action: '',
@@ -105,14 +109,14 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, addDurableNo
     if (mode === 'forgotPassword' && forgotPasswordStatus !== 'checked') return 'password_reset';
     return null;
   }, [emailLoginCaptchaVisible, forgotPasswordStatus, mode, recoveryRequestForm.requestType]);
-  const captchaReady = !captchaState?.required || Boolean(captchaState?.token || captchaState?.powPayload);
+  const captchaReady = !captchaAction || (
+    captchaState?.action === captchaAction
+    && (!captchaState.required || Boolean(captchaState.token || captchaState.powPayload))
+  );
   const buildVisibleCaptchaPayload = React.useCallback(async (action) => {
-    if (captchaState?.provider === 'pow' && captchaState?.powPayload) {
-      return {
-        captchaProvider: 'pow',
-        captchaAction: action,
-        powPayload: captchaState.powPayload,
-      };
+    const completedPayload = buildCompletedAuthCaptchaPayload(action, captchaState);
+    if (Object.keys(completedPayload).length > 0) {
+      return completedPayload;
     }
 
     return buildAuthCaptchaPayload(action);
@@ -591,6 +595,17 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, addDurableNo
         return;
       }
 
+      if (err?.code === 'captcha_required' || errorText.includes('captcha verification required')) {
+        setCaptchaState(null);
+        setCaptchaResetKey((current) => current + 1);
+        setError(tt(
+          '安全验证已失效，请重新完成验证后再创建账号。',
+          'The security check expired. Complete it again before creating the account.'
+        ));
+        setShowDuplicateEmailPrompt(false);
+        return;
+      }
+
       if (
         err?.code === 'email_already_registered' ||
         errorText.includes('already registered') ||
@@ -890,6 +905,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, addDurableNo
       hasEmailError={hasEmailError}
       captchaAction={captchaAction}
       captchaReady={captchaReady}
+      captchaResetKey={captchaResetKey}
       loading={loading}
       message={message}
       mode={mode}
