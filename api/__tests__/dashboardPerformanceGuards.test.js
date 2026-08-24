@@ -38,4 +38,12 @@ describe('dashboard performance guards', () => {
     expect(roster).toContain('const directBucketsInFlight = new Map();');
     expect(roster).toContain('if (directBucketsInFlight.has(cacheKey))');
   });
+
+  it('keeps the mobile special-progress container import when it is rendered', () => {
+    const mobileDashboard = readSource('src/mobile/views/MobileDashboardView.jsx');
+
+    expect(mobileDashboard).toContain("import MobileChartContainer from '../components/MobileChartContainer.jsx';");
+    expect(mobileDashboard).toContain('<MobileChartContainer');
+    expect(mobileDashboard).toContain('sections={timelineSections}');
+  });
 });

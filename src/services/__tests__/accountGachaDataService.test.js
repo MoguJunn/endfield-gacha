@@ -141,7 +141,7 @@ describe('accountGachaDataService', () => {
     });
 
     expect(fetchJsonWithTimeout).toHaveBeenCalledWith(
-      '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2',
+      '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2&locale=zh-CN',
       {
         method: 'GET',
         credentials: 'same-origin',
@@ -151,6 +151,8 @@ describe('accountGachaDataService', () => {
       },
       expect.objectContaining({
         label: 'account-gacha-data-analysis',
+        timeoutMs: 120000,
+        retries: 0,
       })
     );
   });

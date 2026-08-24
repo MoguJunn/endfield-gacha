@@ -1,6 +1,6 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarRange, Filter, RotateCcw } from 'lucide-react';
-import { useAuthStore } from '../../stores';
+import { useAuthStore, useHistoryStore } from '../../stores';
 import { useCurrentPoolData, useCurrentPoolGroupedHistory, useScopedHistoryPages } from '../../hooks';
 import { useI18n } from '../../i18n/index.js';
 import { localizePoolName } from '../../utils/gameDataI18n.js';
@@ -136,6 +136,22 @@ const RecordsView = ({
   // 从 stores 获取状态
   const user = useAuthStore(state => state.user);
   const canEdit = Boolean(user);
+  const loadedScopedHistory = useHistoryStore(state => state.history);
+
+  const {
+    currentPool,
+    poolsArray,
+    selectedPools,
+  } = useCurrentPoolData();
+  const defaultRecordPoolId = currentPool?.isGroupMode === true
+    ? String(selectedPools?.[0]?.id || selectedPools?.[0]?.pool_id || poolsArray?.[0]?.id || '').trim()
+    : String(currentPool?.id || '').trim();
+  const [selectedRecordPoolId, setSelectedRecordPoolId] = useState(defaultRecordPoolId);
+
+  useEffect(() => {
+    setSelectedRecordPoolId(defaultRecordPoolId);
+  }, [defaultRecordPoolId]);
+
   const {
     phase: historyPagePhase,
     hasMore: hasMoreHistoryPages,
@@ -144,17 +160,17 @@ const RecordsView = ({
     loadedCount: loadedHistoryCount,
     loadMore: loadMoreHistory,
     retry: retryHistoryPage,
-  } = useScopedHistoryPages();
+  } = useScopedHistoryPages({ poolId: selectedRecordPoolId });
 
-  const {
-    currentPool,
-    normalizedCurrentPoolHistory,
-    poolsArray
-  } = useCurrentPoolData();
+  const recordPool = useMemo(() => (
+    selectedRecordPoolId
+      ? poolsArray.find((pool) => String(pool?.id || pool?.pool_id || '') === selectedRecordPoolId) || currentPool
+      : currentPool
+  ), [currentPool, poolsArray, selectedRecordPoolId]);
 
   const canEditCurrentPool = canEdit;
   const isAllPoolsOverview = currentPool?.isAllPoolsOverview === true;
-  const shouldShowRecordPoolName = isAllPoolsOverview || currentPool?.isGroupMode === true;
+  const shouldShowRecordPoolName = false;
   const poolMetaById = useMemo(() => {
     const map = new Map();
     (Array.isArray(poolsArray) ? poolsArray : []).forEach((pool) => {
@@ -183,7 +199,7 @@ const RecordsView = ({
   const {
     groupedHistory,
     filteredGroupedHistory
-  } = useCurrentPoolGroupedHistory(normalizedCurrentPoolHistory, {
+  } = useCurrentPoolGroupedHistory(loadedScopedHistory, {
     filters: effectiveRecordFilters,
     poolsArray
   });
@@ -305,8 +321,8 @@ const RecordsView = ({
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-none shadow-sm border border-zinc-200 dark:border-zinc-800 overflow-hidden animate-fade-in relative">
       <HistoryAnomalyReview
-        history={normalizedCurrentPoolHistory}
-        currentPool={currentPool}
+        history={loadedScopedHistory}
+        currentPool={recordPool}
         user={user}
         onEdit={onEdit}
         onDeleteItem={onDeleteItem}
@@ -351,7 +367,27 @@ const RecordsView = ({
           </div>
         </div>
 
-        <div className={`grid gap-3 sm:grid-cols-2 ${isAllPoolsOverview ? 'xl:grid-cols-6' : 'xl:grid-cols-5'}`}>
+        <div className={`grid gap-3 sm:grid-cols-2 ${isAllPoolsOverview ? 'xl:grid-cols-7' : 'xl:grid-cols-6'}`}>
+          <label className="space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-500">
+              {t('records.filter.pool')}
+            </span>
+            <select
+              value={selectedRecordPoolId}
+              onChange={(event) => setSelectedRecordPoolId(event.target.value)}
+              className="w-full border border-zinc-200 bg-white px-3 py-2 text-xs text-slate-700 outline-none transition-colors focus:border-yellow-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200"
+            >
+              {poolsArray.map((pool) => {
+                const poolId = String(pool?.id || pool?.pool_id || '').trim();
+                if (!poolId) return null;
+                return (
+                  <option key={poolId} value={poolId}>
+                    {localizePoolName(pool, { locale }) || pool?.name || poolId}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
           <label className="space-y-1">
             <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-500">
               <CalendarRange size={12} />
@@ -474,7 +510,7 @@ const RecordsView = ({
             groups={filteredGroupedHistory}
             onEdit={onEdit}
             onDeleteGroup={onDeleteGroup}
-            poolType={currentPool?.type}
+            poolType={recordPool?.type}
             canEdit={canEditCurrentPool}
             showPoolName={shouldShowRecordPoolName}
             poolMetaById={poolMetaById}

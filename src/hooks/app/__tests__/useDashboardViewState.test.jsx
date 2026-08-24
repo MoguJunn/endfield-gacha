@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
     availability: 'idle',
     scope: null
   },
+  currentGameUid: 'game-1::server:1',
+  currentPoolId: '__group_all',
   currentPoolData: null,
   poolStats: null
 }));
@@ -13,7 +15,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../stores/index.js', () => ({
   useAuthStore: (selector) => selector({ user: { id: 'user-1' } }),
   usePersonalAnalysisStore: (selector) => selector(mocks.analysisState),
-  usePoolStore: (selector) => selector({ currentGameUid: 'game-1::server:1' })
+  usePoolStore: (selector) => selector({
+    currentGameUid: mocks.currentGameUid,
+    currentPoolId: mocks.currentPoolId,
+  })
 }));
 
 vi.mock('../useCurrentPoolData.js', () => ({
@@ -69,6 +74,8 @@ function createAllPoolsData(overrides = {}) {
 describe('useDashboardViewState', () => {
   beforeEach(() => {
     mocks.analysisState = { availability: 'idle', scope: null };
+    mocks.currentGameUid = 'game-1::server:1';
+    mocks.currentPoolId = '__group_all';
     mocks.currentPoolData = createAllPoolsData();
     mocks.poolStats = {
       stats: {
@@ -209,5 +216,81 @@ describe('useDashboardViewState', () => {
 
     expect(result.current.isAnalysisBacked).toBe(false);
     expect(result.current.stats.total).toBe(0);
+  });
+
+  it('区服修正后用 owner manifest 将旧账号键归一化到新 scope', () => {
+    mocks.currentGameUid = 'game-1::server:1';
+    mocks.analysisState = {
+      availability: 'ready',
+      owner: {
+        accounts: [{ accountKey: 'game-1::server:2', gameUid: 'game-1', serverId: '2' }],
+      },
+      scope: {
+        account: { accountKey: 'game-1::server:2' },
+        dashboard: {
+          timelineViews: {
+            'zh-CN': {
+              __group_all: [{ id: 'corrected-timeline', totalPulls: 130 }],
+            },
+          },
+          views: {
+            __group_all: {
+              excludeFree: {
+                stats: { total: 130, paidTotal: 130 },
+                effectivePity: { pity6: 39, pity5: 0 },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const { result } = renderHook(() => useDashboardViewState());
+
+    expect(result.current.isAnalysisBacked).toBe(true);
+    expect(result.current.stats.total).toBe(130);
+    expect(result.current.snapshotTimelineSections).toEqual([
+      expect.objectContaining({ id: 'corrected-timeline', totalPulls: 130 }),
+    ]);
+  });
+
+  it('移动端当前池对象短暂回退时仍按 store 选择键读取快照', () => {
+    mocks.currentPoolId = 'limited-selected';
+    mocks.currentPoolData = createAllPoolsData({
+      currentPool: { id: 'limited-fallback', name: '回退池', type: 'limited' },
+      selectedPools: [{ id: 'limited-selected', name: '当前池', type: 'limited' }],
+    });
+    mocks.analysisState = {
+      availability: 'ready',
+      owner: {
+        accounts: [{ accountKey: 'game-1::server:1', gameUid: 'game-1', serverId: '1' }],
+      },
+      scope: {
+        account: { accountKey: 'game-1::server:1' },
+        dashboard: {
+          timelineViews: {
+            'zh-CN': {
+              'limited-selected': [{ id: 'selected-timeline', totalPulls: 120 }],
+            },
+          },
+          views: {
+            'limited-selected': {
+              excludeFree: {
+                stats: { total: 130, paidTotal: 120 },
+                effectivePity: { pity6: 39, pity5: 0 },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const { result } = renderHook(() => useDashboardViewState());
+
+    expect(result.current.isAnalysisBacked).toBe(true);
+    expect(result.current.stats.total).toBe(130);
+    expect(result.current.snapshotTimelineSections).toEqual([
+      expect.objectContaining({ id: 'selected-timeline', totalPulls: 120 }),
+    ]);
   });
 });

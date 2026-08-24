@@ -103,6 +103,11 @@ export function getPersonalAnalysisWorkerConfigFromEnv(env = readEnvironment()) 
       100,
       { min: 1, max: 500 }
     ),
+    historyPageConcurrency: parseInteger(
+      env.PERSONAL_ANALYSIS_WORKER_HISTORY_PAGE_CONCURRENCY,
+      2,
+      { min: 1, max: 4 }
+    ),
   };
 }
 
@@ -132,6 +137,11 @@ function normalizeConfig(config) {
       config.maxHistoryPages,
       defaults.maxHistoryPages,
       { min: 1, max: 500 }
+    ),
+    historyPageConcurrency: parseInteger(
+      config.historyPageConcurrency,
+      defaults.historyPageConcurrency,
+      { min: 1, max: 4 }
     ),
   };
 }
@@ -180,32 +190,32 @@ function chunkValues(values, size) {
 
 async function loadHistory(adminClient, userId, config) {
   const rows = [];
-  let afterInternalId = null;
+  const concurrency = Math.min(
+    config.maxHistoryPages,
+    Math.max(1, Number(config.historyPageConcurrency) || 2)
+  );
 
-  for (let page = 0; page < config.maxHistoryPages; page += 1) {
-    let query = adminClient
-      .from('history')
-      .select(HISTORY_FIELDS)
-      .eq('user_id', userId)
-      .order('id', { ascending: true })
-      .limit(config.historyPageSize);
+  for (let firstPage = 0; firstPage < config.maxHistoryPages; firstPage += concurrency) {
+    const pageNumbers = Array.from(
+      { length: Math.min(concurrency, config.maxHistoryPages - firstPage) },
+      (_, offset) => firstPage + offset
+    );
+    const pages = await Promise.all(pageNumbers.map(async (page) => {
+      const from = page * config.historyPageSize;
+      const to = from + config.historyPageSize - 1;
+      const { data, error } = await adminClient
+        .from('history')
+        .select(HISTORY_FIELDS)
+        .eq('user_id', userId)
+        .order('id', { ascending: true })
+        .range(from, to);
+      if (error) throw error;
+      return Array.isArray(data) ? data : [];
+    }));
 
-    if (afterInternalId !== null) {
-      query = query.gt('id', afterInternalId);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-
-    const pageRows = Array.isArray(data) ? data : [];
-    rows.push(...pageRows);
-    if (pageRows.length < config.historyPageSize) return rows;
-
-    afterInternalId = Number(pageRows[pageRows.length - 1]?.id);
-    if (!Number.isInteger(afterInternalId) || afterInternalId < 1) {
-      const paginationError = new Error('Personal analysis history pagination requires internal id');
-      paginationError.code = 'personal_analysis_history_internal_id_missing';
-      throw paginationError;
+    for (const pageRows of pages) {
+      rows.push(...pageRows);
+      if (pageRows.length < config.historyPageSize) return rows;
     }
   }
 
@@ -265,6 +275,7 @@ export async function loadPersonalAnalysisModel(adminClient, userId, config = {}
     ...config,
     historyPageSize: parseInteger(config.historyPageSize, 1000, { min: 1, max: 1000 }),
     maxHistoryPages: parseInteger(config.maxHistoryPages, 100, { min: 1, max: 500 }),
+    historyPageConcurrency: parseInteger(config.historyPageConcurrency, 2, { min: 1, max: 4 }),
   };
   const rawHistory = await loadHistory(adminClient, userId, normalizedModelConfig);
   const [poolAliasMap, characterAliasMap] = await Promise.all([

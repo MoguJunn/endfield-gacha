@@ -1,6 +1,8 @@
 import { getSameOriginAuthHeaders } from './authFetchService.js';
 import { fetchJsonWithTimeout } from './supabaseRequest.js';
 
+const PERSONAL_ANALYSIS_TIMEOUT_MS = 120000;
+
 async function buildAccountGachaHeaders() {
   const baseHeaders = {
     Accept: 'application/json',
@@ -46,11 +48,17 @@ export async function loadAccountGachaData() {
   };
 }
 
-export async function loadAccountGachaAnalysis({ accountKey = '' } = {}) {
+export async function loadAccountGachaAnalysis({ accountKey = '', viewKey = '', locale = 'zh-CN' } = {}) {
   const headers = await buildAccountGachaHeaders();
   const params = new URLSearchParams({ mode: 'analysis' });
   if (accountKey) {
     params.set('accountKey', accountKey);
+  }
+  if (viewKey) {
+    params.set('viewKey', viewKey);
+  }
+  if (locale) {
+    params.set('locale', locale);
   }
 
   const { response, data } = await fetchJsonWithTimeout(`/api/account-gacha-data?${params.toString()}`, {
@@ -59,7 +67,11 @@ export async function loadAccountGachaAnalysis({ accountKey = '' } = {}) {
     headers,
   }, {
     label: 'account-gacha-data-analysis',
-    retries: 1,
+    // 本地 transient fallback 需要读取完整 owner 历史并构建全部视图，
+    // 数据量较大时可能超过普通 GET 的 45 秒预算。Abort 后服务端任务仍可能
+    // 继续执行，因此这里也不能自动重试，避免并行重复计算。
+    timeoutMs: PERSONAL_ANALYSIS_TIMEOUT_MS,
+    retries: 0,
   });
 
   if (!response.ok || data?.success === false) {

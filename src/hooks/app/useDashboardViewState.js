@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useAuthStore, usePersonalAnalysisStore, usePoolStore } from '../../stores';
-import { getCurrentUpPoolInfo } from '../../utils/poolTimeUtils';
+import { getCurrentUpPoolInfo, getPoolActivityTiming } from '../../utils/poolTimeUtils';
 import { getCharacterAvatarUrl } from '../../utils/characterUtils';
 import { buildCharacterStats } from '../../utils/dashboardCharacterStats';
 import { buildDashboardResourceSummary } from '../../utils/dashboardResourceSummary.js';
@@ -9,6 +9,7 @@ import { useCurrentPoolData } from './useCurrentPoolData';
 import { usePoolStats } from './usePoolStats';
 import { readBooleanStorageValue, STORAGE_KEYS, writeBooleanStorageValue } from '../../utils/storageUtils.js';
 import { useI18n } from '../../i18n/index.js';
+import { resolveEffectiveGameUid } from '../../utils/accountScopeUtils.js';
 
 function normalizePoolType(type) {
   if (type === 'extra') return 'extra';
@@ -25,8 +26,10 @@ function isLimitedPoolType(type) {
 export function useDashboardViewState() {
   const { locale } = useI18n();
   const user = useAuthStore(state => state.user);
+  const currentPoolId = usePoolStore((state) => state.currentPoolId);
   const currentGameUid = usePoolStore((state) => state.currentGameUid);
   const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
+  const analysisOwnerAccounts = usePersonalAnalysisStore((state) => state.owner?.accounts);
   const analysisScope = usePersonalAnalysisStore((state) => state.scope);
   const [charViewMode, setCharViewMode] = useState('waterfall');
   const [includeFreePullsInStats, setIncludeFreePullsInStatsState] = useState(() => (
@@ -125,10 +128,16 @@ export function useDashboardViewState() {
   }, [normalizedPoolHistory]);
 
   const analysisScopeAccountKey = String(analysisScope?.account?.accountKey || '').trim();
-  const isAnalysisScopeCurrent = !currentGameUid || analysisScopeAccountKey === currentGameUid;
+  const effectiveAnalysisAccountKey = useMemo(() => resolveEffectiveGameUid({
+    currentGameUid,
+    gameAccounts: analysisOwnerAccounts,
+  }), [analysisOwnerAccounts, currentGameUid]);
+  const isAnalysisScopeCurrent = !effectiveAnalysisAccountKey
+    || analysisScopeAccountKey === effectiveAnalysisAccountKey;
+  const analysisViewKey = String(currentPoolId || currentPool?.id || '').trim();
   const snapshotView = isAnalysisScopeCurrent
     && ['ready', 'stale', 'empty'].includes(analysisAvailability)
-    ? analysisScope?.dashboard?.views?.[currentPool?.id]
+    ? analysisScope?.dashboard?.views?.[analysisViewKey]
     : null;
   const snapshotVariant = snapshotView?.[
     includeFreePullsInStats ? 'includeFree' : 'excludeFree'
@@ -154,8 +163,8 @@ export function useDashboardViewState() {
     ? snapshotVariant.splitOverviewStats ?? null
     : null;
   const snapshotTimelineSections = isAnalysisBacked
-    ? analysisScope?.dashboard?.timelineViews?.[locale]?.[currentPool?.id]
-      || analysisScope?.dashboard?.timelineViews?.['zh-CN']?.[currentPool?.id]
+    ? analysisScope?.dashboard?.timelineViews?.[locale]?.[analysisViewKey]
+      || analysisScope?.dashboard?.timelineViews?.['zh-CN']?.[analysisViewKey]
       || null
     : null;
 
@@ -204,19 +213,17 @@ export function useDashboardViewState() {
 
   const currentUpPool = useMemo(() => {
     if ((isLimited || isExtra) && currentPool?.start_time && currentPool?.end_time) {
-      const now = new Date();
-      const start = new Date(currentPool.start_time);
-      const end = new Date(currentPool.end_time);
-      const isActive = now >= start && now < end;
-      const isExpired = now >= end;
-      const remainingMs = end - now;
+      const timing = getPoolActivityTiming(currentPool);
 
       return {
         name: getPoolFeaturedLead(currentPool),
-        isActive,
-        isExpired,
-        remainingDays: isActive ? Math.floor(remainingMs / (1000 * 60 * 60 * 24)) : 0,
-        remainingHours: isActive ? Math.floor((remainingMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)) : 0
+        ...timing,
+        remainingDays: timing.days,
+        remainingHours: timing.hours,
+        remainingMinutes: timing.minutes,
+        startsIn: timing.days,
+        startsInHours: timing.hours,
+        startsInMinutes: timing.minutes,
       };
     }
 

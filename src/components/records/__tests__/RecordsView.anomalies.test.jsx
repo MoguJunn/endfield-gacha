@@ -13,6 +13,7 @@ const harness = vi.hoisted(() => ({
   loadHistoryAnomalies: vi.fn(),
   updateHistoryAnomaly: vi.fn(),
   historyPage: null,
+  history: [],
 }));
 
 vi.mock('../../../stores', () => ({
@@ -20,6 +21,7 @@ vi.mock('../../../stores', () => ({
   useHistoryStore: (selector) =>
     selector({
       visibleHistoryCount: 20,
+      history: harness.history,
       loadMoreHistory: harness.loadMoreHistory,
       setVisibleHistoryCount: harness.setVisibleHistoryCount,
     }),
@@ -93,6 +95,7 @@ function makeAnomaly(overrides = {}) {
 }
 
 function setPool(poolId = 'pool-1', record = makeRecord({ poolId })) {
+  harness.history = [record];
   harness.poolData = {
     currentPool: { id: poolId, name: poolId, type: 'limited_character' },
     normalizedCurrentPoolHistory: [record],
@@ -216,6 +219,7 @@ describe('RecordsView history anomalies', () => {
   });
 
   it('当前账号在卡池内没有记录时不退化为跨账号查询', async () => {
+    harness.history = [];
     harness.poolData = {
       currentPool: { id: 'pool-1', name: 'pool-1', type: 'limited_character' },
       normalizedCurrentPoolHistory: [],

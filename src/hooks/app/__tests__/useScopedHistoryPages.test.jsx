@@ -118,6 +118,31 @@ describe('useScopedHistoryPages', () => {
     ]);
   });
 
+  it('卡池筛选变化时按 poolId 重置并读取目标池第一页', async () => {
+    loadAccountGachaHistoryPage
+      .mockResolvedValueOnce(pageResponse([record('pool-a-record', { poolId: 'pool-a' })]))
+      .mockResolvedValueOnce(pageResponse([record('pool-b-record', { poolId: 'pool-b' })]));
+    const { result, rerender } = renderHook(
+      ({ poolId }) => useScopedHistoryPages({ poolId }),
+      { initialProps: { poolId: 'pool-a' } }
+    );
+
+    await waitFor(() => expect(useHistoryStore.getState().history[0]?.id).toBe('pool-a-record'));
+    expect(loadAccountGachaHistoryPage).toHaveBeenLastCalledWith(expect.objectContaining({
+      poolId: 'pool-a',
+      cursor: '',
+    }));
+
+    rerender({ poolId: 'pool-b' });
+
+    await waitFor(() => expect(useHistoryStore.getState().history[0]?.id).toBe('pool-b-record'));
+    expect(loadAccountGachaHistoryPage).toHaveBeenLastCalledWith(expect.objectContaining({
+      poolId: 'pool-b',
+      cursor: '',
+    }));
+    expect(result.current.phase).toBe('ready');
+  });
+
   it('账号 scope 切换时清空旧记录并加载新账号第一页', async () => {
     loadAccountGachaHistoryPage
       .mockResolvedValueOnce(pageResponse([record('old-record')]))
@@ -149,6 +174,32 @@ describe('useScopedHistoryPages', () => {
       cursor: '',
     }));
     expect(result.current.phase).toBe('ready');
+  });
+
+  it('区服修正后旧 accountKey 仍按同 UID 的权威 scope 加载日志', async () => {
+    usePoolStore.setState({ currentGameUid: 'game-1::server:1' });
+    setAnalysisAccount({
+      accountKey: 'game-1::server:2',
+      gameUid: 'game-1',
+      serverScope: '2',
+      region: 'intl',
+    });
+    loadAccountGachaHistoryPage.mockResolvedValueOnce(pageResponse([
+      record('corrected-record', { serverScope: '2' }),
+    ]));
+
+    const { result } = renderHook(() => useScopedHistoryPages());
+
+    await waitFor(() => expect(result.current.phase).toBe('ready'));
+    expect(loadAccountGachaHistoryPage).toHaveBeenCalledWith(expect.objectContaining({
+      accountKey: 'game-1::server:2',
+      gameUid: 'game-1',
+      serverScope: '2',
+      region: 'intl',
+    }));
+    expect(useHistoryStore.getState().history).toEqual([
+      expect.objectContaining({ id: 'corrected-record', serverScope: '2' }),
+    ]);
   });
 
   it('revision 冲突时清空并只自动重启一次第一页', async () => {

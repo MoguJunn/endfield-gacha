@@ -54,6 +54,10 @@ const MAX_WRITE_POOLS = 200;
 const MAX_WRITE_HISTORY = 1000;
 const MAX_DELETE_IDS = 1000;
 const MAX_SERVER_LABEL_WRITE_IDS = 100;
+const TRANSIENT_ANALYSIS_CACHE_TTL_MS = 10 * 60 * 1000;
+const TRANSIENT_ANALYSIS_CACHE_MAX_ENTRIES = 3;
+const transientAnalysisCache = new Map();
+const transientAnalysisInFlight = new Map();
 
 class AccountGachaDataRequestError extends Error {
   constructor(message, code, status = 400) {
@@ -77,6 +81,54 @@ function shouldUseTransientPersonalAnalysis(adminClient, env = globalThis.proces
     String(env.PERSONAL_ANALYSIS_TRANSIENT_FALLBACK || '').trim().toLowerCase()
   );
   return !adminClient || enabled;
+}
+
+function clearTransientPersonalAnalysisCache(userId = '') {
+  const normalizedUserId = String(userId || '').trim();
+  if (normalizedUserId) {
+    transientAnalysisCache.delete(normalizedUserId);
+    transientAnalysisInFlight.delete(normalizedUserId);
+    return;
+  }
+  transientAnalysisCache.clear();
+  transientAnalysisInFlight.clear();
+}
+
+async function getTransientPersonalAnalysisModel(dbClient, userId) {
+  const now = Date.now();
+  const cached = transientAnalysisCache.get(userId);
+  if (cached && now - cached.createdAt < TRANSIENT_ANALYSIS_CACHE_TTL_MS) {
+    // Refresh insertion order for the small LRU cache.
+    transientAnalysisCache.delete(userId);
+    transientAnalysisCache.set(userId, cached);
+    return { model: cached.model, cacheHit: true };
+  }
+  if (cached) transientAnalysisCache.delete(userId);
+
+  const existingRequest = transientAnalysisInFlight.get(userId);
+  if (existingRequest) {
+    return { model: await existingRequest, cacheHit: true };
+  }
+
+  const request = loadPersonalAnalysisModel(dbClient, userId, {
+    historyPageSize: PAGE_SIZE,
+    historyPageConcurrency: 2,
+    maxHistoryPages: MAX_PAGES,
+  });
+  transientAnalysisInFlight.set(userId, request);
+  try {
+    const model = await request;
+    transientAnalysisCache.set(userId, { model, createdAt: Date.now() });
+    while (transientAnalysisCache.size > TRANSIENT_ANALYSIS_CACHE_MAX_ENTRIES) {
+      const oldestKey = transientAnalysisCache.keys().next().value;
+      transientAnalysisCache.delete(oldestKey);
+    }
+    return { model, cacheHit: false };
+  } finally {
+    if (transientAnalysisInFlight.get(userId) === request) {
+      transientAnalysisInFlight.delete(userId);
+    }
+  }
 }
 
 function sendError(res, status, error, code = error) {
@@ -115,6 +167,15 @@ function normalizeAccountText(value, maxLength = 160) {
   return String(value || '')
     .trim()
     .slice(0, maxLength);
+}
+
+function normalizeAnalysisViewKey(value) {
+  const normalized = normalizeAccountText(value, 160);
+  return /^[A-Za-z0-9_.:-]+$/.test(normalized) ? normalized : '';
+}
+
+function normalizeAnalysisLocale(value) {
+  return String(value || '').trim().toLowerCase().startsWith('en') ? 'en-US' : 'zh-CN';
 }
 
 function normalizeHistoryPageLimit(value) {
@@ -439,6 +500,100 @@ async function loadPersonalAnalysisSnapshot(dbClient, userId, scopeKind, scopeKe
   return normalizePersonalAnalysisSnapshot(data);
 }
 
+function buildProjectedAccountPayload(data, viewKey, locale) {
+  const fallbackPayload = data?.payload && typeof data.payload === 'object' ? data.payload : {};
+  const view = data?.view && typeof data.view === 'object'
+    ? data.view
+    : fallbackPayload.dashboard?.views?.[viewKey] || null;
+  const timeline = Array.isArray(data?.timeline)
+    ? data.timeline
+    : fallbackPayload.dashboard?.timelineViews?.[locale]?.[viewKey] || null;
+  return {
+    account: data?.account && typeof data.account === 'object'
+      ? data.account
+      : fallbackPayload.account || null,
+    poolManifest: Array.isArray(data?.pool_manifest)
+      ? data.pool_manifest
+      : Array.isArray(fallbackPayload.poolManifest) ? fallbackPayload.poolManifest : [],
+    selector: data?.selector && typeof data.selector === 'object'
+      ? data.selector
+      : fallbackPayload.selector || {},
+    dashboard: {
+      views: view ? { [viewKey]: view } : {},
+      timelineViews: timeline ? { [locale]: { [viewKey]: timeline } } : {},
+    },
+    recentSixStars: Array.isArray(data?.recent_six_stars)
+      ? data.recent_six_stars
+      : Array.isArray(fallbackPayload.recentSixStars) ? fallbackPayload.recentSixStars : [],
+  };
+}
+
+async function loadProjectedPersonalAnalysisAccountSnapshot(
+  dbClient,
+  userId,
+  scopeKey,
+  { viewKey, locale }
+) {
+  if (!viewKey) {
+    return loadPersonalAnalysisSnapshot(dbClient, userId, 'account', scopeKey);
+  }
+
+  const selection = [
+    'scope_kind',
+    'scope_key',
+    'source_game_uid',
+    'source_server_scope',
+    'input_revision',
+    'analysis_schema_version',
+    'computed_at',
+    'account:payload->account',
+    'pool_manifest:payload->poolManifest',
+    'selector:payload->selector',
+    `view:payload->dashboard->views->${viewKey}`,
+    `timeline:payload->dashboard->timelineViews->${locale}->${viewKey}`,
+    'recent_six_stars:payload->recentSixStars',
+  ].join(',');
+  const { data, error } = await dbClient
+    .from('personal_analysis_snapshots')
+    .select(selection)
+    .eq('user_id', userId)
+    .eq('scope_kind', 'account')
+    .eq('scope_key', scopeKey)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingPersonalAnalysisInfrastructureError(error)) {
+      throw new AccountGachaDataRequestError(
+        'Personal analysis snapshots are not configured',
+        'personal_analysis_not_configured',
+        503
+      );
+    }
+    throw error;
+  }
+  if (!data) return null;
+
+  return normalizePersonalAnalysisSnapshot({
+    ...data,
+    payload: buildProjectedAccountPayload(data, viewKey, locale),
+  });
+}
+
+function projectTransientScopePayload(payload, viewKey, locale) {
+  if (!payload || !viewKey) return payload || null;
+  const view = payload.dashboard?.views?.[viewKey] || null;
+  const timeline = payload.dashboard?.timelineViews?.[locale]?.[viewKey]
+    || payload.dashboard?.timelineViews?.['zh-CN']?.[viewKey]
+    || null;
+  return {
+    ...payload,
+    dashboard: {
+      views: view ? { [viewKey]: view } : {},
+      timelineViews: Array.isArray(timeline) ? { [locale]: { [viewKey]: timeline } } : {},
+    },
+  };
+}
+
 async function hasAnyHistoryForUser(dbClient, userId) {
   const { data, error } = await dbClient
     .from('history')
@@ -478,8 +633,10 @@ function getAnalysisAccountKey(ownerPayload, requestedAccountKey = '') {
 
 async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
   const userId = authResult.user.id;
-  const ownerState = await loadPersonalAnalysisOwnerState(dbClient, userId);
-  const ownerSnapshot = await loadPersonalAnalysisSnapshot(dbClient, userId, 'owner', 'owner');
+  const [ownerState, ownerSnapshot] = await Promise.all([
+    loadPersonalAnalysisOwnerState(dbClient, userId),
+    loadPersonalAnalysisSnapshot(dbClient, userId, 'owner', 'owner'),
+  ]);
 
   if (!ownerSnapshot) {
     const hasHistory = await hasAnyHistoryForUser(dbClient, userId);
@@ -550,9 +707,33 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
     ownerSnapshot.payload,
     requestedAccountKey
   );
-  const accountSnapshot = accountKey
-    ? await loadPersonalAnalysisSnapshot(dbClient, userId, 'account', accountKey)
-    : null;
+  const viewKey = normalizeAnalysisViewKey(url.searchParams.get('viewKey'));
+  const locale = normalizeAnalysisLocale(url.searchParams.get('locale'));
+  const selectedAccount = ownerAccounts.find((account) => (
+    normalizeAccountText(account?.accountKey || account?.account_key, 320) === accountKey
+  ));
+  const manifestScope = selectedAccount ? {
+    gameUid: normalizeAccountText(selectedAccount.gameUid || selectedAccount.game_uid),
+    serverScope: normalizeAccountText(
+      selectedAccount.serverScope
+      || selectedAccount.server_scope
+      || selectedAccount.serverId
+      || selectedAccount.server_id
+    ),
+  } : null;
+  const accountSnapshotRequest = accountKey
+    ? loadProjectedPersonalAnalysisAccountSnapshot(dbClient, userId, accountKey, {
+      viewKey,
+      locale,
+    })
+    : Promise.resolve(null);
+  const scopeStateRequest = manifestScope?.gameUid && manifestScope?.serverScope
+    ? loadPersonalAnalysisScopeState(dbClient, userId, manifestScope)
+    : Promise.resolve(null);
+  const [accountSnapshot, manifestScopeState] = await Promise.all([
+    accountSnapshotRequest,
+    scopeStateRequest,
+  ]);
 
   if (accountKey && !accountSnapshot) {
     res.setHeader('Retry-After', '10');
@@ -577,11 +758,16 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
     return;
   }
 
+  const snapshotMatchesManifest = accountSnapshot && manifestScope
+    && accountSnapshot.sourceGameUid === manifestScope.gameUid
+    && accountSnapshot.sourceServerScope === manifestScope.serverScope;
   const scopeState = accountSnapshot
-    ? await loadPersonalAnalysisScopeState(dbClient, userId, {
+    ? snapshotMatchesManifest && manifestScopeState
+      ? manifestScopeState
+      : await loadPersonalAnalysisScopeState(dbClient, userId, {
       gameUid: accountSnapshot.sourceGameUid,
       serverScope: accountSnapshot.sourceServerScope,
-    })
+      })
     : null;
   const ownerFresh = isPersonalAnalysisSnapshotFresh(ownerSnapshot, ownerState);
   const scopeFresh = !accountSnapshot || (
@@ -619,6 +805,8 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
       scopeRevision: scopeState?.historyRevision || accountSnapshot?.inputRevision || null,
       scopeSnapshotRevision: accountSnapshot?.inputRevision || null,
       generatedAt: accountSnapshot?.computedAt || ownerSnapshot.computedAt,
+      viewKey: viewKey || null,
+      locale,
     },
     owner: ownerSnapshot.payload,
     scope: accountSnapshot?.payload || null,
@@ -628,10 +816,7 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
 
 async function handleLoadTransientPersonalAnalysis(url, res, dbClient, authResult) {
   const userId = authResult.user.id;
-  const model = await loadPersonalAnalysisModel(dbClient, userId, {
-    historyPageSize: PAGE_SIZE,
-    maxHistoryPages: MAX_PAGES,
-  });
+  const { model, cacheHit } = await getTransientPersonalAnalysisModel(dbClient, userId);
   const accounts = Array.isArray(model?.owner?.accounts) ? model.owner.accounts : [];
   const requestedAccountKey = normalizeAccountText(
     url.searchParams.get('accountKey') || '',
@@ -654,6 +839,8 @@ async function handleLoadTransientPersonalAnalysis(url, res, dbClient, authResul
   const scope = accountKey
     ? model.scopes.find((candidate) => candidate?.scopeKey === accountKey)?.payload || null
     : null;
+  const viewKey = normalizeAnalysisViewKey(url.searchParams.get('viewKey'));
+  const locale = normalizeAnalysisLocale(url.searchParams.get('locale'));
   const verifiedEmpty = accounts.length === 0;
 
   res.status(200).json({
@@ -667,11 +854,14 @@ async function handleLoadTransientPersonalAnalysis(url, res, dbClient, authResul
       rawIncluded: false,
       verifiedEmpty,
       transient: true,
+      cacheHit,
       accountKey: accountKey || null,
       generatedAt: new Date().toISOString(),
+      viewKey: viewKey || null,
+      locale,
     },
     owner: model.owner,
-    scope,
+    scope: projectTransientScopePayload(scope, viewKey, locale),
     warnings: [{ code: 'personal_analysis_transient_fallback' }],
   });
 }
@@ -1116,7 +1306,13 @@ function collectDuplicateHistoryRecordIdsForServerMerge(rows, { serverId, region
   return duplicateIds;
 }
 
-async function updateHistoryServerLabelByInternalIds(adminClient, userId, internalIds, { serverId, region } = {}) {
+async function updateHistoryServerLabelByInternalIds(
+  adminClient,
+  userId,
+  gameUid,
+  internalIds,
+  { serverId, region } = {}
+) {
   let updated = 0;
 
   for (let index = 0; index < internalIds.length; index += MAX_SERVER_LABEL_WRITE_IDS) {
@@ -1129,6 +1325,7 @@ async function updateHistoryServerLabelByInternalIds(adminClient, userId, intern
         updated_at: new Date().toISOString(),
       })
       .eq('user_id', userId)
+      .eq('game_uid', gameUid)
       .in('id', chunk);
 
     if (error) throw error;
@@ -1138,12 +1335,17 @@ async function updateHistoryServerLabelByInternalIds(adminClient, userId, intern
   return updated;
 }
 
-async function deleteHistoryRowsByInternalIds(adminClient, userId, internalIds) {
+async function deleteHistoryRowsByInternalIds(adminClient, userId, gameUid, internalIds) {
   let deleted = 0;
 
   for (let index = 0; index < internalIds.length; index += MAX_SERVER_LABEL_WRITE_IDS) {
     const chunk = internalIds.slice(index, index + MAX_SERVER_LABEL_WRITE_IDS);
-    const { error } = await adminClient.from('history').delete().eq('user_id', userId).in('id', chunk);
+    const { error } = await adminClient
+      .from('history')
+      .delete()
+      .eq('user_id', userId)
+      .eq('game_uid', gameUid)
+      .in('id', chunk);
 
     if (error) throw error;
     deleted += chunk.length;
@@ -1203,8 +1405,14 @@ async function handleUpdateAccountServerLabel(body, res, adminClient, userId) {
     });
   }
 
-  const deletedDuplicates = await deleteHistoryRowsByInternalIds(adminClient, userId, duplicateIds);
-  const updated = await updateHistoryServerLabelByInternalIds(adminClient, userId, targetIds, { serverId, region });
+  const deletedDuplicates = await deleteHistoryRowsByInternalIds(adminClient, userId, gameUid, duplicateIds);
+  const updated = await updateHistoryServerLabelByInternalIds(
+    adminClient,
+    userId,
+    gameUid,
+    targetIds,
+    { serverId, region }
+  );
 
   return res.status(200).json({
     success: true,
@@ -1735,9 +1943,11 @@ export default async function accountGachaDataHandler(req, res) {
         return;
       }
       if (body.action === 'updateServerLabel') {
+        clearTransientPersonalAnalysisCache(authResult.user.id);
         await handleUpdateAccountServerLabel(body, res, dbClient, authResult.user.id);
         return;
       }
+      clearTransientPersonalAnalysisCache(authResult.user.id);
       await handleSaveAccountGachaData(body, res, dbClient, authResult.user.id, {
         // Personal browser writes must never invoke global catalog/history
         // reconciliation, even when the route has a service-role client.
@@ -1748,11 +1958,13 @@ export default async function accountGachaDataHandler(req, res) {
     }
 
     if (req.method === 'DELETE') {
+      clearTransientPersonalAnalysisCache(authResult.user.id);
       await handleDeleteAccountGachaData(req, res, dbClient, authResult.user.id);
       return;
     }
 
     if (req.method === 'PATCH') {
+      clearTransientPersonalAnalysisCache(authResult.user.id);
       await handlePatchDetailedHistoryRecord(req, res, dbClient, authResult.user.id);
       return;
     }
@@ -1925,10 +2137,12 @@ export default async function accountGachaDataHandler(req, res) {
 
 export const __internal = {
   decodeHistoryPageCursor,
+  clearTransientPersonalAnalysisCache,
   encodeHistoryPageCursor,
   formatHistoryRows: formatAccountGachaHistoryRows,
   handleLoadPersonalAnalysis,
   handleLoadTransientPersonalAnalysis,
+  handleUpdateAccountServerLabel,
   handleDeleteAccountGachaData,
   handleResolveAccountGachaAliases,
   handleSaveAccountGachaData,
@@ -1936,6 +2150,7 @@ export const __internal = {
   loadHistoryPageForScope,
   loadHistorySeqKeysForUser,
   loadPersonalAnalysisOwnerState,
+  loadProjectedPersonalAnalysisAccountSnapshot,
   loadPersonalAnalysisSnapshot,
   loadPersonalAnalysisScopeState,
   readHistoryPageScope,

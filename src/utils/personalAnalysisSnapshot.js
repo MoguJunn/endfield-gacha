@@ -113,7 +113,8 @@ function buildAccount(accountKey, records) {
   ));
   const metadata = {
     gameUid,
-    serverId: rawServerId || serverScope,
+    serverId: rawServerId || (serverScope && serverScope !== LEGACY_ACCOUNT_KEY ? serverScope : null),
+    serverScope,
     region: rawRegion,
     channelMasterId: pickLatestText(sortedRecords, (record) => (
       record?.channel_master_id ?? record?.channelMasterId
@@ -150,7 +151,7 @@ function buildAccount(accountKey, records) {
     serverTag: explicitServerTag || (
       gameUid === LEGACY_ACCOUNT_KEY
         ? null
-        : buildGameAccountServerTag({ ...metadata, serverId, region })
+        : buildGameAccountServerTag({ ...metadata, serverId, serverScope, region })
     ),
     recordCount: sortedRecords.length,
     latestRecordAt,

@@ -5,6 +5,7 @@ import { useI18n } from '../../i18n/index.js';
 import { useScopedHistoryPages } from '../../hooks/app/useScopedHistoryPages.js';
 import { compareHistoryTimelineDesc } from '../../utils/historyTimelineSort.js';
 import { localizeHistoryItemName } from '../../utils/gameDataI18n.js';
+import { resolveMobileDetailedLogAvatarUrl } from '../../utils/mobileDetailedLogAvatar.js';
 
 function buildMobileDetailedLogEntries(history, { locale, t, formatDateTime }) {
   return [...(Array.isArray(history) ? history : [])]
@@ -13,6 +14,7 @@ function buildMobileDetailedLogEntries(history, { locale, t, formatDateTime }) {
       id: item.id || `${item.poolId || item.pool_id || 'pool'}-${index}`,
       item,
       name: localizeHistoryItemName(item, { locale, fallback: t('common.unknown') }),
+      avatarUrl: resolveMobileDetailedLogAvatarUrl(item),
       rarity: Number(item.rarity || 0),
       dateLabel: formatDateTime(
         item.timestamp || item.created_at,
@@ -34,14 +36,30 @@ function DetailedLogRow({ index, style, ariaAttributes, entries, onEdit, t }) {
   return (
     <div style={style} {...ariaAttributes} className="px-1 py-1">
       <div className="mobile-ux-card-inset flex h-full items-center gap-3 px-3 py-2 text-left">
-        <div className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border font-mono text-xs font-black ${
+        <div className={`inline-flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border font-mono text-xs font-black ${
           entry.rarity >= 6
             ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300'
             : entry.rarity === 5
               ? 'border-violet-300 bg-violet-50 text-violet-700 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-300'
               : 'border-zinc-200 bg-white text-slate-500 dark:border-zinc-800 dark:bg-[#111] dark:text-zinc-400'
         }`}>
-          {entry.rarity > 0 ? `${entry.rarity}★` : '--'}
+          {entry.avatarUrl ? (
+            <img
+              src={entry.avatarUrl}
+              alt={entry.name}
+              loading="lazy"
+              className="h-full w-full object-cover"
+              onError={(event) => {
+                event.currentTarget.style.display = 'none';
+                if (event.currentTarget.nextElementSibling) {
+                  event.currentTarget.nextElementSibling.style.display = 'flex';
+                }
+              }}
+            />
+          ) : null}
+          <span className={`h-full w-full items-center justify-center ${entry.avatarUrl ? 'hidden' : 'flex'}`}>
+            {entry.rarity > 0 ? `${entry.rarity}★` : '--'}
+          </span>
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-bold text-slate-900 dark:text-white">{entry.name}</div>
@@ -71,7 +89,7 @@ function DetailedLogRow({ index, style, ariaAttributes, entries, onEdit, t }) {
   );
 }
 
-export default function MobileDetailedLogList({ history, onEdit }) {
+export default function MobileDetailedLogList({ history, poolId = '', onEdit }) {
   const { isEnglish, locale, t, formatDateTime, formatNumber } = useI18n();
   const {
     phase,
@@ -81,7 +99,7 @@ export default function MobileDetailedLogList({ history, onEdit }) {
     loadedCount,
     loadMore,
     retry,
-  } = useScopedHistoryPages();
+  } = useScopedHistoryPages({ poolId });
   const entries = useMemo(() => buildMobileDetailedLogEntries(history, {
     locale,
     t,

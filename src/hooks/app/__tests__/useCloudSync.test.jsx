@@ -73,9 +73,10 @@ describe('useCloudSync.loadCloudData', () => {
 
     const snapshot = await result.current.loadCloudData({ id: 'user-1' });
 
-    expect(loadAccountGachaAnalysis).toHaveBeenCalledWith({
+    expect(loadAccountGachaAnalysis).toHaveBeenCalledWith(expect.objectContaining({
       accountKey: 'account-current',
-    });
+      viewKey: '__group_all',
+    }));
     expect(loadAccountGachaData).not.toHaveBeenCalled();
     expect(snapshot).toMatchObject({
       kind: 'analysis',
@@ -85,9 +86,9 @@ describe('useCloudSync.loadCloudData', () => {
     expect(snapshot).not.toHaveProperty('history');
     expect(snapshot.pools.map((pool) => pool.id)).toEqual([
       'snapshot-pool',
-      'catalog-pool',
       'visible-pool',
     ]);
+    expect(loadAllPoolsForCatalog).not.toHaveBeenCalled();
   });
 
   it('旧本地账号不存在时不带 accountKey 重试一次并恢复默认分析', async () => {
@@ -114,10 +115,13 @@ describe('useCloudSync.loadCloudData', () => {
       preferredGameUid: 'account-removed',
     });
 
-    expect(loadAccountGachaAnalysis).toHaveBeenNthCalledWith(1, {
+    expect(loadAccountGachaAnalysis).toHaveBeenNthCalledWith(1, expect.objectContaining({
       accountKey: 'account-removed',
-    });
-    expect(loadAccountGachaAnalysis).toHaveBeenNthCalledWith(2, {});
+      viewKey: '__group_all',
+    }));
+    expect(loadAccountGachaAnalysis).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      viewKey: '__group_all',
+    }));
     expect(snapshot.analysis.meta.accountKey).toBe('account-default');
   });
 
@@ -153,7 +157,10 @@ describe('useCloudSync.loadCloudData', () => {
     renderHook(() => useCloudSync({ showToast: vi.fn() }));
 
     await waitFor(() => {
-      expect(loadAccountGachaAnalysis).toHaveBeenCalledWith({ accountKey: 'account-new' });
+      expect(loadAccountGachaAnalysis).toHaveBeenCalledWith(expect.objectContaining({
+        accountKey: 'account-new',
+        viewKey: '__group_all',
+      }));
       expect(usePersonalAnalysisStore.getState().meta?.accountKey).toBe('account-new');
     });
     expect(loadAccountGachaAnalysis).toHaveBeenCalledTimes(1);
@@ -175,6 +182,53 @@ describe('useCloudSync.loadCloudData', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(loadAccountGachaAnalysis).not.toHaveBeenCalled();
+  });
+
+  it('切换卡池时只请求新卡池对应的分析 view', async () => {
+    useAuthStore.setState({ user: { id: 'user-1' }, authResolved: true });
+    usePersonalDataStore.getState().switchOwner('user-1');
+    usePersonalDataStore.setState({ phase: 'ready', hasSnapshot: true });
+    usePersonalAnalysisStore.setState({
+      ownerId: 'user-1',
+      availability: 'ready',
+      scope: {
+        account: { accountKey: 'account-current' },
+        dashboard: { views: { 'pool-old': { total: 1 } } },
+      },
+      meta: { ownerId: 'user-1', accountKey: 'account-current' },
+    });
+    usePoolStore.setState({
+      currentGameUid: 'account-current',
+      currentPoolId: 'pool-old',
+    });
+    loadAccountGachaAnalysis.mockResolvedValue({
+      availability: 'ready',
+      schemaVersion: 1,
+      owner: { defaultAccountKey: 'account-current' },
+      scope: {
+        account: { accountKey: 'account-current' },
+        poolManifest: [],
+        dashboard: { views: { 'pool-new': { total: 2 } } },
+      },
+      source: 'site-session',
+      meta: { ownerId: 'user-1', accountKey: 'account-current' },
+      warnings: [],
+    });
+
+    renderHook(() => useCloudSync({ showToast: vi.fn() }));
+    expect(loadAccountGachaAnalysis).not.toHaveBeenCalled();
+
+    act(() => {
+      usePoolStore.setState({ currentPoolId: 'pool-new' });
+    });
+
+    await waitFor(() => {
+      expect(loadAccountGachaAnalysis).toHaveBeenCalledWith(expect.objectContaining({
+        accountKey: 'account-current',
+        viewKey: 'pool-new',
+      }));
+    });
+    expect(loadAccountGachaAnalysis).toHaveBeenCalledTimes(1);
   });
 
   it('快速 B 到 C 切换不会把 C 合并进 B 的在途请求', async () => {
@@ -217,14 +271,20 @@ describe('useCloudSync.loadCloudData', () => {
       usePoolStore.setState({ currentGameUid: 'account-b' });
     });
     await waitFor(() => {
-      expect(loadAccountGachaAnalysis).toHaveBeenCalledWith({ accountKey: 'account-b' });
+      expect(loadAccountGachaAnalysis).toHaveBeenCalledWith(expect.objectContaining({
+        accountKey: 'account-b',
+        viewKey: '__group_all',
+      }));
     });
 
     act(() => {
       usePoolStore.setState({ currentGameUid: 'account-c' });
     });
     await waitFor(() => {
-      expect(loadAccountGachaAnalysis).toHaveBeenCalledWith({ accountKey: 'account-c' });
+      expect(loadAccountGachaAnalysis).toHaveBeenCalledWith(expect.objectContaining({
+        accountKey: 'account-c',
+        viewKey: '__group_all',
+      }));
       expect(usePersonalAnalysisStore.getState().meta?.accountKey).toBe('account-c');
     });
 

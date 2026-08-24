@@ -69,6 +69,7 @@ function createAdminClient({
       this.table = table;
       this.filters = [];
       this.limitValue = null;
+      this.rangeValue = null;
       this.columns = '';
       queryLog.push(this);
     }
@@ -79,6 +80,7 @@ function createAdminClient({
     in(column, values) { this.filters.push(['in', column, values]); return this; }
     order() { return this; }
     limit(value) { this.limitValue = value; return this; }
+    range(from, to) { this.rangeValue = [from, to]; return this; }
 
     execute() {
       let data;
@@ -96,6 +98,9 @@ function createAdminClient({
       });
       if (this.table === 'history') {
         data = [...data].sort((left, right) => Number(left.id) - Number(right.id));
+      }
+      if (this.rangeValue !== null) {
+        data = data.slice(this.rangeValue[0], this.rangeValue[1] + 1);
       }
       if (this.limitValue !== null) data = data.slice(0, this.limitValue);
       return { data, error: null };
@@ -175,6 +180,7 @@ describe('personal analysis worker', () => {
       backfillBatchSize: 500,
       leaseSeconds: 30,
       historyPageSize: 1000,
+      historyPageConcurrency: 2,
       maxHistoryPages: 100,
     });
   });
@@ -265,7 +271,7 @@ describe('personal analysis worker', () => {
       leaseId: LEASE_ID,
     });
 
-    expect(queryLog.filter((query) => query.table === 'history')).toHaveLength(1);
+    expect(queryLog.filter((query) => query.table === 'history')).toHaveLength(2);
     expect(queryLog.filter((query) => query.table === 'pools')).toHaveLength(1);
     expect(queryLog.filter((query) => query.table === 'characters')).toHaveLength(1);
     expect(queryLog.find((query) => query.table === 'pools').filters).toContainEqual([
@@ -334,7 +340,7 @@ describe('personal analysis worker', () => {
     const ownerCall = rpc.mock.calls.find(([name]) => (
       name === 'publish_personal_analysis_owner_snapshot'
     ));
-    expect(queryLog.filter((query) => query.table === 'history')).toHaveLength(3);
+    expect(queryLog.filter((query) => query.table === 'history')).toHaveLength(4);
     expect(ownerCall[1].p_payload.summary.total).toBe(2);
     expect(result.stats.succeeded).toBe(1);
   });

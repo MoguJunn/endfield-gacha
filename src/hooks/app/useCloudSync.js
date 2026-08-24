@@ -20,7 +20,7 @@ import {
   usePersonalDataStore,
   usePoolStore,
 } from '../../stores';
-import { getMessage } from '../../i18n/index.js';
+import { getAppLocale, getMessage } from '../../i18n/index.js';
 import {
   applyCloudAnalysisToStores,
   prepareCloudAnalysisSnapshot,
@@ -87,12 +87,14 @@ export function useCloudSync({ showToast }) {
   const switchGameAccount = usePoolStore((state) => state.switchGameAccount);
   const restoreOwnerSelection = usePoolStore((state) => state.restoreOwnerSelection);
   const currentGameUid = usePoolStore((state) => state.currentGameUid);
+  const currentPoolId = usePoolStore((state) => state.currentPoolId);
   const history = useHistoryStore((state) => state.history);
   const setHistory = useHistoryStore((state) => state.setHistory);
   const personalDataHasSnapshot = usePersonalDataStore((state) => state.hasSnapshot);
   const personalDataPhase = usePersonalDataStore((state) => state.phase);
   const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
   const analysisAccountKey = usePersonalAnalysisStore((state) => state.meta?.accountKey || null);
+  const analysisScope = usePersonalAnalysisStore((state) => state.scope);
   const accountScopeRequestRef = useRef(null);
 
   // 只准备快照；请求合并、token 校验和提交由 refreshPersonalData 统一负责。
@@ -109,16 +111,27 @@ export function useCloudSync({ showToast }) {
       const preferredGameUid = options.preferredGameUid
         ?? usePoolStore.getState().currentGameUid
         ?? '';
-      const analysisRequest = loadAccountGachaAnalysis({ accountKey: preferredGameUid })
+      const preferredPoolId = options.preferredPoolId
+        ?? usePoolStore.getState().currentPoolId
+        ?? '__group_all';
+      const analysisViewKey = preferredPoolId || '__group_all';
+      const analysisRequestOptions = {
+        accountKey: preferredGameUid,
+        viewKey: analysisViewKey,
+        locale: getAppLocale(),
+      };
+      const analysisRequest = loadAccountGachaAnalysis(analysisRequestOptions)
         .catch((error) => {
           if (preferredGameUid && error?.code === 'personal_analysis_account_not_found') {
-            return loadAccountGachaAnalysis({});
+            return loadAccountGachaAnalysis({
+              viewKey: analysisViewKey,
+              locale: getAppLocale(),
+            });
           }
           throw error;
         });
-      const [latestVisiblePools, catalogPools, analysis] = await Promise.all([
+      const [latestVisiblePools, analysis] = await Promise.all([
         loadLatestVisiblePools(),
-        loadAllPoolsForCatalog().catch(() => []),
         analysisRequest,
       ]);
       assertPersonalDataOwner(analysis, currentUser);
@@ -134,7 +147,7 @@ export function useCloudSync({ showToast }) {
         : [];
 
       const knownPoolsMap = new Map();
-      [...analysisPools, ...catalogPools, ...visiblePools].forEach((pool) => {
+      [...analysisPools, ...visiblePools].forEach((pool) => {
         const poolId = pool?.id || pool?.pool_id;
         if (poolId) {
           const existing = knownPoolsMap.get(poolId) || {};
@@ -189,7 +202,7 @@ export function useCloudSync({ showToast }) {
         ownerGeneration: ownerState.ownerGeneration,
         kind: options.kind || 'explicit',
         reason: options.reason || options.kind || 'explicit',
-        request: () => loadCloudData(currentUser, { preferredGameUid }),
+        request: () => loadCloudData(currentUser, { preferredGameUid, preferredPoolId }),
         apply: (snapshot) => applyCloudAnalysisToStores(snapshot, {
           setPools,
           switchPool,
@@ -222,22 +235,27 @@ export function useCloudSync({ showToast }) {
     const ownerId = String(user?.id || '').trim();
     const preferredGameUid = String(currentGameUid || '').trim();
     const currentAnalysisAccountKey = String(analysisAccountKey || '').trim();
+    const preferredPoolId = String(currentPoolId || '').trim();
+    const hasCurrentView = Boolean(
+      preferredPoolId
+      && analysisScope?.dashboard?.views?.[preferredPoolId]
+    );
     const isBuilding = personalDataPhase === 'building' || analysisAvailability === 'building';
 
     if (
       !ownerId
       || !personalDataHasSnapshot
       || !preferredGameUid
-      || preferredGameUid === currentAnalysisAccountKey
+      || (preferredGameUid === currentAnalysisAccountKey && hasCurrentView)
       || isBuilding
     ) {
-      if (preferredGameUid && preferredGameUid === currentAnalysisAccountKey) {
+      if (preferredGameUid && preferredGameUid === currentAnalysisAccountKey && hasCurrentView) {
         accountScopeRequestRef.current = null;
       }
       return;
     }
 
-    const requestKey = JSON.stringify([ownerId, preferredGameUid]);
+    const requestKey = JSON.stringify([ownerId, preferredGameUid, preferredPoolId]);
     if (accountScopeRequestRef.current === requestKey) {
       return;
     }
@@ -245,14 +263,19 @@ export function useCloudSync({ showToast }) {
     void refreshPersonalData(user, {
       // Include the target in the coordinator key so rapid B → C switches
       // cannot reuse B's in-flight promise for C.
-      kind: `account-scope:${preferredGameUid}`,
-      reason: 'account_scope_changed',
+      kind: `account-view:${preferredGameUid}:${preferredPoolId}`,
+      reason: preferredGameUid === currentAnalysisAccountKey
+        ? 'analysis_view_changed'
+        : 'account_scope_changed',
       preferredGameUid,
+      preferredPoolId,
     });
   }, [
     analysisAccountKey,
     analysisAvailability,
+    analysisScope,
     currentGameUid,
+    currentPoolId,
     personalDataHasSnapshot,
     personalDataPhase,
     refreshPersonalData,

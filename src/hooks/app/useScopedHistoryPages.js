@@ -14,6 +14,10 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function getSelectionGameUid(value) {
+  return normalizeText(value).split('::')[0] || '';
+}
+
 function normalizeAccountScope(account, currentGameUid) {
   if (!account || typeof account !== 'object') {
     return null;
@@ -33,7 +37,11 @@ function normalizeAccountScope(account, currentGameUid) {
     return null;
   }
   if (selectedAccountKey && selectedAccountKey !== accountKey) {
-    return null;
+    // 区服修正会让持久化的旧 accountKey 暂时落后于权威快照。
+    // 同 UID 可以采用当前快照 scope；不同 UID 切换期间仍必须拒绝。
+    if (getSelectionGameUid(selectedAccountKey) !== gameUid) {
+      return null;
+    }
   }
 
   return {
@@ -79,7 +87,7 @@ function createOwnerMismatchError(responseOwnerId, ownerId) {
   return error;
 }
 
-export function useScopedHistoryPages({ limit = DEFAULT_PAGE_LIMIT } = {}) {
+export function useScopedHistoryPages({ limit = DEFAULT_PAGE_LIMIT, poolId = '' } = {}) {
   const user = useAuthStore((state) => state.user);
   const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
   const analysisAccount = usePersonalAnalysisStore((state) => state.scope?.account || null);
@@ -89,6 +97,7 @@ export function useScopedHistoryPages({ limit = DEFAULT_PAGE_LIMIT } = {}) {
   ));
 
   const ownerId = normalizeText(user?.id);
+  const normalizedPoolId = normalizeText(poolId);
   const accountScope = useMemo(
     () => normalizeAccountScope(analysisAccount, currentGameUid),
     [analysisAccount, currentGameUid]
@@ -100,9 +109,10 @@ export function useScopedHistoryPages({ limit = DEFAULT_PAGE_LIMIT } = {}) {
         accountScope.gameUid,
         accountScope.serverScope,
         accountScope.region,
+        normalizedPoolId,
       ])
       : null
-  ), [accountScope]);
+  ), [accountScope, normalizedPoolId]);
 
   const pageOwnerId = useHistoryPageStore((state) => state.ownerId);
   const pageScopeKey = useHistoryPageStore((state) => state.scopeKey);
@@ -135,6 +145,7 @@ export function useScopedHistoryPages({ limit = DEFAULT_PAGE_LIMIT } = {}) {
         gameUid: accountScope.gameUid,
         serverScope: accountScope.serverScope,
         region: accountScope.region,
+        ...(normalizedPoolId ? { poolId: normalizedPoolId } : {}),
         cursor: reset ? '' : cursor,
         limit,
       });
@@ -164,7 +175,7 @@ export function useScopedHistoryPages({ limit = DEFAULT_PAGE_LIMIT } = {}) {
       useHistoryPageStore.getState().fail(token, requestError);
       return false;
     }
-  }, [accountScope, limit, ownerId, scopeKey]);
+  }, [accountScope, limit, normalizedPoolId, ownerId, scopeKey]);
 
   const loadFirstPage = useCallback(
     () => requestPage({ reset: true, cursor: '' }),

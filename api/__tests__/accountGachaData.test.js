@@ -354,6 +354,7 @@ function createAdminClient() {
 describe('/api/account-gacha-data', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    __internal.clearTransientPersonalAnalysisCache();
     mocks.getSupabaseAdminClient.mockReturnValue(createAdminClient());
     mocks.resolveAuthenticatedRequestUser.mockResolvedValue({
       ok: true,
@@ -445,6 +446,46 @@ describe('/api/account-gacha-data', () => {
       warnings: [],
     });
     expect(adminClient.__state.selectCalls.some((call) => call.table === 'history')).toBe(false);
+  });
+
+  it('projects only the requested dashboard view and locale from an account snapshot', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.accountSnapshots['game-1::server:2'].payload.dashboard = {
+      views: {
+        'pool-current': { total: 12 },
+        'pool-other': { total: 34 },
+      },
+      timelineViews: {
+        'zh-CN': {
+          'pool-current': [{ id: 'current-zh' }],
+          'pool-other': [{ id: 'other-zh' }],
+        },
+        'en-US': {
+          'pool-current': [{ id: 'current-en' }],
+        },
+      },
+    };
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2&viewKey=pool-current&locale=en-US',
+    }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.meta).toMatchObject({ viewKey: 'pool-current', locale: 'en-US' });
+    expect(res.body.scope.dashboard).toEqual({
+      views: { 'pool-current': { total: 12 } },
+      timelineViews: { 'en-US': { 'pool-current': [{ id: 'current-en' }] } },
+    });
+    const projectedRead = adminClient.__state.selectCalls.find((call) => (
+      call.table === 'personal_analysis_snapshots'
+      && call.selection.includes('view:payload->dashboard->views->pool-current')
+    ));
+    expect(projectedRead?.selection).toContain(
+      'timeline:payload->dashboard->timelineViews->en-US->pool-current'
+    );
+    expect(JSON.stringify(res.body.scope)).not.toContain('pool-other');
   });
 
   it('returns building instead of falling back to a full history read when no snapshot exists', async () => {
@@ -841,6 +882,39 @@ describe('/api/account-gacha-data', () => {
     expect(res.body).not.toHaveProperty('history');
   });
 
+  it('reuses a transient analysis model for repeated reads by the same owner', async () => {
+    const callerClient = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(null);
+    mocks.resolveAuthenticatedRequestUser.mockResolvedValue({
+      ok: true,
+      source: 'supabase',
+      user: { id: 'user-1' },
+      callerClient,
+    });
+
+    const firstResponse = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis',
+      headers: { authorization: 'Bearer native-token' },
+    }), firstResponse);
+    const firstHistoryReadCount = callerClient.__state.selectCalls.filter((call) => (
+      call.table === 'history'
+    )).length;
+
+    const secondResponse = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis',
+      headers: { authorization: 'Bearer native-token' },
+    }), secondResponse);
+
+    expect(firstHistoryReadCount).toBeGreaterThan(0);
+    expect(callerClient.__state.selectCalls.filter((call) => call.table === 'history')).toHaveLength(
+      firstHistoryReadCount
+    );
+    expect(firstResponse.body.meta.cacheHit).toBe(false);
+    expect(secondResponse.body.meta.cacheHit).toBe(true);
+  });
+
   it('returns current user seq keys for import dedupe', async () => {
     const adminClient = createAdminClient();
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
@@ -1199,6 +1273,7 @@ describe('/api/account-gacha-data', () => {
       },
       filters: [
         { op: 'eq', column: 'user_id', value: 'user-1' },
+        { op: 'eq', column: 'game_uid', value: 'game-1' },
         { op: 'in', column: 'id', values: [101] },
       ],
     });
@@ -1273,6 +1348,7 @@ describe('/api/account-gacha-data', () => {
     expect(adminClient.__state.deleteCalls).toHaveLength(1);
     expect(adminClient.__state.deleteCalls[0].filters).toEqual([
       { op: 'eq', column: 'user_id', value: 'user-1' },
+      { op: 'eq', column: 'game_uid', value: 'game-1' },
       { op: 'in', column: 'id', values: [202] },
     ]);
   });

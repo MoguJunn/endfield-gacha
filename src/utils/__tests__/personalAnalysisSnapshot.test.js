@@ -111,9 +111,9 @@ describe('buildPersonalAnalysisSnapshots', () => {
     });
 
     expect(result.owner.accounts[0]).toMatchObject({
-      accountKey: 'legacy-game::server:1',
+      accountKey: 'legacy-game::region:cn',
       gameUid: 'legacy-game',
-      serverId: '1',
+      serverId: null,
       serverScope: 'legacy',
       region: 'cn',
     });
