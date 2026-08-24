@@ -1014,6 +1014,78 @@
     background: rgba(20, 83, 45, 0.38);
   }
 
+  /* 卡池详情信息密度高于其他移动页面，单独收紧视觉尺寸。 */
+  .mobile-dashboard-compact .mobile-ux-card,
+  .mobile-dashboard-compact .mobile-glass-panel,
+  .mobile-dashboard-compact .mobile-ux-soft-card,
+  .mobile-dashboard-compact .mobile-ux-card-inset {
+    border-radius: 0.8rem;
+  }
+
+  .mobile-dashboard-compact .mx-4 {
+    margin-left: 0.75rem;
+    margin-right: 0.75rem;
+  }
+
+  .mobile-dashboard-compact .p-4 {
+    padding: 0.75rem;
+  }
+
+  .mobile-dashboard-compact .p-3 {
+    padding: 0.625rem;
+  }
+
+  .mobile-dashboard-compact .px-3 {
+    padding-left: 0.625rem;
+    padding-right: 0.625rem;
+  }
+
+  .mobile-dashboard-compact .py-3 {
+    padding-top: 0.625rem;
+    padding-bottom: 0.625rem;
+  }
+
+  .mobile-dashboard-compact .gap-3 {
+    gap: 0.5rem;
+  }
+
+  .mobile-dashboard-compact .gap-2 {
+    gap: 0.375rem;
+  }
+
+  .mobile-dashboard-compact .text-3xl {
+    font-size: 1.5rem;
+    line-height: 1.85rem;
+  }
+
+  .mobile-dashboard-compact .text-2xl {
+    font-size: 1.25rem;
+    line-height: 1.6rem;
+  }
+
+  .mobile-dashboard-compact .text-xl {
+    font-size: 1.05rem;
+    line-height: 1.45rem;
+  }
+
+  .mobile-dashboard-compact .text-sm {
+    font-size: 0.78rem;
+    line-height: 1.15rem;
+  }
+
+  .mobile-dashboard-compact .text-xs {
+    font-size: 0.68rem;
+    line-height: 1rem;
+  }
+
+  .mobile-dashboard-compact .h-52 {
+    height: 11rem;
+  }
+
+  .mobile-dashboard-compact .h-48 {
+    height: 10rem;
+  }
+
   .mobile-ux-dropdown {
     border-radius: 1.2rem;
     border: 1px solid rgba(228, 228, 231, 0.95);

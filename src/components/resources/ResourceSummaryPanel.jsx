@@ -108,6 +108,7 @@ function getItems(resources, variant, t, formatNumber) {
     return [
       baseItems.jadeSpent,
       baseItems.originiteEquivalent,
+      baseItems.arsenalGained,
       baseItems.aicQuotaDirect,
       baseItems.aicQuotaConvertible,
       baseItems.bondQuotaDirect,
@@ -123,9 +124,10 @@ function getItems(resources, variant, t, formatNumber) {
   }
 
   return [
-      baseItems.jadeSpent,
-      baseItems.originiteEquivalent,
-      baseItems.aicQuotaDirect,
+    baseItems.jadeSpent,
+    baseItems.originiteEquivalent,
+    baseItems.arsenalGained,
+    baseItems.aicQuotaDirect,
       baseItems.aicQuotaConvertible,
       baseItems.bondQuotaDirect,
       baseItems.endpointQuotaConvertible,

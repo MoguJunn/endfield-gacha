@@ -59,7 +59,6 @@ import appLogger from '../../utils/appLogger.js';
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from '../../utils/storageUtils.js';
 import { localizeDashboardChartItems } from '../../utils/dashboardChartLabels.js';
 import { normalizeShareThemeMode, resolveShareThemeMode } from '../../utils/shareThemeMode.js';
-import DeferredSection from '../ui/DeferredSection.jsx';
 import { useHistoryPageStore, useHistoryStore } from '../../stores/index.js';
 
 const DashboardCharts = React.lazy(() => import('./DashboardCharts.jsx'));
@@ -1367,10 +1366,10 @@ const DashboardView = ({ showToast }) => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className={`grid grid-cols-1 items-start gap-6 ${isGroupMode ? 'xl:grid-cols-1' : 'xl:grid-cols-[minmax(0,7fr)_minmax(0,13fr)]'}`}>
         {/* 左列：保底机制分析 (聚合模式下隐藏) */}
         {!isGroupMode && (
-          <div className="md:col-span-1 space-y-6">
+          <div className="space-y-6 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:self-start xl:overflow-y-auto xl:pr-1">
             <PoolAnalysisCard
               currentPool={currentPool}
               stats={stats}
@@ -1383,7 +1382,7 @@ const DashboardView = ({ showToast }) => {
         )}
 
         {/* 右列：详细数据与图表（聚合模式下全宽） */}
-        <div className={`${isGroupMode ? 'md:col-span-3' : 'md:col-span-2'} space-y-6`}>
+        <div className="flex min-w-0 flex-col gap-6">
           {splitOverviewStats ? (
             <>
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -1572,11 +1571,13 @@ const DashboardView = ({ showToast }) => {
                 </div>
               </div>
 
-              <DeferredSection
-                title={t('dashboard.chart.deepAnalysis', {}, '资源、平均与趋势')}
-                description={t('dashboard.chart.deepAnalysisHint', {}, '按需展开角色池与武器池的长期统计，避免阻塞核心结果。')}
-                contentClassName="space-y-6"
-              >
+              <section className="order-20 space-y-6" aria-labelledby="overview-resource-analysis-title">
+                <div className="flex items-center gap-3 border-b border-zinc-200 pb-2 dark:border-zinc-800">
+                  <h3 id="overview-resource-analysis-title" className="text-sm font-bold uppercase tracking-[0.16em] text-slate-700 dark:text-zinc-200">
+                    {t('dashboard.chart.deepAnalysis', {}, '资源、平均与趋势')}
+                  </h3>
+                  <span className="h-px flex-1 bg-zinc-100 dark:bg-zinc-800" />
+                </div>
                 <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
                   <AveragePullStatsPanel
                     stats={splitOverviewStats.character}
@@ -1585,7 +1586,7 @@ const DashboardView = ({ showToast }) => {
                   />
                   <AveragePullStatsPanel stats={splitOverviewStats.weapon} poolType="weapon" isAllPoolsOverview={true} />
                 </div>
-                <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
                   <ResourceSummaryPanel
                     title={t('dashboard.resources.groupTitle', { name: characterPoolLabel })}
                     resources={splitOverviewStats.character.resourceSummary}
@@ -1606,37 +1607,38 @@ const DashboardView = ({ showToast }) => {
                     <DashboardCharts groups={dashboardChartGroups} isDark={isDark} tooltipStyle={tooltipStyle} />
                   </React.Suspense>
                 </div>
-              </DeferredSection>
+              </section>
             </>
           ) : (
             <>
-              {/* 总投入 Banner */}
-              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 flex items-center justify-between shadow-sm relative overflow-hidden group">
-                <div className="absolute right-0 top-0 h-full w-32 bg-gradient-to-l from-zinc-50 dark:from-zinc-800 to-transparent"></div>
-                <div className="relative z-10">
-                  <h3 className="text-xs text-slate-500 dark:text-zinc-500 font-bold uppercase tracking-wider mb-1">
-                    {totalPullBannerTitle}
-                  </h3>
-                  <div className="text-4xl font-black font-mono text-slate-800 dark:text-zinc-100 flex items-baseline gap-2">
-                    {formatNumber(stats.total)}
-                    <span className="text-lg font-medium text-slate-400 dark:text-zinc-600">{pullUnitLabel}</span>
+              {/* 总投入与核心数量合并为同一行 */}
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(13rem,0.8fr)_minmax(0,2.2fr)]">
+                <div className="group relative flex min-w-0 flex-col justify-between gap-3 overflow-hidden border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+                  <div className="absolute right-0 top-0 h-full w-24 bg-gradient-to-l from-zinc-50 to-transparent dark:from-zinc-800"></div>
+                  <div className="relative z-10">
+                    <h3 className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-500">
+                      {totalPullBannerTitle}
+                    </h3>
+                    <div className="flex items-baseline gap-2 font-mono text-3xl font-black text-slate-800 dark:text-zinc-100">
+                      {formatNumber(stats.total)}
+                      <span className="text-base font-medium text-slate-400 dark:text-zinc-600">{pullUnitLabel}</span>
+                    </div>
                   </div>
+                  {(normalizedPoolType === 'limited' || normalizedPoolType === 'extra') && (
+                    <div className="relative z-10 w-full">
+                      <FreePullStatsToggle
+                        enabled={includeFreePullsInStats}
+                        onToggle={() => setIncludeFreePullsInStats((value) => !value)}
+                        t={t}
+                      />
+                    </div>
+                  )}
                 </div>
-                {(normalizedPoolType === 'limited' || normalizedPoolType === 'extra') && (
-                  <div className="relative z-10 w-full max-w-[18rem]">
-                    <FreePullStatsToggle
-                      enabled={includeFreePullsInStats}
-                      onToggle={() => setIncludeFreePullsInStats((value) => !value)}
-                      t={t}
-                    />
-                  </div>
-                )}
-              </div>
 
-              {/* 核心数据网格 */}
-              <div
-                className={`grid grid-cols-2 ${normalizedPoolType !== 'standard' ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4`}
-              >
+                {/* 核心数据网格 */}
+                <div
+                  className={`grid grid-cols-2 ${normalizedPoolType !== 'standard' ? 'xl:grid-cols-4' : 'xl:grid-cols-3'} gap-4`}
+                >
                 {normalizedPoolType !== 'standard' && (
                   <StatBox
                     title={primarySixStarLabel}
@@ -1702,6 +1704,7 @@ const DashboardView = ({ showToast }) => {
                   colorClass="text-purple-600 dark:text-purple-400"
                   icon={Star}
                 />
+                </div>
               </div>
 
               {isGroupMode && (
@@ -1736,28 +1739,31 @@ const DashboardView = ({ showToast }) => {
                 />
               )}
 
-              <DeferredSection
-                title={t('dashboard.chart.deepAnalysis', {}, '资源、分布与趋势')}
-                description={t('dashboard.chart.deepAnalysisHint', {}, '核心保底和出货结果优先展示；深度图表按需加载。')}
-                contentClassName="grid grid-cols-1 gap-6 xl:grid-cols-3"
-                defaultOpen={true}
-              >
+              <section className="order-20 space-y-6" aria-labelledby="resource-analysis-title">
+                <div className="flex items-center gap-3 border-b border-zinc-200 pb-2 dark:border-zinc-800">
+                  <h3 id="resource-analysis-title" className="text-sm font-bold uppercase tracking-[0.16em] text-slate-700 dark:text-zinc-200">
+                    {t('dashboard.chart.deepAnalysis', {}, '资源、分布与趋势')}
+                  </h3>
+                  <span className="h-px flex-1 bg-zinc-100 dark:bg-zinc-800" />
+                </div>
                 <ResourceSummaryPanel
                   title={resourceSummaryTitle}
                   resources={dashboardResourceSummary}
                   variant={resourceSummaryVariant}
-                  stacked={true}
+                  layout="grouped"
                   className="bg-white dark:bg-zinc-900 shadow-sm"
                 />
-                <React.Suspense fallback={<div className="p-6 text-center text-sm text-zinc-500">{t('common.loading')}</div>}>
-                  <DashboardCharts groups={dashboardChartGroups} isDark={isDark} tooltipStyle={tooltipStyle} />
-                </React.Suspense>
-              </DeferredSection>
+                <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                  <React.Suspense fallback={<div className="p-6 text-center text-sm text-zinc-500">{t('common.loading')}</div>}>
+                    <DashboardCharts groups={dashboardChartGroups} isDark={isDark} tooltipStyle={tooltipStyle} />
+                  </React.Suspense>
+                </div>
+              </section>
             </>
           )}
 
           {/* 角色出货列表 (Updated Style) */}
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm">
+          <div className="order-10 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm">
             <div className="flex items-center gap-2 mb-4 border-b border-zinc-100 dark:border-zinc-800 pb-2">
               <User size={18} className="text-slate-400 dark:text-zinc-500" />
               <h3 className="text-sm font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">

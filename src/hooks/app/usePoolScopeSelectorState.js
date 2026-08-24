@@ -5,13 +5,19 @@ import {
   usePersonalAnalysisStore,
   usePoolStore,
 } from '../../stores/index.js';
+import useSiteConfigStore from '../../stores/useSiteConfigStore.js';
 import { buildPoolSelectorGroups } from '../../utils/poolSelectorDisplay.js';
+import {
+  HOME_VERSION_TIMELINE_CONFIG_KEY,
+  normalizeHomeVersionTimeline,
+} from '../../utils/homeVersionTimeline.js';
 import {
   filterHistoryForEffectiveGameUid,
   resolveEffectiveGameUid,
 } from '../../utils/accountScopeUtils.js';
 import { getPreferredPool } from '../../utils/poolSelectionUtils.js';
 import { isPoolGroupId } from '../../stores/usePoolStore.js';
+import { usePersonalGameAccounts } from './usePersonalGameAccounts.js';
 
 /** Shared account/pool scope projection for desktop and mobile selectors. */
 export function usePoolScopeSelectorState({
@@ -27,20 +33,15 @@ export function usePoolScopeSelectorState({
   const switchToPoolGroup = usePoolStore((state) => state.switchToPoolGroup);
   const switchGameAccount = usePoolStore((state) => state.switchGameAccount);
   const history = useHistoryStore((state) => state.history);
-  const getGameAccountsFromHistory = useHistoryStore((state) => state.getGameAccountsFromHistory);
   const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
-  const analysisOwner = usePersonalAnalysisStore((state) => state.owner);
   const analysisScope = usePersonalAnalysisStore((state) => state.scope);
+  const versionTimelineConfig = useSiteConfigStore(
+    (state) => state.config[HOME_VERSION_TIMELINE_CONFIG_KEY]
+  );
   const hasAnalysisSnapshot = ['ready', 'stale', 'empty'].includes(analysisAvailability);
   const poolsArray = useMemo(() => (Array.isArray(pools) ? pools : []), [pools]);
   const historyArray = useMemo(() => (Array.isArray(history) ? history : []), [history]);
-  const gameAccounts = useMemo(() => {
-    if (hasAnalysisSnapshot && Array.isArray(analysisOwner?.accounts)) {
-      return analysisOwner.accounts;
-    }
-    void history;
-    return getGameAccountsFromHistory();
-  }, [analysisOwner, getGameAccountsFromHistory, hasAnalysisSnapshot, history]);
+  const gameAccounts = usePersonalGameAccounts();
   const effectiveGameUid = useMemo(() => resolveEffectiveGameUid({
     currentGameUid,
     gameAccounts,
@@ -80,12 +81,18 @@ export function usePoolScopeSelectorState({
     || (poolPullCounts[pool.id] || 0) > 0
     || pool.id === currentPoolId
   )), [currentPoolId, hideZeroPullPools, poolPullCounts, poolsArray]);
+  const versionTimeline = useMemo(
+    () => normalizeHomeVersionTimeline(versionTimelineConfig),
+    [versionTimelineConfig]
+  );
   const groupedPools = useMemo(() => buildPoolSelectorGroups({
     pools: selectorPools,
     poolPullCounts,
     searchQuery,
     locale,
-  }), [locale, poolPullCounts, searchQuery, selectorPools]);
+    versionTimeline,
+    latestVersionLimit: 2,
+  }), [locale, poolPullCounts, searchQuery, selectorPools, versionTimeline]);
   const totalPulls = hasAnalysisSnapshot
     && analysisScope?.account?.accountKey === effectiveGameUid
     && Number.isFinite(Number(analysisScope?.selector?.totalPulls))

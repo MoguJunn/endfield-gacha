@@ -10,8 +10,8 @@ import { useCloudSync, useDashboardViewState, useToast } from '../../hooks';
 import { RARITY_CONFIG } from '../../constants';
 import { useTheme } from '../../contexts/ThemeContext';
 import { DistributionAreaChart, RainbowGradientDefs } from '../../components/charts';
-import MobileChartContainer from '../components/MobileChartContainer';
 import MobilePoolRailSelector from '../components/MobilePoolRailSelector';
+import MobileChartContainer from '../components/MobileChartContainer.jsx';
 import ResourceSummaryPanel from '../../components/resources/ResourceSummaryPanel';
 import AveragePullStatsPanel from '../../components/dashboard/AveragePullStatsPanel';
 import PoolTimelinePanel from '../../components/dashboard/PoolTimelinePanel';
@@ -48,6 +48,7 @@ import {
   MobileStatusBadge
 } from '../components/ux/MobilePrimitives.jsx';
 import MobileAuthRequiredView from '../components/MobileAuthRequiredView.jsx';
+import AccountServerLabelNotice from '../../components/app/AccountServerLabelNotice.jsx';
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from '../../utils/storageUtils.js';
 import { localizeDashboardChartItems } from '../../utils/dashboardChartLabels.js';
 import { normalizeShareThemeMode, resolveShareThemeMode } from '../../utils/shareThemeMode.js';
@@ -807,6 +808,7 @@ function MobileDashboardView() {
         <div className={poolRailShellClass}>
           <MobilePoolRailSelector />
         </div>
+        <AccountServerLabelNotice ownerId={user.id} mobile />
 
         <div className="mobile-ux-card mx-4 p-8 text-center">
           <Calculator size={48} className="mx-auto mb-4 text-slate-700 dark:text-zinc-300 dark:text-zinc-700" />
@@ -824,6 +826,7 @@ function MobileDashboardView() {
         <div className={poolRailShellClass}>
           <MobilePoolRailSelector />
         </div>
+        <AccountServerLabelNotice ownerId={user.id} mobile />
         <div className="mobile-ux-card mx-4 p-8 text-center">
           <Calculator size={48} className="mx-auto mb-4 text-slate-700 dark:text-zinc-300 dark:text-zinc-700" />
           <p className="text-slate-500 dark:text-zinc-500 dark:text-slate-600 dark:text-zinc-400">{t('dashboard.empty.selectOrCreatePool')}</p>
@@ -833,7 +836,7 @@ function MobileDashboardView() {
   }
 
   return (
-    <div className="flex-1 h-full overflow-y-auto overflow-x-hidden slide-right-enter scroll-smooth w-full bg-ef-light dark:bg-ef-dark flex flex-col pb-[calc(env(safe-area-inset-bottom,0px)+7.5rem)] [&>*]:shrink-0">
+    <div className="mobile-dashboard-compact flex-1 h-full overflow-y-auto overflow-x-hidden slide-right-enter scroll-smooth w-full bg-ef-light dark:bg-ef-dark flex flex-col pb-[calc(env(safe-area-inset-bottom,0px)+7.5rem)] [&>*]:shrink-0">
       {hasDashboardShareData && (isShareActionBusy || (supportsClipboardImageCopy && isFirefoxClipboardBrowser)) && (
         <div
           aria-hidden="true"
@@ -859,6 +862,7 @@ function MobileDashboardView() {
       <div className={poolRailShellClass}>
         <MobilePoolRailSelector />
       </div>
+      <AccountServerLabelNotice ownerId={user.id} mobile />
 
       <div className="mobile-ux-card relative mb-4 mx-4 mt-4 overflow-hidden border-pink-500/30">
         <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-gradient-to-b from-pink-500 to-orange-500"></div>
@@ -887,10 +891,27 @@ function MobileDashboardView() {
                   <Clock size={12} className="text-endfield-yellow" />
                   <span className="font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-zinc-500">{t('dashboard.pool.status')}</span>
                   <span className="countdown-nums text-slate-900 dark:text-white">
-                    {t('dashboard.pool.remainingTime', {
-                      days: currentUpPool.remainingDays || 0,
-                      hours: currentUpPool.remainingHours || 0,
-                    })}
+                    {currentUpPool.isExpired
+                      ? t('dashboard.pool.statusEnded')
+                      : currentUpPool.isUpcoming
+                        ? (currentUpPool.startsIn > 0 || currentUpPool.startsInHours > 0
+                          ? t('dashboard.pool.startsInTime', {
+                              days: currentUpPool.startsIn || 0,
+                              hours: currentUpPool.startsInHours || 0,
+                            })
+                          : t('dashboard.pool.startsInMinutes', {
+                              minutes: currentUpPool.startsInMinutes || 1,
+                            }))
+                        : currentUpPool.isActive
+                          ? (currentUpPool.remainingDays > 0 || currentUpPool.remainingHours > 0
+                            ? t('dashboard.pool.remainingTime', {
+                                days: currentUpPool.remainingDays || 0,
+                                hours: currentUpPool.remainingHours || 0,
+                              })
+                            : t('dashboard.pool.remainingMinutes', {
+                                minutes: currentUpPool.remainingMinutes || 1,
+                              }))
+                          : t('dashboard.pool.statusAlwaysOn')}
                   </span>
                 </div>
               ) : null}
@@ -1035,11 +1056,7 @@ function MobileDashboardView() {
           </button>
       </div>
 
-      <MobileChartContainer
-        title={resourceSummaryTitle}
-        defaultExpanded={false}
-        className="mx-4 mb-4"
-      >
+      <div className="mx-4 mb-4">
         <ResourceSummaryPanel
           title={resourceSummaryTitle}
           resources={dashboardResourceSummary}
@@ -1047,7 +1064,7 @@ function MobileDashboardView() {
           compact={true}
           mobile={true}
         />
-      </MobileChartContainer>
+      </div>
 
       {/* 保底进度（聚合模式下隐藏） */}
       {!isGroupMode && !hasMergedAccountView && (
@@ -1147,7 +1164,10 @@ function MobileDashboardView() {
       {stats.total > 0 && (
         <div className="space-y-2">
           {/* 饼图 - 分布概览 */}
-          <MobileChartContainer title={t('dashboard.chart.distribution')} defaultExpanded={false} className="mb-4 mx-4">
+          <section className="mobile-ux-card mx-4 mb-4 p-3" aria-labelledby="mobile-distribution-title">
+            <h3 id="mobile-distribution-title" className="text-sm font-bold text-slate-800 dark:text-white">
+              {t('dashboard.chart.distribution')}
+            </h3>
             <div className="h-52 w-full pt-2">
               {stats.chartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={180}>
@@ -1190,11 +1210,14 @@ function MobileDashboardView() {
                 <div className="h-full flex items-center justify-center text-slate-700 dark:text-zinc-300 dark:text-zinc-700 text-sm">{t('dashboard.empty.noChartData')}</div>
               )}
             </div>
-          </MobileChartContainer>
+          </section>
 
           {/* 面积图 - 6星出货趋势 */}
           {stats.pityStats.history.length > 0 && (
-            <MobileChartContainer title={t('dashboard.chart.trend')} defaultExpanded={false} className="mb-4 mx-4">
+            <section className="mobile-ux-card mx-4 mb-4 p-3" aria-labelledby="mobile-trend-title">
+              <h3 id="mobile-trend-title" className="text-sm font-bold text-slate-800 dark:text-white">
+                {t('dashboard.chart.trend')}
+              </h3>
               <div className="h-48 w-full pt-2">
                 <DistributionAreaChart
                   data={stats.pityStats.distribution}
@@ -1209,7 +1232,7 @@ function MobileDashboardView() {
                   margin={{ top: 5, right: 5, left: -25, bottom: 0 }}
                 />
               </div>
-            </MobileChartContainer>
+            </section>
           )}
         </div>
       )}
@@ -1458,6 +1481,7 @@ function MobileDashboardView() {
           ) : charViewMode === 'waterfall' ? (
             <div className="pt-2">
               <PoolTimelinePanel
+                sections={timelineSections}
                 currentPool={currentPool}
                 currentPoolHistory={normalizedPoolHistory}
                 groupedHistory={groupedHistory}
@@ -1637,6 +1661,7 @@ function MobileDashboardView() {
             <React.Suspense fallback={<div className="p-4 text-center text-xs text-zinc-500">{t('common.loading')}</div>}>
               <MobileDetailedLogList
                 history={normalizedPoolHistory}
+                poolId={isGroupMode ? '' : currentPoolId || currentPool?.id}
                 onEdit={setEditAnomalyRecord}
               />
             </React.Suspense>

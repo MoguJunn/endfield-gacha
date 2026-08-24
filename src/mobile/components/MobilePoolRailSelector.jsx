@@ -53,6 +53,7 @@ export default function MobilePoolRailSelector() {
   const [showFilters, setShowFilters] = useState(false);
   const [showPoolMenu, setShowPoolMenu] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState({});
+  const [expandedOldPoolGroups, setExpandedOldPoolGroups] = useState({});
   const poolMenuRef = React.useRef(null);
   const {
     user,
@@ -310,6 +311,14 @@ export default function MobilePoolRailSelector() {
                   const groupId = `${POOL_GROUP_PREFIX}${group.type}`;
                   const groupSelected = currentPoolId === groupId;
                   const groupExpanded = group.disableCollapse ? true : expandedGroups[group.type] !== false;
+                  const versionFoldEnabled = group.versionFold?.enabled === true && !group.disableCollapse;
+                  const directPools = versionFoldEnabled ? group.versionFold.directPools : group.pools;
+                  const foldedPools = versionFoldEnabled ? group.versionFold.foldedPools : [];
+                  const selectedOldPool = foldedPools.some((pool) => pool.id === currentPoolId);
+                  const oldPoolsExpanded = selectedOldPool || expandedOldPoolGroups[group.type] === true;
+                  const displayedPools = oldPoolsExpanded
+                    ? [...directPools, ...foldedPools]
+                    : directPools;
                   const headerConfig = getGroupHeaderConfig(group.type);
                   const HeaderIcon = headerConfig.icon;
 
@@ -369,7 +378,7 @@ export default function MobilePoolRailSelector() {
                             </button>
                           ) : null}
 
-                          {group.pools.map((pool) => {
+                          {displayedPools.map((pool) => {
                             const active = currentPoolId === pool.id;
                             const config = getPoolTypeConfig(pool);
                             const Icon = config.icon;
@@ -401,6 +410,27 @@ export default function MobilePoolRailSelector() {
                               </button>
                             );
                           })}
+
+                          {foldedPools.length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => setExpandedOldPoolGroups((current) => ({
+                                ...current,
+                                [group.type]: !oldPoolsExpanded,
+                              }))}
+                              className="flex w-full items-center justify-between rounded-lg border border-dashed border-zinc-300 px-3 py-2.5 text-left text-[11px] font-bold text-slate-600 transition-colors hover:border-endfield-yellow/50 hover:bg-endfield-yellow/8 dark:border-zinc-700 dark:text-zinc-300"
+                            >
+                              <span>
+                                {oldPoolsExpanded
+                                  ? t('pool.card.keepLatest')
+                                  : t('pool.card.hasMore', { count: formatNumber(foldedPools.length) })}
+                              </span>
+                              <ChevronDown
+                                size={14}
+                                className={cx('transition-transform', oldPoolsExpanded && 'rotate-180')}
+                              />
+                            </button>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
