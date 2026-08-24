@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
-import { DONATION_PLATFORM_URL } from '../../../constants/donations.js';
+import { AFDIAN_SUPPORT_TIERS, DONATION_LEDGER, DONATION_PLATFORM_URL } from '../../../constants/donations.js';
 import DonationThanksCard from '../DonationThanksCard.jsx';
 import DonationThanksPage from '../DonationThanksPage.jsx';
 
@@ -28,6 +28,11 @@ describe('DonationThanksCard', () => {
     expect(supporterAvatar.closest('[class*="overflow-y-auto"]')).toBeInTheDocument();
     expect(screen.getByText(/home.donation.summary/)).toBeInTheDocument();
     expect(screen.getAllByText('¥200')).toHaveLength(2);
+    expect(DONATION_LEDGER[0]).toMatchObject({ name: 'Neptune', pinned: true });
+    expect(screen.getByText(/home.donation.pinned/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /home.donation.amountLink/ })).toHaveClass(
+      'donation-rainbow-amount'
+    );
     expect(screen.getByRole('link', { name: /home.donation.action/ })).toHaveAttribute(
       'href',
       DONATION_PLATFORM_URL
@@ -50,6 +55,10 @@ describe('DonationThanksCard', () => {
     expect(screen.getAllByText('¥200').length).toBeGreaterThan(0);
     expect(screen.getByText(/donations.process.received.title/)).toBeInTheDocument();
     expect(screen.getByText(/donations.processTitle/)).toBeInTheDocument();
+    expect(AFDIAN_SUPPORT_TIERS.map((tier) => tier.amountCny)).toEqual([6, 12, 32, 70, 125]);
+    AFDIAN_SUPPORT_TIERS.forEach((tier) => {
+      expect(screen.getByText(`¥${tier.amountCny}`)).toBeInTheDocument();
+    });
     expect(screen.getByRole('link', { name: /donations.supportAction/ })).toHaveAttribute(
       'href',
       DONATION_PLATFORM_URL

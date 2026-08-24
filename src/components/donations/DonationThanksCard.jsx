@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, Copy, ExternalLink, HandCoins, List, Users } from 'lucide-react';
+import { Check, Copy, ExternalLink, HandCoins, List, Pin, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ACCOUNT_RECOVERY_QQ_GROUP, ENGLISH_COMMUNITY_DISCORD_URL } from '../../constants/community.js';
 import { DONATION_LEDGER, DONATION_PLATFORM_URL, DONATION_TOTALS } from '../../constants/donations.js';
@@ -61,6 +61,11 @@ export default function DonationThanksCard({ compact = false }) {
                     loading="lazy"
                   />
                   <span className="truncate text-[8px] text-rose-600/65 dark:text-rose-300/55">{donation.donatedAt}</span>
+                  {donation.pinned ? (
+                    <span className="inline-flex shrink-0 items-center gap-0.5 text-[8px] font-bold text-amber-600 dark:text-amber-300">
+                      <Pin size={9} fill="currentColor" /> {t('home.donation.pinned')}
+                    </span>
+                  ) : null}
                 </div>
                 <p className="mt-0.5 truncate text-[8px] text-rose-700/65 dark:text-rose-300/55">
                   {t('home.donation.allocation', {
@@ -69,9 +74,15 @@ export default function DonationThanksCard({ compact = false }) {
                   })}
                 </p>
               </div>
-              <span className={`${compact ? 'text-xs' : 'text-sm'} shrink-0 font-mono font-black text-rose-600 dark:text-rose-300`}>
+              <a
+                href={DONATION_PLATFORM_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`${compact ? 'text-xs' : 'text-sm'} donation-rainbow-amount shrink-0 font-mono font-black`}
+                aria-label={t('home.donation.amountLink', { name: donation.name, amount: donation.amountCny })}
+              >
                 ¥{donation.amountCny}
-              </span>
+              </a>
             </article>
           ))}
         </div>

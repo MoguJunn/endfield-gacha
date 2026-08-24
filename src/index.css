@@ -1463,3 +1463,26 @@
     background: #27272a;
     color: #fff;
   }
+
+@keyframes donation-rainbow-flow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+.donation-rainbow-amount {
+  background-image: linear-gradient(90deg, #ff4d6d, #ffb703, #8ac926, #00b4d8, #7b2cbf, #ff4d6d);
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.2));
+  animation: donation-rainbow-flow 2.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .donation-rainbow-amount {
+    animation: none;
+    background-position: 50% 50%;
+  }
+}

@@ -3,6 +3,7 @@ import { ArrowLeft, ExternalLink, Gift, HandCoins, ReceiptText, Server, Users } 
 import { Link } from 'react-router-dom';
 import { ACCOUNT_RECOVERY_QQ_GROUP, ENGLISH_COMMUNITY_DISCORD_URL } from '../../constants/community.js';
 import {
+  AFDIAN_SUPPORT_TIERS,
   DONATION_LEDGER,
   DONATION_PLATFORM_URL,
   DONATION_TOTALS,
@@ -62,6 +63,37 @@ export default function DonationThanksPage() {
               <p className={`mt-2 font-mono text-3xl font-black ${tone}`}>¥{amount}</p>
             </div>
           ))}
+        </section>
+
+        <section className="mt-6 border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900 sm:p-7">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-black">{t('donations.tiersTitle')}</h2>
+            </div>
+            <a href={DONATION_PLATFORM_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-600 hover:text-rose-500 dark:text-rose-300">
+              {t('donations.tiersOpen')} <ExternalLink size={12} />
+            </a>
+          </div>
+          <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-5">
+            {AFDIAN_SUPPORT_TIERS.map((tier) => (
+              <a
+                key={tier.planId}
+                href={DONATION_PLATFORM_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-plan-id={tier.planId}
+                className="group border border-rose-200 bg-gradient-to-br from-rose-50 to-white p-4 text-center transition-all hover:-translate-y-0.5 hover:border-rose-400 hover:shadow-md dark:border-rose-900/60 dark:from-rose-950/30 dark:to-zinc-950"
+              >
+                <p className="font-mono text-2xl font-black text-rose-600 dark:text-rose-300">¥{tier.amountCny}</p>
+                <p className="mt-1 text-[10px] font-bold text-zinc-600 dark:text-zinc-300">
+                  {t('donations.tierName', { amount: tier.amountCny })}
+                </p>
+                <p className="mt-2 text-[9px] text-zinc-400">
+                  {t('donations.tierBilling', { months: tier.billingMonths })}
+                </p>
+              </a>
+            ))}
+          </div>
         </section>
 
         <section className="mt-6 border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900 sm:p-7">
