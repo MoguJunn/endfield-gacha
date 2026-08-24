@@ -31,7 +31,6 @@ import DonationThanksCard from '../../components/donations/DonationThanksCard.js
 import HomecomingPreviewCard from '../../components/home/HomecomingPreviewCard.jsx';
 import { VERSION_CALENDAR_URL } from '../../components/home/RotationScheduleCard.jsx';
 
-
 const DEFAULT_LINKS = [
   { id: 'yituliu-calculator', title: '一图流攒抽计算器', url: 'https://ef.yituliu.cn/tools/gacha-calculator', icon: 'bar-chart-2' }, 
   { id: 'opendfield-map', title: '地图（国际服可用）', url: 'https://opendfieldmap.cn/', icon: 'map' },

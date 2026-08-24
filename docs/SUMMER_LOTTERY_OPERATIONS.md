@@ -17,6 +17,12 @@
 
 主站仓库中的 `src/assets/lottery/` 保存本次活动奖品图；构建时会与主站已有 HarmonyOS Sans、Novecento 字体一起复制到活动产物。公开模板仓库不包含这些活动专属素材。
 
+## 当前活动与往期归档
+
+当前计划活动为 `arknights-p3r-collab-2026`：北京时间 2026-08-21 20:30 开放，2026-09-15 12:00 截止；系统从 12:00:03 起允许人工开奖，固定使用 drand Quicknet 第 `32213813` 轮。真实抽奖名额由数据库 `prize_plan` 控制为 `{"first":1,"second":5}`；参与奖不写入中奖表，由公开快照对未中前两档的有效参与者推导。
+
+上一期 `community-lottery` 的数据库行、报名、中奖记录和审计不得删除或覆盖。切换当前活动前已将其公开快照保存为 `src/assets/lottery/archives/community-lottery.json`，部署后由 `/lottery/archive/community-lottery` 只读展示并继续支持复算。归档只包含公开参与 ID、获奖结果和随机性证明，不得加入联系方式、内部用户 ID 或后台审计明细。
+
 ## 数据库版本
 
 共享 Supabase 数据库必须按顺序应用独立活动站仓库的迁移 160–165：
@@ -50,6 +56,13 @@
 `/api/admin-summer-lottery-operations` 只接受当前主站超级管理员身份。写操作要求允许的 Origin、活动级精确确认词和数据库共享限流；数据库在同一事务中重新确认 actor 仍为 `super_admin`，并追加不含 seed 的操作审计。
 
 活动站 `/api/admin/prepare`、`/api/admin/draw` 必须保持 404；普通数据网关收到 `prepare` / `draw` 必须返回 `action_not_allowed`。
+
+本期精确确认词：
+
+- 固定承诺：`PREPARE arknights-p3r-collab-2026`
+- 真实开奖：`DRAW arknights-p3r-collab-2026`
+
+后台默认跟随服务端 `LOTTERY_CAMPAIGN_ID`，也允许显式输入活动 ID 切换查看。执行准备、开奖、兑奖授权、联系方式读取或删除前，必须核对面板“已加载”字段，不能仅依赖浏览器记忆或上一期默认值。
 
 ## 兑奖最小权限
 

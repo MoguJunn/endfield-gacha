@@ -340,7 +340,9 @@ async function readTokenFromTurnstile(config, win, doc, timeoutMs) {
     renderOptions: {
       sitekey: config.siteKey,
       action: config.action,
-      size: 'invisible',
+      size: 'normal',
+      appearance: 'interaction-only',
+      execution: 'execute',
     },
     executeOptions: undefined,
     timeoutMs,
@@ -449,5 +451,31 @@ export async function buildAuthCaptchaPayload(action, options = {}) {
     captchaToken: token,
     captchaProvider: config.provider,
     captchaAction: config.action,
+  };
+}
+
+export function buildCompletedAuthCaptchaPayload(action, captchaState) {
+  const normalizedAction = normalizeAction(action);
+  if (!normalizedAction || normalizeAction(captchaState?.action) !== normalizedAction) {
+    return {};
+  }
+
+  if (captchaState?.provider === 'pow' && captchaState?.powPayload) {
+    return {
+      captchaProvider: 'pow',
+      captchaAction: normalizedAction,
+      powPayload: captchaState.powPayload,
+    };
+  }
+
+  const token = normalizeTokenResult(captchaState?.token);
+  if (!token) {
+    return {};
+  }
+
+  return {
+    captchaToken: token,
+    captchaProvider: normalizeProvider(captchaState?.provider),
+    captchaAction: normalizedAction,
   };
 }

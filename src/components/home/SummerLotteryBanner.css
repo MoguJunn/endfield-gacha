@@ -1,0 +1,493 @@
+.summer-lottery-banner {
+  --lottery-blue: #087ff2;
+  --lottery-blue-deep: #071fa9;
+  --lottery-cyan: #26ddff;
+  --lottery-violet: #7257ff;
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);
+  min-height: 248px;
+  overflow: hidden;
+  border: 1px solid rgb(8 127 242 / 24%);
+  background: #fff;
+  box-shadow: 0 18px 42px rgb(10 51 120 / 14%);
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.summer-lottery-banner:hover {
+  transform: translateY(-2px);
+  border-color: rgb(38 221 255 / 66%);
+  box-shadow: 0 24px 52px rgb(10 51 120 / 20%);
+}
+
+.summer-lottery-banner__info {
+  z-index: 2;
+  min-width: 0;
+  padding: clamp(26px, 3.4vw, 48px);
+  color: #102444;
+  background: #fff;
+}
+
+.summer-lottery-banner__kicker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--lottery-blue);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+}
+
+.summer-lottery-banner__kicker svg { color: var(--lottery-violet); }
+
+.summer-lottery-banner__info h3 {
+  max-width: 520px;
+  margin: 10px 0 0;
+  color: #0639ba;
+  font-size: clamp(25px, 2.4vw, 38px);
+  font-weight: 950;
+  letter-spacing: -0.04em;
+  line-height: 1.04;
+  text-shadow: 3px 3px 0 rgb(38 221 255 / 16%);
+}
+
+.summer-lottery-banner__info > p {
+  max-width: 590px;
+  margin: 10px 0 0;
+  color: #60728e;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.summer-lottery-banner__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 15px;
+}
+
+.summer-lottery-banner__meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  color: #17416f;
+  border: 1px solid rgb(8 127 242 / 18%);
+  background: #f2f7ff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.summer-lottery-banner__meta span:last-child {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(110deg, #0639ba, #087ff2);
+}
+
+.summer-lottery-banner__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  margin-top: 16px;
+  padding: 0 17px;
+  color: #fff;
+  background: linear-gradient(100deg, #0639ba, #087ff2 58%, #24ccea);
+  box-shadow: 5px 5px 0 rgb(114 87 255 / 26%);
+  font-size: 12px;
+  font-weight: 900;
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.summer-lottery-banner:hover .summer-lottery-banner__action {
+  transform: translate(-2px, -2px);
+  box-shadow: 8px 8px 0 rgb(114 87 255 / 30%);
+}
+
+.summer-lottery-banner__visual {
+  position: relative;
+  isolation: isolate;
+  min-height: 248px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background:
+    radial-gradient(circle at 55% 5%, rgb(76 232 255 / 62%), transparent 31%),
+    radial-gradient(circle, rgb(255 255 255 / 45%) 0 1px, transparent 1.5px) 0 0 / 12px 12px,
+    linear-gradient(155deg, #04aef1, #075ed0 43%, var(--lottery-blue-deep) 88%);
+}
+
+.summer-lottery-banner__curve {
+  position: absolute;
+  z-index: -1;
+  top: -22%;
+  left: -27%;
+  width: 43%;
+  height: 145%;
+  border-right: 7px solid var(--lottery-cyan);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 15px 0 0 #0758cd, 24px 0 0 rgb(114 87 255 / 78%);
+  transform: rotate(-3deg);
+}
+
+.summer-lottery-banner__lockup {
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(12px, 2vw, 28px);
+  width: min(76%, 610px);
+  margin-top: -48px;
+  text-align: center;
+  filter: drop-shadow(0 8px 16px rgb(2 16 84 / 34%));
+}
+
+.summer-lottery-banner__lockup strong {
+  font-size: clamp(22px, 2.5vw, 42px);
+  font-weight: 950;
+  letter-spacing: -0.06em;
+  line-height: 0.88;
+}
+
+.summer-lottery-banner__lockup b {
+  color: var(--lottery-cyan);
+  font-family: ui-monospace, monospace;
+  font-size: clamp(27px, 3vw, 48px);
+  font-weight: 400;
+}
+
+.summer-lottery-banner__lockup small {
+  grid-column: 1 / -1;
+  color: rgb(235 250 255 / 72%);
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.22em;
+}
+
+.summer-lottery-banner__prizes {
+  position: absolute;
+  z-index: 1;
+  bottom: 6%;
+  left: 55%;
+  width: min(67%, 500px);
+  height: 34%;
+  transform: translateX(-50%);
+}
+
+.summer-lottery-banner__prizes img {
+  position: absolute;
+  width: 48%;
+  height: 100%;
+  border: 1px solid rgb(255 255 255 / 52%);
+  border-radius: 7px;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 14px 28px rgb(2 14 92 / 36%);
+  object-fit: contain;
+}
+
+.summer-lottery-banner__prizes img:first-child { left: 7%; transform: rotate(-5deg); }
+.summer-lottery-banner__prizes img:last-child { right: 7%; transform: rotate(5deg); }
+
+.summer-lottery-banner__rail {
+  position: absolute;
+  z-index: 3;
+  bottom: 4%;
+  left: 4%;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 48%;
+  color: #0639ba;
+  border: 4px solid var(--lottery-cyan);
+  border-radius: 18px 18px 5px 5px;
+  background: #f6fcff;
+  box-shadow: 7px 7px 0 rgb(21 22 156 / 46%);
+  transform: rotate(18deg);
+}
+
+.summer-lottery-banner__rail span {
+  font-size: 7px;
+  font-weight: 950;
+  letter-spacing: 0.16em;
+  writing-mode: vertical-rl;
+}
+
+.summer-lottery-banner__rail b { font-family: ui-monospace, monospace; font-size: 12px; }
+.summer-lottery-banner__rail i { width: 15px; border-top: 3px double #0639ba; }
+
+.summer-lottery-banner__shards i {
+  position: absolute;
+  z-index: 1;
+  width: 12px;
+  height: 16px;
+  background: linear-gradient(145deg, var(--lottery-cyan), var(--lottery-violet));
+  clip-path: polygon(50% 0, 100% 70%, 0 100%);
+}
+
+.summer-lottery-banner__shards i:nth-child(1) { top: 15%; left: 25%; }
+.summer-lottery-banner__shards i:nth-child(2) { top: 22%; right: 9%; }
+.summer-lottery-banner__shards i:nth-child(3) { right: 17%; bottom: 10%; }
+.summer-lottery-banner__shards i:nth-child(4) { top: 49%; left: 13%; }
+
+.dark .summer-lottery-banner,
+.dark .summer-lottery-banner__info { background: #0c1d40; }
+.dark .summer-lottery-banner__info { color: #e9f9ff; }
+.dark .summer-lottery-banner__info h3 { color: #9adfff; }
+.dark .summer-lottery-banner__info > p { color: #a4bdd0; }
+.dark .summer-lottery-banner__meta span { color: #dcefff; border-color: rgb(115 209 232 / 22%); background: #102854; }
+.dark .summer-lottery-banner__curve { background: #0c1d40; }
+
+.summer-lottery-banner--compact {
+  grid-template-columns: 1fr;
+  border-radius: 0.75rem;
+}
+
+.summer-lottery-banner--compact .summer-lottery-banner__info { padding: 22px; }
+.summer-lottery-banner--compact .summer-lottery-banner__visual { min-height: 220px; }
+.summer-lottery-banner--compact .summer-lottery-banner__action { width: 100%; }
+.summer-lottery-banner--compact .summer-lottery-banner__lockup { width: 75%; }
+
+@media (max-width: 900px) {
+  .summer-lottery-banner { grid-template-columns: 1fr; }
+  .summer-lottery-banner__visual { min-height: 230px; }
+  .summer-lottery-banner__action { width: 100%; }
+}
+
+@media (max-width: 520px) {
+  .summer-lottery-banner__info { padding: 22px; }
+  .summer-lottery-banner__info h3 { font-size: 26px; }
+  .summer-lottery-banner__visual { min-height: 210px; }
+  .summer-lottery-banner__lockup { width: 76%; gap: 9px; }
+  .summer-lottery-banner__lockup strong { font-size: 24px; }
+  .summer-lottery-banner__lockup b { font-size: 28px; }
+  .summer-lottery-banner__prizes { left: 58%; width: 70%; }
+  .summer-lottery-banner__rail { left: 2%; width: 33px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .summer-lottery-banner,
+  .summer-lottery-banner__action { transition: none; }
+}
+
+/* Reference-led collaboration banner */
+.summer-lottery-banner {
+  grid-template-columns: minmax(350px, 35%) minmax(0, 65%);
+  min-height: 330px;
+  border-color: rgb(10 91 204 / 18%);
+  background: #fbfdff;
+  box-shadow: 0 22px 58px rgb(3 38 112 / 16%);
+}
+.summer-lottery-banner__info {
+  min-height: 330px;
+  padding: 36px clamp(30px, 3.2vw, 54px);
+  position: relative;
+  z-index: 5;
+  color: #142743;
+  background: #fbfdff;
+}
+.summer-lottery-banner__info::before {
+  content: '';
+  width: 62px;
+  height: 3px;
+  position: absolute;
+  top: 24px;
+  left: clamp(30px, 3.2vw, 54px);
+  background: linear-gradient(90deg, #04cce9 0 34%, #0b5cdf 34% 70%, #7155ee 70%);
+}
+.summer-lottery-banner__kicker { margin-top: 5px; color: #1373d2; font-size: 8px; }
+.summer-lottery-banner__partners {
+  margin-top: 28px;
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  color: #788392;
+  font-size: 12px;
+  line-height: 1;
+}
+.summer-lottery-banner__partners b { color: #1373d2; font-size: 8px; }
+.summer-lottery-banner__info h3 {
+  max-width: 490px;
+  margin-top: 25px;
+  color: #0b3da9;
+  font-size: clamp(25px, 2.25vw, 38px);
+  line-height: 1.08;
+  text-shadow: none;
+}
+.summer-lottery-banner__info > p { margin-top: 11px; color: #647186; font-size: 11px; line-height: 1.6; }
+.summer-lottery-banner__meta { margin-top: 13px; }
+.summer-lottery-banner__meta span { color: #38516f; background: #eef6fd; }
+.summer-lottery-banner__action { min-height: 38px; margin-top: 13px; box-shadow: 4px 4px 0 rgb(43 224 241 / 45%); }
+
+.summer-lottery-banner__visual {
+  min-height: 330px;
+  background: linear-gradient(180deg, #53e6f3 0%, #0aa7e7 28%, #075bd3 62%, #071b9f 100%);
+}
+.summer-lottery-banner__visual::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -3;
+  background:
+    radial-gradient(ellipse 19% 5% at 72% 8%, rgb(236 255 255 / 72%) 0 96%, transparent 100%),
+    radial-gradient(ellipse 24% 5% at 51% 13%, rgb(224 255 255 / 60%) 0 96%, transparent 100%),
+    radial-gradient(ellipse 23% 6% at 96% 16%, rgb(235 255 255 / 64%) 0 96%, transparent 100%);
+}
+.summer-lottery-banner__sky {
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  background: radial-gradient(ellipse at 65% 32%, rgb(255 255 255 / 17%), transparent 34%);
+}
+.summer-lottery-banner__horizon {
+  position: absolute;
+  z-index: -1;
+  right: 0;
+  bottom: 0;
+  width: 76%;
+  height: 43%;
+  opacity: .2;
+  background: #001b7c;
+  clip-path: polygon(0 48%, 7% 34%, 12% 50%, 18% 25%, 24% 52%, 31% 19%, 37% 48%, 43% 32%, 49% 53%, 57% 23%, 64% 49%, 70% 30%, 77% 50%, 84% 20%, 91% 49%, 96% 35%, 100% 46%, 100% 100%, 0 100%);
+}
+.summer-lottery-banner__curve {
+  top: -20%;
+  left: -29%;
+  width: 42%;
+  height: 140%;
+  border-right: 5px solid #2be6f5;
+  background: #fbfdff;
+  box-shadow: 10px 0 0 #0870db, 16px 0 0 rgb(101 67 236 / 92%);
+  transform: rotate(-4deg);
+}
+.summer-lottery-banner__lockup {
+  width: min(72%, 690px);
+  margin: 0 0 12% 10%;
+  gap: clamp(16px, 2.3vw, 38px);
+}
+.summer-lottery-banner__lockup strong { font-size: clamp(27px, 3.3vw, 53px); }
+.summer-lottery-banner__lockup b { color: #fff; font-size: clamp(31px, 3.4vw, 53px); }
+.summer-lottery-banner__lockup small { color: rgb(235 250 255 / 68%); }
+.summer-lottery-banner__prizes {
+  bottom: 2%;
+  left: auto;
+  right: 2%;
+  width: min(64%, 550px);
+  height: 30%;
+  transform: none;
+}
+.summer-lottery-banner__prizes::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 4%;
+  width: 88%;
+  height: 22%;
+  border-radius: 50%;
+  background: rgb(32 225 246 / 30%);
+  filter: blur(14px);
+}
+.summer-lottery-banner__choice {
+  position: absolute;
+  bottom: 0;
+  display: grid;
+  align-items: end;
+  justify-items: center;
+  height: 100%;
+  transform-origin: 50% 100%;
+}
+.summer-lottery-banner__choice--1 { left: 1%; width: 48%; transform: rotate(-3deg) translateY(7%); }
+.summer-lottery-banner__choice--2 { right: 0; width: 57%; height: 112%; transform: rotate(2deg); }
+.summer-lottery-banner__prizes .summer-lottery-banner__choice img {
+  position: static;
+  grid-area: 1 / 1;
+  align-self: end;
+  width: 100%;
+  height: calc(100% - 13px);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  object-fit: contain;
+  filter: drop-shadow(0 12px 14px rgb(0 17 101 / 40%));
+  transform: none;
+}
+.summer-lottery-banner__choice span {
+  position: absolute;
+  bottom: 0;
+  min-width: 54px;
+  padding: 3px 5px;
+  color: rgb(236 252 255 / 78%);
+  border-left: 2px solid #36e5f3;
+  background: rgb(2 43 155 / 62%);
+  font-size: 5px;
+  font-weight: 900;
+  letter-spacing: .16em;
+}
+.summer-lottery-banner__choice--1 span { left: 10%; }
+.summer-lottery-banner__choice--2 span { right: 8%; }
+.summer-lottery-banner__rail {
+  left: -9px;
+  bottom: -90px;
+  width: 58px;
+  height: 295px;
+  border: 5px solid #0b4dcc;
+  border-left-width: 9px;
+  border-radius: 30px 30px 8px 8px;
+  box-shadow: inset 0 0 0 3px #2be6f5, 8px 8px 0 rgb(12 26 150 / 46%);
+  transform: rotate(31deg);
+}
+.summer-lottery-banner__rail::before { content: ''; width: 14px; height: 14px; border: 3px solid #2be6f5; border-radius: 50%; box-shadow: 0 0 0 3px #0b4dcc; }
+.summer-lottery-banner__rail span { font-size: 5px; }
+.summer-lottery-banner__rail b { font-size: 9px; }
+.summer-lottery-banner__coordinate {
+  position: absolute;
+  left: 12%;
+  bottom: 4%;
+  color: rgb(225 250 255 / 62%);
+  font-size: 5px;
+  font-weight: 900;
+  letter-spacing: .2em;
+}
+.summer-lottery-banner__shards i:nth-child(1) { left: 16%; }
+.summer-lottery-banner__shards i:nth-child(4) { left: 10%; }
+
+.dark .summer-lottery-banner { background: #fbfdff; }
+.dark .summer-lottery-banner__info { color: #142743; background: #fbfdff; }
+.dark .summer-lottery-banner__info h3 { color: #0b3da9; }
+.dark .summer-lottery-banner__info > p { color: #647186; }
+.dark .summer-lottery-banner__meta span { color: #38516f; border-color: rgb(8 127 242 / 18%); background: #eef6fd; }
+.dark .summer-lottery-banner__curve { background: #fbfdff; }
+
+.summer-lottery-banner--compact { grid-template-columns: 1fr; }
+.summer-lottery-banner--compact .summer-lottery-banner__info { min-height: auto; padding: 34px 22px 26px; }
+.summer-lottery-banner--compact .summer-lottery-banner__info::before { left: 22px; }
+.summer-lottery-banner--compact .summer-lottery-banner__partners { margin-top: 24px; }
+.summer-lottery-banner--compact .summer-lottery-banner__visual { min-height: 290px; }
+.summer-lottery-banner--compact .summer-lottery-banner__lockup { width: 78%; margin-left: 14%; }
+.summer-lottery-banner--compact .summer-lottery-banner__prizes { width: 72%; }
+
+@media (max-width: 980px) {
+  .summer-lottery-banner { grid-template-columns: 1fr; }
+  .summer-lottery-banner__info { min-height: auto; padding: 38px 30px 30px; }
+  .summer-lottery-banner__info::before { left: 30px; }
+  .summer-lottery-banner__partners { margin-top: 26px; }
+  .summer-lottery-banner__action { width: 100%; }
+  .summer-lottery-banner__visual { min-height: 300px; }
+  .summer-lottery-banner__lockup { width: 76%; margin-left: 14%; }
+  .summer-lottery-banner__prizes { width: 68%; }
+}
+
+@media (max-width: 520px) {
+  .summer-lottery-banner__info { padding: 36px 22px 24px; }
+  .summer-lottery-banner__info::before { left: 22px; }
+  .summer-lottery-banner__info h3 { margin-top: 22px; font-size: 29px; }
+  .summer-lottery-banner__visual { min-height: 280px; }
+  .summer-lottery-banner__lockup { width: 79%; margin: 0 0 28% 14%; gap: 7px; }
+  .summer-lottery-banner__lockup strong { font-size: 22px; white-space: nowrap; }
+  .summer-lottery-banner__lockup b { font-size: 27px; }
+  .summer-lottery-banner__prizes { right: 0; bottom: 15%; width: 77%; height: 25%; }
+  .summer-lottery-banner__rail { left: -18px; width: 48px; height: 250px; }
+  .summer-lottery-banner__coordinate { left: 16%; }
+}

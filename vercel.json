@@ -28,7 +28,7 @@
     {
       "source": "/lottery/local-activity/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=3600, stale-while-revalidate=86400" }
+        { "key": "Cache-Control", "value": "public, max-age=86400, stale-while-revalidate=604800" }
       ]
     },
     {
@@ -101,6 +101,9 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/router?__path=/$1" },
     { "source": "/lottery", "destination": "/lottery/index.html" },
+    { "source": "/lottery/", "destination": "/lottery/index.html" },
+    { "source": "/lottery/archive/:campaignId", "destination": "/lottery/index.html" },
+    { "source": "/lottery/archive/:campaignId/", "destination": "/lottery/index.html" },
     { "source": "/m/assets/index-(.*).js", "destination": "/m/assets/legacy-mobile-entry.js" },
     { "source": "/m/assets/supabase-vendor-(.*).js", "destination": "/m/assets/legacy-empty.js" },
     { "source": "/((?!api/)(?!.*\\.[^/]+$).*)", "destination": "/index.html" }

@@ -41,5 +41,13 @@ jobs:
       - name: Unit test suite
         run: npm run test:unit
 
+      - name: Prepare cn-font-split FFI runtime
+        # cn-font-split 7.4.1 的 postinstall 依赖 ungh.cc 查询最新版本，该服务不稳定；
+        # 显式固定下载 7.6.8 的 libffi 二进制，避免字体构建因共享库缺失失败。
+        run: |
+          curl -fsSL -o node_modules/cn-font-split/dist/libffi-x86_64-unknown-linux-gnu.so \
+            https://github.com/KonghaYao/cn-font-split/releases/download/7.6.8/libffi-x86_64-unknown-linux-gnu.so
+          printf 'x86_64-unknown-linux-gnu@7.6.8\n' > node_modules/cn-font-split/dist/version
+
       - name: Build
         run: npm run build

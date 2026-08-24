@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import SummerLotteryContactPanel from '../SummerLotteryContactPanel.jsx';
@@ -59,13 +59,34 @@ describe('SummerLotteryContactPanel capability boundaries', () => {
     );
 
     await screen.findByText('编号 #7');
-    expect(loadSummerLotteryContactTargets).toHaveBeenCalledOnce();
+    expect(loadSummerLotteryContactTargets).toHaveBeenCalledWith('');
     expect(loadSummerLotteryOperationStatus).not.toHaveBeenCalled();
     expect(loadSummerLotteryOperatorGrants).not.toHaveBeenCalled();
     expect(screen.queryByText('短期管理员会话操作')).not.toBeInTheDocument();
     expect(screen.queryByText('兑奖最小权限')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '通知中奖' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '隐私请求删除' })).toBeDisabled();
+  });
+
+  it('loads the deployed campaign by default and allows an explicit campaign switch', async () => {
+    render(
+      <SummerLotteryContactPanel
+        showOperationControls
+        showPermissionManager
+      />,
+    );
+
+    await screen.findByText('编号 #7');
+    fireEvent.change(screen.getByLabelText('当前操作活动'), {
+      target: { value: 'arknights-p3r-collab-2026' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '切换并读取' }));
+
+    await waitFor(() => {
+      expect(loadSummerLotteryContactTargets).toHaveBeenLastCalledWith('arknights-p3r-collab-2026');
+      expect(loadSummerLotteryOperationStatus).toHaveBeenLastCalledWith('arknights-p3r-collab-2026');
+      expect(loadSummerLotteryOperatorGrants).toHaveBeenLastCalledWith('arknights-p3r-collab-2026');
+    });
   });
 
   it('lets the super-admin permission manager load even without contact access', async () => {

@@ -7,8 +7,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, '..');
 const lotteryRoot = resolve(rootDir, 'node_modules', 'open-lottery');
 const activityRoot = resolve(lotteryRoot, 'public', 'local-activity');
+const archiveTargetDir = resolve(activityRoot, 'archives');
 const fontTargetDir = resolve(activityRoot, 'fonts');
 const fontSourceDir = resolve(rootDir, 'src', 'assets', 'fonts');
+const lotteryAssetDir = resolve(rootDir, 'src', 'assets', 'lottery');
+
+const activityAssets = [
+  ['summer-gift-package.png', 'summer-gift-package.png'],
+  ['arknights-monthly-card.png', 'arknights-monthly-card.png'],
+  ['endfield-monthly-card.png', 'endfield-monthly-card.png'],
+];
+
+const activityArchives = [
+  ['community-lottery.json', 'community-lottery.json'],
+];
 
 const fonts = [
   ['harmony/HarmonyOS_Sans_Medium.woff2', 'HarmonyOS_Sans_Medium.woff2'],
@@ -80,11 +92,16 @@ const fontStylesheet = `@font-face {
 }
 `;
 
-await mkdir(fontTargetDir, { recursive: true });
-await copyFile(
-  resolve(rootDir, 'src', 'assets', 'lottery', 'summer-gift-package.png'),
-  resolve(activityRoot, 'summer-gift-package.png'),
-);
+await Promise.all([
+  mkdir(fontTargetDir, { recursive: true }),
+  mkdir(archiveTargetDir, { recursive: true }),
+]);
+await Promise.all(activityAssets.map(([source, target]) => (
+  copyFile(resolve(lotteryAssetDir, source), resolve(activityRoot, target))
+)));
+await Promise.all(activityArchives.map(([source, target]) => (
+  copyFile(resolve(lotteryAssetDir, 'archives', source), resolve(archiveTargetDir, target))
+)));
 await Promise.all(fonts.map(([source, target]) => (
   copyFile(resolve(fontSourceDir, source), resolve(fontTargetDir, target))
 )));

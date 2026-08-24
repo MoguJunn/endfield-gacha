@@ -33,6 +33,7 @@ export default function AuthModalView({
   hasEmailError,
   captchaAction,
   captchaReady,
+  captchaResetKey,
   onCaptchaStateChange,
   loading,
   message,
@@ -700,6 +701,7 @@ export default function AuthModalView({
 
           {captchaAction && (
             <AuthCaptchaBox
+              key={`${captchaAction}:${captchaResetKey}`}
               action={captchaAction}
               onStateChange={onCaptchaStateChange}
             />
