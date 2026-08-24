@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowUpRight, Bell, Calendar, ChevronRight, Globe, Image as ImageIcon, Layers, Maximize2, Radio, Shield, Sparkles, Star, Users, X, BarChart3, Map, BarChart2 } from 'lucide-react';
+import { ArrowUpRight, Bell, Calendar, ChevronRight, Globe, Layers, Radio, Shield, Sparkles, Star, Users, BarChart3, Map, BarChart2 } from 'lucide-react';
 import { ACCOUNT_RECOVERY_QQ_GROUP, ENGLISH_COMMUNITY_DISCORD_URL } from '../../constants/community';
 import { useAppStore, useAuthStore } from '../../stores';
 import usePoolStore from '../../stores/usePoolStore';
@@ -19,15 +19,17 @@ import {
 import { localizeEntityName, localizePoolName } from '../../utils/gameDataI18n.js';
 import { getLocalizedAnnouncementTitle } from '../../utils/announcementLocale.js';
 import { resolveGameAnnouncementDigest } from '../../utils/gameAnnouncementDigest.js';
-import { resolveGameAnnouncementCalendarImage } from '../../utils/gameAnnouncementCalendar.js';
 import {
   buildHomeRotationVersionSections,
   buildHomeVersionCountdownTitle,
   resolveHomeVersionPlan,
 } from '../../utils/homeVersionTimeline.js';
-import { getAnnouncementTypeLabel, splitSiteAnnouncements } from '../../utils/announcementMeta.js';
+import { getAnnouncementSeverityMeta, getAnnouncementTypeLabel, getMostImportantAnnouncement, splitSiteAnnouncements } from '../../utils/announcementMeta.js';
 import { DEFAULT_HOME_ROADMAP_SUMMARY, normalizeHomeRoadmapItems } from '../../constants/homeRoadmap.js';
 import SummerLotteryBanner from '../../components/home/SummerLotteryBanner.jsx';
+import DonationThanksCard from '../../components/donations/DonationThanksCard.jsx';
+import HomecomingPreviewCard from '../../components/home/HomecomingPreviewCard.jsx';
+import { VERSION_CALENDAR_URL } from '../../components/home/RotationScheduleCard.jsx';
 
 
 const DEFAULT_LINKS = [
@@ -102,8 +104,6 @@ export default function MobileHomePageView() {
   const roadmapConfig = useJsonConfig('home_roadmap_items', DEFAULT_HOME_ROADMAP_SUMMARY);
   const roadmap = normalizeHomeRoadmapItems(roadmapConfig, DEFAULT_HOME_ROADMAP_SUMMARY);
   const [now, setNow] = useState(new Date());
-  const [showGameCalendar, setShowGameCalendar] = useState(false);
-  const [expandedGameCalendarImage, setExpandedGameCalendarImage] = useState(null);
   const heroSlogan = t(
     'home.mobile.heroLead',
     {},
@@ -141,15 +141,19 @@ export default function MobileHomePageView() {
     () => splitSiteAnnouncements(announcements),
     [announcements]
   );
-  const latestAnnouncement = temporaryAnnouncements?.[0] || updateAnnouncements?.[0] || null;
+  const mostImportantTemporaryAnnouncement = useMemo(
+    () => getMostImportantAnnouncement(temporaryAnnouncements),
+    [temporaryAnnouncements]
+  );
+  const temporarySeverityMeta = getAnnouncementSeverityMeta(
+    mostImportantTemporaryAnnouncement?.severity,
+    locale
+  );
+  const latestAnnouncement = updateAnnouncements?.[0] || null;
   const localizedAnnouncementTitle = getLocalizedAnnouncementTitle(latestAnnouncement, locale) || t('announcement.empty');
   const gameAnnouncementDigest = useMemo(
     () => resolveGameAnnouncementDigest(storedGameAnnouncementDigest, gameAnnouncements, t),
     [gameAnnouncements, storedGameAnnouncementDigest, t]
-  );
-  const gameAnnouncementCalendar = useMemo(
-    () => resolveGameAnnouncementCalendarImage(gameAnnouncements),
-    [gameAnnouncements]
   );
   
   const translatedLinks = useMemo(() => (Array.isArray(links) ? links : []).map((item, index) => ({
@@ -248,26 +252,6 @@ export default function MobileHomePageView() {
     });
   }, [homeRotationVersionSections, isEnglish, locale, now]);
 
-  const nextVersionCountdown = useMemo(() => {
-    const target = new Date(nextVersionTargetDate);
-    if (Number.isNaN(target.getTime())) {
-      return null;
-    }
-
-    const diff = Math.max(0, target.getTime() - now.getTime());
-    return {
-      targetDate: nextVersionTargetDate,
-      days: Math.floor(diff / (1000 * 60 * 60 * 24)),
-      hours: Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
-      minutes: Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)),
-      seconds: Math.floor((diff % (1000 * 60)) / 1000)
-    };
-  }, [nextVersionTargetDate, now]);
-  const nextVersionScheduleMeta = useMemo(() => t('home.countdown.scheduleTime', {
-    label: t('home.countdown.releaseAt'),
-    time: formatDateTime(nextVersionTargetDate, { timeZoneName: 'short' }, t('common.timeUnknown')),
-  }), [formatDateTime, nextVersionTargetDate, t]);
-
   const featureLinks = [
     {
       key: 'mechanics',
@@ -324,110 +308,45 @@ export default function MobileHomePageView() {
                   )}
               </div>
           </div>
+          <div className="col-span-2">
+            <DonationThanksCard compact />
+          </div>
       </div>
 
       {/* Announcements */}
       <div className="mb-6 space-y-2">
-          <div onClick={() => navigate('/m/announcements')} className="rounded-xl border border-amber-200 dark:border-amber-800/50 bg-gradient-to-r from-amber-100 dark:from-amber-950/40 to-transparent flex items-center justify-between p-3 cursor-pointer">
-              <div className="flex items-center gap-2 w-full pr-2">
-                  <div className="relative">
-                      <Bell size={16} className="text-amber-500 shrink-0" />
-                      {latestAnnouncement && <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-ping"></span>}
-                  </div>
-                  <span className="text-[9px] bg-amber-100 dark:bg-amber-900/50 text-amber-900 dark:text-amber-100 px-1 py-0.5 rounded font-bold shrink-0">{latestAnnouncement ? getAnnouncementTypeLabel(latestAnnouncement.announcement_type, locale) : t('home.siteAnnouncement')}</span>
-                  <span className="text-xs font-bold text-amber-900 dark:text-amber-100 truncate flex-1">{localizedAnnouncementTitle}</span>
+          {mostImportantTemporaryAnnouncement ? (
+            <button type="button" onClick={() => navigate('/m/announcements')} className={`flex w-full items-center justify-between rounded-xl border p-3 text-left ${temporarySeverityMeta.card}`}>
+              <div className="flex min-w-0 items-center gap-2 pr-2">
+                <Bell size={16} className={`shrink-0 ${temporarySeverityMeta.chevron}`} />
+                <span className={`shrink-0 rounded px-1 py-0.5 text-[9px] font-bold ${temporarySeverityMeta.badge}`}>
+                  {getAnnouncementTypeLabel('temporary', locale)} × {temporaryAnnouncements.length}
+                </span>
+                <span className="truncate text-xs font-bold">
+                  {getLocalizedAnnouncementTitle(mostImportantTemporaryAnnouncement, locale)}
+                </span>
               </div>
-              <ChevronRight size={14} className="text-amber-500/50 shrink-0" />
-          </div>
-          <div onClick={() => navigate('/m/announcements')} className="rounded-xl border border-orange-200 dark:border-orange-800/30 bg-gradient-to-r from-orange-100 dark:from-orange-950/20 to-transparent flex items-center justify-between p-3 cursor-pointer">
-              <div className="flex items-center gap-2 w-full pr-2">
-                  <Radio size={16} className="text-orange-500 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[9px] bg-orange-100 dark:bg-orange-900/50 text-orange-600 dark:text-orange-400 px-1 py-0.5 rounded font-bold shrink-0">{t('home.gameAnnouncement')}</span>
-                      <span className="text-xs font-bold text-slate-700 dark:text-zinc-300 truncate">{gameAnnouncementDigest.title}</span>
-                    </div>
-                    {gameAnnouncementDigest.subtitle ? (
-                      <div className="mt-0.5 text-[10px] text-slate-500 dark:text-zinc-400 truncate">
-                        {gameAnnouncementDigest.subtitle}
-                      </div>
-                    ) : null}
-                  </div>
+              <ChevronRight size={14} className={`shrink-0 ${temporarySeverityMeta.chevron}`} />
+            </button>
+          ) : null}
+
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => navigate('/m/announcements')} className="min-w-0 rounded-xl border border-amber-200 bg-gradient-to-br from-amber-100 to-amber-50 p-3 text-left dark:border-amber-800/50 dark:from-amber-950/40 dark:to-transparent">
+              <div className="flex items-center gap-1.5">
+                <Bell size={14} className="shrink-0 text-amber-500" />
+                <span className="text-[9px] font-black text-amber-700 dark:text-amber-300">{t('home.siteAnnouncement')}</span>
               </div>
-              <ChevronRight size={14} className="text-slate-400 dark:text-zinc-600 shrink-0" />
+              <p className="mt-2 line-clamp-2 text-[11px] font-bold leading-tight text-amber-950 dark:text-amber-100">{localizedAnnouncementTitle}</p>
+            </button>
+            <button type="button" onClick={() => navigate('/m/announcements')} className="min-w-0 rounded-xl border border-orange-200 bg-gradient-to-br from-orange-100 to-orange-50 p-3 text-left dark:border-orange-800/30 dark:from-orange-950/30 dark:to-transparent">
+              <div className="flex items-center gap-1.5">
+                <Radio size={14} className="shrink-0 text-orange-500" />
+                <span className="text-[9px] font-black text-orange-700 dark:text-orange-300">{t('home.gameAnnouncement')}</span>
+              </div>
+              <p className="mt-2 line-clamp-2 text-[11px] font-bold leading-tight text-orange-950 dark:text-orange-100">{gameAnnouncementDigest.title}</p>
+            </button>
           </div>
       </div>
-
-      {gameAnnouncementCalendar ? (
-        <div className="mb-6 overflow-hidden rounded-xl border border-cyan-200 dark:border-cyan-800/40 bg-gradient-to-r from-cyan-50 dark:from-cyan-950/25 to-white dark:to-zinc-950">
-          <button
-            type="button"
-            onClick={() => setShowGameCalendar((value) => !value)}
-            className="flex w-full items-center justify-between gap-3 p-3 text-left"
-            aria-expanded={showGameCalendar}
-          >
-            <div className="flex min-w-0 items-center gap-2">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-cyan-200 dark:border-cyan-800/50 bg-cyan-100 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300">
-                <ImageIcon size={15} />
-              </div>
-              <div className="min-w-0">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="shrink-0 rounded bg-cyan-100 dark:bg-cyan-900/50 px-1 py-0.5 text-[9px] font-bold text-cyan-700 dark:text-cyan-300">{t('home.gameCalendar')}</span>
-                  <span className="truncate text-xs font-bold text-cyan-900 dark:text-cyan-100">{gameAnnouncementCalendar.title || t('home.gameCalendarTitle')}</span>
-                </div>
-              </div>
-            </div>
-            <ChevronRight size={14} className={`shrink-0 text-cyan-500 transition-transform ${showGameCalendar ? 'rotate-90' : ''}`} />
-          </button>
-          {showGameCalendar ? (
-            <div className="px-3 pb-3">
-              <button
-                type="button"
-                onClick={() => setExpandedGameCalendarImage(gameAnnouncementCalendar.imageUrl)}
-                className="group relative block w-full overflow-hidden rounded-lg border border-cyan-200 dark:border-cyan-900/60 bg-white/80 dark:bg-black/30 p-2"
-                aria-label={t('home.gameCalendarOpen')}
-              >
-                <img
-                  src={gameAnnouncementCalendar.imageUrl}
-                  alt={t('home.gameCalendarImageAlt')}
-                  loading="lazy"
-                  decoding="async"
-                  className="max-h-72 w-full object-contain"
-                />
-                <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded border border-cyan-300 bg-white/90 px-2 py-1 text-[10px] font-bold text-cyan-700 shadow-sm dark:border-cyan-700 dark:bg-zinc-950/90 dark:text-cyan-300">
-                  <Maximize2 size={11} />
-                  {t('home.gameCalendarOpen')}
-                </span>
-              </button>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {expandedGameCalendarImage ? (
-        <div
-          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/85 p-3 backdrop-blur-sm"
-          onClick={() => setExpandedGameCalendarImage(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-label={t('home.gameCalendarOpen')}
-        >
-          <button
-            type="button"
-            className="absolute right-3 top-3 rounded-full border border-white/20 bg-black/40 p-2 text-white"
-            onClick={() => setExpandedGameCalendarImage(null)}
-            aria-label={t('common.close')}
-          >
-            <X size={20} />
-          </button>
-          <img
-            src={expandedGameCalendarImage}
-            alt={t('home.gameCalendarImageAlt')}
-            className="max-h-[88vh] max-w-[94vw] object-contain shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          />
-        </div>
-      ) : null}
 
       <div className="grid grid-cols-2 gap-3 mb-6">
         {featureLinks.map((item) => {
@@ -483,9 +402,16 @@ export default function MobileHomePageView() {
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-ef-card p-4 mb-6">
           <div className="flex justify-between items-center mb-3">
               <h3 className="text-sm font-bold tracking-widest text-slate-900 dark:text-white flex items-center gap-2"><Calendar size={14}/> {t('home.mobile.calendarTitle')}</h3>
-              <button type="button" onClick={() => navigate('/m/details')} className="text-slate-400 dark:text-zinc-600">
-                <ChevronRight size={14} />
-              </button>
+              <a
+                href={VERSION_CALENDAR_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-amber-400 px-3 py-2 text-[10px] font-black text-zinc-950 shadow-sm"
+              >
+                <Calendar size={13} />
+                {t('home.rotation.calendar')}
+                <ArrowUpRight size={11} />
+              </a>
           </div>
           <div className="space-y-3">
             {rotationPreview.length > 0 ? rotationPreview.map((pool) => (
@@ -507,20 +433,13 @@ export default function MobileHomePageView() {
           </div>
       </div>
 
-      {/* Next Version Countdown */}
-      {nextVersionCountdown ? (
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-ef-card p-4 mb-8 flex flex-col items-center justify-center relative overflow-hidden">
-            <div className="text-[9px] font-bold tracking-[0.2em] text-slate-500 dark:text-zinc-500 mb-1 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-sm bg-zinc-600"></span>{t('countdown.system')}</div>
-            <h3 className="text-lg font-black text-slate-900 dark:text-white tracking-normal mb-2 uppercase">{nextVersionCardTitle}</h3>
-            <div className="flex items-baseline gap-1 countdown-nums font-bold text-3xl text-slate-700 dark:text-zinc-300 tracking-tighter">
-                <span>{String(nextVersionCountdown.days).padStart(2, '0')}</span><span className="text-slate-400 dark:text-zinc-600 text-xs relative top-[-4px] ml-0.5 mr-1 font-sans font-bold">{isEnglish ? 'D' : '天'}</span>
-                <span>{String(nextVersionCountdown.hours).padStart(2, '0')}</span><span className="text-slate-400 dark:text-zinc-600 text-xs relative top-[-4px] ml-0.5 mr-1 font-sans font-bold">{isEnglish ? 'H' : '时'}</span>
-                <span>{String(nextVersionCountdown.minutes).padStart(2, '0')}</span><span className="text-slate-400 dark:text-zinc-600 text-xs relative top-[-4px] ml-0.5 mr-1 font-sans font-bold">{isEnglish ? 'M' : '分'}</span>
-                <span>{String(nextVersionCountdown.seconds || 0).padStart(2, '0')}</span><span className="text-slate-400 dark:text-zinc-600 text-xs relative top-[-4px] ml-0.5 font-sans font-bold">{isEnglish ? 'S' : '秒'}</span>
-            </div>
-            <div className="mt-2 text-[10px] text-slate-500 dark:text-zinc-500 font-mono">{nextVersionScheduleMeta}</div>
-        </div>
-      ) : null}
+      <div className="mb-8">
+        <HomecomingPreviewCard
+          compact
+          targetDate={nextVersionTargetDate}
+          title={nextVersionCardTitle}
+        />
+      </div>
 
       {/* Friendly Links */}
       <div className="mb-6">

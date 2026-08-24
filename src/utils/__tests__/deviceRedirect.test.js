@@ -20,9 +20,11 @@ describe('deviceRedirect', () => {
     })).toBe('/settings?email_verification=failed&reason=token_expired#account');
   });
 
-  it('does not redirect independent auth and status pages', () => {
+  it('does not redirect independent auth, status, and donation pages', () => {
     expect(shouldBypassDeviceRedirect('/auth/callback')).toBe(true);
     expect(shouldBypassDeviceRedirect('/status')).toBe(true);
+    expect(shouldBypassDeviceRedirect('/donations')).toBe(true);
+    expect(getDeviceRedirectTarget('/donations', true)).toBeNull();
     expect(getDeviceRedirectTarget('/auth/callback', true, {
       search: '?next=%2Fsettings',
     })).toBeNull();

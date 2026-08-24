@@ -18,6 +18,7 @@ import { useI18n } from '../../i18n/index.js';
 import { resolveSiteLegalConfig } from '../../utils/siteLegalConfig.js';
 import { MobileSectionTitle, MobileStickyHeader } from '../components/ux/MobilePrimitives.jsx';
 import AiCollaboratorGrid from '../../components/about/AiCollaboratorGrid.jsx';
+import { FEATURED_SUPPORTER } from '../../constants/donations.js';
 
 function MobileAboutSection({ title, icon, children }) {
   return (
@@ -109,8 +110,8 @@ function MobileAboutView() {
           <div className="relative">
             <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-[1rem] border border-zinc-300 bg-zinc-200 dark:border-zinc-600 dark:bg-zinc-700">
               <img
-                src="/neptune.jpg"
-                alt="Neptune"
+                src={FEATURED_SUPPORTER.avatarUrl}
+                alt={FEATURED_SUPPORTER.name}
                 className="h-full w-full object-cover"
                 loading="lazy"
               />
@@ -118,8 +119,8 @@ function MobileAboutView() {
             <div className="absolute -bottom-1 -right-1 h-3 w-3 border border-white bg-green-500 dark:border-zinc-900" />
           </div>
           <div className="min-w-0 flex-1">
-            <h4 className="text-sm font-bold uppercase text-slate-900 dark:text-zinc-100">Neptune</h4>
-            <p className="mt-1 font-mono text-[10px] uppercase text-slate-500 dark:text-zinc-400">{t('about.neptuneRole')}</p>
+            <h4 className="text-sm font-bold uppercase text-slate-900 dark:text-zinc-100">{FEATURED_SUPPORTER.name}</h4>
+            <p className="mt-1 font-mono text-[10px] uppercase text-slate-500 dark:text-zinc-400">{t(FEATURED_SUPPORTER.roleKey)}</p>
           </div>
         </div>
 

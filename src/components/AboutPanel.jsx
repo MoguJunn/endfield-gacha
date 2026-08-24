@@ -17,6 +17,7 @@ import { APP_BUILD_INFO, APP_VERSION_LABEL } from '../constants/appMeta';
 import useSiteConfigStore, { useJsonConfig } from '../stores/useSiteConfigStore';
 import { useI18n } from '../i18n/index.js';
 import AiCollaboratorGrid from './about/AiCollaboratorGrid.jsx';
+import { FEATURED_SUPPORTER } from '../constants/donations.js';
 
 const ICON_MAP = { Star, Calculator, BarChart3, Cloud, Download, Shield, Globe };
 
@@ -127,8 +128,8 @@ const AboutPanel = React.memo(() => {
             <div className="relative">
               <div className="w-16 h-16 bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center overflow-hidden border border-zinc-300 dark:border-zinc-600">
                 <img
-                  src="/neptune.jpg"
-                  alt="Neptune"
+                  src={FEATURED_SUPPORTER.avatarUrl}
+                  alt={FEATURED_SUPPORTER.name}
                   className="w-full h-full object-cover"
                   loading="lazy"
                 />
@@ -136,8 +137,8 @@ const AboutPanel = React.memo(() => {
               <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 border-2 border-white dark:border-zinc-900"></div>
             </div>
             <div className="flex-1">
-              <h4 className="text-lg font-bold text-zinc-800 dark:text-zinc-100">Neptune</h4>
-              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400 font-mono">{t('about.neptuneRole')}</p>
+              <h4 className="text-lg font-bold text-zinc-800 dark:text-zinc-100">{FEATURED_SUPPORTER.name}</h4>
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400 font-mono">{t(FEATURED_SUPPORTER.roleKey)}</p>
             </div>
           </div>
 

@@ -6,13 +6,10 @@ import {
   Bell,
   ChevronUp,
   ExternalLink,
-  Image,
-  Maximize2,
   Shield,
   Sparkles,
   Star,
-  Users,
-  X
+  Users
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import {
@@ -29,7 +26,6 @@ import useSiteConfigStore, {
 } from '../../stores/useSiteConfigStore';
 import CountdownTimer from './CountdownTimer';
 import HomecomingPreviewCard from './HomecomingPreviewCard';
-import NextVersionCountdownCard from './NextVersionCountdownCard';
 import HomeAnnouncementContent from './AnnouncementContent';
 import CollapsibleContent from './CollapsibleContent';
 import HomeFriendlyLinksCard from './FriendlyLinksCard';
@@ -39,6 +35,7 @@ import PoolMechanicsCard from './PoolMechanicsCard';
 import RoadmapCard from './RoadmapCard';
 import HomeRotationScheduleCard from './RotationScheduleCard';
 import SummerLotteryBanner from './SummerLotteryBanner';
+import DonationThanksCard from '../donations/DonationThanksCard.jsx';
 import { ACCOUNT_RECOVERY_QQ_GROUP, ENGLISH_COMMUNITY_DISCORD_URL } from '../../constants/community';
 import {
   STORAGE_KEYS,
@@ -51,7 +48,6 @@ import { useAppStore, useAuthStore } from '../../stores';
 import { useI18n } from '../../i18n/index.js';
 import { localizeEntityName } from '../../utils/gameDataI18n.js';
 import { getLocalizedAnnouncementContent, getLocalizedAnnouncementTitle } from '../../utils/announcementLocale.js';
-import { resolveGameAnnouncementCalendarImage } from '../../utils/gameAnnouncementCalendar.js';
 import { resolveGameAnnouncementDigest } from '../../utils/gameAnnouncementDigest.js';
 import {
   buildHomeRotationVersionSections,
@@ -61,6 +57,7 @@ import {
 import {
   getAnnouncementSeverityMeta,
   getAnnouncementTypeLabel,
+  getMostImportantAnnouncement,
   splitSiteAnnouncements
 } from '../../utils/announcementMeta.js';
 
@@ -178,24 +175,18 @@ const HomePage = React.memo(() => {
     () => resolveGameAnnouncementDigest(storedGameAnnouncementDigest, gameAnnouncements, t),
     [gameAnnouncements, storedGameAnnouncementDigest, t]
   );
-  const gameAnnouncementCalendar = useMemo(
-    () => resolveGameAnnouncementCalendarImage(gameAnnouncements),
-    [gameAnnouncements]
+  const mostImportantTemporaryAnnouncement = useMemo(
+    () => getMostImportantAnnouncement(temporaryAnnouncements),
+    [temporaryAnnouncements]
+  );
+  const temporarySeverityMeta = getAnnouncementSeverityMeta(
+    mostImportantTemporaryAnnouncement?.severity,
+    locale
   );
   const hasAnnouncementUpdate = latestSiteAnnouncement
     ? hasNewContent(STORAGE_KEYS.ANNOUNCEMENT_LAST_VIEWED, latestSiteAnnouncement.updated_at || latestSiteAnnouncement.created_at)
     : false;
-  const temporaryAnnouncementKeys = useMemo(
-    () => temporaryAnnouncements.map((announcement, index) => (
-      String(
-        announcement?.id
-        || announcement?.source_id
-        || `${announcement?.updated_at || announcement?.created_at || 'no-time'}:${announcement?.title || 'untitled'}:${index}`
-      )
-    )),
-    [temporaryAnnouncements]
-  );
-  const [shouldDefaultOpenTemporaryAnnouncements] = useState(
+  const [showTemporaryAnnouncements, setShowTemporaryAnnouncements] = useState(
     () => hasAnnouncementUpdate || !initialCollapseState.temporaryAnnouncements
   );
 
@@ -205,10 +196,7 @@ const HomePage = React.memo(() => {
   const [showUpdateAnnouncement, setShowUpdateAnnouncement] = useState(
     hasAnnouncementUpdate ? true : !initialCollapseState.announcement
   );
-  const [temporaryAnnouncementOverrides, setTemporaryAnnouncementOverrides] = useState(() => new Map());
   const [showGameAnnouncements, setShowGameAnnouncements] = useState(!initialCollapseState.gameAnnouncements);
-  const [showGameCalendar, setShowGameCalendar] = useState(!initialCollapseState.gameCalendar);
-  const [expandedGameCalendarImage, setExpandedGameCalendarImage] = useState(null);
   const [isAnnouncementNew, setIsAnnouncementNew] = useState(hasAnnouncementUpdate);
 
   const handleTogglePoolMechanics = useCallback(() => {
@@ -243,36 +231,18 @@ const HomePage = React.memo(() => {
     });
   }, []);
 
-  const handleToggleTemporaryAnnouncement = useCallback((announcementKey, isExpanded) => {
-    const next = new Map(temporaryAnnouncementOverrides);
-    const nextExpanded = !isExpanded;
-    if (nextExpanded === shouldDefaultOpenTemporaryAnnouncements) {
-      next.delete(announcementKey);
-    } else {
-      next.set(announcementKey, nextExpanded);
-    }
-
-    const hasAnyExpanded = temporaryAnnouncementKeys.some((key) => (
-      key === announcementKey
-        ? nextExpanded
-        : (next.has(key) ? next.get(key) : shouldDefaultOpenTemporaryAnnouncements)
-    ));
-    setHomeCollapseState('temporaryAnnouncements', !hasAnyExpanded);
-    setTemporaryAnnouncementOverrides(next);
-  }, [shouldDefaultOpenTemporaryAnnouncements, temporaryAnnouncementKeys, temporaryAnnouncementOverrides]);
+  const handleToggleTemporaryAnnouncements = useCallback(() => {
+    setShowTemporaryAnnouncements((previous) => {
+      const next = !previous;
+      setHomeCollapseState('temporaryAnnouncements', !next);
+      return next;
+    });
+  }, []);
 
   const handleToggleGameAnnouncements = useCallback(() => {
     setShowGameAnnouncements((prev) => {
       const next = !prev;
       setHomeCollapseState('gameAnnouncements', !next);
-      return next;
-    });
-  }, []);
-
-  const handleToggleGameCalendar = useCallback(() => {
-    setShowGameCalendar((prev) => {
-      const next = !prev;
-      setHomeCollapseState('gameCalendar', !next);
       return next;
     });
   }, []);
@@ -289,19 +259,12 @@ const HomePage = React.memo(() => {
   }, [isAnnouncementNew]);
 
   useEffect(() => {
-    const hasExpandedTemporaryAnnouncement = temporaryAnnouncementKeys.some((key) => (
-      temporaryAnnouncementOverrides.has(key)
-        ? temporaryAnnouncementOverrides.get(key)
-        : shouldDefaultOpenTemporaryAnnouncements
-    ));
-    if ((showUpdateAnnouncement || hasExpandedTemporaryAnnouncement) && isAnnouncementNew) {
+    if ((showUpdateAnnouncement || showTemporaryAnnouncements) && isAnnouncementNew) {
       handleAnnouncementViewed();
     }
   }, [
     showUpdateAnnouncement,
-    temporaryAnnouncementKeys,
-    temporaryAnnouncementOverrides,
-    shouldDefaultOpenTemporaryAnnouncements,
+    showTemporaryAnnouncements,
     isAnnouncementNew,
     handleAnnouncementViewed
   ]);
@@ -384,7 +347,7 @@ const HomePage = React.memo(() => {
 
       <SummerLotteryBanner />
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800/50 rounded-none overflow-hidden shadow-sm">
           <div className="px-4 py-3 flex items-start gap-3">
             <div className="p-2 bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-500 shrink-0">
@@ -433,62 +396,65 @@ const HomePage = React.memo(() => {
             </div>
           </div>
         </div>
+
+        <DonationThanksCard />
       </div>
 
       {(temporaryAnnouncements.length > 0 || latestAnnouncement || gameAnnouncements.length > 0) && (
         <div className="space-y-3">
-          {temporaryAnnouncements.map((announcement, index) => {
-            const announcementKey = temporaryAnnouncementKeys[index];
-            const isTemporaryAnnouncementExpanded = temporaryAnnouncementOverrides.has(announcementKey)
-              ? temporaryAnnouncementOverrides.get(announcementKey)
-              : shouldDefaultOpenTemporaryAnnouncements;
-            const severityMeta = getAnnouncementSeverityMeta(announcement.severity, locale);
-            const title = getLocalizedAnnouncementTitle(announcement, locale);
-            const content = getLocalizedAnnouncementContent(announcement, locale);
-            return (
-              <div key={announcementKey} className={`${severityMeta.card} border rounded-none overflow-hidden`}>
-                <button
-                  type="button"
-                  onClick={() => handleToggleTemporaryAnnouncement(announcementKey, isTemporaryAnnouncementExpanded)}
-                  aria-expanded={isTemporaryAnnouncementExpanded}
-                  className="w-full px-4 py-3 flex items-center justify-between hover:bg-white/30 dark:hover:bg-white/5 transition-colors"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className={`p-2 rounded-none shrink-0 relative ${severityMeta.icon}`}>
-                      <AlertTriangle size={20} />
-                      {isAnnouncementNew && (
-                        <span className="absolute -top-1 -right-1 px-1 py-0.5 text-[8px] font-bold bg-red-500 text-white rounded animate-pulse">
-                          NEW
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-left min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`text-[10px] px-1.5 py-0.5 font-bold uppercase tracking-wide ${severityMeta.badge}`}>
-                          {getAnnouncementTypeLabel('temporary', locale)}
-                        </span>
-                        <span className={`text-[10px] px-1.5 py-0.5 font-bold uppercase tracking-wide ${severityMeta.badge}`}>
-                          {severityMeta.displayLabel}
-                        </span>
-                        <h3 className="font-bold truncate">{title}</h3>
-                        {isAnnouncementNew && (
-                          <span className="px-1.5 py-0.5 text-[10px] font-bold bg-red-500 text-white rounded animate-pulse">
-                            NEW
-                          </span>
-                        )}
-                      </div>
-                    </div>
+          {temporaryAnnouncements.length > 0 && (
+            <div className={`${temporarySeverityMeta.card} overflow-hidden border`}>
+              <button
+                type="button"
+                onClick={handleToggleTemporaryAnnouncements}
+                aria-expanded={showTemporaryAnnouncements}
+                className="flex w-full items-center justify-between px-4 py-3 transition-colors hover:bg-white/30 dark:hover:bg-white/5"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className={`relative shrink-0 p-2 ${temporarySeverityMeta.icon}`}>
+                    <AlertTriangle size={20} />
+                    {isAnnouncementNew && (
+                      <span className="absolute -right-1 -top-1 bg-red-500 px-1 py-0.5 text-[8px] font-bold text-white animate-pulse">NEW</span>
+                    )}
                   </div>
-                  <ChevronUp size={20} className={`${severityMeta.chevron} transition-transform duration-300 ${isTemporaryAnnouncementExpanded ? '' : 'rotate-180'}`} />
-                </button>
+                  <div className="min-w-0 text-left">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${temporarySeverityMeta.badge}`}>
+                        {getAnnouncementTypeLabel('temporary', locale)} × {temporaryAnnouncements.length}
+                      </span>
+                      <span className={`px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${temporarySeverityMeta.badge}`}>
+                        {temporarySeverityMeta.displayLabel}
+                      </span>
+                      <h3 className="truncate font-bold">
+                        {getLocalizedAnnouncementTitle(mostImportantTemporaryAnnouncement, locale)}
+                      </h3>
+                    </div>
+                    <p className="mt-1 text-[11px] opacity-65">{t('home.temporaryAnnouncementsMerged', { count: temporaryAnnouncements.length })}</p>
+                  </div>
+                </div>
+                <ChevronUp size={20} className={`${temporarySeverityMeta.chevron} shrink-0 transition-transform duration-300 ${showTemporaryAnnouncements ? '' : 'rotate-180'}`} />
+              </button>
 
-                <CollapsibleContent isOpen={isTemporaryAnnouncementExpanded} unmountOnClose>
-                  <HomeAnnouncementContent content={content} />
-                </CollapsibleContent>
-              </div>
-            );
-          })}
+              <CollapsibleContent isOpen={showTemporaryAnnouncements} unmountOnClose>
+                <div className="space-y-3 border-t border-current/10 px-4 pb-4 pt-3">
+                  {temporaryAnnouncements.map((announcement, index) => {
+                    const itemSeverity = getAnnouncementSeverityMeta(announcement.severity, locale);
+                    return (
+                      <article key={announcement.id || `${announcement.title}-${index}`} className={`border ${itemSeverity.card}`}>
+                        <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
+                          <span className={`px-1.5 py-0.5 text-[9px] font-bold ${itemSeverity.badge}`}>{itemSeverity.displayLabel}</span>
+                          <h4 className="text-sm font-black">{getLocalizedAnnouncementTitle(announcement, locale)}</h4>
+                        </div>
+                        <HomeAnnouncementContent content={getLocalizedAnnouncementContent(announcement, locale)} />
+                      </article>
+                    );
+                  })}
+                </div>
+              </CollapsibleContent>
+            </div>
+          )}
 
+          <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-2">
           {latestAnnouncement && (
             <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 border border-amber-200 dark:border-amber-800 rounded-none overflow-hidden">
               <button
@@ -555,79 +521,7 @@ const HomePage = React.memo(() => {
               </CollapsibleContent>
             </div>
           )}
-        </div>
-      )}
-
-      {gameAnnouncementCalendar && (
-        <div className="bg-gradient-to-r from-cyan-50/70 to-blue-50/60 dark:from-cyan-950/20 dark:to-blue-950/20 border border-cyan-200/70 dark:border-cyan-800/50 rounded-none overflow-hidden">
-          <button
-            type="button"
-            onClick={handleToggleGameCalendar}
-            className="w-full px-4 py-3 flex items-center justify-between gap-4 hover:bg-cyan-100/30 dark:hover:bg-cyan-900/20 transition-colors"
-          >
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="p-2 bg-cyan-100/80 dark:bg-cyan-900/25 text-cyan-600 dark:text-cyan-400 shrink-0">
-                <Image size={18} />
-              </div>
-              <div className="min-w-0 text-left">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="shrink-0 text-[10px] px-1.5 py-0.5 bg-cyan-200 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300 font-bold uppercase tracking-wide">{t('home.gameCalendar')}</span>
-                  <h3 className="min-w-0 truncate font-bold text-cyan-700 dark:text-cyan-300">
-                    {gameAnnouncementCalendar.title || t('home.gameCalendarTitle')}
-                  </h3>
-                </div>
-              </div>
-            </div>
-            <ChevronUp size={20} className={`shrink-0 text-cyan-400 transition-transform duration-300 ${showGameCalendar ? '' : 'rotate-180'}`} />
-          </button>
-
-          <CollapsibleContent isOpen={showGameCalendar} unmountOnClose>
-            <div className="px-4 pb-4">
-              <button
-                type="button"
-                onClick={() => setExpandedGameCalendarImage(gameAnnouncementCalendar.imageUrl)}
-                className="group relative block w-full overflow-hidden border border-cyan-200 bg-white/70 p-2 text-left transition-colors hover:border-cyan-400 dark:border-cyan-900/50 dark:bg-zinc-950/30"
-                aria-label={t('home.gameCalendarOpen')}
-              >
-                <img
-                  src={gameAnnouncementCalendar.imageUrl}
-                  alt={t('home.gameCalendarImageAlt')}
-                  loading="lazy"
-                  decoding="async"
-                  className="max-h-[400px] w-full object-contain"
-                />
-                <span className="absolute right-3 top-3 inline-flex items-center gap-1 border border-cyan-300 bg-white/90 px-2 py-1 text-[11px] font-bold text-cyan-700 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 dark:border-cyan-700 dark:bg-zinc-950/90 dark:text-cyan-300">
-                  <Maximize2 size={12} />
-                  {t('home.gameCalendarOpen')}
-                </span>
-              </button>
-            </div>
-          </CollapsibleContent>
-        </div>
-      )}
-
-      {expandedGameCalendarImage && (
-        <div
-          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
-          onClick={() => setExpandedGameCalendarImage(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-label={t('home.gameCalendarOpen')}
-        >
-          <button
-            type="button"
-            className="absolute right-4 top-4 border border-white/20 bg-black/40 p-2 text-white transition-colors hover:border-red-400 hover:text-red-300"
-            onClick={() => setExpandedGameCalendarImage(null)}
-            aria-label={t('common.close')}
-          >
-            <X size={22} />
-          </button>
-          <img
-            src={expandedGameCalendarImage}
-            alt={t('home.gameCalendarImageAlt')}
-            className="max-h-[90vh] max-w-[94vw] object-contain shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          />
+          </div>
         </div>
       )}
 
@@ -664,17 +558,11 @@ const HomePage = React.memo(() => {
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.3fr] gap-6">
           <HomeFriendlyLinksCard />
 
-          <div className="flex flex-col gap-6">
-            <HomecomingPreviewCard />
-            <div className="shrink-0 min-h-32">
-              <NextVersionCountdownCard
-                targetDate={nextVersionTargetDate}
-                title={nextVersionCountdownTitle}
-                subTitle={t('home.nextVersionRelease')}
-                endedText={t('home.versionLaunched')}
-                scheduleLabel={t('home.countdown.releaseAt')}
-              />
-            </div>
+          <div className="flex h-full flex-col">
+            <HomecomingPreviewCard
+              targetDate={nextVersionTargetDate}
+              title={nextVersionCountdownTitle}
+            />
           </div>
         </div>
       </div>
