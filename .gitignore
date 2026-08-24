@@ -49,6 +49,21 @@ backend/lib/*
 !backend/lib/officialIdReconciliation.js
 !backend/lib/officialImportIncremental.js
 !backend/lib/officialImportStaging.js
+
+# 本地私有后端重构产物：不属于主站主线，也不参与主站 CI。
+# backend/lib/* 默认继续忽略；后续拆分出的私有模块不要再加入白名单。
+backend/lib/dailyStats.js
+backend/lib/performanceMetrics.js
+backend/lib/performanceMonitor.js
+backend/lib/supabaseConnectionRetry.js
+
+# 上述本地重构模块的配套测试同样只保留在本地。
+api/__tests__/dailyStats.test.js
+api/__tests__/performanceMetrics.test.js
+api/__tests__/performanceMonitor.test.js
+api/__tests__/queuePerformanceMetrics.test.js
+api/__tests__/supabaseConnectionRetry.test.js
+api/__tests__/privateRecordsFallback.test.js
 dev-proxy.js
 api/hg-proxy.js
 
