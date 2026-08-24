@@ -8,17 +8,22 @@ import { useHistoryStore, usePersonalAnalysisStore, usePoolStore } from '../../s
 import { isPoolGroupId } from '../../stores/usePoolStore';
 import { localizePoolName } from '../../utils/gameDataI18n.js';
 import { resolveEffectiveGameUid } from '../../utils/accountScopeUtils.js';
+import { resolveGameAccountServerTag } from '../../utils/gameAccountMetadata.js';
 import PersonalDataBoundary from './PersonalDataBoundary.jsx';
+import AccountServerLabelNotice from './AccountServerLabelNotice.jsx';
 import PoolSelector from '../pool/PoolSelector.jsx';
 
 const DashboardView = lazy(() => import('../dashboard/DashboardView'));
 const RecordsView = lazy(() => import('../records/RecordsView'));
 
 function resolveExportGameAccounts(analysisAccounts, historyAccounts) {
-  if (Array.isArray(analysisAccounts)) {
-    return analysisAccounts;
-  }
-  return Array.isArray(historyAccounts) ? historyAccounts : [];
+  const accounts = Array.isArray(analysisAccounts)
+    ? analysisAccounts
+    : Array.isArray(historyAccounts) ? historyAccounts : [];
+  return accounts.map((account) => ({
+    ...account,
+    serverTag: resolveGameAccountServerTag(account) || '区服待确认',
+  }));
 }
 
 function TabPanelFallback({ label = '正在加载模块...' }) {
@@ -213,6 +218,7 @@ export default function DesktopDashboardWorkspace({
       {user && (
         <div className="animate-fade-in">
           <PersonalDataBoundary user={user} onRetry={onRetryPersonalData}>
+            <AccountServerLabelNotice ownerId={user.id} />
             <div className="mb-6 border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
               <PoolSelector
                 onOpenImportWizard={openImportWizard}

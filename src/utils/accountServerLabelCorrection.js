@@ -38,10 +38,6 @@ function getAccountServerIdentity(account = {}) {
   return region ? `region:${region}` : 'unknown';
 }
 
-function getAccountServerOptionValue(account = {}) {
-  return normalizeGameAccountServerId(account) || normalizeText(account.serverId || account.server_id) || '';
-}
-
 function isSameGameUidSelection(selectedValue, gameUid) {
   const selected = normalizeText(selectedValue);
   const uid = normalizeText(gameUid);
@@ -118,16 +114,12 @@ export function buildDuplicateGameUidServerGroups(accounts = []) {
   return Array.from(groups.values())
     .filter(group => group.accounts.length > 1 && (group.serverIdentities.size > 1 || group.accountKeys.size > 1))
     .map((group) => {
-      const defaultServerId = group.accounts
-        .map(account => getAccountServerOptionValue(account))
-        .find(Boolean) || ACCOUNT_SERVER_LABEL_OPTIONS[0]?.serverId || '';
-
       return {
         gameUid: group.gameUid,
         accounts: group.accounts,
         accountKeyCount: group.accountKeys.size,
         serverCount: group.serverIdentities.size,
-        defaultServerId,
+        defaultServerId: '',
         labels: [...new Set(group.accounts
           .map(account => buildGameAccountServerTag(account) || normalizeText(account.serverId || account.server_id) || 'unknown')
           .filter(Boolean))],
@@ -142,7 +134,7 @@ export async function updateAccountServerLabel({
   setHistory,
   currentGameUid,
   switchGameAccount,
-  mergeGameUid = false,
+  mergeGameUid = true,
   mergeAccounts = [],
 } = {}) {
   const option = ACCOUNT_SERVER_LABEL_OPTIONS.find(item => item.serverId === String(nextServerId || '').trim());

@@ -32,9 +32,38 @@ describe('accountServerLabelCorrection', () => {
     expect(groups[0]).toMatchObject({
       gameUid: '10000001',
       serverCount: 2,
-      defaultServerId: '2',
+      defaultServerId: '',
     });
     expect(groups[0].labels).toEqual(expect.arrayContaining(['国际服·亚服', '国际服·欧/美服']));
+  });
+
+  it('treats a direct account correction as a full UID merge by default', async () => {
+    const history = [
+      { gameUid: '10000001', serverId: '1', seqId: '1', poolId: 'limited' },
+      { gameUid: '10000001', serverId: '2', seqId: '2', poolId: 'limited' },
+      { gameUid: '10000002', serverId: '1', seqId: '3', poolId: 'limited' },
+    ];
+    const setHistory = vi.fn();
+
+    await updateAccountServerLabel({
+      account: { gameUid: '10000001', accountKey: '10000001::server:1', serverId: '1', region: 'cn' },
+      nextServerId: 'bilibili',
+      history,
+      setHistory,
+      currentGameUid: '10000001::server:1',
+      switchGameAccount: vi.fn(),
+    });
+
+    expect(updateAccountGachaServerLabel).toHaveBeenCalledWith(expect.objectContaining({
+      gameUid: '10000001',
+      serverId: 'bilibili',
+      mergeGameUid: true,
+    }));
+    expect(setHistory).toHaveBeenCalledWith([
+      expect.objectContaining({ gameUid: '10000001', serverId: 'bilibili' }),
+      expect.objectContaining({ gameUid: '10000001', serverId: 'bilibili' }),
+      expect.objectContaining({ gameUid: '10000002', serverId: '1' }),
+    ]);
   });
 
   it('updates and deduplicates records for a UID when merging split server groups', async () => {

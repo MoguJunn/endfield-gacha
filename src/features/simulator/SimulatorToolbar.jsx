@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Copy, Download, Loader2, Plus, RefreshCw, Share2, User } from 'lucide-react';
-import { useHistoryStore } from '../../stores';
+import { usePersonalGameAccounts } from '../../hooks/app/usePersonalGameAccounts.js';
 import { getLocalizedResourceLabel, RESOURCE_ICON_URLS } from '../../utils/resourceEconomy';
 import PoolGroupCardRail from '../../components/pool/PoolGroupCardRail';
 import ShareActionStatus from '../../components/share/ShareActionStatus';
@@ -300,8 +300,7 @@ const SimulatorToolbar = ({
   const [showInheritAccountDropdown, setShowInheritAccountDropdown] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
   const shareMenuRef = useRef(null);
-  useHistoryStore((state) => state.history);
-  const getGameAccountsFromHistory = useHistoryStore((state) => state.getGameAccountsFromHistory);
+  const gameAccounts = usePersonalGameAccounts();
   const isEnglishLocale = locale?.toLowerCase().startsWith('en');
   const cnOriginiteDoubleBonusEnabled = Boolean(resourceSettings?.cnOriginiteDoubleBonusEnabled);
   const infiniteResourcesEnabled = Boolean(resourceSettings?.infiniteResources);
@@ -377,8 +376,6 @@ const SimulatorToolbar = ({
       }),
     [locale, poolPullCounts, simulatorPools]
   );
-  const gameAccounts = getGameAccountsFromHistory();
-
   const openEditor = (resourceKey, mode, value) => {
     setActiveEditor({
       resourceKey,

@@ -31,6 +31,10 @@ vi.mock('../PersonalDataBoundary.jsx', () => ({
   default: ({ children }) => children,
 }));
 
+vi.mock('../AccountServerLabelNotice.jsx', () => ({
+  default: () => null,
+}));
+
 vi.mock('../../dashboard/DashboardView.jsx', () => ({
   default: () => null,
 }));
@@ -99,7 +103,10 @@ describe('DesktopDashboardWorkspace export accounts', () => {
       renderWorkspace();
     });
 
-    expect(JSON.parse(screen.getByTestId('export-game-accounts').textContent)).toEqual(snapshotAccounts);
+    expect(JSON.parse(screen.getByTestId('export-game-accounts').textContent)).toEqual([{
+      ...snapshotAccounts[0],
+      serverTag: '官服',
+    }]);
   });
 
   it('passes history-derived accounts when no analysis snapshot accounts exist', async () => {
@@ -112,6 +119,9 @@ describe('DesktopDashboardWorkspace export accounts', () => {
       renderWorkspace();
     });
 
-    expect(JSON.parse(screen.getByTestId('export-game-accounts').textContent)).toEqual(historyAccounts);
+    expect(JSON.parse(screen.getByTestId('export-game-accounts').textContent)).toEqual([{
+      ...historyAccounts[0],
+      serverTag: '区服待确认',
+    }]);
   });
 });

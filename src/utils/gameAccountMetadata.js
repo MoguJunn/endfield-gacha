@@ -46,6 +46,7 @@ export function getHistoryRecordGameUid(record) {
 export function normalizeGameAccountServerId(metadata = {}) {
   const serverId = normalizeString(metadata.serverId || metadata.server_id);
   const normalizedServerId = (serverId || '').toLowerCase();
+  const serverScope = normalizeString(metadata.serverScope || metadata.server_scope);
   const channelMasterId = normalizeString(metadata.channelMasterId || metadata.channel_master_id);
   const source = normalizeString(metadata.source || metadata.importSource || metadata.lastImportSource);
   const region = normalizeString(metadata.region || metadata.serverRegion || metadata.serverName);
@@ -55,6 +56,14 @@ export function normalizeGameAccountServerId(metadata = {}) {
       || metadata.serverLabel
       || metadata.server_label
   );
+  if (
+    serverScope?.toLowerCase() === 'legacy'
+    && !serverId
+    && !serverTag
+    && !channelMasterId
+  ) {
+    return null;
+  }
   const signal = `${source || ''} ${region || ''} ${serverTag || ''}`.toLowerCase();
 
   if (
@@ -215,7 +224,11 @@ export function normalizeGameAccountMetadata(metadata = {}) {
   const hgUid = rawHgUid && rawHgUid !== gameUid ? rawHgUid : null;
   const channelMasterId = normalizeString(metadata.channelMasterId || metadata.channel_master_id);
   const channelName = normalizeString(metadata.channelName || metadata.channel_name);
-  const serverId = normalizeGameAccountServerId({ ...metadata, channelMasterId, channelName });
+  const serverScope = normalizeString(metadata.serverScope || metadata.server_scope);
+  const rawServerId = normalizeString(metadata.serverId || metadata.server_id);
+  const serverId = serverScope?.toLowerCase() === 'legacy' && !rawServerId
+    ? null
+    : normalizeGameAccountServerId({ ...metadata, channelMasterId, channelName });
   const region = normalizeGameAccountRegion({ ...metadata, serverId, channelMasterId, channelName });
   const nickName = normalizeString(metadata.nickName || metadata.nick_name) || gameUid;
   const lastImportedAt = normalizeMetadataTimestamp(
@@ -240,6 +253,12 @@ export function normalizeGameAccountMetadata(metadata = {}) {
     : metadata.isOfficial === false || metadata.is_official === false
       ? false
       : null;
+  const serverTag = normalizeString(
+    metadata.serverTag
+      || metadata.server_tag
+      || metadata.serverLabel
+      || metadata.server_label
+  );
 
   return {
     accountKey: buildGameAccountKey({ ...metadata, gameUid, serverId, region, channelMasterId, channelName }),
@@ -249,7 +268,9 @@ export function normalizeGameAccountMetadata(metadata = {}) {
     channelMasterId,
     channelName,
     serverId,
+    serverScope,
     region,
+    serverTag,
     isOfficial,
     lastImportedAt,
     lastImportedRecordAt,
@@ -426,6 +447,7 @@ export function buildGameAccountServerTag(metadata = {}) {
 
   const channelName = (normalized.channelName || '').toLowerCase();
   const serverId = (normalized.serverId || '').toLowerCase();
+  const serverScope = (normalized.serverScope || '').toLowerCase();
   const region = (normalized.region || '').toLowerCase();
   const signal = `${channelName} ${serverId} ${region}`;
 
@@ -460,6 +482,7 @@ export function buildGameAccountServerTag(metadata = {}) {
   if (
     normalized.channelMasterId === '1' ||
     normalized.isOfficial === true ||
+    (serverId === '1' && serverScope !== 'legacy') ||
     /官服|official|gryphline|hypergryph|鹰角/.test(signal)
   ) {
     return '官服';
@@ -474,6 +497,15 @@ export function buildGameAccountServerTag(metadata = {}) {
   }
 
   return null;
+}
+
+export function resolveGameAccountServerTag(metadata = {}) {
+  const normalized = normalizeGameAccountMetadata(metadata);
+  if (!normalized) {
+    return null;
+  }
+
+  return normalized.serverTag || buildGameAccountServerTag(normalized);
 }
 
 export function localizeGameAccountServerTag(serverTag, locale = 'zh-CN') {
@@ -492,7 +524,8 @@ export function localizeGameAccountServerTag(serverTag, locale = 'zh-CN') {
     B服: 'Bilibili',
     国际服: 'Intl',
     '国际服·亚服': 'Intl Asia',
-    '国际服·欧/美服': 'Intl EU/NA'
+    '国际服·欧/美服': 'Intl EU/NA',
+    '区服待确认': 'Server to confirm',
   };
 
   return tagMap[normalizedTag] || normalizedTag;

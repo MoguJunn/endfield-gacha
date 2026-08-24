@@ -4,6 +4,7 @@ import {
   buildGameAccountKey,
   buildGameAccountServerTag,
   localizeGameAccountServerTag,
+  normalizeGameAccountMetadata,
   normalizeGameAccountRegion,
   normalizeGameAccountServerId,
 } from '../gameAccountMetadata.js';
@@ -41,6 +42,18 @@ describe('gameAccountMetadata', () => {
     expect(buildGameAccountServerTag({ gameUid: '10000001', serverId: '1', channelMasterId: '2' })).toBe('B服');
     expect(buildGameAccountServerTag({ gameUid: '10000001', serverId: '3', channelMasterId: '2' })).toBe('国际服·欧/美服');
     expect(buildGameAccountServerTag({ gameUid: '10000001', serverId: '1', channelMasterId: '1' })).toBe('官服');
+  });
+
+  it('shows explicit official servers while leaving legacy inferred servers unconfirmed', () => {
+    expect(buildGameAccountServerTag({ gameUid: '10000001', serverId: '1', serverScope: '1' })).toBe('官服');
+    expect(buildGameAccountServerTag({ gameUid: '10000001', serverId: '1', serverScope: 'legacy' })).toBeNull();
+    expect(localizeGameAccountServerTag('区服待确认', 'en-US')).toBe('Server to confirm');
+    expect(normalizeGameAccountServerId({ gameUid: '10000001', serverScope: 'legacy', region: 'cn' })).toBeNull();
+    expect(normalizeGameAccountMetadata({ gameUid: '10000001', serverScope: 'legacy', region: 'cn' })).toMatchObject({
+      accountKey: '10000001::region:cn',
+      serverId: null,
+      serverScope: 'legacy',
+    });
   });
 
   it('keeps chinese server tags unchanged under zh locales', () => {

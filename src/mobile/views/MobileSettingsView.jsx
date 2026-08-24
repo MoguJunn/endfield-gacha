@@ -9,6 +9,7 @@ import usePoolStore from '../../stores/usePoolStore';
 import useHistoryStore from '../../stores/useHistoryStore';
 import useSiteConfigStore from '../../stores/useSiteConfigStore';
 import { useCloudSync } from '../../hooks/app';
+import { usePersonalGameAccounts } from '../../hooks/app/usePersonalGameAccounts.js';
 import { useToast } from '../../hooks';
 import PlatformSwitcher from '../../components/common/PlatformSwitcher';
 import LocaleSwitcher from '../../components/common/LocaleSwitcher.jsx';
@@ -58,6 +59,7 @@ import {
   getGameAccountSelectionValue,
   isGameAccountSelectionMatch,
   localizeGameAccountServerTag,
+  resolveGameAccountServerTag,
 } from '../../utils/gameAccountMetadata.js';
 import {
   ACCOUNT_SERVER_LABEL_OPTIONS,
@@ -162,10 +164,10 @@ function MobileSettingsView() {
   const { themeMode, setThemeMode } = useTheme();
   const { user, signOut, logout, userRole, syncing, syncError, lastSyncAt, setUser } = useAuthStore();
   const { pools, setPools, currentPoolId, currentGameUid, switchPool, switchGameAccount } = usePoolStore();
-  const { history, setHistory, getGameAccountsFromHistory } = useHistoryStore();
+  const { history, setHistory } = useHistoryStore();
   const siteVersion = useSiteConfigStore((state) => state.config.site_version || APP_VERSION_LABEL);
   const { toasts, showToast, removeToast } = useToast();
-  const { syncToCloud, loadPublicPools, deleteUserDataFromCloud } = useCloudSync({ showToast });
+  const { syncToCloud, loadPublicPools, deleteUserDataFromCloud, refreshPersonalData } = useCloudSync({ showToast });
   const deletePhrase = t('settings.deletePhrase');
   const deleteAccountPhrase = t('settings.deleteAccountPhrase');
 
@@ -217,10 +219,7 @@ function MobileSettingsView() {
 
   const userPoolCount = myPools.length;
   const userHistoryCount = myHistory.length;
-  const gameAccounts = useMemo(() => {
-    void history;
-    return getGameAccountsFromHistory();
-  }, [getGameAccountsFromHistory, history]);
+  const gameAccounts = usePersonalGameAccounts();
   const duplicateGameUidServerGroups = useMemo(
     () => buildDuplicateGameUidServerGroups(gameAccounts),
     [gameAccounts]
@@ -342,7 +341,7 @@ function MobileSettingsView() {
   const handleAccountServerLabelChange = async (account, nextServerId) => {
     const accountValue = getGameAccountSelectionValue(account) || account?.gameUid || account?.game_uid;
     const nextOption = ACCOUNT_SERVER_LABEL_OPTIONS.find(option => option.serverId === nextServerId);
-    const currentLabel = localizeGameAccountServerTag(account, locale) || accountValue || '';
+    const currentLabel = localizeGameAccountServerTag(resolveGameAccountServerTag(account), locale) || accountValue || '';
     const nextLabel = nextOption ? t(nextOption.labelKey) : nextServerId;
 
     if (!window.confirm(t('settings.serverLabelConfirm', { current: currentLabel, next: nextLabel }))) {
@@ -352,13 +351,18 @@ function MobileSettingsView() {
     setServerLabelError('');
     setServerLabelUpdatingAccount(accountValue);
     try {
-      await updateAccountServerLabel({
+      const result = await updateAccountServerLabel({
         account,
         nextServerId,
         history,
         setHistory,
         currentGameUid,
         switchGameAccount,
+      });
+      await refreshPersonalData(user, {
+        kind: 'mutation',
+        reason: 'server_label_update',
+        preferredGameUid: result.nextAccountValue,
       });
     } catch (error) {
       const message = error?.message === 'server_label_update_no_records'
@@ -389,7 +393,7 @@ function MobileSettingsView() {
     setServerLabelError('');
     setServerLabelUpdatingAccount(loadingKey);
     try {
-      await updateAccountServerLabel({
+      const result = await updateAccountServerLabel({
         account: anchorAccount,
         nextServerId,
         history,
@@ -398,6 +402,11 @@ function MobileSettingsView() {
         switchGameAccount,
         mergeGameUid: true,
         mergeAccounts: group.accounts,
+      });
+      await refreshPersonalData(user, {
+        kind: 'mutation',
+        reason: 'server_label_merge',
+        preferredGameUid: result.nextAccountValue,
       });
       setServerMergeSelections((prev) => {
         const next = { ...prev };
@@ -1097,7 +1106,7 @@ function MobileSettingsView() {
                   </div>
                   <div className="mt-3 space-y-2">
                     {duplicateGameUidServerGroups.map((group) => {
-                      const selectedServerId = serverMergeSelections[group.gameUid] || group.defaultServerId || '';
+                      const selectedServerId = serverMergeSelections[group.gameUid] || '';
                       const loadingKey = `merge:${group.gameUid}`;
                       const isMerging = serverLabelUpdatingAccount === loadingKey;
 
@@ -1122,6 +1131,7 @@ function MobileSettingsView() {
                               }))}
                               className="rounded-[0.65rem] border border-amber-400/30 bg-zinc-950 px-2 py-1 text-[10px] font-bold text-amber-100 outline-none disabled:opacity-60"
                             >
+                              <option value="" disabled>{t('settings.serverMergeSelectTarget')}</option>
                               {ACCOUNT_SERVER_LABEL_OPTIONS.map((option) => (
                                 <option key={option.serverId} value={option.serverId}>{t(option.labelKey)}</option>
                               ))}

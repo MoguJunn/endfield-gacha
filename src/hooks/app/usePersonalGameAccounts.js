@@ -3,6 +3,14 @@ import {
   useHistoryStore,
   usePersonalAnalysisStore,
 } from '../../stores/index.js';
+import { resolveGameAccountServerTag } from '../../utils/gameAccountMetadata.js';
+
+function addDisplayServerTags(accounts) {
+  return (Array.isArray(accounts) ? accounts : []).map((account) => ({
+    ...account,
+    serverTag: resolveGameAccountServerTag(account) || '区服待确认',
+  }));
+}
 
 /**
  * Return the authoritative account manifest when analysis is available.
@@ -20,11 +28,11 @@ export function usePersonalGameAccounts() {
       ['ready', 'stale', 'empty'].includes(analysisAvailability)
       && Array.isArray(analysisOwner?.accounts)
     ) {
-      return analysisOwner.accounts;
+      return addDisplayServerTags(analysisOwner.accounts);
     }
 
     void history;
-    return getGameAccountsFromHistory();
+    return addDisplayServerTags(getGameAccountsFromHistory());
   }, [analysisAvailability, analysisOwner, getGameAccountsFromHistory, history]);
 }
 
