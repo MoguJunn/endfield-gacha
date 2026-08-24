@@ -10,6 +10,7 @@ function createFakeSupabase() {
     official_import_tasks: [],
     official_import_staged_records: [],
   };
+  const failures = [];
   let taskSequence = 0;
   let recordSequence = 0;
 
@@ -76,6 +77,21 @@ function createFakeSupabase() {
     }
 
     async execute(mode) {
+      const failureIndex = failures.findIndex((failure) => failure.predicate({
+        tableName: this.tableName,
+        action: this.action,
+        payload: this.payload,
+        mode,
+      }));
+      if (failureIndex >= 0) {
+        const failure = failures[failureIndex];
+        failure.remaining -= 1;
+        if (failure.remaining <= 0) {
+          failures.splice(failureIndex, 1);
+        }
+        return { data: null, error: structuredClone(failure.error) };
+      }
+
       const table = tables[this.tableName];
       if (!table) {
         return { data: null, error: { message: `Unexpected table ${this.tableName}` } };
@@ -133,6 +149,9 @@ function createFakeSupabase() {
 
   return {
     tables,
+    failNext(predicate, error, times = 1) {
+      failures.push({ predicate, error, remaining: times });
+    },
     from(tableName) {
       return new Query(tableName);
     },
@@ -193,6 +212,18 @@ async function createReview(supabase) {
 }
 
 describe('official import staging', () => {
+  const poolTimeout = {
+    code: 'PGRST003',
+    message: 'Timed out acquiring connection from connection pool.',
+  };
+  const retryImmediately = {
+    baseDelayMs: 0,
+    maxDelayMs: 0,
+    random: () => 0,
+    sleep: vi.fn(async () => {}),
+    logger: { warn: vi.fn() },
+  };
+
   it('stores only an access-key hash and defaults blocking records to skip', async () => {
     const supabase = createFakeSupabase();
     const staged = await createReview(supabase);
@@ -361,6 +392,121 @@ describe('official import staging', () => {
     });
     expect(first.result).not.toHaveProperty('taskCommittedAtomically');
     expect(second).toMatchObject({ idempotent: true, result: { savedRecords: 1, atomicCommit: true } });
+    expect(commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers when the first task read cannot acquire a connection', async () => {
+    const supabase = createFakeSupabase();
+    const staged = await createReview(supabase);
+    const commit = vi.fn(async ({ rows }) => ({ savedRecords: rows.length }));
+    supabase.failNext(
+      ({ tableName, action }) => tableName === 'official_import_tasks' && action === 'select',
+      poolTimeout
+    );
+
+    const confirmed = await confirmOfficialImportTask({
+      supabase,
+      taskId: staged.task.id,
+      userId: 'user-1',
+      accessKey: staged.accessKey,
+      commit,
+      connectionRetryOptions: retryImmediately,
+    });
+
+    expect(confirmed).toMatchObject({ idempotent: false, result: { savedRecords: 1 } });
+    expect(commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a PGRST003 while acquiring the confirmation lock', async () => {
+    const supabase = createFakeSupabase();
+    const staged = await createReview(supabase);
+    const commit = vi.fn(async ({ rows }) => ({ savedRecords: rows.length }));
+    supabase.failNext(
+      ({ tableName, action, payload }) => (
+        tableName === 'official_import_tasks'
+        && action === 'update'
+        && payload?.status === 'confirming'
+      ),
+      poolTimeout
+    );
+
+    const confirmed = await confirmOfficialImportTask({
+      supabase,
+      taskId: staged.task.id,
+      userId: 'user-1',
+      accessKey: staged.accessKey,
+      commit,
+      connectionRetryOptions: retryImmediately,
+    });
+
+    expect(confirmed.result.savedRecords).toBe(1);
+    expect(commit).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports database busy instead of a false concurrent confirmation after retries are exhausted', async () => {
+    const supabase = createFakeSupabase();
+    const staged = await createReview(supabase);
+    const commit = vi.fn();
+    supabase.failNext(
+      ({ tableName, action, payload }) => (
+        tableName === 'official_import_tasks'
+        && action === 'update'
+        && payload?.status === 'confirming'
+      ),
+      poolTimeout,
+      3
+    );
+
+    await expect(confirmOfficialImportTask({
+      supabase,
+      taskId: staged.task.id,
+      userId: 'user-1',
+      accessKey: staged.accessKey,
+      commit,
+      connectionRetryOptions: retryImmediately,
+    })).rejects.toMatchObject({
+      code: 'REVIEW_DATABASE_BUSY',
+      statusCode: 503,
+      details: {
+        operation: 'lock-review-task',
+        retryable: true,
+        sourceCode: 'PGRST003',
+      },
+    });
+    expect(commit).not.toHaveBeenCalled();
+    expect(supabase.tables.official_import_tasks[0].status).toBe('awaiting_confirmation');
+  });
+
+  it('treats a committed task as success when the atomic callback response is lost', async () => {
+    const supabase = createFakeSupabase();
+    const staged = await createReview(supabase);
+    const commit = vi.fn(async ({ task, rows }) => {
+      const storedTask = supabase.tables.official_import_tasks.find((item) => item.id === task.id);
+      Object.assign(storedTask, {
+        status: 'committed',
+        committed_at: new Date().toISOString(),
+        summary: {
+          ...storedTask.summary,
+          commitResult: { savedRecords: rows.length, atomicCommit: true },
+        },
+      });
+      throw new Error('response lost after commit');
+    });
+
+    const confirmed = await confirmOfficialImportTask({
+      supabase,
+      taskId: staged.task.id,
+      userId: 'user-1',
+      accessKey: staged.accessKey,
+      commit,
+      connectionRetryOptions: retryImmediately,
+    });
+
+    expect(confirmed).toMatchObject({
+      idempotent: true,
+      task: { status: 'committed' },
+      result: { savedRecords: 1, atomicCommit: true },
+    });
     expect(commit).toHaveBeenCalledTimes(1);
   });
 });

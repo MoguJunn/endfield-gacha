@@ -9,7 +9,7 @@
  * 5. 后端直接写入 Supabase
  * 6. 前端通过轮询获取进度
  *
- * @version 1.6.3
+ * @version 1.6.6
  * @date 2026-07-19
  */
 
@@ -28,6 +28,10 @@ import {
 } from './lib/officialIdReconciliation.js';
 import { classifyCharacterIdSource } from './lib/canonicalEntityUtils.js';
 import { buildOfficialImportRecordKey } from './lib/officialImportIncremental.js';
+import {
+  isSupabaseConnectionPoolTimeout,
+  retrySupabaseConnectionPoolOperation,
+} from './lib/supabaseConnectionRetry.js';
 import {
   filterOfficialImportPullRecords,
   hasActionableImportIdentityIssues,
@@ -240,18 +244,31 @@ function getAlternateIntlServerId(serverId) {
 
 function collectRecordsFetchErrorText(result = {}) {
   const failedPools = Array.isArray(result?.data?.failed) ? result.data.failed : [];
+  const structuredFailedPools = Array.isArray(result?.details?.failedPools)
+    ? result.details.failedPools
+    : [];
   return [
+    result instanceof Error ? result.message : null,
     result?.error,
     result?.message,
     result?.data?.error,
     result?.data?.message,
+    result?.details?.message,
+    ...(Array.isArray(result?.details?.failureReasons) ? result.details.failureReasons : []),
     ...failedPools.flatMap(item => [item?.error, item?.message, item?.msg, item?.reason]),
+    ...structuredFailedPools.flatMap(item => [item?.error, item?.message, item?.msg, item?.reason]),
   ].map(value => normalizeString(value, 500)).filter(Boolean).join(' ');
 }
 
 function isTokenInvalidRecordsFetchResult(result = {}) {
   const message = collectRecordsFetchErrorText(result).toLowerCase();
-  return /token is invalid|invalid token|token无效|请检查token是否有效/.test(message);
+  return /token\s+is\s+invalid|invalid\s+token|token\s*无效|请检查token是否有效/.test(message);
+}
+
+function isTokenInvalidRecordsFetchError(error) {
+  return error?.code === 'RECORDS_TOKEN_INVALID'
+    || error?.details?.allTokenInvalid === true
+    || isTokenInvalidRecordsFetchResult(error);
 }
 
 function withResolvedRequestServerContext(context = {}, serverId, account = {}, source = 'cn') {
@@ -1811,17 +1828,27 @@ async function commitStagedOfficialImport({ task, rows }) {
       .map((pool) => [String(pool.pool_id), pool])
   ).values()).map(sanitizeStagedPool).filter(Boolean);
 
-  const { data: atomicResult, error: atomicError } = await supabase.rpc(
-    'commit_official_import_records',
-    {
-      p_task_id: task.id,
-      p_user_id: task.user_id,
-      p_pools: pools,
-      p_history: historyRecords,
-    }
+  const { data: atomicResult, error: atomicError } = await retrySupabaseConnectionPoolOperation(
+    () => supabase.rpc(
+      'commit_official_import_records',
+      {
+        p_task_id: task.id,
+        p_user_id: task.user_id,
+        p_pools: pools,
+        p_history: historyRecords,
+      }
+    ),
+    { label: '正式写入导入记录' }
   );
   if (atomicError) {
-    throw new Error(`正式写入导入记录失败：${atomicError.message || atomicError}`);
+    const commitError = new Error(`正式写入导入记录失败：${atomicError.message || atomicError}`);
+    commitError.code = atomicError.code || null;
+    commitError.statusCode = isSupabaseConnectionPoolTimeout(atomicError) ? 503 : 500;
+    commitError.details = {
+      retryable: isSupabaseConnectionPoolTimeout(atomicError),
+      sourceCode: atomicError.code || null,
+    };
+    throw commitError;
   }
 
   const savedRecords = Number.isFinite(Number(atomicResult?.savedRecords))
@@ -2003,41 +2030,80 @@ export async function executeFullImport({
     updateProgress({ progress: 40, message: '正在获取抽卡记录...' });
     const { fetchAllRecordsConcurrent } = authChainFunctions;
     let recordsRequestServerId = accountServerContext.requestServerId;
-    let recordsResult = await fetchAllRecordsConcurrent(
-      u8Token,
+    const runRecordsFetch = async (requestServerId, options) => {
+      try {
+        return await fetchAllRecordsConcurrent(
+          u8Token,
+          requestServerId,
+          account.gameUid,
+          account.nickName,
+          options
+        );
+      } catch (error) {
+        return {
+          success: false,
+          error: error?.message || 'Records fetch failed',
+          code: error?.code || 'RECORDS_FETCH_FAILED',
+          details: error?.details || {},
+          alertAlreadySent: error?.alertAlreadySent === true,
+        };
+      }
+    };
+    let recordsResult = await runRecordsFetch(
       recordsRequestServerId,
-      account.gameUid,
-      account.nickName,
       {
         importMode: normalizedImportMode,
         existingRecordKeys: needsCompleteNonPullRepairScan ? null : existingSeqIds
       }
     );
 
-    if (source === 'intl' && isTokenInvalidRecordsFetchResult(recordsResult)) {
+    if (source === 'intl' && isTokenInvalidRecordsFetchError(recordsResult)) {
       const alternateServerId = getAlternateIntlServerId(recordsRequestServerId);
       if (alternateServerId) {
         console.warn(`[FullImportService] 国际服 ${recordsRequestServerId} 抽卡记录返回 Token is invalid，尝试切换到 ${alternateServerId} 重试一次`);
-        const retryResult = await fetchAllRecordsConcurrent(
-          u8Token,
+        updateProgress({
+          progress: 45,
+          message: `当前国际服区服无法读取记录，正在切换到备用区服 ${alternateServerId} 重试...`,
+        });
+        const retryResult = await runRecordsFetch(
           alternateServerId,
-          account.gameUid,
-          account.nickName,
           {
             importMode: normalizedImportMode,
             existingRecordKeys: null,
           }
         );
 
-        if (retryResult.success || !recordsResult.success) {
+        if (retryResult.success) {
           recordsResult = retryResult;
           recordsRequestServerId = alternateServerId;
+        } else if (!recordsResult.success) {
+          recordsResult = {
+            ...retryResult,
+            code: retryResult.code || recordsResult.code || 'RECORDS_TOKEN_INVALID',
+            details: {
+              ...(recordsResult.details || {}),
+              ...(retryResult.details || {}),
+              initialServerId: recordsRequestServerId,
+              alternateServerId,
+              attemptedServerIds: [recordsRequestServerId, alternateServerId],
+              initialFailure: {
+                code: recordsResult.code || null,
+                message: recordsResult.error || null,
+              },
+            },
+            alertAlreadySent: recordsResult.alertAlreadySent === true
+              || retryResult.alertAlreadySent === true,
+          };
         }
       }
     }
 
     if (!recordsResult.success) {
-      throw new Error(recordsResult.error || 'Records fetch failed');
+      const recordsError = new Error(recordsResult.error || 'Records fetch failed');
+      recordsError.code = recordsResult.code || 'RECORDS_FETCH_FAILED';
+      recordsError.details = recordsResult.details || {};
+      recordsError.alertAlreadySent = recordsResult.alertAlreadySent === true;
+      throw recordsError;
     }
 
     accountServerContext = withResolvedRequestServerContext(
