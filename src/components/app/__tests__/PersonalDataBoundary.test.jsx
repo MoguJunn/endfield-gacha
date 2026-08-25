@@ -119,7 +119,7 @@ describe('PersonalDataBoundary', () => {
       ...createPersonalAnalysisInitialState(),
       ownerId: 'user-1',
       availability: 'building',
-      meta: { ownerId: 'user-1', retryAfterSeconds: 10 },
+      meta: { ownerId: 'user-1', retryAfterSeconds: 3 },
     });
 
     render(
@@ -131,20 +131,21 @@ describe('PersonalDataBoundary', () => {
     expect(screen.queryByText('0 抽 暂无卡池数据')).toBeNull();
     expect(screen.getByTestId('personal-data-building')).toBeTruthy();
 
-    act(() => vi.advanceTimersByTime(29_999));
+    act(() => vi.advanceTimersByTime(2_999));
     expect(onRetry).not.toHaveBeenCalled();
     act(() => vi.advanceTimersByTime(1));
     expect(onRetry).toHaveBeenNthCalledWith(1, { automatic: true, phase: 'building' });
 
-    act(() => vi.advanceTimersByTime(60_000));
-    act(() => vi.advanceTimersByTime(120_000));
-    act(() => vi.advanceTimersByTime(300_000));
-    expect(onRetry).toHaveBeenCalledTimes(4);
+    act(() => vi.advanceTimersByTime(5_000));
+    act(() => vi.advanceTimersByTime(10_000));
+    act(() => vi.advanceTimersByTime(20_000));
+    act(() => vi.advanceTimersByTime(30_000));
+    expect(onRetry).toHaveBeenCalledTimes(5);
     expect(screen.getByText('统计快照仍在后台排队，无需停留在本页面，可稍后手动重试。')).toBeTruthy();
     expect(screen.getByRole('button', { name: '立即重试' })).toBeTruthy();
 
     act(() => vi.advanceTimersByTime(600_000));
-    expect(onRetry).toHaveBeenCalledTimes(4);
+    expect(onRetry).toHaveBeenCalledTimes(5);
   });
 
   it('组件重挂载后沿用全局重试截止时间而不是从头计时', () => {

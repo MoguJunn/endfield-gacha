@@ -7,7 +7,7 @@ import {
 import { useI18n } from '../../i18n/index.js';
 import { getPersonalDataErrorPresentation } from '../../utils/personalDataError.js';
 
-const AUTO_RETRY_DELAYS_SECONDS = Object.freeze([30, 60, 120, 300]);
+const AUTO_RETRY_DELAYS_SECONDS = Object.freeze([3, 5, 10, 20, 30]);
 
 function PersonalDataStatusPanel({
   kind,

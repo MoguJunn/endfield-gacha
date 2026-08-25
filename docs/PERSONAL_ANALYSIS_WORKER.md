@@ -6,14 +6,20 @@
 
 ## 调度方式
 
-- migration：`178_schedule_personal_analysis_worker_with_pg_cron.sql`
+- migrations：178 建立定时调度，179/180 增加节流与优先级感知即时派发
 - 默认频率：每分钟
 - 地址必须是包含 Worker 的不可变 Vercel Deployment URL
-- 每次只触发一个 Worker 调用；数据库 lease 与 revision 合同负责并发安全
+- 活跃用户成功入队时立即请求一次 Worker，全局至少间隔 5 秒；每分钟 cron 继续兜底
+- 每个 HTTP 请求在 45 秒预算内顺序处理最多 4 个用户批次
+- 数据库 lease 与 revision 合同负责并发安全
 - GitHub Actions 只保留 `workflow_dispatch` 手动应急入口，不再配置 schedule
 
 `pg_net` 是异步 HTTP 队列。cron 成功表示请求已进入 `pg_net`，HTTP 状态还需通过
 `personal_analysis_worker_dispatches` 与 `net._http_response` 联合检查。
+
+前端冷启动按 3、5、10、20、30 秒递增检查快照；`building-poll` 只读取分析状态，
+复用已有公共卡池，不重复请求公共目录。组件或路由重挂载会沿用全局 Store 中的
+`nextRetryAt`，同 owner 的被动认证事件也不会打断 building 状态。
 
 ## 必需配置
 
@@ -25,9 +31,9 @@ PERSONAL_ANALYSIS_WORKER_SECRET=<随机高强度密钥>
 PERSONAL_ANALYSIS_WORKER_BACKFILL_ENABLED=false
 ```
 
-`SUPABASE_SECRET_KEY`（或兼容的 service role key）也必须可用。单次任务默认只
-领取一个用户及该用户最多 20 个 scope；Worker 只构建一次该用户模型，再发布
-owner 和 scope，以避免重复读取历史并控制 Vercel 函数时限。
+`SUPABASE_SECRET_KEY`（或兼容的 service role key）也必须可用。
+每批领取一个用户及该用户最多 20 个 scope；Worker 只构建一次该用户模型，再发布
+owner 和 scope。单次受保护 HTTP 调用最多顺序运行 4 批，并在 45 秒预算到达后停止。
 
 常规计划任务必须保持 `PERSONAL_ANALYSIS_WORKER_BACKFILL_ENABLED=false`，避免
 每分钟重复扫描全量历史。新写入会由数据库触发器自动创建或标脏队列状态。
@@ -46,7 +52,7 @@ personal_analysis_worker_vercel_bypass_secret=<Deployment Protection bypass secr
 不要把任何 Secret 直接写进 `cron.job.command`。migration 创建的 cron 命令只包含：
 
 ```sql
-SELECT public.dispatch_personal_analysis_worker();
+SELECT public.request_personal_analysis_worker_dispatch(NULL, 5);
 ```
 
 自建数据库必须已经预加载并提供 `pg_cron`、`pg_net` 与 `supabase_vault`。生产当前
@@ -71,6 +77,9 @@ PERSONAL_ANALYSIS_WORKER_MAX_BATCHES=4
 SELECT jobid, jobname, schedule, command, active
 FROM cron.job
 WHERE jobname = 'personal-analysis-worker';
+
+-- command 应为：
+-- SELECT public.request_personal_analysis_worker_dispatch(NULL, 5);
 
 SELECT
   dispatch.request_id,

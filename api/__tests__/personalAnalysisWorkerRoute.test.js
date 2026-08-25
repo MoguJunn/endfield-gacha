@@ -17,8 +17,8 @@ vi.mock('../_lib/personalAnalysisWorker.js', () => ({
 
 import handler, { __internal } from '../_routes/root/personal-analysis-worker.js';
 
-function createRequest(method = 'GET', headers = {}) {
-  return { method, headers };
+function createRequest(method = 'GET', headers = {}, body = undefined) {
+  return { method, headers, body };
 }
 
 function createResponse() {
@@ -100,8 +100,72 @@ describe('personal analysis worker route', () => {
 
     expect(mocks.runPersonalAnalysisWorker).toHaveBeenCalledWith({ adminClient });
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ success: true, partial: false, result: workerResult });
+    expect(res.body).toMatchObject({
+      success: true,
+      partial: false,
+      result: {
+        ok: true,
+        code: 'personal_analysis_worker_completed',
+        batches: 1,
+        stats: workerResult.stats,
+        results: workerResult.results,
+      },
+    });
     expect(res.headers['Cache-Control']).toBe('no-store');
+  });
+
+  it('processes requested batches sequentially until the queue is empty', async () => {
+    process.env.PERSONAL_ANALYSIS_WORKER_SECRET = 'worker-secret';
+    const adminClient = { rpc: vi.fn(), from: vi.fn() };
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    mocks.runPersonalAnalysisWorker
+      .mockResolvedValueOnce({
+        ok: true,
+        skipped: false,
+        code: 'personal_analysis_worker_completed',
+        stats: { claimedOwner: 1, claimedScope: 2, succeeded: 3, stale: 0, failed: 0 },
+        results: [{ kind: 'owner', status: 'succeeded' }],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        skipped: false,
+        code: 'personal_analysis_worker_completed',
+        stats: { claimedOwner: 1, claimedScope: 1, succeeded: 2, stale: 0, failed: 0 },
+        results: [{ kind: 'scope', status: 'succeeded' }],
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        skipped: false,
+        code: 'personal_analysis_worker_completed',
+        stats: { claimedOwner: 0, claimedScope: 0, succeeded: 0, stale: 0, failed: 0 },
+        results: [],
+      });
+    const res = createResponse();
+
+    await handler(createRequest('POST', {
+      authorization: 'Bearer worker-secret',
+    }, {
+      maxBatches: 4,
+      timeBudgetMs: 45000,
+    }), res);
+
+    expect(mocks.runPersonalAnalysisWorker).toHaveBeenCalledTimes(3);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      partial: false,
+      result: {
+        batches: 3,
+        timeBudgetReached: false,
+        stats: {
+          claimedOwner: 2,
+          claimedScope: 3,
+          succeeded: 5,
+          stale: 0,
+          failed: 0,
+        },
+      },
+    });
   });
 
   it('accepts preflight requests without worker credentials', async () => {

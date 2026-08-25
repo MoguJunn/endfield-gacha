@@ -130,8 +130,9 @@ export function useCloudSync({ showToast }) {
           }
           throw error;
         });
+      const shouldRefreshPublicPools = options.refreshPublicPools !== false;
       const [latestVisiblePools, analysis] = await Promise.all([
-        loadLatestVisiblePools(),
+        shouldRefreshPublicPools ? loadLatestVisiblePools() : Promise.resolve(null),
         analysisRequest,
       ]);
       assertPersonalDataOwner(analysis, currentUser);
@@ -193,6 +194,8 @@ export function useCloudSync({ showToast }) {
     const ownerState = usePersonalDataStore.getState();
     const preferredPoolId = options.preferredPoolId ?? usePoolStore.getState().currentPoolId;
     const preferredGameUid = options.preferredGameUid ?? usePoolStore.getState().currentGameUid;
+    const refreshPublicPools = options.refreshPublicPools
+      ?? options.kind !== 'building-poll';
 
     setSyncError(null);
     setPersonalRefreshActivity(true);
@@ -202,7 +205,11 @@ export function useCloudSync({ showToast }) {
         ownerGeneration: ownerState.ownerGeneration,
         kind: options.kind || 'explicit',
         reason: options.reason || options.kind || 'explicit',
-        request: () => loadCloudData(currentUser, { preferredGameUid, preferredPoolId }),
+        request: () => loadCloudData(currentUser, {
+          preferredGameUid,
+          preferredPoolId,
+          refreshPublicPools,
+        }),
         apply: (snapshot) => applyCloudAnalysisToStores(snapshot, {
           setPools,
           switchPool,

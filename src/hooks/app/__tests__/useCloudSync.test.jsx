@@ -125,6 +125,38 @@ describe('useCloudSync.loadCloudData', () => {
     expect(snapshot.analysis.meta.accountKey).toBe('account-default');
   });
 
+  it('building poll 复用公共卡池并跳过目录网络读取', async () => {
+    usePersonalDataStore.getState().setPublicPools([
+      { id: 'cached-public-pool', name: 'Cached' },
+    ]);
+    loadAccountGachaAnalysis.mockResolvedValue({
+      availability: 'building',
+      schemaVersion: 1,
+      owner: null,
+      scope: null,
+      source: 'site-session',
+      meta: { ownerId: 'user-1', retryAfterSeconds: 3 },
+      warnings: [],
+    });
+    const { result } = renderHook(() => useCloudSync({ showToast: vi.fn() }));
+
+    let response;
+    await act(async () => {
+      response = await result.current.refreshPersonalData({ id: 'user-1' }, {
+        kind: 'building-poll',
+        reason: 'building_poll',
+      });
+    });
+
+    expect(response.ok).toBe(true);
+    expect(loadAccountGachaAnalysis).toHaveBeenCalledTimes(1);
+    expect(loadVisiblePools).not.toHaveBeenCalled();
+    expect(loadAllPoolsForCatalog).not.toHaveBeenCalled();
+    expect(usePoolStore.getState().pools.map((pool) => pool.id)).toContain(
+      'cached-public-pool'
+    );
+  });
+
   it('当前选择与分析账号不同时自动刷新对应账号且不重复', async () => {
     useAuthStore.setState({ user: { id: 'user-1' }, authResolved: true });
     usePersonalDataStore.getState().switchOwner('user-1');

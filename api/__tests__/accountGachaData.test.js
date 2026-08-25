@@ -268,6 +268,11 @@ function createAdminClient() {
     rpcCalls: [],
     priorityRpcError: null,
     priorityQueued: true,
+    immediateDispatchResult: {
+      accepted: true,
+      dispatched: true,
+      throttled: false,
+    },
     selectCalls: [],
     scopeState: {
       history_revision: 7,
@@ -348,6 +353,12 @@ function createAdminClient() {
             ownerRows: 1,
             scopeRows: 1,
           },
+          error: null,
+        };
+      }
+      if (functionName === 'request_personal_analysis_worker_dispatch') {
+        return {
+          data: state.immediateDispatchResult,
           error: null,
         };
       }
@@ -518,7 +529,7 @@ describe('/api/account-gacha-data', () => {
     }), res);
 
     expect(res.statusCode).toBe(202);
-    expect(res.headers['Retry-After']).toBe('60');
+    expect(res.headers['Retry-After']).toBe('3');
     expect(res.body).toMatchObject({
       success: true,
       mode: 'analysis',
@@ -527,8 +538,13 @@ describe('/api/account-gacha-data', () => {
         ownerId: 'user-1',
         rawIncluded: false,
         verifiedEmpty: false,
-        retryAfterSeconds: 60,
+        retryAfterSeconds: 3,
         updateQueued: true,
+        immediateDispatch: {
+          accepted: true,
+          dispatched: true,
+          throttled: false,
+        },
       },
       owner: null,
       scope: null,
@@ -545,6 +561,13 @@ describe('/api/account-gacha-data', () => {
         p_server_scope: null,
         p_force_owner: true,
         p_force_scope: false,
+      },
+    });
+    expect(adminClient.__state.rpcCalls).toContainEqual({
+      functionName: 'request_personal_analysis_worker_dispatch',
+      params: {
+        p_user_id: 'user-1',
+        p_min_interval_seconds: 5,
       },
     });
   });
@@ -626,12 +649,12 @@ describe('/api/account-gacha-data', () => {
     }), res);
 
     expect(res.statusCode).toBe(202);
-    expect(res.headers['Retry-After']).toBe('60');
+    expect(res.headers['Retry-After']).toBe('3');
     expect(res.body).toMatchObject({
       availability: 'building',
       meta: {
         accountKey: 'game-1::server:2',
-        retryAfterSeconds: 60,
+        retryAfterSeconds: 3,
         updateQueued: true,
       },
       owner: expect.any(Object),
@@ -665,7 +688,7 @@ describe('/api/account-gacha-data', () => {
       meta: {
         revision: '8',
         ownerSnapshotRevision: '7',
-        retryAfterSeconds: 60,
+        retryAfterSeconds: 3,
         updateQueued: true,
       },
       warnings: [{ code: 'personal_analysis_owner_stale' }],

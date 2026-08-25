@@ -23,9 +23,33 @@ describe('personal analysis worker production schedule', () => {
   });
 
   it('uses Supabase pg_cron while keeping GitHub as a manual fallback', async () => {
-    const [workflow, runner, migration] = await Promise.all([
+    const [
+      workflow,
+      immediateMigration,
+      priorityAwareMigration,
+      runner,
+      migration,
+    ] = await Promise.all([
       readFile(
         path.join(projectRoot, '.github', 'workflows', 'personal-analysis-worker.yml'),
+        'utf8'
+      ),
+      readFile(
+        path.join(
+          projectRoot,
+          'supabase',
+          'migrations',
+          '179_dispatch_active_personal_analysis_immediately.sql'
+        ),
+        'utf8'
+      ),
+      readFile(
+        path.join(
+          projectRoot,
+          'supabase',
+          'migrations',
+          '180_prioritize_immediate_personal_analysis_dispatch.sql'
+        ),
         'utf8'
       ),
       readFile(
@@ -64,5 +88,21 @@ describe('personal analysis worker production schedule', () => {
     expect(migration).toContain("'* * * * *'");
     expect(migration).toContain("'SELECT public.dispatch_personal_analysis_worker();'");
     expect(migration).not.toContain('Authorization: Bearer');
+    expect(immediateMigration).toContain('request_personal_analysis_worker_dispatch');
+    expect(immediateMigration).toContain("'maxBatches', 4");
+    expect(immediateMigration).toContain("'timeBudgetMs', 45000");
+    expect(immediateMigration).toContain('pg_advisory_xact_lock');
+    expect(immediateMigration).toContain('p_min_interval_seconds INTEGER DEFAULT 5');
+    expect(immediateMigration).toContain(
+      "'SELECT public.request_personal_analysis_worker_dispatch(NULL, 5);'"
+    );
+    expect(immediateMigration).not.toContain('Authorization: Bearer');
+    expect(priorityAwareMigration).toContain('v_user_priority_at TIMESTAMPTZ');
+    expect(priorityAwareMigration).toContain(
+      'v_control.last_dispatched_at >= v_user_priority_at'
+    );
+    expect(priorityAwareMigration).toContain(
+      'GRANT EXECUTE ON FUNCTION public.request_personal_analysis_worker_dispatch(UUID, INTEGER) TO service_role'
+    );
   });
 });

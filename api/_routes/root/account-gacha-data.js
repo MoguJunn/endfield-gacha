@@ -430,6 +430,33 @@ async function prioritizePersonalAnalysisJobs(dbClient, userId, {
   return true;
 }
 
+async function requestImmediatePersonalAnalysisDispatch(dbClient, userId) {
+  if (!dbClient?.rpc || !userId) {
+    return { accepted: false, dispatched: false, throttled: false };
+  }
+
+  const { data, error } = await dbClient.rpc(
+    'request_personal_analysis_worker_dispatch',
+    {
+      p_user_id: userId,
+      p_min_interval_seconds: 5,
+    }
+  );
+  if (error) {
+    return {
+      accepted: false,
+      dispatched: false,
+      throttled: false,
+      code: String(error.code || 'personal_analysis_immediate_dispatch_failed').slice(0, 120),
+    };
+  }
+  return {
+    accepted: data?.accepted === true,
+    dispatched: data?.dispatched === true,
+    throttled: data?.throttled === true,
+  };
+}
+
 async function loadPersonalAnalysisScopeState(dbClient, userId, scope) {
   const { data, error } = await dbClient
     .from('personal_analysis_scope_state')
@@ -714,8 +741,12 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
     const updateQueued = await prioritizePersonalAnalysisJobs(dbClient, userId, {
       forceOwner: true,
     });
+    const immediateDispatch = await requestImmediatePersonalAnalysisDispatch(
+      dbClient,
+      userId
+    );
 
-    res.setHeader('Retry-After', '60');
+    res.setHeader('Retry-After', '3');
     res.status(202).json({
       success: true,
       mode: 'analysis',
@@ -727,8 +758,9 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
         rawIncluded: false,
         verifiedEmpty: false,
         revision: ownerState?.historyRevision || null,
-        retryAfterSeconds: 60,
+        retryAfterSeconds: 3,
         updateQueued,
+        immediateDispatch,
       },
       owner: null,
       scope: null,
@@ -796,7 +828,11 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
       scope: manifestScope,
       forceScope: true,
     });
-    res.setHeader('Retry-After', '60');
+    const immediateDispatch = await requestImmediatePersonalAnalysisDispatch(
+      dbClient,
+      userId
+    );
+    res.setHeader('Retry-After', '3');
     res.status(202).json({
       success: true,
       mode: 'analysis',
@@ -809,8 +845,9 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
         verifiedEmpty: false,
         revision: ownerState?.historyRevision || ownerSnapshot.inputRevision,
         accountKey,
-        retryAfterSeconds: 60,
+        retryAfterSeconds: 3,
         updateQueued,
+        immediateDispatch,
       },
       owner: ownerSnapshot.payload,
       scope: null,
@@ -860,6 +897,9 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
       scope: queueScope,
     })
     : false;
+  const immediateDispatch = availability === 'stale'
+    ? await requestImmediatePersonalAnalysisDispatch(dbClient, userId)
+    : null;
 
   res.status(200).json({
     success: true,
@@ -879,8 +919,9 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
       generatedAt: accountSnapshot?.computedAt || ownerSnapshot.computedAt,
       viewKey: viewKey || null,
       locale,
-      retryAfterSeconds: availability === 'stale' ? 60 : null,
+      retryAfterSeconds: availability === 'stale' ? 3 : null,
       updateQueued,
+      immediateDispatch,
     },
     owner: ownerSnapshot.payload,
     scope: accountSnapshot?.payload || null,
@@ -2228,6 +2269,7 @@ export const __internal = {
   loadPersonalAnalysisSnapshot,
   loadPersonalAnalysisScopeState,
   prioritizePersonalAnalysisJobs,
+  requestImmediatePersonalAnalysisDispatch,
   readHistoryPageScope,
   shouldUseTransientPersonalAnalysis,
 };
