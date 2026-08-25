@@ -225,6 +225,40 @@ describe('poolService same-origin API client', () => {
     }));
   });
 
+  it('forwards reconstruction profile and entity semantics when creating an extra UP target', async () => {
+    fetchJsonWithTimeout.mockResolvedValue({
+      response: { ok: true, status: 200 },
+      data: {
+        success: true,
+        character: { id: 'weapon-created', name: '重构武器', type: 'weapon', is_limited: true },
+      },
+    });
+
+    await createUpCharacter(
+      '重构武器',
+      'extra',
+      '2026-06-05T04:00:00.000Z',
+      0,
+      'weapon',
+      'reconstruction_weapon_v1'
+    );
+
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/admin-pools', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'createUpCharacter',
+        characterName: '重构武器',
+        poolType: 'extra',
+        poolStartTime: '2026-06-05T04:00:00.000Z',
+        rotationBaseCount: 0,
+        itemType: 'weapon',
+        extraRuleProfile: 'reconstruction_weapon_v1',
+      }),
+    }), expect.objectContaining({
+      label: 'admin-pool-create-up-character',
+    }));
+  });
+
   it('deletes pools and recalculates history through the same-origin route', async () => {
     fetchJsonWithTimeout
       .mockResolvedValueOnce({

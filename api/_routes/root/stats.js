@@ -13,6 +13,7 @@ import {
 import { serverLogger } from '../../_lib/serverLogger.js';
 import { resolveSupabaseServerKey, resolveSupabaseUrl } from '../../_lib/supabaseEnv.js';
 import { buildVersionCalendarPayload, mergeVersionTimelineConfig } from '../../_lib/versionCalendarSnapshot.js';
+import { getCanonicalExtraPoolSubtype } from '../../../shared/extraPoolSubtype.js';
 
 // 内存缓存
 const cache = {
@@ -175,6 +176,10 @@ function formatVisiblePoolRecord(record) {
     name: record.name,
     name_en: record.name_en || null,
     type: normalizeRemotePoolType(record.type, record.is_limited_weapon),
+    extra_subtype: getCanonicalExtraPoolSubtype(record),
+    extra_rule_profile: record.extra_rule_profile || null,
+    extra_series_key: record.extra_series_key || null,
+    extra_series_phase: record.extra_series_phase ?? null,
     locked: record.locked || false,
     isLimitedWeapon: record.is_limited_weapon !== false,
     created_at: record.created_at || null,
@@ -384,7 +389,7 @@ async function fetchPoolCatalog(supabase) {
   const { data, error } = await supabase
     .from('pools')
     .select(
-      'pool_id, name, name_en, type, locked, is_limited_weapon, created_at, updated_at, user_id, up_character, description, banner_url, start_time, end_time, featured_characters'
+      'pool_id, name, name_en, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase, locked, is_limited_weapon, created_at, updated_at, user_id, up_character, description, banner_url, start_time, end_time, featured_characters'
     );
 
   if (error) {

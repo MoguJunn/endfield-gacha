@@ -81,6 +81,95 @@ assert.equal(roundTripValidation.normalizedData.history[0].pool_id, 'special_1_0
 assert.equal(payload.history[0].character_id, 'chr_0016_laevat', '导出应按角色目录补齐缺失的 canonical CharID');
 assert.equal(payload.history[1].character_id, 'chr_test_five_star', '导出应补齐早期历史记录的角色 ID');
 
+const extraPools = [
+  {
+    id: 'extra_recon_character',
+    name: '重构角色',
+    type: 'extra',
+    extra_subtype: 'reconstruction',
+    extra_rule_profile: 'reconstruction_character_v1',
+    extra_series_key: 'recon-character-series',
+    extra_series_phase: 1,
+    up_character: '重构目标角色',
+  },
+  {
+    id: 'extra_recon_weapon',
+    name: '重构武器',
+    type: 'extra',
+    extraSubtype: 'reconstruction',
+    extraRuleProfile: 'reconstruction_weapon_v1',
+    extraSeriesKey: 'recon-weapon-series',
+    extraSeriesPhase: 2,
+    upCharacter: '重构目标武器',
+  },
+  {
+    id: 'extra_special',
+    name: '辉光庆典',
+    type: 'extra',
+    extraSubtype: 'special',
+    extraRuleProfile: 'brilliance_festival_v1',
+  },
+  {
+    id: 'extra_unknown',
+    name: '未知附加寻访',
+    type: 'extra',
+    extra_subtype: '',
+    extra_rule_profile: null,
+    extra_series_key: '',
+    extra_series_phase: null,
+  },
+];
+const extraHistory = extraPools.map((pool, index) => ({
+  id: `extra-record-${index + 1}`,
+  user_id: 'source-user',
+  poolId: pool.id,
+  name: `附加记录${index + 1}`,
+  rarity: 6,
+  isStandard: index === 3,
+  timestamp: `2026-04-0${index + 1}T00:00:00.000Z`,
+}));
+const extraPayload = buildExportPayload({
+  history: extraHistory,
+  pools: extraPools,
+  currentUserId: 'source-user',
+  options: {
+    poolFilter: 'all',
+    accountFilter: 'all',
+  },
+});
+const extraExportedJson = JSON.parse(buildExportJsonContent(extraPayload));
+const extraRoundTrip = validateAndNormalizeImportData(extraExportedJson, {
+  existingPools: [],
+  currentUserId: 'target-user',
+});
+
+assert.equal(extraRoundTrip.valid, true, `附加寻访字段应可往返: ${extraRoundTrip.errors.join('; ')}`);
+assert.deepEqual(
+  extraRoundTrip.normalizedData.pools.map((pool) => pool.id),
+  extraPools.map((pool) => pool.id),
+  '附加寻访往返不得改变卡池 ID'
+);
+assert.deepEqual(
+  extraRoundTrip.normalizedData.history.map((record) => record.id),
+  extraHistory.map((record) => record.id),
+  '附加寻访往返不得改变记录 ID'
+);
+assert.deepEqual(
+  extraRoundTrip.normalizedData.pools.map((pool) => ({
+    subtype: pool.extra_subtype,
+    profile: pool.extra_rule_profile,
+    seriesKey: pool.extra_series_key,
+    seriesPhase: pool.extra_series_phase,
+  })),
+  [
+    { subtype: 'reconstruction', profile: 'reconstruction_character_v1', seriesKey: 'recon-character-series', seriesPhase: 1 },
+    { subtype: 'reconstruction_claim', profile: 'reconstruction_weapon_v1', seriesKey: 'recon-weapon-series', seriesPhase: 2 },
+    { subtype: 'special', profile: 'brilliance_festival_v1', seriesKey: null, seriesPhase: null },
+    { subtype: null, profile: null, seriesKey: null, seriesPhase: null },
+  ],
+  '站内 JSON 应兼容 camel/snake 输入并保留四个附加寻访字段'
+);
+
 const sampleLegacyPayload = buildExportPayload({
   history: [
     { id: 'sample-chen', user_id: 'source-user', poolId: 'special_1_0_3', name: '陈千语', gameUid: '1000123456' },

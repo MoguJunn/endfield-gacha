@@ -1,5 +1,9 @@
 // 数据校验工具函数
-import { LIMITED_POOL_RULES, STANDARD_POOL_RULES, WEAPON_POOL_RULES } from '../constants/index.js';
+import { getRulesForPool, resolvePoolCapabilities } from './poolCapabilities.js';
+import {
+  buildOneTimeTargetGuaranteeState,
+  buildScopedPaidHistoryTimeline,
+} from './poolScopedHistory.js';
 import {
   getPasswordCharacterGroups,
   validateAccountPassword,
@@ -11,14 +15,7 @@ import { getUsernameValidationCode } from './usernameValidation.js';
  * @param {string} poolType - 'limited' | 'standard' | 'weapon'
  * @returns {Object}
  */
-export const getPoolRules = (poolType) => {
-  switch (poolType) {
-    case 'limited': return LIMITED_POOL_RULES;
-    case 'standard': return STANDARD_POOL_RULES;
-    case 'weapon': return WEAPON_POOL_RULES;
-    default: return LIMITED_POOL_RULES;
-  }
-};
+export const getPoolRules = (pool) => getRulesForPool(pool);
 
 const isGiftPull = (pull) => pull?.specialType === 'gift' || pull?.special_type === 'gift';
 
@@ -55,7 +52,13 @@ function countPreviousWeaponMissClaims(pulls, claimStart, claimSize, matcher) {
   return misses;
 }
 
-function validateCompletedWeaponClaims({ existingPulls, batchData, rules, errors }) {
+function validateCompletedWeaponClaims({
+  existingPulls,
+  targetExistingPulls = existingPulls,
+  batchData,
+  rules,
+  errors,
+}) {
   const claimSize = Math.max(1, Math.floor(Number(rules.claimSize) || 10));
   const sixStarClaimPity = Number(rules.sixStarClaimPity || Math.ceil((rules.sixStarPity || 40) / claimSize));
   const targetClaimPity = Number(
@@ -89,10 +92,24 @@ function validateCompletedWeaponClaims({ existingPulls, batchData, rules, errors
       errors.push(`录入错误：武器池连续 ${sixStarClaimPity} 次申领未获得6星武器，第 ${claimNumber} 次申领应至少包含1件6星武器`);
     }
 
-    const hasTargetBefore = combinedPulls.slice(0, claimStart).some(isTargetSixStar);
+  }
+
+  const combinedTargetPulls = [...targetExistingPulls, ...batchData];
+  const firstNewTargetIndex = targetExistingPulls.length;
+  for (let claimStart = Math.floor(firstNewTargetIndex / claimSize) * claimSize;
+    claimStart < combinedTargetPulls.length;
+    claimStart += claimSize) {
+    const claimEnd = claimStart + claimSize;
+    if (claimEnd <= firstNewTargetIndex || claimEnd > combinedTargetPulls.length) {
+      continue;
+    }
+
+    const claim = combinedTargetPulls.slice(claimStart, claimEnd);
+    const claimNumber = Math.floor(claimStart / claimSize) + 1;
+    const hasTargetBefore = combinedTargetPulls.slice(0, claimStart).some(isTargetSixStar);
     if (!hasTargetBefore) {
       const previousTargetMissClaims = countPreviousWeaponMissClaims(
-        combinedPulls,
+        combinedTargetPulls,
         claimStart,
         claimSize,
         hasTargetSixStar
@@ -104,14 +121,69 @@ function validateCompletedWeaponClaims({ existingPulls, batchData, rules, errors
   }
 }
 
+function annotateHistoryWithPoolFallback(history, pool, pools) {
+  if (Array.isArray(pools) && pools.length > 0) {
+    return history;
+  }
+
+  return history.map((record) => ({
+    ...record,
+    type: record?.type || record?.poolType || record?.pool_type || pool?.type,
+    extra_rule_profile: record?.extra_rule_profile
+      ?? record?.extraRuleProfile
+      ?? pool?.extra_rule_profile
+      ?? pool?.extraRuleProfile,
+    extra_series_key: record?.extra_series_key
+      ?? record?.extraSeriesKey
+      ?? pool?.extra_series_key
+      ?? pool?.extraSeriesKey,
+  }));
+}
+
+function buildValidationRuleState({ existingPulls, allPoolPulls, pools, pool }) {
+  const capabilities = resolvePoolCapabilities(pool);
+  const sourceHistory = Array.isArray(allPoolPulls) && allPoolPulls.length > 0
+    ? allPoolPulls
+    : existingPulls;
+  const contextualHistory = annotateHistoryWithPoolFallback(sourceHistory, pool, pools);
+  const scopePools = [...(Array.isArray(pools) ? pools : []), pool].filter(Boolean);
+  const pityPulls = capabilities.pityScope === 'pool'
+    ? existingPulls.filter(isPaidRulePull)
+    : buildScopedPaidHistoryTimeline({
+        history: contextualHistory,
+        pools: scopePools,
+        pool,
+        scopeType: 'pity',
+      });
+  const targetPulls = capabilities.targetScope === 'pool'
+    ? existingPulls.filter(isPaidRulePull)
+    : buildScopedPaidHistoryTimeline({
+        history: contextualHistory,
+        pools: scopePools,
+        pool,
+        scopeType: 'target',
+      });
+  const targetGuarantee = buildOneTimeTargetGuaranteeState({
+    history: contextualHistory,
+    pools: scopePools,
+    pool,
+  });
+
+  return {
+    pityPulls,
+    targetPulls,
+    targetGuarantee,
+  };
+}
+
 /**
  * 计算当前概率（考虑软保底）
  * @param {number} currentPity - 当前垫刀数
- * @param {string} poolType - 卡池类型
+ * @param {string|Object} pool - 卡池类型或卡池记录
  * @returns {{probability: number, isInSoftPity: boolean, pullsUntilSoftPity: number, hasSoftPity: boolean}}
  */
-export const calculateCurrentProbability = (currentPity, poolType) => {
-  const rules = getPoolRules(poolType);
+export const calculateCurrentProbability = (currentPity, pool) => {
+  const rules = getPoolRules(pool);
   const baseProbability = rules.sixStarBaseProbability;
   const normalizedCurrentPity = Math.max(0, Math.floor(Number(currentPity) || 0));
   const nextPity = normalizedCurrentPity + 1;
@@ -203,19 +275,34 @@ export const validatePullData = (data) => {
  * @param {Object} params.pool - 当前卡池信息 {type: 'limited'|'standard'|'weapon'}
  * @returns {{isValid: boolean, errors: string[], warnings: string[]}}
  */
-export const validatePullAgainstRules = ({ newPull, existingPulls, allLimitedPoolPulls: _allLimitedPoolPulls = [], pool }) => {
+export const validatePullAgainstRules = ({
+  newPull,
+  existingPulls,
+  allLimitedPoolPulls = [],
+  pools = [],
+  pool,
+}) => {
   const errors = [];
   const warnings = [];
-  const rules = getPoolRules(pool.type);
+  const capabilities = resolvePoolCapabilities(pool);
+  const poolType = capabilities.basePoolType;
+  const rules = getPoolRules(pool);
 
   // 过滤掉赠送的记录
   const validPulls = existingPulls.filter(isPaidRulePull);
-  const currentPity = calculatePityFromHistory(validPulls);
-  const currentPity5 = calculatePity5FromHistory(validPulls);
+  const validationState = buildValidationRuleState({
+    existingPulls,
+    allPoolPulls: allLimitedPoolPulls,
+    pools,
+    pool,
+  });
+  const currentPity = calculatePityFromHistory(validationState.pityPulls);
+  const currentPity5 = calculatePity5FromHistory(validationState.pityPulls);
 
-  if (pool.type === 'weapon') {
+  if (poolType === 'weapon') {
     validateCompletedWeaponClaims({
       existingPulls: validPulls,
+      targetExistingPulls: validationState.targetPulls,
       batchData: isPaidRulePull(newPull) ? [newPull] : [],
       rules,
       errors
@@ -235,7 +322,7 @@ export const validatePullAgainstRules = ({ newPull, existingPulls, allLimitedPoo
 
     // 检查是否超过硬保底
     if (pullsForThisSixStar > rules.sixStarPity) {
-      errors.push(`录入错误：在第 ${pullsForThisSixStar} 抽出6星，但${pool.type === 'weapon' ? '武器池' : '角色池'}最多 ${rules.sixStarPity} 抽保底`);
+      errors.push(`录入错误：在第 ${pullsForThisSixStar} 抽出6星，但${poolType === 'weapon' ? '武器池' : '角色池'}最多 ${rules.sixStarPity} 抽保底`);
     }
   }
 
@@ -248,12 +335,10 @@ export const validatePullAgainstRules = ({ newPull, existingPulls, allLimitedPoo
   }
 
   // 3. 检查硬保底逻辑（限定池120抽、武器池80抽）
-  if (pool.type === 'limited' || pool.type === 'weapon') {
-    const guaranteedPity = pool.type === 'limited' ? 120 : 80;
-    const totalPulls = validPulls.length + 1;
-
-    // 检查是否已有限定
-    const hasLimitedAlready = validPulls.some(p => p.rarity === 6 && !p.isStandard);
+  if (capabilities.targetMode === 'single-up') {
+    const guaranteedPity = Number(rules.guaranteedLimitedPity || 0);
+    const totalPulls = validationState.targetGuarantee.pity + 1;
+    const hasLimitedAlready = validationState.targetGuarantee.hasReceivedGuaranteedLimited;
 
     // 如果已经到了硬保底抽数，且之前没出过限定，这抽必须是限定6星
     if (totalPulls === guaranteedPity && !hasLimitedAlready) {
@@ -271,7 +356,7 @@ export const validatePullAgainstRules = ({ newPull, existingPulls, allLimitedPoo
   }
 
   // 4. 检查常驻池特殊规则（不区分限定/歪）
-  if (pool.type === 'standard' && newPull.rarity === 6 && !newPull.isStandard) {
+  if (poolType === 'standard' && newPull.rarity === 6 && !newPull.isStandard) {
     warnings.push('提示：常驻池没有限定角色，建议将此6星标记为常驻');
   }
 
@@ -289,33 +374,48 @@ export const validatePullAgainstRules = ({ newPull, existingPulls, allLimitedPoo
  * @param {Object} pool - 卡池信息
  * @returns {{isValid: boolean, errors: string[], warnings: string[]}}
  */
-export const validateBatchAgainstRules = ({ batchData, existingPulls, pool }) => {
+export const validateBatchAgainstRules = ({
+  batchData,
+  existingPulls,
+  allLimitedPoolPulls = [],
+  pools = [],
+  pool,
+}) => {
   const errors = [];
   const warnings = [];
-  const rules = getPoolRules(pool.type);
+  const capabilities = resolvePoolCapabilities(pool);
+  const poolType = capabilities.basePoolType;
+  const rules = getPoolRules(pool);
 
   const validExistingPulls = existingPulls.filter(isPaidRulePull);
   const validBatchPulls = batchData.filter(isPaidRulePull);
+  const validationState = buildValidationRuleState({
+    existingPulls,
+    allPoolPulls: allLimitedPoolPulls,
+    pools,
+    pool,
+  });
 
   // 1. 检查十连中5星保底
-  const has5StarOrAbove = (pool.type === 'weapon' ? validBatchPulls : batchData)
+  const has5StarOrAbove = (poolType === 'weapon' ? validBatchPulls : batchData)
     .some(p => p.rarity >= 5);
-  if (!has5StarOrAbove && pool.type !== 'weapon') {
+  if (!has5StarOrAbove && poolType !== 'weapon') {
     // 角色池：检查是否有累积的5星保底
-    const currentPity5 = calculatePity5FromHistory(validExistingPulls);
+    const currentPity5 = calculatePity5FromHistory(validationState.pityPulls);
     if (currentPity5 + 10 > rules.fiveStarPity) {
       errors.push(`录入错误：此十连无5星+，但加上之前的 ${currentPity5} 抽，已超过 ${rules.fiveStarPity} 抽5星保底`);
     }
   }
 
   // 武器池：每十连必出5星+
-  if (pool.type === 'weapon' && !has5StarOrAbove) {
+  if (poolType === 'weapon' && !has5StarOrAbove) {
     errors.push('录入错误：武器池每次申领（十连）必定有5星或以上武器');
   }
 
-  if (pool.type === 'weapon') {
+  if (poolType === 'weapon') {
     validateCompletedWeaponClaims({
       existingPulls: validExistingPulls,
+      targetExistingPulls: validationState.targetPulls,
       batchData: validBatchPulls,
       rules,
       errors
@@ -329,7 +429,7 @@ export const validateBatchAgainstRules = ({ batchData, existingPulls, pool }) =>
   }
 
   // 2. 模拟录入，检查每一抽
-  const simulatedPulls = [...validExistingPulls];
+  const simulatedPulls = [...validationState.pityPulls];
   let pity = calculatePityFromHistory(simulatedPulls);
   let pity5 = calculatePity5FromHistory(simulatedPulls);
 
@@ -361,10 +461,10 @@ export const validateBatchAgainstRules = ({ batchData, existingPulls, pool }) =>
   }
 
   // 3. 检查硬保底逻辑
-  if (pool.type === 'limited' || pool.type === 'weapon') {
-    const guaranteedPity = pool.type === 'limited' ? 120 : 80;
-    const startIndex = validExistingPulls.length;
-    const hasLimitedBefore = validExistingPulls.some(p => p.rarity === 6 && !p.isStandard);
+  if (capabilities.targetMode === 'single-up') {
+    const guaranteedPity = Number(rules.guaranteedLimitedPity || 0);
+    const startIndex = validationState.targetGuarantee.pity;
+    const hasLimitedBefore = validationState.targetGuarantee.hasReceivedGuaranteedLimited;
 
     if (!hasLimitedBefore) {
       // 检查这个十连是否跨越了硬保底点

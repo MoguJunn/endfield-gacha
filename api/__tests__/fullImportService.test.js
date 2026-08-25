@@ -67,6 +67,153 @@ beforeEach(() => {
   });
 });
 
+describe('savePoolsToServer reconstruction promotion', () => {
+  it('promotes trusted official IDs before the canonical pool lookup regardless of prefix', async () => {
+    vi.resetModules();
+    const events = [];
+    const aliases = [];
+    const pools = [
+      {
+        pool_id: 'joint_manual_extra_reconstruction_yvonne_p1',
+        name: '绚丽异彩',
+        type: 'extra',
+        extra_subtype: 'reconstruction',
+        extra_rule_profile: 'reconstruction_character_v1',
+        extra_series_key: 'reconstruction-xuesong-youmeng',
+        extra_series_phase: 1,
+        start_time: '2026-09-24T12:00:00+08:00',
+        up_character: '伊冯',
+        description: '版本更新维护前结束',
+        locked: true,
+        user_id: null,
+      },
+      {
+        pool_id: 'joint_manual_extra_reconstruction_arttyrant_p1',
+        name: '点绘申领',
+        type: 'extra',
+        extra_subtype: 'reconstruction',
+        extra_rule_profile: 'reconstruction_weapon_v1',
+        extra_series_key: 'reconstruction-xuesong-youmeng',
+        extra_series_phase: 1,
+        start_time: '2026-09-24T12:00:00+08:00',
+        up_character: '艺术暴君',
+        description: '版本更新维护前结束',
+        locked: true,
+        user_id: null,
+      },
+    ];
+
+    mockSupabaseClient = {
+      rpc: vi.fn(async (functionName, args) => {
+        events.push(`rpc:${args.p_official_pool.pool_id}`);
+        expect(functionName).toBe('promote_manual_pool_to_official_id');
+        const sourceIndex = pools.findIndex((pool) => pool.pool_id === args.p_manual_pool_id);
+        pools.splice(sourceIndex, 1, args.p_official_pool);
+        return { data: { promoted: true }, error: null };
+      }),
+      from(tableName) {
+        if (tableName === 'pools') {
+          return {
+            select(columns) {
+              return {
+                limit: async () => {
+                  events.push('load-pool-catalog');
+                  return { data: pools.map((pool) => ({ ...pool })), error: null };
+                },
+                in: async (_column, values) => {
+                  events.push('lookup-canonical-pools');
+                  return {
+                    data: pools
+                      .filter((pool) => values.includes(pool.pool_id))
+                      .map((pool) => ({ pool_id: pool.pool_id })),
+                    error: null,
+                    columns,
+                  };
+                },
+              };
+            },
+            async upsert(rows) {
+              events.push(`upsert-pools:${rows.length}`);
+              pools.push(...rows);
+              return { error: null };
+            },
+          };
+        }
+
+        if (tableName === 'pool_id_aliases') {
+          return {
+            select() {
+              return {
+                in: async (_column, values) => ({
+                  data: aliases.filter((alias) => values.includes(alias.alias_id)),
+                  error: null,
+                }),
+              };
+            },
+            async upsert(rows) {
+              rows.forEach((row) => {
+                const index = aliases.findIndex(
+                  (alias) => alias.source === row.source && alias.alias_id === row.alias_id
+                );
+                if (index >= 0) {
+                  aliases[index] = { ...aliases[index], ...row };
+                } else {
+                  aliases.push({ ...row });
+                }
+              });
+              return { error: null };
+            },
+          };
+        }
+
+        throw new Error(`Unexpected table: ${tableName}`);
+      },
+    };
+
+    const { initSupabaseAdmin, savePoolsToServer } = await import('../../backend/fullImportService.js');
+    initSupabaseAdmin('https://example.supabase.co', 'service-role-key');
+
+    const result = await savePoolsToServer([
+      {
+        pool_id: 'reconstruction_9_0_1',
+        name: '绚丽异彩',
+        type: 'extra',
+        start_time: '2026-09-24T12:00:00+08:00',
+        up_character: '伊冯',
+      },
+      {
+        pool_id: 'reclaim_9_0_2',
+        name: '点绘申领',
+        type: 'weapon',
+        start_time: '2026-09-24T12:00:00+08:00',
+        up_character: '艺术暴君',
+      },
+    ], 'import-user');
+
+    expect(result).toMatchObject({ success: true, migrated: 2, created: 0 });
+    expect(events).toEqual(expect.arrayContaining([
+      'rpc:reconstruction_9_0_1',
+      'rpc:reclaim_9_0_2',
+      'lookup-canonical-pools',
+    ]));
+    expect(events.indexOf('rpc:reconstruction_9_0_1')).toBeLessThan(events.indexOf('lookup-canonical-pools'));
+    expect(events.indexOf('rpc:reclaim_9_0_2')).toBeLessThan(events.indexOf('lookup-canonical-pools'));
+    expect(pools).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        pool_id: 'reconstruction_9_0_1',
+        type: 'extra',
+        extra_rule_profile: 'reconstruction_character_v1',
+      }),
+      expect.objectContaining({
+        pool_id: 'reclaim_9_0_2',
+        type: 'extra',
+        extra_subtype: 'reconstruction_claim',
+        extra_rule_profile: 'reconstruction_weapon_v1',
+      }),
+    ]));
+  });
+});
+
 function toBase64UrlJson(value) {
   return Buffer.from(JSON.stringify(value)).toString('base64url');
 }
@@ -497,7 +644,7 @@ describe('savePoolsToServer', () => {
 
     const result = await savePoolsToServer(
       [{
-        pool_id: 'special_1_2_1',
+        pool_id: 'reconstruction_new_1',
         name: '测试限定池',
         type: 'limited',
         start_time: null,
@@ -530,6 +677,35 @@ describe('executeFullImport import mode metadata', () => {
     expect(normalizeFullImportMode('incremental')).toBe('incremental');
     expect(normalizeFullImportMode('unsafe')).toBe('incremental');
     expect(normalizeFullImportMode(undefined)).toBe('incremental');
+  });
+
+  it('classifies only the exact known Joint pool and preserves canonical metadata', async () => {
+    const { resolveOfficialExtraPoolMetadata } = await import('../../backend/fullImportService.js');
+
+    expect(resolveOfficialExtraPoolMetadata('joint_1_2_2', 'extra')).toEqual({
+      extra_subtype: 'special',
+      extra_rule_profile: 'brilliance_festival_v1',
+      extra_series_key: null,
+      extra_series_phase: null,
+    });
+    expect(resolveOfficialExtraPoolMetadata('joint_9_9_9', 'extra')).toEqual({
+      extra_subtype: null,
+      extra_rule_profile: null,
+      extra_series_key: null,
+      extra_series_phase: null,
+    });
+    expect(resolveOfficialExtraPoolMetadata('joint_9_9_9', 'extra', {
+      type: 'extra',
+      extra_subtype: 'reconstruction',
+      extra_rule_profile: 'reconstruction_character_v1',
+      extra_series_key: 'canonical-series',
+      extra_series_phase: 3,
+    })).toEqual({
+      extra_subtype: 'reconstruction',
+      extra_rule_profile: 'reconstruction_character_v1',
+      extra_series_key: 'canonical-series',
+      extra_series_phase: 3,
+    });
   });
 
   it('rejects expired credentials before starting the queued grant chain', async () => {

@@ -7,12 +7,20 @@ import * as poolService from '../../services/admin/poolService';
 import { invalidatePublicCache } from '../../services/admin/publicCacheService';
 import { useAuthStore } from '../../stores';
 import { characterCache } from '../../utils/characterUtils';
+import {
+  canonicalizeExtraPoolSubtype,
+  getExpectedExtraPoolSubtype,
+} from '../../../shared/extraPoolSubtype.js';
 
 // 表单初始状态
 export const INITIAL_POOL_FORM = {
   name: '',
   name_en: '',
   type: 'limited',
+  extra_subtype: '',
+  extra_rule_profile: '',
+  extra_series_key: '',
+  extra_series_phase: '',
   up_character: '',
   featured_characters_text: '',
   banner_url: '',
@@ -82,14 +90,16 @@ export function parseFeaturedCharactersInput(value) {
 function buildFeaturedCharacterSet(poolType, upCharacter, featuredCharactersInput) {
   const normalizedPoolType = normalizePoolType(poolType);
   if (normalizedPoolType === 'extra') {
-    return new Set(parseFeaturedCharactersInput(featuredCharactersInput));
+    const featuredCharacters = parseFeaturedCharactersInput(featuredCharactersInput);
+    return new Set(featuredCharacters.length > 0 ? featuredCharacters : [normalizeText(upCharacter)].filter(Boolean));
   }
 
   const normalizedUpCharacter = String(upCharacter || '').trim();
   return normalizedUpCharacter ? new Set([normalizedUpCharacter]) : new Set();
 }
 
-function getExpectedCharacterType(poolType) {
+function getExpectedCharacterType(poolType, extraRuleProfile = null) {
+  if (extraRuleProfile === 'reconstruction_weapon_v1') return 'weapon';
   return normalizePoolType(poolType) === 'weapon' ? 'weapon' : 'character';
 }
 
@@ -108,8 +118,15 @@ function buildCharacterNameMap(characters = [], expectedType = 'character') {
   return result;
 }
 
-export function normalizeDraftPoolCharacters(rows = [], characters = [], poolType, featuredNames = []) {
-  const expectedType = getExpectedCharacterType(poolType);
+export function normalizeDraftPoolCharacters(
+  rows = [],
+  characters = [],
+  poolType,
+  featuredNames = [],
+  extraRuleProfile = null
+) {
+  const normalizedPoolType = normalizePoolType(poolType);
+  const expectedType = getExpectedCharacterType(poolType, extraRuleProfile);
   const validCharactersById = new Map(
     (Array.isArray(characters) ? characters : [])
       .filter((character) => character?.id && character.type === expectedType)
@@ -128,7 +145,9 @@ export function normalizeDraftPoolCharacters(rows = [], characters = [], poolTyp
 
     dedupedRows.set(characterId, {
       character_id: characterId,
-      is_up: Boolean(row?.is_up) || featuredNameSet.has(character.name),
+      is_up: normalizedPoolType === 'extra'
+        ? featuredNameSet.has(character.name)
+        : Boolean(row?.is_up) || featuredNameSet.has(character.name),
     });
   });
 
@@ -147,19 +166,46 @@ export function normalizeDraftPoolCharacters(rows = [], characters = [], poolTyp
 
 export function buildPoolDataFromForm(poolForm = {}) {
   const normalizedPoolType = normalizePoolType(poolForm.type);
-  const featuredCharacters = parseFeaturedCharactersInput(poolForm.featured_characters_text);
-  const upCharacterName =
-    normalizedPoolType === 'extra' ? featuredCharacters[0] || '' : normalizeText(poolForm.up_character);
+  const extraRuleProfile = normalizedPoolType === 'extra'
+    ? normalizeText(poolForm.extra_rule_profile)
+    : '';
+  const isBrillianceFestival = extraRuleProfile === 'brilliance_festival_v1';
+  const typedUpCharacter = normalizeText(poolForm.up_character);
+  const featuredCharacters = normalizedPoolType === 'extra'
+    ? isBrillianceFestival
+      ? parseFeaturedCharactersInput(poolForm.featured_characters_text)
+      : [typedUpCharacter].filter(Boolean)
+    : [];
+  const upCharacterName = isBrillianceFestival
+    ? featuredCharacters[0] || ''
+    : typedUpCharacter;
+  const rawSeriesPhase = poolForm.extra_series_phase;
+  const extraSeriesPhase = rawSeriesPhase !== null
+    && rawSeriesPhase !== undefined
+    && rawSeriesPhase !== ''
+    && Number.isInteger(Number(rawSeriesPhase))
+    ? Number(rawSeriesPhase)
+    : null;
+  const extraSubtype = normalizedPoolType === 'extra'
+    ? getExpectedExtraPoolSubtype(extraRuleProfile)
+      || canonicalizeExtraPoolSubtype(poolForm.extra_subtype, extraRuleProfile)
+    : null;
+  const isReconstructionProduct = ['reconstruction', 'reconstruction_claim'].includes(extraSubtype);
 
   return {
     normalizedPoolType,
-    expectedCharacterType: getExpectedCharacterType(normalizedPoolType),
+    expectedCharacterType: getExpectedCharacterType(normalizedPoolType, extraRuleProfile),
     featuredCharacters,
     upCharacterName,
     poolData: {
       name: normalizeText(poolForm.name),
       name_en: normalizeNullableText(poolForm.name_en),
       type: normalizedPoolType,
+      extra_subtype: extraSubtype,
+      extra_rule_profile: normalizedPoolType === 'extra' ? extraRuleProfile || null : null,
+      extra_series_key:
+        isReconstructionProduct ? normalizeNullableText(poolForm.extra_series_key) : null,
+      extra_series_phase: isReconstructionProduct ? extraSeriesPhase : null,
       up_character: upCharacterName || null,
       featured_characters: normalizedPoolType === 'extra' ? featuredCharacters : null,
       banner_url: normalizeNullableText(poolForm.banner_url),
@@ -251,7 +297,8 @@ export function buildPoolDraftDiff({
     editingPoolCharacters,
     characters,
     normalizedPoolType,
-    featuredNamesForSave
+    featuredNamesForSave,
+    poolData.extra_rule_profile
   );
   const normalizedOriginalRows = editingPool
     ? normalizeDraftPoolCharacters(
@@ -260,7 +307,8 @@ export function buildPoolDraftDiff({
         normalizePoolType(editingPool.type),
         Array.isArray(editingPool.featured_characters)
           ? editingPool.featured_characters
-          : [editingPool.up_character].filter(Boolean)
+          : [editingPool.up_character].filter(Boolean),
+        editingPool.extra_rule_profile
       )
     : [];
 
@@ -268,6 +316,10 @@ export function buildPoolDraftDiff({
     name: '卡池名称',
     name_en: '英文名称',
     type: '卡池类型',
+    extra_subtype: '附加寻访子类型',
+    extra_rule_profile: '附加寻访模板',
+    extra_series_key: '重构系列 key',
+    extra_series_phase: '重构阶段',
     up_character: 'UP 项',
     featured_characters: '附加寻访 6★',
     banner_url: 'Banner',
@@ -290,7 +342,18 @@ export function buildPoolDraftDiff({
       }
     });
   } else {
-    ['name', 'type', 'up_character', 'featured_characters', 'start_time', 'end_time'].forEach((key) => {
+    [
+      'name',
+      'type',
+      'extra_subtype',
+      'extra_rule_profile',
+      'extra_series_key',
+      'extra_series_phase',
+      'up_character',
+      'featured_characters',
+      'start_time',
+      'end_time',
+    ].forEach((key) => {
       const value = normalizeComparableValue(poolData[key]);
       if (value !== null && !(Array.isArray(value) && value.length === 0)) {
         fieldChanges.push({
@@ -458,15 +521,22 @@ export const usePools = (showToast) => {
     const result = await poolService.loadPoolCharactersForEdit(pool.pool_id);
     setEditingPoolCharacters(result.data);
     setEditingPoolOriginalCharacters(result.data);
+    const featuredCharacterLabels = Array.isArray(pool.featured_characters)
+      ? pool.featured_characters
+          .map((value) => characters.find((character) => character.id === value)?.name || value)
+          .filter(Boolean)
+      : [];
 
     setPoolForm({
       name: pool.name || '',
       name_en: pool.name_en || '',
       type: pool.type || 'limited',
+      extra_subtype: canonicalizeExtraPoolSubtype(pool.extra_subtype, pool.extra_rule_profile) || '',
+      extra_rule_profile: pool.extra_rule_profile || '',
+      extra_series_key: pool.extra_series_key || '',
+      extra_series_phase: pool.extra_series_phase ?? '',
       up_character: pool.up_character || '',
-      featured_characters_text: Array.isArray(pool.featured_characters)
-        ? pool.featured_characters.filter(Boolean).join('\n')
-        : '',
+      featured_characters_text: featuredCharacterLabels.join('\n'),
       banner_url: pool.banner_url || '',
       description: pool.description || '',
       start_time: formatDateTimeLocal(pool.start_time),
@@ -476,7 +546,7 @@ export const usePools = (showToast) => {
     });
     setEditingPool(pool);
     setShowEditDialog(true);
-  }, []);
+  }, [characters]);
 
   const startCreate = useCallback(() => {
     setPoolForm(INITIAL_POOL_FORM);
@@ -514,19 +584,53 @@ export const usePools = (showToast) => {
         buildPoolDataFromForm(poolForm);
 
       if (normalizedPoolType === 'extra') {
-        if (featuredCharacters.length !== 4) {
-          showToast('附加寻访必须填写 4 个不重复的 6★ 角色名称', 'error');
+        if (!['reconstruction_character_v1', 'reconstruction_weapon_v1', 'brilliance_festival_v1'].includes(
+          poolForm.extra_rule_profile
+        )) {
+          showToast('请选择附加寻访模板', 'error');
           setActionLoading(null);
           return;
         }
 
-        const missingFeaturedCharacters = featuredCharacters.filter(
-          (name) => !checkUpCharacterExists(name, 'character')
-        );
-        if (missingFeaturedCharacters.length > 0) {
-          showToast(`以下角色不存在，无法创建附加寻访：${missingFeaturedCharacters.join('、')}`, 'error');
-          setActionLoading(null);
-          return;
+        if (poolForm.extra_rule_profile === 'brilliance_festival_v1') {
+          if (featuredCharacters.length !== 4) {
+            showToast('辉光庆典必须填写 4 个不重复的 6★角色名称', 'error');
+            setActionLoading(null);
+            return;
+          }
+
+          const invalidFeaturedCharacters = featuredCharacters.filter((name) => !characters.some(
+            (character) => character.name === name && character.type === 'character' && Number(character.rarity) === 6
+          ));
+          if (invalidFeaturedCharacters.length > 0) {
+            showToast(`以下项目不是已登记的 6★角色：${invalidFeaturedCharacters.join('、')}`, 'error');
+            setActionLoading(null);
+            return;
+          }
+        } else {
+          if (!normalizeText(poolForm.extra_series_key)) {
+            showToast('重构寻访必须填写系列 key', 'error');
+            setActionLoading(null);
+            return;
+          }
+          if (!Number.isInteger(Number(poolForm.extra_series_phase)) || Number(poolForm.extra_series_phase) <= 0) {
+            showToast('重构寻访阶段必须是正整数', 'error');
+            setActionLoading(null);
+            return;
+          }
+          if (!upCharacterName) {
+            showToast('重构寻访必须填写且仅填写 1 个 UP 项', 'error');
+            setActionLoading(null);
+            return;
+          }
+          const existingUpCandidate = characters.find(
+            (character) => character.name === upCharacterName && character.type === expectedCharacterType
+          );
+          if (existingUpCandidate && Number(existingUpCandidate.rarity) !== 6) {
+            showToast('重构寻访的单 UP 必须是 6★角色或武器', 'error');
+            setActionLoading(null);
+            return;
+          }
         }
       }
 
@@ -536,7 +640,12 @@ export const usePools = (showToast) => {
         normalizedPoolType === 'extra' ? featuredCharacters : [upCharacterName].filter(Boolean);
 
       // 检查UP角色是否存在
-      if (upCharacterName && (normalizedPoolType === 'limited' || normalizedPoolType === 'weapon')) {
+      const isReconstructionPool = normalizedPoolType === 'extra'
+        && ['reconstruction_character_v1', 'reconstruction_weapon_v1'].includes(poolForm.extra_rule_profile);
+      if (
+        upCharacterName
+        && (normalizedPoolType === 'limited' || normalizedPoolType === 'weapon' || isReconstructionPool)
+      ) {
         const upExists = checkUpCharacterExists(upCharacterName, expectedCharacterType);
 
         if (!upExists) {
@@ -547,7 +656,10 @@ export const usePools = (showToast) => {
             const createdCharacter = await poolService.createUpCharacter(
               upCharacterName,
               normalizedPoolType,
-              poolStartTime
+              poolStartTime,
+              0,
+              expectedCharacterType,
+              normalizedPoolType === 'extra' ? poolForm.extra_rule_profile : null
             );
             charactersForSave = [...characters, createdCharacter];
             if (!editingPoolCharactersForSave.some((row) => row.character_id === createdCharacter.id)) {
@@ -572,7 +684,8 @@ export const usePools = (showToast) => {
         editingPoolCharactersForSave,
         charactersForSave,
         normalizedPoolType,
-        featuredNamesForSave
+        featuredNamesForSave,
+        poolForm.extra_rule_profile
       );
 
       const { poolData } = buildPoolDataFromForm(poolForm);

@@ -41,6 +41,7 @@ import {
   summarizeOfficialImportIssues,
 } from '../shared/officialImportRecordNormalizer.js';
 import { calculateHistoryPity } from '../shared/historyPity.js';
+import { getCanonicalExtraPoolMetadata } from '../shared/extraPoolSubtype.js';
 import {
   confirmOfficialImportTask,
   getOfficialImportReview,
@@ -627,6 +628,72 @@ function getDefaultPoolName(poolId, type) {
     default:
       return poolId || '未知卡池';
   }
+}
+
+const EMPTY_EXTRA_POOL_METADATA = Object.freeze({
+  extra_subtype: null,
+  extra_rule_profile: null,
+  extra_series_key: null,
+  extra_series_phase: null,
+});
+
+export function resolveOfficialExtraPoolMetadata(poolId, poolType, existingPool = null) {
+  const normalizedType = normalizeString(existingPool?.type || poolType, 80) || 'standard';
+  if (normalizedType !== 'extra') {
+    return { ...EMPTY_EXTRA_POOL_METADATA };
+  }
+
+  if (existingPool) {
+    return getCanonicalExtraPoolMetadata(existingPool);
+  }
+
+  if (normalizeString(poolId, 200) === 'joint_1_2_2') {
+    return {
+      extra_subtype: 'special',
+      extra_rule_profile: 'brilliance_festival_v1',
+      extra_series_key: null,
+      extra_series_phase: null,
+    };
+  }
+
+  return { ...EMPTY_EXTRA_POOL_METADATA };
+}
+
+async function hydrateOfficialImportPools(supabase, pools = []) {
+  const inputPools = Array.isArray(pools) ? pools : [];
+  if (inputPools.length === 0) return [];
+
+  const poolAliasMap = await resolvePoolAliasMap(
+    supabase,
+    inputPools.map((pool) => pool?.pool_id),
+    'official_api'
+  );
+  const canonicalPools = inputPools.map((pool) => ({
+    ...pool,
+    pool_id: resolveAliasValue(poolAliasMap, pool?.pool_id),
+  }));
+  const canonicalPoolIds = [...new Set(canonicalPools.map((pool) => pool.pool_id).filter(Boolean))];
+  const { data: existingRows, error } = await supabase
+    .from('pools')
+    .select('pool_id, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase')
+    .in('pool_id', canonicalPoolIds);
+  if (error) throw error;
+
+  const existingById = new Map(
+    (Array.isArray(existingRows) ? existingRows : []).map((pool) => [String(pool.pool_id), pool])
+  );
+  const hydratedById = new Map();
+  canonicalPools.forEach((pool) => {
+    const existingPool = existingById.get(String(pool.pool_id)) || null;
+    const type = existingPool?.type || pool.type;
+    hydratedById.set(String(pool.pool_id), {
+      ...pool,
+      type,
+      ...resolveOfficialExtraPoolMetadata(pool.pool_id, type, existingPool),
+    });
+  });
+
+  return Array.from(hydratedById.values());
 }
 
 function buildImportPoolSummary(rawResults = []) {
@@ -1242,6 +1309,7 @@ export async function savePoolsToServer(pools, userId) {
   const supabase = getSupabaseAdmin();
   const reconciliation = await reconcileOfficialPoolIds(supabase, pools, {
     userId,
+    allowUnknownOfficialIds: true,
   });
 
   const poolAliasMap = await resolvePoolAliasMap(
@@ -1763,10 +1831,14 @@ function sanitizeStagedPool(pool = {}) {
       : ['extra', 'limited', 'standard', 'weapon', 'beginner'].includes(rawType)
         ? rawType
         : 'standard';
+  const extraMetadata = type === 'extra'
+    ? getCanonicalExtraPoolMetadata(pool)
+    : { ...EMPTY_EXTRA_POOL_METADATA };
   return {
     pool_id: poolId,
     name: normalizeString(pool.name || pool.pool_name || pool.poolName, 300) || poolId,
     type,
+    ...extraMetadata,
     start_time: pool.start_time || pool.startTime || null,
     end_time: pool.end_time || pool.endTime || null,
     up_character: normalizeString(pool.up_character || pool.upCharacter, 300) || null,
@@ -1857,7 +1929,10 @@ async function commitStagedOfficialImport({ task, rows }) {
   let poolReconciliation = { ok: true };
   try {
     if (pools.length > 0) {
-      await reconcileOfficialPoolIds(supabase, pools, task.user_id);
+      await reconcileOfficialPoolIds(supabase, pools, {
+        userId: task.user_id,
+        allowUnknownOfficialIds: true,
+      });
     }
   } catch (error) {
     poolReconciliation = {
@@ -2124,7 +2199,7 @@ export async function executeFullImport({
 
     // 6. 整理真实抽卡记录所属的卡池；官方非抽卡事件不会参与建池或写入。
     updateProgress({ progress: 70, message: '正在整理导入内容...' });
-    const pools = [];
+    const rawPools = [];
     const seenPoolIds = new Set();
     for (const poolData of recordsResult.data.results) {
       const { type, poolType, records, currentUpCharacter } = poolData;
@@ -2137,7 +2212,7 @@ export async function executeFullImport({
         seenPoolIds.add(poolId);
 
         const normalizedPoolType = getPoolTypeFromId(poolId, type, poolType);
-        pools.push({
+        rawPools.push({
           pool_id: poolId,
           name: record.poolName || record.pool_name || getDefaultPoolName(poolId, normalizedPoolType),
           type: normalizedPoolType,
@@ -2147,6 +2222,7 @@ export async function executeFullImport({
         });
       });
     }
+    const pools = await hydrateOfficialImportPools(supabase, rawPools);
 
     // 7. 获取已存在的记录（用于去重）
     updateProgress({ progress: 75, message: '正在检查重复记录...' });

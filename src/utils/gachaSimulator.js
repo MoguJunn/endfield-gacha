@@ -19,6 +19,7 @@ import {
   WEAPON_POOL_RULES,
   STANDARD_POOL_RULES
 } from '../constants/index.js';
+import { EXTRA_RULE_PROFILES, resolvePoolCapabilities } from './poolCapabilities.js';
 
 import {
   getCurrentUpCharacter
@@ -59,10 +60,12 @@ function resolveRosterAvatarUrl(poolCharactersList, characterName) {
  * @param {string} poolType - 卡池类型
  * @returns {Object} 初始状态
  */
-export function createInitialState(poolType = 'limited_character') {
+export function createInitialState(poolType = 'limited_character', capabilities = resolvePoolCapabilities(poolType)) {
   return {
     // 卡池类型
     poolType,
+    extraRuleProfile: capabilities.ruleProfile,
+    extraSeriesKey: capabilities.seriesKey,
 
     // 保底计数
     sixStarPity: 0,
@@ -80,6 +83,7 @@ export function createInitialState(poolType = 'limited_character') {
     upSixStarCount: 0,                  // UP 6星数量
 
     // 赠送机制
+    seriesRewardPulls: null,             // 系列奖励付费抽数；null 时兼容旧存档并回退当前池总抽数
     giftsReceived: 0,                   // 已领取的赠送次数（限定池：每240抽）
     freeTenPullsReceived: 0,            // 已领取的30抽赠送十连次数（限定池/附加寻访：仅1次）
     hasReceivedInfoBook: false,         // 是否已领取情报书（限定池：60抽，仅1次）
@@ -106,7 +110,12 @@ export function createInitialState(poolType = 'limited_character') {
  * @param {string} poolType - 卡池类型
  * @returns {Object} 卡池规则
  */
-function getRulesByPoolType(poolType) {
+export function getRulesByPoolType(pool) {
+  if (pool && typeof pool === 'object') {
+    return resolvePoolCapabilities(pool).rules;
+  }
+
+  const poolType = pool;
   switch (poolType) {
     case 'extra':
       return EXTRA_POOL_RULES;
@@ -122,6 +131,19 @@ function getRulesByPoolType(poolType) {
     default:
       return LIMITED_POOL_RULES;
   }
+}
+
+function resolveSimulatorCapabilities(pool) {
+  if (typeof pool === 'string' && pool === 'extra') {
+    // 兼容旧调用方只传 poolType 的模拟器入口；真实卡池对象仍必须有 profile。
+    return resolvePoolCapabilities({
+      id: 'legacy-simulator-extra',
+      type: 'extra',
+      extra_rule_profile: EXTRA_RULE_PROFILES.BRILLIANCE_FESTIVAL,
+    });
+  }
+
+  return resolvePoolCapabilities(pool);
 }
 
 function normalizeSimulatorPoolType(poolType) {
@@ -144,11 +166,14 @@ function normalizeSimulatorPoolType(poolType) {
  * 抽卡模拟器类
  */
 export class GachaSimulator {
-  constructor(poolType = 'limited_character', customRules = null, currentUpCharacter = null, poolCharactersList = null) {
-    this.poolType = poolType;
-    this.state = createInitialState(poolType);
+  constructor(pool = 'limited_character', customRules = null, currentUpCharacter = null, poolCharactersList = null) {
+    this.poolInfo = typeof pool === 'object' ? pool : { type: pool };
+    this.capabilities = resolveSimulatorCapabilities(pool);
+    this.rawPoolType = this.capabilities.rawPoolType;
+    this.poolType = this.capabilities.basePoolType;
+    this.state = createInitialState(this.poolType, this.capabilities);
     // 如果提供自定义规则则使用，否则根据 poolType 自动选择
-    this.rules = customRules || getRulesByPoolType(poolType);
+    this.rules = customRules || getRulesByPoolType(pool);
     this.listeners = [];
     // 当前UP角色（限定池专用）
     this.currentUpCharacter = currentUpCharacter;
@@ -157,6 +182,12 @@ export class GachaSimulator {
 
     // 确保角色数据已加载
     this.ensureCharacterDataLoaded();
+  }
+
+  assertResolved() {
+    if (!this.capabilities.isResolved) {
+      throw new Error('当前附加寻访规则尚未识别，模拟器已停止抽取');
+    }
   }
 
   /**
@@ -246,12 +277,13 @@ export class GachaSimulator {
    * @returns {Object} 抽卡结果
    */
   pullSingle() {
+    this.assertResolved();
     if (normalizeSimulatorPoolType(this.poolType) === 'weapon') {
       throw new Error('武器池按申领进行，每次申领固定获得10件武器');
     }
 
     // 获取当前UP角色（如果是限定池）
-    const currentUpChar = (this.poolType === 'limited' || this.poolType === 'limited_character')
+    const currentUpChar = this.capabilities.targetMode === 'single-up' && this.capabilities.entityType === 'character'
       ? this.getCurrentUpCharacter()
       : null;
 
@@ -269,12 +301,16 @@ export class GachaSimulator {
     };
 
     // 检查特殊机制
-    const gifts = this.checkGifts(result.totalPulls);
+    const rewardPulls = this.getRewardPullCount(result.totalPulls);
+    const gifts = this.checkGifts(rewardPulls);
     const infoBook = this.checkInfoBook(result);
 
     // 更新状态
     this.updateState({
       ...result,
+      seriesRewardPulls: this.capabilities.rewardScope === 'series'
+        ? rewardPulls
+        : this.state.seriesRewardPulls,
       pullHistory: [...this.state.pullHistory, pullRecord],
       giftsReceived: gifts.count,
       hasReceivedInfoBook: infoBook || this.state.hasReceivedInfoBook,
@@ -294,12 +330,13 @@ export class GachaSimulator {
    * @returns {Array} 十连结果数组
    */
   pullTen() {
+    this.assertResolved();
     if (normalizeSimulatorPoolType(this.poolType) === 'weapon') {
       return this.pullWeaponClaim();
     }
 
     // 获取当前UP角色（如果是限定池）
-    const currentUpChar = (this.poolType === 'limited' || this.poolType === 'limited_character')
+    const currentUpChar = this.capabilities.targetMode === 'single-up' && this.capabilities.entityType === 'character'
       ? this.getCurrentUpCharacter()
       : null;
 
@@ -329,7 +366,8 @@ export class GachaSimulator {
     const finalResult = results[results.length - 1];
 
     // 检查特殊机制
-    const gifts = this.checkGifts(finalResult.totalPulls);
+    const rewardPulls = this.getRewardPullCount(finalResult.totalPulls);
+    const gifts = this.checkGifts(rewardPulls);
     const infoBook = this.checkInfoBook(finalResult);
 
     // 统计UP 6星数量
@@ -337,6 +375,9 @@ export class GachaSimulator {
 
     this.updateState({
       ...finalResult,
+      seriesRewardPulls: this.capabilities.rewardScope === 'series'
+        ? rewardPulls
+        : this.state.seriesRewardPulls,
       pullHistory: [...this.state.pullHistory, ...pullRecords],
       giftsReceived: gifts.count,
       hasReceivedInfoBook: infoBook || this.state.hasReceivedInfoBook,
@@ -354,6 +395,7 @@ export class GachaSimulator {
    * @returns {Array} 申领结果数组
    */
   pullWeaponClaim() {
+    this.assertResolved();
     const currentUpChar = this.currentUpCharacter || null;
     const { results, nextState } = simulateWeaponTenClaim(
       this.state,
@@ -392,11 +434,15 @@ export class GachaSimulator {
     });
 
     const totalPulls = this.state.totalPulls + pullRecords.length;
-    const gifts = this.checkGifts(totalPulls);
+    const rewardPulls = this.getRewardPullCount(totalPulls);
+    const gifts = this.checkGifts(rewardPulls);
 
     this.updateState({
       ...nextState,
       totalPulls,
+      seriesRewardPulls: this.capabilities.rewardScope === 'series'
+        ? rewardPulls
+        : this.state.seriesRewardPulls,
       sixStarCount: this.state.sixStarCount + sixStars,
       fiveStarCount: this.state.fiveStarCount + fiveStars,
       pullHistory: [...this.state.pullHistory, ...pullRecords],
@@ -413,8 +459,9 @@ export class GachaSimulator {
    * @returns {Array} 免费十连结果数组
    */
   pullFreeTen() {
+    this.assertResolved();
     // 获取当前UP角色（如果是限定池）
-    const currentUpChar = (this.poolType === 'limited' || this.poolType === 'limited_character')
+    const currentUpChar = this.capabilities.targetMode === 'single-up' && this.capabilities.entityType === 'character'
       ? this.getCurrentUpCharacter()
       : null;
 
@@ -445,7 +492,10 @@ export class GachaSimulator {
     // 免费十连不推进保底、总抽数、目标保底或奖励进度。
     this.updateState({
       pullHistory: [...this.state.pullHistory, ...pullRecords],
-      freeTenPullsReceived: Math.min((this.state.freeTenPullsReceived || 0) + 1, 1),
+      freeTenPullsReceived: Math.min(
+        (this.state.freeTenPullsReceived || 0) + 1,
+        this.capabilities.freeTenPullLimit
+      ),
       lastPullResult: pullRecords
     });
 
@@ -457,6 +507,7 @@ export class GachaSimulator {
    * @returns {Array} 情报书十连结果数组
    */
   pullInfoBookTen() {
+    this.assertResolved();
     if (!this.state.infoBookTenPullAvailable || this.state.hasUsedInfoBookTenPull) {
       throw new Error('情报书十连不可用');
     }
@@ -524,13 +575,30 @@ export class GachaSimulator {
   }
 
   /**
+   * 获取奖励作用域的付费抽数。系列重构池跨阶段累积，普通池保持单池计数。
+   */
+  getRewardPullCount(nextPoolTotalPulls = this.state.totalPulls) {
+    if (this.capabilities.rewardScope !== 'series') {
+      return Number(nextPoolTotalPulls || 0);
+    }
+
+    const currentPoolTotal = Number(this.state.totalPulls || 0);
+    const delta = Math.max(Number(nextPoolTotalPulls || 0) - currentPoolTotal, 0);
+    const storedSeriesPulls = this.state.seriesRewardPulls;
+    const baseline = storedSeriesPulls == null
+      ? currentPoolTotal
+      : Number(storedSeriesPulls || 0);
+    return baseline + delta;
+  }
+
+  /**
    * 检查30抽赠送十连
    * @param {number} totalPulls - 总抽数（支付的抽数，不包括赠送）
    * @returns {Object} 赠送信息
    */
   checkFreeTenPulls(totalPulls) {
-    // 限定池与附加寻访都有 30 抽赠送十连，但都不计入保底。
-    if (this.poolType !== 'limited' && this.poolType !== 'limited_character' && this.poolType !== 'extra') {
+    const milestones = this.capabilities.freeTenPullMilestones;
+    if (!this.capabilities.isResolved || milestones.length === 0) {
       return {
         count: 0,
         isNewGift: false,
@@ -539,14 +607,17 @@ export class GachaSimulator {
       };
     }
 
-    const freeTenPullCount = Math.min(Math.floor(totalPulls / this.rules.freeTenPullInterval), 1);
+    const rewardPulls = this.getRewardPullCount(totalPulls);
+    const freeTenPullCount = milestones.filter((threshold) => rewardPulls >= threshold).length;
     const isNewGift = freeTenPullCount > this.state.freeTenPullsReceived;
 
     return {
       count: freeTenPullCount,
       isNewGift,
-      nextGiftAt: freeTenPullCount >= 1 ? null : this.rules.freeTenPullInterval,
-      remainingPulls: freeTenPullCount >= 1 ? 0 : this.rules.freeTenPullInterval - totalPulls,
+      nextGiftAt: milestones[freeTenPullCount] || null,
+      remainingPulls: milestones[freeTenPullCount]
+        ? Math.max(milestones[freeTenPullCount] - rewardPulls, 0)
+        : 0,
       giftType: 'free_ten_pull'
     };
   }
@@ -558,7 +629,7 @@ export class GachaSimulator {
    */
   checkGifts(totalPulls) {
     // 限定池：每240抽送限定角色信物
-    if (this.poolType === 'limited' || this.poolType === 'limited_character') {
+    if (this.capabilities.basePoolType === 'limited') {
       const giftCount = Math.floor(totalPulls / this.rules.giftInterval);
       const isNewGift = giftCount > this.state.giftsReceived;
 
@@ -571,7 +642,7 @@ export class GachaSimulator {
       };
     }
 
-    if (this.poolType === 'extra') {
+    if (this.capabilities.basePoolType === 'extra') {
       return {
         count: 0,
         isNewGift: false,
@@ -652,7 +723,7 @@ export class GachaSimulator {
    * @returns {boolean} 是否领取情报书
    */
   checkInfoBook(state) {
-    return checkInfoBookAvailable(state, this.rules);
+    return this.capabilities.infoBookEnabled && checkInfoBookAvailable(state, this.rules);
   }
 
   /**
@@ -673,7 +744,7 @@ export class GachaSimulator {
    * 重置模拟器
    */
   reset() {
-    this.state = createInitialState(this.poolType);
+    this.state = createInitialState(this.poolType, this.capabilities);
     this.notifyListeners();
   }
 
@@ -682,11 +753,18 @@ export class GachaSimulator {
    * @param {Object} savedState - 保存的状态
    */
   importState(savedState) {
-    const { poolType: _storedPoolType, ...stateWithoutPoolType } = savedState || {};
+    const {
+      poolType: _storedPoolType,
+      extraRuleProfile: _storedRuleProfile,
+      extraSeriesKey: _storedSeriesKey,
+      ...stateWithoutPoolType
+    } = savedState || {};
     this.state = {
-      ...createInitialState(this.poolType),
+      ...createInitialState(this.poolType, this.capabilities),
       ...stateWithoutPoolType,
-      poolType: this.poolType
+      poolType: this.poolType,
+      extraRuleProfile: this.capabilities.ruleProfile,
+      extraSeriesKey: this.capabilities.seriesKey,
     };
     this.notifyListeners();
   }
@@ -766,7 +844,7 @@ export class GachaSimulator {
       });
 
     // 获取赠送信息（根据卡池类型）
-    const giftInfo = this.checkGifts(totalPulls);
+    const giftInfo = this.checkGifts(this.getRewardPullCount(totalPulls));
     const freeTenPullInfo = this.checkFreeTenPulls(totalPulls);
 
     return {
@@ -861,8 +939,8 @@ export class GachaSimulator {
  * @param {Object} poolCharactersList - 可选：卡池角色列表
  * @returns {GachaSimulator} 模拟器实例
  */
-export function createSimulator(poolType, customRules = null, currentUpCharacter = null, poolCharactersList = null) {
-  return new GachaSimulator(poolType, customRules, currentUpCharacter, poolCharactersList);
+export function createSimulator(pool, customRules = null, currentUpCharacter = null, poolCharactersList = null) {
+  return new GachaSimulator(pool, customRules, currentUpCharacter, poolCharactersList);
 }
 
 export default {

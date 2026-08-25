@@ -82,6 +82,23 @@ export const EXTRA_POOL_RULES = {
   pityInherits: false,
 };
 
+// 未识别附加寻访的保守规则。它只用于阻止未知 profile 被误判为辉光庆典；
+// 真实抽取仍应在能力解析完成后才开放。
+export const UNRESOLVED_POOL_RULES = {
+  sixStarPity: 80,
+  sixStarBaseProbability: 0.008,
+  sixStarSoftPityStart: 66,
+  sixStarSoftPityIncrease: 0.05,
+  hasSoftPity: true,
+
+  fiveStarPity: 10,
+  fiveStarBaseProbability: 0.08,
+
+  upProbability: 0,
+  pityInherits: false,
+  isUnresolved: true,
+};
+
 // 限定池轮换计划（基于官方公告时间）
 // 莱万汀：3次特许寻访后移出
 // 伊冯：4次特许寻访后移出

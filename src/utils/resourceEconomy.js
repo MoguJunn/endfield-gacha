@@ -4,6 +4,8 @@ import {
   calculateWeaponQuotaFromCounts,
   normalizeQuotaSummary
 } from './quotaEconomy.js';
+import { isInfoBookHistoryPull } from './historyInfoBook.js';
+import { resolvePoolCapabilities } from './poolCapabilities.js';
 
 const JADE_ICON_URL = '/resource-icons/item_diamond.webp';
 const ORIGINITE_ICON_URL = '/resource-icons/item_originium_recharge.webp';
@@ -266,6 +268,108 @@ export function buildPoolResourceSummary({
   });
 }
 
+function getResourceHistoryPoolId(record) {
+  return record?.poolId || record?.pool_id || null;
+}
+
+function isResourceGiftRecord(record) {
+  return record?.specialType === 'gift' || record?.special_type === 'gift';
+}
+
+function isResourceFreeRecord(record) {
+  return record?.isFree === true
+    || record?.is_free === true
+    || record?.isFreePull === true
+    || record?.is_free_pull === true;
+}
+
+function isResourceInfoBookRecord(record) {
+  return isInfoBookHistoryPull(record)
+    || record?.isInfoBookPull === true
+    || record?.is_info_book_pull === true
+    || record?.specialType === 'info_book'
+    || record?.special_type === 'info_book';
+}
+
+/**
+ * 聚合目录必须按每条记录所属真实池的 capabilities 拆分角色/武器资源，
+ * 不能让合成的 extra/all 卡池对象替代来源池规则。
+ */
+export function buildCapabilityAwarePoolResourceSummary({
+  history = [],
+  pools = [],
+  includeFreePulls = false,
+  quotaLedger = null,
+  settings = DEFAULT_RESOURCE_RULES,
+} = {}) {
+  const poolLookup = new Map(
+    (Array.isArray(pools) ? pools : [])
+      .flatMap((pool) => [pool?.id, pool?.pool_id].map((poolId) => [String(poolId || ''), pool]))
+      .filter(([poolId]) => Boolean(poolId))
+  );
+  const aggregate = {
+    characterPulls: 0,
+    weaponPulls: 0,
+    chargedCharacterPulls: 0,
+    chargedWeaponPulls: 0,
+    characterCounts: { 6: 0, '6_std': 0, 5: 0, 4: 0 },
+  };
+
+  (Array.isArray(history) ? history : []).forEach((record) => {
+    if (isResourceGiftRecord(record)) {
+      return;
+    }
+
+    const isFree = isResourceFreeRecord(record);
+    if (isFree && !includeFreePulls) {
+      return;
+    }
+
+    const poolId = getResourceHistoryPoolId(record);
+    const sourcePool = poolLookup.get(String(poolId || '')) || {
+      ...record,
+      id: poolId,
+      type: record?.poolType || record?.pool_type || record?.type,
+    };
+    const capabilities = resolvePoolCapabilities(sourcePool);
+    const isWeapon = capabilities.entityType === 'weapon' || capabilities.basePoolType === 'weapon';
+    const isCharged = !isFree && !isResourceInfoBookRecord(record);
+
+    if (isWeapon) {
+      aggregate.weaponPulls += 1;
+      if (isCharged) {
+        aggregate.chargedWeaponPulls += 1;
+      }
+      return;
+    }
+
+    aggregate.characterPulls += 1;
+    if (isCharged) {
+      aggregate.chargedCharacterPulls += 1;
+    }
+
+    const rarity = Number(record?.rarity) || 0;
+    if (rarity >= 6) {
+      aggregate.characterCounts[record?.isStandard ? '6_std' : 6] += 1;
+    } else if (rarity === 5) {
+      aggregate.characterCounts[5] += 1;
+    } else if (rarity > 0) {
+      aggregate.characterCounts[4] += 1;
+    }
+  });
+
+  return buildResourceSummaryFromAggregates({
+    characterPulls: aggregate.characterPulls,
+    weaponPulls: aggregate.weaponPulls,
+    chargedCharacterPulls: aggregate.chargedCharacterPulls,
+    chargedWeaponPulls: aggregate.chargedWeaponPulls,
+    counts: aggregate.characterCounts,
+    arsenalGainCounts: aggregate.characterCounts,
+    quotaLedger,
+    settings,
+  });
+}
+
 function countHistoryRarities(history = []) {
   return history.reduce((accumulator, record) => {
     const rarity = Number(record?.rarity) || 0;
@@ -301,7 +405,12 @@ export function buildSimulatorResourceLedger(simulatorStates = [], settings = DE
   const quotaLedger = buildQuotaLedgerFromSimulatorStates(simulatorStates);
 
   const aggregate = simulatorStates.reduce((accumulator, state) => {
-    const poolType = normalizePoolType(state?.poolType);
+    const poolType = resolvePoolCapabilities({
+      id: state?.poolId || state?.id,
+      type: state?.poolType,
+      extra_rule_profile: state?.extraRuleProfile || state?.extra_rule_profile,
+      extra_series_key: state?.extraSeriesKey || state?.extra_series_key,
+    }).basePoolType;
     const pullHistory = Array.isArray(state?.pullHistory) ? state.pullHistory : [];
     const counts = countHistoryRarities(pullHistory);
 

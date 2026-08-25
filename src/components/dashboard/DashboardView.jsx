@@ -32,7 +32,7 @@ import ShareActionStatus from '../share/ShareActionStatus';
 import { characterCache } from '../../utils/characterUtils';
 import ResourceSummaryPanel from '../resources/ResourceSummaryPanel';
 import { buildCharacterStats } from '../../utils/dashboardCharacterStats';
-import { buildPoolSelectorGroups, normalizePoolGroupType } from '../../utils/poolSelectorDisplay';
+import { buildPoolSelectorGroups } from '../../utils/poolSelectorDisplay';
 import { buildOverviewPoolAnalysisPityMap, getPoolAnalysisPityState } from '../../utils/poolAnalysisPity';
 import { buildDashboardTimelineSections } from '../../utils/dashboardTimelineSections';
 import { buildDashboardOverviewSplitStats } from '../../utils/dashboardOverviewSplitStats';
@@ -60,6 +60,8 @@ import { readStorageValue, STORAGE_KEYS, writeStorageValue } from '../../utils/s
 import { localizeDashboardChartItems } from '../../utils/dashboardChartLabels.js';
 import { normalizeShareThemeMode, resolveShareThemeMode } from '../../utils/shareThemeMode.js';
 import { useHistoryPageStore, useHistoryStore } from '../../stores/index.js';
+import { resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
+import { getOverviewPoolBucket, getOverviewPoolTypeKey } from '../../utils/dashboardOverviewPoolFilters.js';
 
 const DashboardCharts = React.lazy(() => import('./DashboardCharts.jsx'));
 
@@ -92,40 +94,6 @@ function getDistributionVariant(poolType) {
   }
 
   return 'character';
-}
-
-function getOverviewPoolBucket(pool) {
-  const groupType = normalizePoolGroupType(pool);
-  if (groupType === 'extra') {
-    return 'extra';
-  }
-
-  if (groupType === 'limited') {
-    return 'limited';
-  }
-
-  if (groupType === 'weapon_limited' || groupType === 'weapon_standard') {
-    return 'weapon';
-  }
-
-  return 'standard';
-}
-
-function getOverviewPoolTypeKey(pool) {
-  const groupType = normalizePoolGroupType(pool);
-  if (groupType === 'weapon_limited' || groupType === 'weapon_standard') {
-    return groupType;
-  }
-
-  if (groupType === 'extra') {
-    return 'extra';
-  }
-
-  if (groupType === 'limited') {
-    return 'limited';
-  }
-
-  return 'standard';
 }
 
 function getHistoryPoolId(item) {
@@ -278,16 +246,15 @@ const DashboardView = ({ showToast }) => {
   const [customSharePoolIds, setCustomSharePoolIds] = React.useState([]);
   const [customShareExpandedGroupIds, setCustomShareExpandedGroupIds] = React.useState([]);
   const [showTimelineFiveStarDrops, setShowTimelineFiveStarDrops] = React.useState(true);
-  const loadedRawHistoryCount = useHistoryStore((state) => (
-    Array.isArray(state.history) ? state.history.length : 0
-  ));
+  const loadedRawHistoryCount = useHistoryStore((state) => (Array.isArray(state.history) ? state.history.length : 0));
   const historyPagePhase = useHistoryPageStore((state) => state.phase);
   const historyPageHasMore = useHistoryPageStore((state) => state.hasMore);
   const historyPageTotal = useHistoryPageStore((state) => state.total);
-  const hasCompleteRawHistory = historyPagePhase === 'ready'
-    && historyPageHasMore === false
-    && historyPageTotal !== null
-    && loadedRawHistoryCount >= historyPageTotal;
+  const hasCompleteRawHistory =
+    historyPagePhase === 'ready' &&
+    historyPageHasMore === false &&
+    historyPageTotal !== null &&
+    loadedRawHistoryCount >= historyPageTotal;
   const [clipboardImageWarmState, setClipboardImageWarmState] = React.useState('idle');
   const [clipboardImageReadyKey, setClipboardImageReadyKey] = React.useState(null);
   const [shareThemeMode, setShareThemeMode] = React.useState(() => {
@@ -327,6 +294,9 @@ const DashboardView = ({ showToast }) => {
     allLimitedHistory,
     selectedPools,
     normalizedPoolType,
+    isLimited,
+    isExtra,
+    isWeapon,
     hasPoolData,
     isGroupMode,
     isAllPoolsOverview,
@@ -338,7 +308,7 @@ const DashboardView = ({ showToast }) => {
     groupedHistory,
     characterStats,
     checkLimitedInFirstN,
-    hasReceivedFreeTen,
+    specialProgress,
     includeFreePullsInStats,
     setIncludeFreePullsInStats,
     dashboardResourceSummary,
@@ -392,7 +362,7 @@ const DashboardView = ({ showToast }) => {
       : '当前卡池总投入';
   const primarySixStarLabel = isAllPoolsOverview
     ? t('dashboard.overview.targetSixStar')
-    : normalizedPoolType === 'weapon'
+    : isWeapon
       ? t('dashboard.overview.upWeapon')
       : t('dashboard.average.limitedSix');
   const secondarySixStarLabel = isAllPoolsOverview ? t('dashboard.overview.offrateSixStar') : standardSixLabel;
@@ -519,7 +489,8 @@ const DashboardView = ({ showToast }) => {
       new Set(
         selectedPools
           .filter((pool) => {
-            if (pool?.type !== 'limited' && pool?.type !== 'limited_character') {
+            const capabilities = resolvePoolCapabilities(pool);
+            if (capabilities.basePoolType !== 'limited' || capabilities.entityType !== 'character') {
               return false;
             }
 
@@ -536,11 +507,7 @@ const DashboardView = ({ showToast }) => {
   );
 
   const visibleCharacterStats = React.useMemo(() => {
-    if (
-      !isAllPoolsOverview
-      || !allOverviewFilterPoolIds
-      || (isAnalysisBacked && !hasCompleteRawHistory)
-    ) {
+    if (!isAllPoolsOverview || !allOverviewFilterPoolIds || (isAnalysisBacked && !hasCompleteRawHistory)) {
       return characterStats;
     }
 
@@ -588,51 +555,48 @@ const DashboardView = ({ showToast }) => {
       allLimitedHistory,
     });
   }, [allLimitedHistory, isGroupMode, normalizedPoolHistory, selectedPools]);
-  const timelineSections = React.useMemo(
-    () => {
-      if (isAnalysisBacked && Array.isArray(snapshotTimelineSections)) {
-        return snapshotTimelineSections;
-      }
-      if (isAnalysisBacked && !hasCompleteRawHistory) {
-        return [];
-      }
-      return buildDashboardTimelineSections({
-        currentPool,
-        currentPoolHistory: normalizedPoolHistory,
-        groupedHistory,
-        selectedPools,
-        crossPoolPityMap,
-        isGroupMode,
-        isAllPoolsOverview,
-        effectivePity,
-        analysisPity,
-        overviewAnalysisPityMap,
-        overviewPoolFilter: allOverviewPoolFilter,
-        hasMergedAccountView,
-        locale,
-        showFiveStarDrops: showTimelineFiveStarDrops,
-      });
-    },
-    [
-      allOverviewPoolFilter,
-      analysisPity,
-      crossPoolPityMap,
+  const timelineSections = React.useMemo(() => {
+    if (isAnalysisBacked && Array.isArray(snapshotTimelineSections)) {
+      return snapshotTimelineSections;
+    }
+    if (isAnalysisBacked && !hasCompleteRawHistory) {
+      return [];
+    }
+    return buildDashboardTimelineSections({
       currentPool,
-      effectivePity,
+      currentPoolHistory: normalizedPoolHistory,
       groupedHistory,
-      hasMergedAccountView,
-      hasCompleteRawHistory,
-      isAnalysisBacked,
-      isAllPoolsOverview,
-      isGroupMode,
-      locale,
-      normalizedPoolHistory,
-      overviewAnalysisPityMap,
-      showTimelineFiveStarDrops,
-      snapshotTimelineSections,
       selectedPools,
-    ]
-  );
+      crossPoolPityMap,
+      isGroupMode,
+      isAllPoolsOverview,
+      effectivePity,
+      analysisPity,
+      overviewAnalysisPityMap,
+      overviewPoolFilter: allOverviewPoolFilter,
+      hasMergedAccountView,
+      locale,
+      showFiveStarDrops: showTimelineFiveStarDrops,
+    });
+  }, [
+    allOverviewPoolFilter,
+    analysisPity,
+    crossPoolPityMap,
+    currentPool,
+    effectivePity,
+    groupedHistory,
+    hasMergedAccountView,
+    hasCompleteRawHistory,
+    isAnalysisBacked,
+    isAllPoolsOverview,
+    isGroupMode,
+    locale,
+    normalizedPoolHistory,
+    overviewAnalysisPityMap,
+    showTimelineFiveStarDrops,
+    snapshotTimelineSections,
+    selectedPools,
+  ]);
   const splitOverviewStats = React.useMemo(() => {
     if (!isAllPoolsOverview) {
       return null;
@@ -663,8 +627,7 @@ const DashboardView = ({ showToast }) => {
     () => new Set(customShareSelectedPools.map((pool) => pool.id)),
     [customShareSelectedPools]
   );
-  const shouldBuildCustomShareData = shareMode === 'custom'
-    && (!isAnalysisBacked || hasCompleteRawHistory);
+  const shouldBuildCustomShareData = shareMode === 'custom' && (!isAnalysisBacked || hasCompleteRawHistory);
   const customShareHistory = React.useMemo(
     () =>
       shouldBuildCustomShareData
@@ -1366,7 +1329,9 @@ const DashboardView = ({ showToast }) => {
         </div>
       )}
 
-      <div className={`grid grid-cols-1 items-start gap-6 ${isGroupMode ? 'xl:grid-cols-1' : 'xl:grid-cols-[minmax(0,7fr)_minmax(0,13fr)]'}`}>
+      <div
+        className={`grid grid-cols-1 items-start gap-6 ${isGroupMode ? 'xl:grid-cols-1' : 'xl:grid-cols-[minmax(0,7fr)_minmax(0,13fr)]'}`}
+      >
         {/* 左列：保底机制分析 (聚合模式下隐藏) */}
         {!isGroupMode && (
           <div className="space-y-6 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:self-start xl:overflow-y-auto xl:pr-1">
@@ -1375,7 +1340,7 @@ const DashboardView = ({ showToast }) => {
               stats={stats}
               effectivePity={effectivePity}
               checkLimitedInFirstN={checkLimitedInFirstN}
-              hasReceivedFreeTen={hasReceivedFreeTen}
+              specialProgress={specialProgress}
               hasMergedAccountView={hasMergedAccountView}
             />
           </div>
@@ -1573,7 +1538,10 @@ const DashboardView = ({ showToast }) => {
 
               <section className="order-20 space-y-6" aria-labelledby="overview-resource-analysis-title">
                 <div className="flex items-center gap-3 border-b border-zinc-200 pb-2 dark:border-zinc-800">
-                  <h3 id="overview-resource-analysis-title" className="text-sm font-bold uppercase tracking-[0.16em] text-slate-700 dark:text-zinc-200">
+                  <h3
+                    id="overview-resource-analysis-title"
+                    className="text-sm font-bold uppercase tracking-[0.16em] text-slate-700 dark:text-zinc-200"
+                  >
                     {t('dashboard.chart.deepAnalysis', {}, '资源、平均与趋势')}
                   </h3>
                   <span className="h-px flex-1 bg-zinc-100 dark:bg-zinc-800" />
@@ -1584,7 +1552,11 @@ const DashboardView = ({ showToast }) => {
                     poolType="limited"
                     isAllPoolsOverview={true}
                   />
-                  <AveragePullStatsPanel stats={splitOverviewStats.weapon} poolType="weapon" isAllPoolsOverview={true} />
+                  <AveragePullStatsPanel
+                    stats={splitOverviewStats.weapon}
+                    poolType="weapon"
+                    isAllPoolsOverview={true}
+                  />
                 </div>
                 <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
                   <ResourceSummaryPanel
@@ -1603,7 +1575,9 @@ const DashboardView = ({ showToast }) => {
                   />
                 </div>
                 <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                  <React.Suspense fallback={<div className="p-6 text-center text-sm text-zinc-500">{t('common.loading')}</div>}>
+                  <React.Suspense
+                    fallback={<div className="p-6 text-center text-sm text-zinc-500">{t('common.loading')}</div>}
+                  >
                     <DashboardCharts groups={dashboardChartGroups} isDark={isDark} tooltipStyle={tooltipStyle} />
                   </React.Suspense>
                 </div>
@@ -1639,71 +1613,72 @@ const DashboardView = ({ showToast }) => {
                 <div
                   className={`grid grid-cols-2 ${normalizedPoolType !== 'standard' ? 'xl:grid-cols-4' : 'xl:grid-cols-3'} gap-4`}
                 >
-                {normalizedPoolType !== 'standard' && (
+                  {normalizedPoolType !== 'standard' && (
+                    <StatBox
+                      title={primarySixStarLabel}
+                      value={stats.counts[6]}
+                      subValue={(() => {
+                        if (isAllPoolsOverview) {
+                          return stats.totalSixStar > 0
+                            ? t('dashboard.overview.allSixRate', {
+                                percent: formatPercentValue((stats.counts[6] / stats.totalSixStar) * 100),
+                              })
+                            : t('dashboard.empty.noSixStarData');
+                        }
+                        if (isGroupMode) {
+                          return `${t('dashboard.analysis.winRate')} ${stats.winRate}%`;
+                        }
+                        const bonusCount = stats.gifts?.limitedCount || 0;
+                        return bonusCount > 0
+                          ? isEnglish
+                            ? `Includes ${bonusCount} bonus`
+                            : `含赠送 ${bonusCount}`
+                          : t('dashboard.overview.ratio', { percent: formatPercentValue(stats.winRate) });
+                      })()}
+                      colorClass={
+                        isLimited
+                          ? 'rainbow-text'
+                          : isExtra
+                            ? 'text-cyan-600 dark:text-cyan-400'
+                            : 'text-slate-700 dark:text-zinc-300'
+                      }
+                      icon={Star}
+                      isAnimated={isLimited && !isAllPoolsOverview}
+                    />
+                  )}
                   <StatBox
-                    title={primarySixStarLabel}
-                    value={stats.counts[6]}
-                    subValue={(() => {
-                      if (isAllPoolsOverview) {
-                        return stats.totalSixStar > 0
-                          ? t('dashboard.overview.allSixRate', {
-                              percent: formatPercentValue((stats.counts[6] / stats.totalSixStar) * 100),
-                            })
-                          : t('dashboard.empty.noSixStarData');
-                      }
-                      if (isGroupMode) {
-                        return `${t('dashboard.analysis.winRate')} ${stats.winRate}%`;
-                      }
-                      let bonusCount = 0;
-                      if (normalizedPoolType === 'limited') {
-                        bonusCount = Math.floor(stats.total / 240);
-                      } else if (normalizedPoolType === 'weapon') {
-                        if (stats.total >= 180) bonusCount = 1 + Math.floor((stats.total - 180) / 160);
-                      }
-                      return bonusCount > 0
-                        ? isEnglish
-                          ? `Includes ${bonusCount} bonus`
-                          : `含赠送 ${bonusCount}`
-                        : t('dashboard.overview.ratio', { percent: formatPercentValue(stats.winRate) });
-                    })()}
-                    colorClass={normalizedPoolType === 'limited' ? 'rainbow-text' : 'text-slate-700 dark:text-zinc-300'}
+                    title={secondarySixStarLabel}
+                    value={stats.counts['6_std']}
+                    subValue={
+                      isAllPoolsOverview
+                        ? crossBannerSummary
+                        : normalizedPoolType === 'standard' && stats.total >= 300
+                          ? isEnglish
+                            ? 'Includes 1 bonus'
+                            : '含赠送 1'
+                          : offrateShort
+                    }
+                    colorClass="text-red-600 dark:text-red-400"
                     icon={Star}
-                    isAnimated={normalizedPoolType === 'limited' && !isAllPoolsOverview}
                   />
-                )}
-                <StatBox
-                  title={secondarySixStarLabel}
-                  value={stats.counts['6_std']}
-                  subValue={
-                    isAllPoolsOverview
-                      ? crossBannerSummary
-                      : normalizedPoolType === 'standard' && stats.total >= 300
-                        ? isEnglish
-                          ? 'Includes 1 bonus'
-                          : '含赠送 1'
-                        : offrateShort
-                  }
-                  colorClass="text-red-600 dark:text-red-400"
-                  icon={Star}
-                />
-                <StatBox
-                  title={t('dashboard.overview.fiveStarTotal')}
-                  value={stats.counts[5]}
-                  subValue={t('dashboard.overview.ratio', {
-                    percent: formatPercentValue(stats.total > 0 ? (stats.counts[5] / stats.total) * 100 : 0),
-                  })}
-                  colorClass="text-amber-600 dark:text-amber-400"
-                  icon={Star}
-                />
-                <StatBox
-                  title={t('dashboard.overview.fourStarTotal')}
-                  value={stats.counts[4]}
-                  subValue={t('dashboard.overview.ratio', {
-                    percent: formatPercentValue(stats.total > 0 ? (stats.counts[4] / stats.total) * 100 : 0),
-                  })}
-                  colorClass="text-purple-600 dark:text-purple-400"
-                  icon={Star}
-                />
+                  <StatBox
+                    title={t('dashboard.overview.fiveStarTotal')}
+                    value={stats.counts[5]}
+                    subValue={t('dashboard.overview.ratio', {
+                      percent: formatPercentValue(stats.total > 0 ? (stats.counts[5] / stats.total) * 100 : 0),
+                    })}
+                    colorClass="text-amber-600 dark:text-amber-400"
+                    icon={Star}
+                  />
+                  <StatBox
+                    title={t('dashboard.overview.fourStarTotal')}
+                    value={stats.counts[4]}
+                    subValue={t('dashboard.overview.ratio', {
+                      percent: formatPercentValue(stats.total > 0 ? (stats.counts[4] / stats.total) * 100 : 0),
+                    })}
+                    colorClass="text-purple-600 dark:text-purple-400"
+                    icon={Star}
+                  />
                 </div>
               </div>
 
@@ -1741,7 +1716,10 @@ const DashboardView = ({ showToast }) => {
 
               <section className="order-20 space-y-6" aria-labelledby="resource-analysis-title">
                 <div className="flex items-center gap-3 border-b border-zinc-200 pb-2 dark:border-zinc-800">
-                  <h3 id="resource-analysis-title" className="text-sm font-bold uppercase tracking-[0.16em] text-slate-700 dark:text-zinc-200">
+                  <h3
+                    id="resource-analysis-title"
+                    className="text-sm font-bold uppercase tracking-[0.16em] text-slate-700 dark:text-zinc-200"
+                  >
                     {t('dashboard.chart.deepAnalysis', {}, '资源、分布与趋势')}
                   </h3>
                   <span className="h-px flex-1 bg-zinc-100 dark:bg-zinc-800" />
@@ -1754,7 +1732,9 @@ const DashboardView = ({ showToast }) => {
                   className="bg-white dark:bg-zinc-900 shadow-sm"
                 />
                 <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                  <React.Suspense fallback={<div className="p-6 text-center text-sm text-zinc-500">{t('common.loading')}</div>}>
+                  <React.Suspense
+                    fallback={<div className="p-6 text-center text-sm text-zinc-500">{t('common.loading')}</div>}
+                  >
                     <DashboardCharts groups={dashboardChartGroups} isDark={isDark} tooltipStyle={tooltipStyle} />
                   </React.Suspense>
                 </div>
@@ -2122,10 +2102,10 @@ const DashboardView = ({ showToast }) => {
               </div>
             </div>
 
-            {charViewMode === 'waterfall'
-              && isAnalysisBacked
-              && !hasCompleteRawHistory
-              && !Array.isArray(snapshotTimelineSections) ? (
+            {charViewMode === 'waterfall' &&
+            isAnalysisBacked &&
+            !hasCompleteRawHistory &&
+            !Array.isArray(snapshotTimelineSections) ? (
               <div className="border border-zinc-200 bg-zinc-50 px-4 py-8 text-center text-sm text-slate-500 dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400">
                 {isEnglish
                   ? 'The complete timeline is available after all detailed record pages are loaded.'
@@ -2162,7 +2142,7 @@ const DashboardView = ({ showToast }) => {
                   const isStandardChar = isSixStar && char.isStandard;
                   const localizedCharacterName = localizeEntityName(char.name, {
                     locale,
-                    type: normalizedPoolType === 'weapon' ? 'weapon' : 'character',
+                    type: isWeapon ? 'weapon' : 'character',
                   });
 
                   // 生成出货抽数描述

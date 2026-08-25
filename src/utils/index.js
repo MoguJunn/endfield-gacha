@@ -7,14 +7,14 @@ export {
   calculatePityFromHistory,
   calculatePity5FromHistory,
   calculateInheritedPity,
-  getPoolRules
+  getPoolRules,
 } from './validators.js';
 export {
   extractDrawerFromPoolName,
   extractCharNameFromPoolName,
   extractTypeFromPoolName,
   groupPoolsByDrawer,
-  normalizeIsStandard
+  normalizeIsStandard,
 } from './poolUtils.js';
 export {
   STORAGE_KEYS,
@@ -24,10 +24,13 @@ export {
   hasNewContent,
   markAsViewed,
   getHomeCollapseState,
-  setHomeCollapseState
+  setHomeCollapseState,
 } from './storageUtils.js';
+export { buildHistoryIndex, getCachedHistoryIndex, clearHistoryIndexCache } from './historyIndex.js';
 export {
-  buildHistoryIndex,
-  getCachedHistoryIndex,
-  clearHistoryIndexCache
-} from './historyIndex.js';
+  EXTRA_RULE_PROFILES,
+  POOL_RULE_KEYS,
+  getRulesForPool,
+  normalizeCapabilityPoolType,
+  resolvePoolCapabilities,
+} from './poolCapabilities.js';

@@ -1,6 +1,7 @@
 import { clampHistoryPity } from './historyRecordUtils.js';
 import { normalizeGameAccountMetadata } from './gameAccountMetadata.js';
 import { detectImportFormat, prepareImportPayload } from './dataFormatRegistry.js';
+import { canonicalizeExtraPoolSubtype } from '../../shared/extraPoolSubtype.js';
 
 const MAX_IMPORT_ERRORS = 10;
 const VALID_POOL_TYPES = new Set([
@@ -151,6 +152,12 @@ function normalizeImportedPool(pool, currentUserId) {
 
   const startTime = normalizeTimestamp(pool?.start_time || pool?.startTime);
   const endTime = normalizeTimestamp(pool?.end_time || pool?.endTime);
+  const extraRuleProfile = type === 'extra'
+    ? normalizeString(pool?.extra_rule_profile ?? pool?.extraRuleProfile)
+    : null;
+  const extraSubtype = type === 'extra'
+    ? canonicalizeExtraPoolSubtype(pool?.extra_subtype ?? pool?.extraSubtype, extraRuleProfile)
+    : null;
 
   if ((pool?.start_time || pool?.startTime) && !startTime) {
     errors.push('start_time 无法解析为有效时间');
@@ -167,6 +174,14 @@ function normalizeImportedPool(pool, currentUserId) {
       name,
       name_en: normalizeString(pool?.name_en),
       type,
+      extra_subtype: extraSubtype,
+      extra_rule_profile: extraRuleProfile,
+      extra_series_key: type === 'extra'
+        ? normalizeString(pool?.extra_series_key ?? pool?.extraSeriesKey)
+        : null,
+      extra_series_phase: type === 'extra'
+        ? normalizeInteger(pool?.extra_series_phase ?? pool?.extraSeriesPhase)
+        : null,
       locked: normalizeBoolean(pool?.locked) === true,
       isLimitedWeapon: type === 'weapon' ? normalizedWeaponFlag !== false : true,
       user_id: currentUserId || null,

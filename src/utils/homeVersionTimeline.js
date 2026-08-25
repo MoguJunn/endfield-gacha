@@ -93,6 +93,21 @@ function isExtraSchedulePool(pool) {
   return pool?.poolType === 'extra' || pool?.poolData?.type === 'extra';
 }
 
+function isReconstructionCharacterSchedulePool(pool) {
+  return pool?.homeNodeKind === 'reconstruction-character'
+    || pool?.poolData?.extra_rule_profile === 'reconstruction_character_v1'
+    || pool?.poolData?.extraRuleProfile === 'reconstruction_character_v1';
+}
+
+function isOrdinaryLimitedCharacterSchedulePool(pool) {
+  if (isExtraSchedulePool(pool) || isReconstructionCharacterSchedulePool(pool)) {
+    return false;
+  }
+
+  const poolType = pool?.poolType || pool?.poolData?.type;
+  return poolType === 'limited' || poolType === 'limited_character';
+}
+
 function normalizePoolIds(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -278,9 +293,9 @@ export function buildHomeRotationVersionSections({
         const startsMs = normalizeScheduleTimestamp(section.version?.startsAt);
         const explicitEndMs = normalizeScheduleTimestamp(section.version?.endsAt);
         const nextStartMs = normalizeScheduleTimestamp(sections[index + 1]?.version?.startsAt);
-        const endMs = Number.isFinite(explicitEndMs)
-          ? explicitEndMs
-          : nextStartMs;
+        const endMs = Number.isFinite(nextStartMs)
+          ? nextStartMs
+          : explicitEndMs;
 
         if (!Number.isFinite(startsMs) || startMs < startsMs) {
           return false;
@@ -307,7 +322,12 @@ export function buildHomeRotationVersionSections({
 
       orderedPools.forEach((pool) => {
         const endMs = normalizeScheduleTimestamp(pool.endDate || pool.end_time);
-        if (!isExtraSchedulePool(pool) || !Number.isFinite(endMs) || safeNowMs < endMs) {
+        if (
+          !isExtraSchedulePool(pool)
+          || isReconstructionCharacterSchedulePool(pool)
+          || !Number.isFinite(endMs)
+          || safeNowMs < endMs
+        ) {
           visiblePools.push(pool);
           return;
         }
@@ -345,15 +365,65 @@ export function buildHomeRotationVersionSections({
         pools: visiblePools,
         hiddenExtraCount: orderedPools.filter((pool) => (
           isExtraSchedulePool(pool)
+          && !isReconstructionCharacterSchedulePool(pool)
           && Number.isFinite(normalizeScheduleTimestamp(pool.endDate || pool.end_time))
           && safeNowMs >= normalizeScheduleTimestamp(pool.endDate || pool.end_time)
           && !visiblePools.includes(pool)
         )).length,
       };
-    })
-    .filter((section) => section.pools.length > 0);
+    });
 
-  return foldedSections.length > 0
-    ? foldedSections
+  foldedSections.slice(0, sections.length).forEach((section, sectionIndex) => {
+    const nextVersionSection = foldedSections[sectionIndex + 1];
+    if (!nextVersionSection?.version) {
+      return;
+    }
+
+    const nextVersionStartsMs = normalizeScheduleTimestamp(nextVersionSection.version.startsAt);
+    const explicitEndMs = normalizeScheduleTimestamp(section.version?.endsAt);
+    const versionEndMs = Number.isFinite(nextVersionStartsMs) ? nextVersionStartsMs : explicitEndMs;
+    if (!Number.isFinite(versionEndMs) || safeNowMs < versionEndMs) {
+      return;
+    }
+
+    const rerunPools = section.pools.filter(isReconstructionCharacterSchedulePool);
+    if (rerunPools.length === 0) {
+      return;
+    }
+
+    const target = foldedSections
+      .slice(sectionIndex + 1, sections.length)
+      .flatMap((candidateSection) => candidateSection.pools)
+      .filter(isOrdinaryLimitedCharacterSchedulePool)
+      .filter((pool) => {
+        const startMs = normalizeScheduleTimestamp(pool.startDate || pool.start_time);
+        return Number.isFinite(startMs) && startMs >= versionEndMs;
+      })
+      .sort((left, right) => (
+        normalizeScheduleTimestamp(left.startDate || left.start_time)
+        - normalizeScheduleTimestamp(right.startDate || right.start_time)
+      ))[0];
+    const targetStartMs = normalizeScheduleTimestamp(target?.startDate || target?.start_time);
+    if (!target || !Number.isFinite(targetStartMs) || safeNowMs < targetStartMs) {
+      return;
+    }
+
+    const rerunPoolSet = new Set(rerunPools);
+    section.pools = section.pools.filter((pool) => !rerunPoolSet.has(pool));
+    target.foldedExtraPools = [
+      ...(target.foldedExtraPools || []),
+      ...rerunPools.map((pool) => ({
+        ...pool,
+        mergeKind: 'current-rerun',
+        characterName: pool.homeCharacterName || pool.characterName || pool.name,
+      })),
+    ];
+    section.hiddenExtraCount += rerunPools.length;
+  });
+
+  const visibleSections = foldedSections.filter((section) => section.pools.length > 0);
+
+  return visibleSections.length > 0
+    ? visibleSections
     : [{ id: 'all', name: '轮换计划', version: null, pools: schedule }];
 }

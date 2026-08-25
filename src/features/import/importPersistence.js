@@ -11,6 +11,7 @@ import {
   normalizeOfficialImportRecord,
   summarizeOfficialImportIssues,
 } from '../../../shared/officialImportRecordNormalizer.js';
+import { getCanonicalExtraPoolMetadata } from '../../../shared/extraPoolSubtype.js';
 
 function resolveAliasValue(aliasMap, inputValue) {
   const normalized = typeof inputValue === 'string' ? inputValue.trim() : String(inputValue || '').trim();
@@ -81,8 +82,52 @@ function buildPoolLookups(pools = []) {
   return { poolUpCharacterMap, poolTypeMap };
 }
 
-function buildCanonicalPoolEntries(records, poolAliasMap = {}) {
+function buildPoolCatalogMap(pools = []) {
+  const result = new Map();
+  (Array.isArray(pools) ? pools : []).forEach((pool) => {
+    const ids = [pool?.pool_id, pool?.id, pool?.poolId]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean);
+    ids.forEach((id) => result.set(id, pool));
+  });
+  return result;
+}
+
+function resolveImportedExtraMetadata(poolId, poolType, existingPool = null) {
+  const type = existingPool?.type || poolType;
+  if (type !== 'extra') {
+    return {
+      extra_subtype: null,
+      extra_rule_profile: null,
+      extra_series_key: null,
+      extra_series_phase: null,
+    };
+  }
+
+  if (existingPool) {
+    return getCanonicalExtraPoolMetadata(existingPool);
+  }
+
+  if (poolId === 'joint_1_2_2') {
+    return {
+      extra_subtype: 'special',
+      extra_rule_profile: 'brilliance_festival_v1',
+      extra_series_key: null,
+      extra_series_phase: null,
+    };
+  }
+
+  return {
+    extra_subtype: null,
+    extra_rule_profile: null,
+    extra_series_key: null,
+    extra_series_phase: null,
+  };
+}
+
+function buildCanonicalPoolEntries(records, poolAliasMap = {}, pools = []) {
   const entryMap = new Map();
+  const catalogById = buildPoolCatalogMap(pools);
 
   records.forEach((record) => {
     const normalized = normalizeOfficialImportRecord(record, {
@@ -95,10 +140,14 @@ function buildCanonicalPoolEntries(records, poolAliasMap = {}) {
       return;
     }
 
+    const existingPool = catalogById.get(canonicalPoolId) || catalogById.get(rawPoolId) || null;
+    const type = existingPool?.type || inferPoolTypeFromId(canonicalPoolId);
+
     entryMap.set(canonicalPoolId, {
       id: canonicalPoolId,
       name: normalized.poolName || canonicalPoolId,
-      type: inferPoolTypeFromId(canonicalPoolId),
+      type,
+      ...resolveImportedExtraMetadata(canonicalPoolId, type, existingPool),
       locked: false,
     });
   });
@@ -229,7 +278,7 @@ export async function prepareOfficialImportPersistenceData({
   return {
     currentGameUid,
     currentAccountKey,
-    poolEntries: buildCanonicalPoolEntries(records, resolvedPoolAliasMap),
+    poolEntries: buildCanonicalPoolEntries(records, resolvedPoolAliasMap, pools),
     historyRecords: buildImportedHistoryRecords({
       records,
       userInfo,

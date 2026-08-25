@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { characterCache } from '../characterUtils.js';
 import {
+  applyPoolSelectorScopeView,
   buildPoolSelectorGroups,
   buildPoolSelectorVersionFold,
+  getPoolFeaturedLabel,
   resolvePoolSelectorVersionId,
 } from '../poolSelectorDisplay.js';
 
@@ -61,9 +63,7 @@ describe('poolSelectorDisplay', () => {
     ]);
 
     const groups = buildPoolSelectorGroups({
-      pools: [
-        { id: 'pool_standard', type: 'standard', name: '基础寻访' },
-      ],
+      pools: [{ id: 'pool_standard', type: 'standard', name: '基础寻访' }],
       locale: 'zh-CN',
     });
 
@@ -94,9 +94,7 @@ describe('poolSelectorDisplay', () => {
     ]);
 
     const groups = buildPoolSelectorGroups({
-      pools: [
-        { id: 'pool_weapon', type: 'weapon', isLimitedWeapon: true, name: '行舟审锻', up_character: '焰羽火燎' },
-      ],
+      pools: [{ id: 'pool_weapon', type: 'weapon', isLimitedWeapon: true, name: '行舟审锻', up_character: '焰羽火燎' }],
       locale: 'zh-CN',
     });
 
@@ -108,15 +106,17 @@ describe('poolSelectorDisplay', () => {
 
   it('does not display malformed weapon featured IDs beside a named UP item', () => {
     const groups = buildPoolSelectorGroups({
-      pools: [{
-        id: 'weponbox_1_3_2',
-        type: 'weapon',
-        isLimitedWeapon: true,
-        name: '染赤申领',
-        up_character: '镀红祝福',
-        featured_characters: ['wpn_lance_0015', 'wpn_lance_0010', 'wpn_lance_0011']
-      }],
-      locale: 'zh-CN'
+      pools: [
+        {
+          id: 'weponbox_1_3_2',
+          type: 'weapon',
+          isLimitedWeapon: true,
+          name: '染赤申领',
+          up_character: '镀红祝福',
+          featured_characters: ['wpn_lance_0015', 'wpn_lance_0010', 'wpn_lance_0011'],
+        },
+      ],
+      locale: 'zh-CN',
     });
 
     const weaponPool = groups[0].pools[0];
@@ -131,7 +131,7 @@ describe('poolSelectorDisplay', () => {
       startsAt: `2026-0${version}-01T00:00:00Z`,
       poolIds: [`character-v${version}`, `weapon-v${version}`],
     }));
-    const pools = versionTimeline.flatMap((version, index) => ([
+    const pools = versionTimeline.flatMap((version, index) => [
       {
         id: version.poolIds[0],
         type: 'limited_character',
@@ -145,7 +145,7 @@ describe('poolSelectorDisplay', () => {
         name: `武器 ${index + 1}`,
         start_time: version.startsAt,
       },
-    ]));
+    ]);
 
     const groups = buildPoolSelectorGroups({ pools, versionTimeline, referenceDate: '2026-05-01T00:00:00Z' });
     const characterFold = groups.find((group) => group.type === 'limited').versionFold;
@@ -198,5 +198,222 @@ describe('poolSelectorDisplay', () => {
     expect(groups[0].disableCollapse).toBe(true);
     expect(groups[0].versionFold.enabled).toBe(false);
     expect(groups[0].versionFold.directPools).toHaveLength(2);
+  });
+
+  it('uses capabilities for reconstruction labels, entity localization and avatar counts', () => {
+    characterCache.applyCharacters([
+      { id: 'rw-up', name: '重构武器UP', avatar_url: '/avatars/rw.webp', rarity: 6, type: 'weapon' },
+      { id: 'rc-up', name: '重构角色UP', avatar_url: '/avatars/rc.webp', rarity: 6, type: 'character' },
+      ...Array.from({ length: 4 }, (_, index) => ({
+        id: `festival-${index}`,
+        name: `辉光角色${index + 1}`,
+        avatar_url: `/avatars/festival-${index}.webp`,
+        rarity: 6,
+        type: 'character',
+      })),
+    ]);
+    const groups = buildPoolSelectorGroups({
+      pools: [
+        {
+          id: 'recon-weapon',
+          type: 'extra',
+          name: '武器重构',
+          extra_subtype: 'reconstruction',
+          extra_rule_profile: 'reconstruction_weapon_v1',
+          extra_series_key: 'rw',
+          up_character: '重构武器UP',
+          featured_characters: ['其他武器', '重构武器UP'],
+        },
+        {
+          id: 'recon-character',
+          type: 'extra',
+          name: '角色重构',
+          extra_subtype: 'reconstruction',
+          extra_rule_profile: 'reconstruction_character_v1',
+          extra_series_key: 'rc',
+          up_character: '重构角色UP',
+          featured_characters: ['重构角色UP', '其他角色'],
+        },
+        {
+          id: 'festival',
+          type: 'extra',
+          name: '辉光',
+          extra_subtype: 'special',
+          extra_rule_profile: 'brilliance_festival_v1',
+          featured_characters: ['辉光角色1', '辉光角色2', '辉光角色3', '辉光角色4'],
+        },
+      ],
+      locale: 'zh-CN',
+    });
+    const allExtraPools = groups.find((group) => group.type === 'extra').pools;
+    const reconWeapon = allExtraPools.find((pool) => pool.id === 'recon-weapon');
+    const reconCharacter = allExtraPools.find((pool) => pool.id === 'recon-character');
+    const festival = allExtraPools.find((pool) => pool.id === 'festival');
+
+    expect(getPoolFeaturedLabel(reconWeapon, { locale: 'zh-CN', short: true })).toBe('UP武器');
+    expect(reconWeapon.displayFeaturedCharacters).toEqual(['重构武器UP']);
+    expect(reconWeapon.avatarLookupNames).toEqual(['重构武器UP']);
+    expect(reconCharacter.displayFeaturedCharacters).toEqual(['重构角色UP']);
+    expect(reconCharacter.avatarLookupNames).toEqual(['重构角色UP']);
+    expect(festival.displayFeaturedCharacters).toEqual(['辉光角色1', '辉光角色2', '辉光角色3', '辉光角色4']);
+    expect(festival.avatarLookupNames).toEqual(['辉光角色1', '辉光角色2', '辉光角色3', '辉光角色4']);
+  });
+
+  it('groups extra pools by explicit subtype with the single legacy special fallback', () => {
+    const groups = buildPoolSelectorGroups({
+      pools: [
+        { id: 'joint_reconstruction', type: 'extra', name: '重构', extra_subtype: 'reconstruction' },
+        {
+          id: 'joint_reconstruction_claim',
+          type: 'extra',
+          name: '重构申领',
+          extra_subtype: 'reconstruction',
+          extra_rule_profile: 'reconstruction_weapon_v1',
+        },
+        { id: 'joint_special', type: 'extra', name: '特殊', extraSubtype: 'special' },
+        { id: 'joint_1_2_2', type: 'extra', name: '旧特殊' },
+        { id: 'joint_unknown', type: 'extra', name: '未知附加' },
+        { id: 'joint_1_2_2_explicit', type: 'extra', name: '显式重构', extra_subtype: 'reconstruction' },
+      ],
+      locale: 'zh-CN',
+    });
+
+    const extraGroup = groups.find((group) => group.type === 'extra');
+    expect(extraGroup.groupId).toBe('__group_extra');
+    expect(extraGroup.subgroups.map((subgroup) => subgroup.subtype)).toEqual([
+      'reconstruction',
+      'reconstruction_claim',
+      'special',
+      'unclassified',
+    ]);
+    expect(extraGroup.subgroups[0].pools.map((pool) => pool.id).sort()).toEqual([
+      'joint_1_2_2_explicit',
+      'joint_reconstruction',
+    ]);
+    expect(extraGroup.subgroups[1]).toMatchObject({
+      label: '重构申领',
+      groupId: '__group_extra:reconstruction_claim',
+      defaultExpanded: true,
+    });
+    expect(extraGroup.subgroups[1].pools.map((pool) => pool.id)).toEqual(['joint_reconstruction_claim']);
+    expect(extraGroup.subgroups[2].pools.map((pool) => pool.id).sort()).toEqual(['joint_1_2_2', 'joint_special']);
+    expect(extraGroup.subgroups[3].pools.map((pool) => pool.id)).toEqual(['joint_unknown']);
+  });
+
+  it('sorts each extra subtype by timing and uses pool id as the stable fallback', () => {
+    const groups = buildPoolSelectorGroups({
+      pools: [
+        { id: 'z_untimed', type: 'extra', name: '同名', extra_subtype: 'reconstruction' },
+        { id: 'a_untimed', type: 'extra', name: '同名', extra_subtype: 'reconstruction' },
+        {
+          id: 'active',
+          type: 'extra',
+          name: '进行中',
+          extra_subtype: 'reconstruction',
+          start_time: '2026-08-01T00:00:00Z',
+          end_time: '2026-09-01T00:00:00Z',
+        },
+        {
+          id: 'upcoming',
+          type: 'extra',
+          name: '即将',
+          extra_subtype: 'reconstruction',
+          start_time: '2026-09-01T00:00:00Z',
+          end_time: '2026-10-01T00:00:00Z',
+        },
+        {
+          id: 'expired',
+          type: 'extra',
+          name: '结束',
+          extra_subtype: 'reconstruction',
+          start_time: '2026-07-01T00:00:00Z',
+          end_time: '2026-08-01T00:00:00Z',
+        },
+      ],
+      referenceDate: new Date('2026-08-24T00:00:00Z'),
+      locale: 'zh-CN',
+    });
+
+    const reconstruction = groups.find((group) => group.type === 'extra').subgroups[0];
+    expect(reconstruction.pools.map((pool) => pool.id)).toEqual([
+      'active',
+      'upcoming',
+      'expired',
+      'a_untimed',
+      'z_untimed',
+    ]);
+  });
+
+  it('keeps a zero-pull special catalog header collapsed until explicitly revealed', () => {
+    const catalogGroups = buildPoolSelectorGroups({
+      pools: [
+        { id: 'joint_reconstruction', type: 'extra', name: '重构', extra_subtype: 'reconstruction' },
+        { id: 'joint_special', type: 'extra', name: '特殊', extra_subtype: 'special' },
+      ],
+      poolPullCounts: { joint_reconstruction: 2 },
+      locale: 'zh-CN',
+    });
+
+    const collapsedView = applyPoolSelectorScopeView({
+      groups: catalogGroups,
+      hideZeroPullPools: true,
+    });
+    const collapsedSpecial = collapsedView[0].subgroups.find((subgroup) => subgroup.subtype === 'special');
+    expect(collapsedSpecial).toMatchObject({
+      groupId: '__group_extra:special',
+      totalPulls: 0,
+      poolCount: 1,
+      isExpanded: false,
+    });
+    expect(collapsedSpecial.pools).toEqual([]);
+    expect(collapsedSpecial.allPools.map((pool) => pool.id)).toEqual(['joint_special']);
+
+    const expandedView = applyPoolSelectorScopeView({
+      groups: catalogGroups,
+      hideZeroPullPools: true,
+      subgroupExpansionOverrides: { '__group_extra:special': true },
+    });
+    const expandedSpecial = expandedView[0].subgroups.find((subgroup) => subgroup.subtype === 'special');
+    expect(expandedSpecial.isExpanded).toBe(true);
+    expect(expandedSpecial.pools.map((pool) => pool.id)).toEqual(['joint_special']);
+  });
+
+  it('reveals zero-pull special pools for search hits and selected subtype scopes', () => {
+    const pools = [{ id: 'joint_special', type: 'extra', name: 'Festival Special', extra_subtype: 'special' }];
+    const searchedGroups = buildPoolSelectorGroups({
+      pools,
+      searchQuery: 'festival',
+      locale: 'en-US',
+    });
+    const searchedView = applyPoolSelectorScopeView({
+      groups: searchedGroups,
+      hideZeroPullPools: true,
+      searchQuery: 'festival',
+    });
+    expect(searchedView[0].subgroups[0].pools.map((pool) => pool.id)).toEqual(['joint_special']);
+
+    const selectedGroups = buildPoolSelectorGroups({
+      pools,
+      searchQuery: 'no match',
+      currentPoolId: '__group_extra:special',
+      locale: 'en-US',
+    });
+    const selectedView = applyPoolSelectorScopeView({
+      groups: selectedGroups,
+      currentPoolId: '__group_extra:special',
+      hideZeroPullPools: true,
+      searchQuery: 'no match',
+    });
+    expect(selectedView[0].subgroups[0].isExpanded).toBe(true);
+    expect(selectedView[0].subgroups[0].pools.map((pool) => pool.id)).toEqual(['joint_special']);
+  });
+
+  it('does not render a special subgroup when the catalog has no special pool', () => {
+    const groups = buildPoolSelectorGroups({
+      pools: [{ id: 'joint_reconstruction', type: 'extra', name: '重构', extra_subtype: 'reconstruction' }],
+      locale: 'zh-CN',
+    });
+
+    expect(groups[0].subgroups.map((subgroup) => subgroup.subtype)).toEqual(['reconstruction']);
   });
 });

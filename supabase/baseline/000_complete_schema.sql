@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-08-24T15:17:19.845Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/176_harden_aic_saves_and_economy.sql
+--   4. 生成时间: 2026-08-25T07:02:20.317Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/179_split_reconstruction_claim_subtype.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -31904,4 +31904,2537 @@ COMMENT ON TABLE public.game_reward_claims IS
 COMMENT ON TABLE public.game_purchase_events IS
   '小游戏商店购买不可变流水，按 idempotency_key 防重复扣费与重复授予。';
 -- <<< END MIGRATION: active/176_harden_aic_saves_and_economy.sql
+
+-- >>> BEGIN MIGRATION: active/177_add_extra_pool_subtypes.sql
+-- 177: classify extra recruitment pools without changing pools.type or canonical ids.
+
+ALTER TABLE public.pools
+  ADD COLUMN IF NOT EXISTS extra_subtype TEXT,
+  ADD COLUMN IF NOT EXISTS extra_rule_profile TEXT,
+  ADD COLUMN IF NOT EXISTS extra_series_key TEXT,
+  ADD COLUMN IF NOT EXISTS extra_series_phase INTEGER;
+
+ALTER TABLE public.pools
+  DROP CONSTRAINT IF EXISTS pools_extra_subtype_check,
+  DROP CONSTRAINT IF EXISTS pools_extra_rule_profile_check,
+  DROP CONSTRAINT IF EXISTS pools_extra_metadata_contract_check;
+
+ALTER TABLE public.pools
+  ADD CONSTRAINT pools_extra_subtype_check CHECK (
+    extra_subtype IS NULL
+    OR extra_subtype IN ('reconstruction', 'special')
+  ),
+  ADD CONSTRAINT pools_extra_rule_profile_check CHECK (
+    extra_rule_profile IS NULL
+    OR extra_rule_profile IN (
+      'reconstruction_character_v1',
+      'reconstruction_weapon_v1',
+      'brilliance_festival_v1'
+    )
+  ),
+  ADD CONSTRAINT pools_extra_metadata_contract_check CHECK ((
+    (
+      type <> 'extra'
+      AND extra_subtype IS NULL
+      AND extra_rule_profile IS NULL
+      AND extra_series_key IS NULL
+      AND extra_series_phase IS NULL
+    )
+    OR (
+      type = 'extra'
+      AND (
+        (
+          extra_subtype IS NULL
+          AND extra_rule_profile IS NULL
+          AND extra_series_key IS NULL
+          AND extra_series_phase IS NULL
+        )
+        OR (
+          extra_subtype = 'special'
+          AND extra_rule_profile = 'brilliance_festival_v1'
+          AND extra_series_key IS NULL
+          AND extra_series_phase IS NULL
+        )
+        OR (
+          extra_subtype = 'reconstruction'
+          AND extra_rule_profile IN (
+            'reconstruction_character_v1',
+            'reconstruction_weapon_v1'
+          )
+          AND NULLIF(BTRIM(extra_series_key), '') IS NOT NULL
+          AND extra_series_phase > 0
+        )
+      )
+    )
+  ) IS TRUE);
+
+COMMENT ON COLUMN public.pools.extra_subtype IS
+  '附加寻访子类型：reconstruction（重构）或 special（特殊庆典）；非附加寻访必须为空。';
+COMMENT ON COLUMN public.pools.extra_rule_profile IS
+  '附加寻访规则模板；用于区分重构角色、重构申领与辉光庆典。';
+COMMENT ON COLUMN public.pools.extra_series_key IS
+  '重构系列稳定键；同一系列不同阶段共用，非重构附加寻访必须为空。';
+COMMENT ON COLUMN public.pools.extra_series_phase IS
+  '重构系列阶段，从 1 开始的正整数；非重构附加寻访必须为空。';
+
+-- This is the only legacy Joint id with a known special-banner contract.
+-- Do not infer special classification from the joint_ prefix.
+UPDATE public.pools
+SET
+  type = 'extra',
+  extra_subtype = 'special',
+  extra_rule_profile = 'brilliance_festival_v1',
+  extra_series_key = NULL,
+  extra_series_phase = NULL,
+  updated_at = NOW()
+WHERE pool_id = 'joint_1_2_2';
+
+DROP FUNCTION IF EXISTS public.get_app_visible_pools();
+
+CREATE OR REPLACE FUNCTION public.get_app_visible_pools()
+RETURNS TABLE (
+  pool_id TEXT,
+  name TEXT,
+  name_en TEXT,
+  type TEXT,
+  extra_subtype TEXT,
+  extra_rule_profile TEXT,
+  extra_series_key TEXT,
+  extra_series_phase INTEGER,
+  locked BOOLEAN,
+  is_limited_weapon BOOLEAN,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  user_id UUID,
+  creator_username TEXT,
+  creator_role TEXT,
+  up_character TEXT,
+  description TEXT,
+  banner_url TEXT,
+  start_time TIMESTAMPTZ,
+  end_time TIMESTAMPTZ,
+  featured_characters TEXT[]
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  WITH visible_pools AS (
+    SELECT p.*
+    FROM public.pools AS p
+    WHERE
+      p.pool_id IN ('standard', 'beginner')
+      OR split_part(p.pool_id, '_', 1) IN ('special', 'weponbox', 'weaponbox')
+      OR p.user_id IS NULL
+      OR p.user_id = auth.uid()
+      OR p.locked = true
+      OR EXISTS (
+        SELECT 1
+        FROM public.profiles AS owner_profile
+        WHERE owner_profile.id = p.user_id
+          AND owner_profile.role IN ('admin', 'super_admin')
+      )
+  ),
+  ranked_pools AS (
+    SELECT
+      p.pool_id,
+      p.name,
+      p.name_en,
+      p.type,
+      p.extra_subtype,
+      p.extra_rule_profile,
+      p.extra_series_key,
+      p.extra_series_phase,
+      p.locked,
+      p.is_limited_weapon,
+      p.created_at,
+      p.updated_at,
+      p.user_id,
+      prof.username AS creator_username,
+      prof.role AS creator_role,
+      p.up_character,
+      p.description,
+      p.banner_url,
+      p.start_time,
+      p.end_time,
+      p.featured_characters,
+      ROW_NUMBER() OVER (
+        PARTITION BY p.pool_id
+        ORDER BY
+          CASE
+            WHEN prof.role = 'super_admin' THEN 3
+            WHEN prof.role = 'admin' THEN 2
+            ELSE 1
+          END DESC,
+          (
+            CASE WHEN NULLIF(BTRIM(COALESCE(p.up_character, '')), '') IS NOT NULL THEN 4 ELSE 0 END +
+            CASE WHEN p.start_time IS NOT NULL THEN 2 ELSE 0 END +
+            CASE WHEN p.end_time IS NOT NULL THEN 2 ELSE 0 END +
+            CASE WHEN COALESCE(array_length(p.featured_characters, 1), 0) > 0 THEN 1 ELSE 0 END +
+            CASE WHEN NULLIF(BTRIM(COALESCE(p.banner_url, '')), '') IS NOT NULL THEN 1 ELSE 0 END +
+            CASE WHEN NULLIF(BTRIM(COALESCE(p.description, '')), '') IS NOT NULL THEN 1 ELSE 0 END +
+            CASE WHEN NULLIF(BTRIM(COALESCE(p.name_en, '')), '') IS NOT NULL THEN 1 ELSE 0 END +
+            CASE WHEN p.locked THEN 1 ELSE 0 END
+          ) DESC,
+          CASE WHEN p.user_id = auth.uid() THEN 1 ELSE 0 END DESC,
+          COALESCE(p.start_time, p.updated_at, p.created_at, to_timestamp(0)) DESC,
+          COALESCE(p.updated_at, p.created_at, to_timestamp(0)) DESC
+      ) AS row_rank
+    FROM visible_pools AS p
+    LEFT JOIN public.profiles AS prof
+      ON prof.id = p.user_id
+  )
+  SELECT
+    pool_id,
+    name,
+    name_en,
+    type,
+    extra_subtype,
+    extra_rule_profile,
+    extra_series_key,
+    extra_series_phase,
+    locked,
+    is_limited_weapon,
+    created_at,
+    updated_at,
+    user_id,
+    creator_username,
+    creator_role,
+    up_character,
+    description,
+    banner_url,
+    start_time,
+    end_time,
+    featured_characters
+  FROM ranked_pools
+  WHERE row_rank = 1
+  ORDER BY COALESCE(start_time, created_at, updated_at, to_timestamp(0)) DESC, pool_id ASC;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_app_visible_pools() TO anon, authenticated;
+
+COMMENT ON FUNCTION public.get_app_visible_pools() IS
+  '返回 app 端可见卡池及附加寻访分类字段，并在服务端完成 pool_id 级别去重。';
+
+CREATE OR REPLACE FUNCTION public.admin_upsert_pool_with_aliases(
+  p_pool_id TEXT,
+  p_insert_payload JSONB,
+  p_update_payload JSONB DEFAULT '{}'::jsonb,
+  p_alias_rows JSONB DEFAULT '[]'::jsonb,
+  p_pool_character_rows JSONB DEFAULT '[]'::jsonb,
+  p_actor_user_id UUID DEFAULT NULL
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_actor_user_id UUID;
+  v_pool_type TEXT;
+  v_extra_subtype TEXT;
+  v_extra_rule_profile TEXT;
+  v_extra_series_key TEXT;
+  v_extra_series_phase_text TEXT;
+BEGIN
+  IF NOT public.is_super_admin() THEN
+    RAISE EXCEPTION 'only super_admin can manage pools';
+  END IF;
+
+  IF COALESCE(BTRIM(p_pool_id), '') = '' THEN
+    RAISE EXCEPTION 'p_pool_id is required';
+  END IF;
+
+  IF p_insert_payload IS NULL OR jsonb_typeof(p_insert_payload) <> 'object' THEN
+    RAISE EXCEPTION 'p_insert_payload must be a JSON object';
+  END IF;
+
+  IF p_update_payload IS NULL THEN
+    p_update_payload := '{}'::jsonb;
+  END IF;
+  IF jsonb_typeof(p_update_payload) <> 'object' THEN
+    RAISE EXCEPTION 'p_update_payload must be a JSON object';
+  END IF;
+
+  IF p_alias_rows IS NULL THEN
+    p_alias_rows := '[]'::jsonb;
+  END IF;
+  IF jsonb_typeof(p_alias_rows) <> 'array' THEN
+    RAISE EXCEPTION 'p_alias_rows must be a JSON array';
+  END IF;
+
+  IF p_pool_character_rows IS NULL THEN
+    p_pool_character_rows := '[]'::jsonb;
+  END IF;
+  IF jsonb_typeof(p_pool_character_rows) <> 'array' THEN
+    RAISE EXCEPTION 'p_pool_character_rows must be a JSON array';
+  END IF;
+
+  v_pool_type := COALESCE(NULLIF(BTRIM(p_insert_payload->>'type'), ''), 'limited');
+  v_extra_subtype := NULLIF(BTRIM(p_insert_payload->>'extra_subtype'), '');
+  v_extra_rule_profile := NULLIF(BTRIM(p_insert_payload->>'extra_rule_profile'), '');
+  v_extra_series_key := NULLIF(BTRIM(p_insert_payload->>'extra_series_key'), '');
+  v_extra_series_phase_text := NULLIF(BTRIM(p_insert_payload->>'extra_series_phase'), '');
+
+  IF v_pool_type <> 'extra' THEN
+    IF v_extra_subtype IS NOT NULL
+      OR v_extra_rule_profile IS NOT NULL
+      OR v_extra_series_key IS NOT NULL
+      OR v_extra_series_phase_text IS NOT NULL THEN
+      RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'extra_pool_fields_not_allowed';
+    END IF;
+  ELSIF v_extra_subtype = 'special' THEN
+    IF v_extra_rule_profile IS DISTINCT FROM 'brilliance_festival_v1'
+      OR v_extra_series_key IS NOT NULL
+      OR v_extra_series_phase_text IS NOT NULL THEN
+      RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'brilliance_pool_metadata_invalid';
+    END IF;
+  ELSIF v_extra_subtype = 'reconstruction' THEN
+    IF v_extra_rule_profile IS NULL
+      OR v_extra_rule_profile NOT IN ('reconstruction_character_v1', 'reconstruction_weapon_v1')
+      OR v_extra_series_key IS NULL
+      OR v_extra_series_phase_text !~ '^[1-9][0-9]*$' THEN
+      RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'reconstruction_pool_metadata_invalid';
+    END IF;
+  ELSE
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'extra_pool_template_required';
+  END IF;
+
+  v_actor_user_id := COALESCE(
+    p_actor_user_id,
+    CASE
+      WHEN COALESCE(BTRIM(p_insert_payload->>'user_id'), '') <> ''
+      THEN BTRIM(p_insert_payload->>'user_id')::UUID
+      ELSE NULL
+    END,
+    auth.uid()
+  );
+
+  IF v_actor_user_id IS NULL AND auth.role() = 'service_role' THEN
+    SELECT id
+      INTO v_actor_user_id
+      FROM public.profiles
+     WHERE role = 'super_admin'
+     ORDER BY created_at ASC NULLS LAST, id ASC
+     LIMIT 1;
+  END IF;
+
+  IF v_actor_user_id IS NULL THEN
+    RAISE EXCEPTION 'pool owner is required';
+  END IF;
+
+  INSERT INTO public.pools (
+    user_id,
+    pool_id,
+    name,
+    name_en,
+    type,
+    extra_subtype,
+    extra_rule_profile,
+    extra_series_key,
+    extra_series_phase,
+    locked,
+    is_limited_weapon,
+    description,
+    start_time,
+    end_time,
+    banner_url,
+    featured_characters,
+    up_character
+  )
+  VALUES (
+    v_actor_user_id,
+    BTRIM(p_pool_id),
+    BTRIM(p_insert_payload->>'name'),
+    NULLIF(BTRIM(p_insert_payload->>'name_en'), ''),
+    COALESCE(NULLIF(BTRIM(p_insert_payload->>'type'), ''), 'limited'),
+    NULLIF(BTRIM(p_insert_payload->>'extra_subtype'), ''),
+    NULLIF(BTRIM(p_insert_payload->>'extra_rule_profile'), ''),
+    NULLIF(BTRIM(p_insert_payload->>'extra_series_key'), ''),
+    NULLIF(BTRIM(p_insert_payload->>'extra_series_phase'), '')::INTEGER,
+    COALESCE((p_insert_payload->>'locked')::BOOLEAN, FALSE),
+    CASE
+      WHEN p_insert_payload ? 'is_limited_weapon'
+        AND jsonb_typeof(p_insert_payload->'is_limited_weapon') = 'boolean'
+      THEN (p_insert_payload->>'is_limited_weapon')::BOOLEAN
+      ELSE NULL
+    END,
+    NULLIF(BTRIM(p_insert_payload->>'description'), ''),
+    NULLIF(BTRIM(p_insert_payload->>'start_time'), '')::TIMESTAMPTZ,
+    NULLIF(BTRIM(p_insert_payload->>'end_time'), '')::TIMESTAMPTZ,
+    NULLIF(BTRIM(p_insert_payload->>'banner_url'), ''),
+    CASE
+      WHEN p_insert_payload ? 'featured_characters'
+        AND jsonb_typeof(p_insert_payload->'featured_characters') = 'array'
+      THEN ARRAY(
+        SELECT jsonb_array_elements_text(p_insert_payload->'featured_characters')
+      )
+      ELSE NULL
+    END,
+    NULLIF(BTRIM(p_insert_payload->>'up_character'), '')
+  )
+  ON CONFLICT (pool_id) DO UPDATE
+  SET
+    name = CASE
+      WHEN p_update_payload ? 'name'
+      THEN COALESCE(NULLIF(BTRIM(p_update_payload->>'name'), ''), public.pools.name)
+      ELSE public.pools.name
+    END,
+    name_en = CASE
+      WHEN p_update_payload ? 'name_en'
+      THEN NULLIF(BTRIM(p_update_payload->>'name_en'), '')
+      ELSE public.pools.name_en
+    END,
+    type = CASE
+      WHEN p_update_payload ? 'type'
+      THEN COALESCE(NULLIF(BTRIM(p_update_payload->>'type'), ''), public.pools.type)
+      ELSE public.pools.type
+    END,
+    extra_subtype = CASE
+      WHEN p_update_payload ? 'extra_subtype'
+      THEN NULLIF(BTRIM(p_update_payload->>'extra_subtype'), '')
+      ELSE public.pools.extra_subtype
+    END,
+    extra_rule_profile = CASE
+      WHEN p_update_payload ? 'extra_rule_profile'
+      THEN NULLIF(BTRIM(p_update_payload->>'extra_rule_profile'), '')
+      ELSE public.pools.extra_rule_profile
+    END,
+    extra_series_key = CASE
+      WHEN p_update_payload ? 'extra_series_key'
+      THEN NULLIF(BTRIM(p_update_payload->>'extra_series_key'), '')
+      ELSE public.pools.extra_series_key
+    END,
+    extra_series_phase = CASE
+      WHEN p_update_payload ? 'extra_series_phase'
+      THEN NULLIF(BTRIM(p_update_payload->>'extra_series_phase'), '')::INTEGER
+      ELSE public.pools.extra_series_phase
+    END,
+    locked = CASE
+      WHEN p_update_payload ? 'locked'
+        AND jsonb_typeof(p_update_payload->'locked') = 'boolean'
+      THEN (p_update_payload->>'locked')::BOOLEAN
+      ELSE public.pools.locked
+    END,
+    is_limited_weapon = CASE
+      WHEN p_update_payload ? 'is_limited_weapon'
+        AND jsonb_typeof(p_update_payload->'is_limited_weapon') = 'boolean'
+      THEN (p_update_payload->>'is_limited_weapon')::BOOLEAN
+      WHEN p_update_payload ? 'is_limited_weapon'
+        AND jsonb_typeof(p_update_payload->'is_limited_weapon') = 'null'
+      THEN NULL
+      ELSE public.pools.is_limited_weapon
+    END,
+    description = CASE
+      WHEN p_update_payload ? 'description'
+      THEN NULLIF(BTRIM(p_update_payload->>'description'), '')
+      ELSE public.pools.description
+    END,
+    start_time = CASE
+      WHEN p_update_payload ? 'start_time'
+      THEN NULLIF(BTRIM(p_update_payload->>'start_time'), '')::TIMESTAMPTZ
+      ELSE public.pools.start_time
+    END,
+    end_time = CASE
+      WHEN p_update_payload ? 'end_time'
+      THEN NULLIF(BTRIM(p_update_payload->>'end_time'), '')::TIMESTAMPTZ
+      ELSE public.pools.end_time
+    END,
+    banner_url = CASE
+      WHEN p_update_payload ? 'banner_url'
+      THEN NULLIF(BTRIM(p_update_payload->>'banner_url'), '')
+      ELSE public.pools.banner_url
+    END,
+    featured_characters = CASE
+      WHEN p_update_payload ? 'featured_characters'
+        AND jsonb_typeof(p_update_payload->'featured_characters') = 'array'
+      THEN ARRAY(
+        SELECT jsonb_array_elements_text(p_update_payload->'featured_characters')
+      )
+      WHEN p_update_payload ? 'featured_characters'
+        AND jsonb_typeof(p_update_payload->'featured_characters') = 'null'
+      THEN NULL
+      ELSE public.pools.featured_characters
+    END,
+    up_character = CASE
+      WHEN p_update_payload ? 'up_character'
+      THEN NULLIF(BTRIM(p_update_payload->>'up_character'), '')
+      ELSE public.pools.up_character
+    END;
+
+  INSERT INTO public.pool_id_aliases (
+    source,
+    alias_id,
+    pool_id,
+    is_primary,
+    note
+  )
+  SELECT
+    BTRIM(alias_entry.value->>'source'),
+    BTRIM(alias_entry.value->>'alias_id'),
+    BTRIM(p_pool_id),
+    COALESCE((alias_entry.value->>'is_primary')::BOOLEAN, FALSE),
+    NULLIF(BTRIM(alias_entry.value->>'note'), '')
+  FROM jsonb_array_elements(p_alias_rows) AS alias_entry(value)
+  WHERE
+    jsonb_typeof(alias_entry.value) = 'object'
+    AND COALESCE(BTRIM(alias_entry.value->>'source'), '') <> ''
+    AND COALESCE(BTRIM(alias_entry.value->>'alias_id'), '') <> ''
+  ON CONFLICT (source, alias_id) DO UPDATE
+  SET
+    pool_id = EXCLUDED.pool_id,
+    is_primary = EXCLUDED.is_primary,
+    note = EXCLUDED.note,
+    updated_at = NOW();
+
+  IF jsonb_array_length(p_pool_character_rows) > 0 THEN
+    DELETE FROM public.pool_characters
+    WHERE pool_id = BTRIM(p_pool_id);
+
+    INSERT INTO public.pool_characters (
+      pool_id,
+      character_id,
+      is_up
+    )
+    SELECT
+      BTRIM(p_pool_id),
+      BTRIM(character_entry.value->>'character_id'),
+      COALESCE((character_entry.value->>'is_up')::BOOLEAN, FALSE)
+    FROM jsonb_array_elements(p_pool_character_rows) AS character_entry(value)
+    WHERE
+      jsonb_typeof(character_entry.value) = 'object'
+      AND COALESCE(BTRIM(character_entry.value->>'character_id'), '') <> ''
+    ON CONFLICT (pool_id, character_id) DO UPDATE
+    SET is_up = EXCLUDED.is_up;
+  END IF;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.admin_upsert_pool_with_aliases(TEXT, JSONB, JSONB, JSONB, JSONB, UUID)
+  TO authenticated;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION public.admin_upsert_pool_with_aliases(TEXT, JSONB, JSONB, JSONB, JSONB, UUID)
+      TO service_role;
+  END IF;
+END;
+$$;
+
+COMMENT ON FUNCTION public.admin_upsert_pool_with_aliases(TEXT, JSONB, JSONB, JSONB, JSONB, UUID) IS
+  '管理端原子化写入单个卡池、附加寻访分类、alias 与 pool_characters。';
+
+-- Keep migration 135's legacy parameter overload compatible with uncategorized
+-- extra pools. The JSON overload remains strict for the HTTP admin route. This
+-- branch intentionally omits the four classification columns from conflict
+-- updates so an old caller cannot erase an explicit classification.
+CREATE OR REPLACE FUNCTION public.admin_upsert_pool_with_aliases(
+  p_pool_id TEXT,
+  p_name TEXT,
+  p_type TEXT DEFAULT 'limited',
+  p_description TEXT DEFAULT NULL,
+  p_start_time TIMESTAMPTZ DEFAULT NULL,
+  p_end_time TIMESTAMPTZ DEFAULT NULL,
+  p_up_character TEXT DEFAULT NULL,
+  p_featured_characters TEXT[] DEFAULT NULL,
+  p_banner_url TEXT DEFAULT NULL,
+  p_alias_rows JSONB DEFAULT '[]'::jsonb,
+  p_pool_character_rows JSONB DEFAULT '[]'::jsonb,
+  p_actor_user_id UUID DEFAULT NULL
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_actor_user_id UUID;
+  v_payload JSONB;
+  v_pool_type TEXT;
+BEGIN
+  v_payload := jsonb_build_object(
+    'name', p_name,
+    'type', p_type,
+    'description', p_description,
+    'start_time', p_start_time,
+    'end_time', p_end_time,
+    'up_character', p_up_character,
+    'featured_characters', p_featured_characters,
+    'banner_url', p_banner_url
+  );
+  v_pool_type := COALESCE(NULLIF(BTRIM(p_type), ''), 'limited');
+
+  IF v_pool_type <> 'extra' THEN
+    PERFORM public.admin_upsert_pool_with_aliases(
+      p_pool_id,
+      v_payload,
+      v_payload,
+      p_alias_rows,
+      p_pool_character_rows,
+      p_actor_user_id
+    );
+    RETURN;
+  END IF;
+
+  IF NOT public.is_super_admin() THEN
+    RAISE EXCEPTION 'only super_admin can manage pools';
+  END IF;
+
+  IF COALESCE(BTRIM(p_pool_id), '') = '' THEN
+    RAISE EXCEPTION 'p_pool_id is required';
+  END IF;
+
+  IF p_alias_rows IS NULL THEN
+    p_alias_rows := '[]'::jsonb;
+  END IF;
+  IF jsonb_typeof(p_alias_rows) <> 'array' THEN
+    RAISE EXCEPTION 'p_alias_rows must be a JSON array';
+  END IF;
+
+  IF p_pool_character_rows IS NULL THEN
+    p_pool_character_rows := '[]'::jsonb;
+  END IF;
+  IF jsonb_typeof(p_pool_character_rows) <> 'array' THEN
+    RAISE EXCEPTION 'p_pool_character_rows must be a JSON array';
+  END IF;
+
+  v_actor_user_id := COALESCE(p_actor_user_id, auth.uid());
+
+  IF v_actor_user_id IS NULL AND auth.role() = 'service_role' THEN
+    SELECT id
+      INTO v_actor_user_id
+      FROM public.profiles
+     WHERE role = 'super_admin'
+     ORDER BY created_at ASC NULLS LAST, id ASC
+     LIMIT 1;
+  END IF;
+
+  IF v_actor_user_id IS NULL THEN
+    RAISE EXCEPTION 'pool owner is required';
+  END IF;
+
+  INSERT INTO public.pools (
+    user_id,
+    pool_id,
+    name,
+    type,
+    locked,
+    is_limited_weapon,
+    description,
+    start_time,
+    end_time,
+    banner_url,
+    featured_characters,
+    up_character
+  )
+  VALUES (
+    v_actor_user_id,
+    BTRIM(p_pool_id),
+    BTRIM(p_name),
+    v_pool_type,
+    FALSE,
+    NULL,
+    NULLIF(BTRIM(p_description), ''),
+    p_start_time,
+    p_end_time,
+    NULLIF(BTRIM(p_banner_url), ''),
+    p_featured_characters,
+    NULLIF(BTRIM(p_up_character), '')
+  )
+  ON CONFLICT (pool_id) DO UPDATE
+  SET
+    name = COALESCE(NULLIF(BTRIM(p_name), ''), public.pools.name),
+    type = v_pool_type,
+    description = NULLIF(BTRIM(p_description), ''),
+    start_time = p_start_time,
+    end_time = p_end_time,
+    banner_url = NULLIF(BTRIM(p_banner_url), ''),
+    featured_characters = p_featured_characters,
+    up_character = NULLIF(BTRIM(p_up_character), '');
+
+  INSERT INTO public.pool_id_aliases (
+    source,
+    alias_id,
+    pool_id,
+    is_primary,
+    note
+  )
+  SELECT
+    BTRIM(alias_entry.value->>'source'),
+    BTRIM(alias_entry.value->>'alias_id'),
+    BTRIM(p_pool_id),
+    COALESCE((alias_entry.value->>'is_primary')::BOOLEAN, FALSE),
+    NULLIF(BTRIM(alias_entry.value->>'note'), '')
+  FROM jsonb_array_elements(p_alias_rows) AS alias_entry(value)
+  WHERE
+    jsonb_typeof(alias_entry.value) = 'object'
+    AND COALESCE(BTRIM(alias_entry.value->>'source'), '') <> ''
+    AND COALESCE(BTRIM(alias_entry.value->>'alias_id'), '') <> ''
+  ON CONFLICT (source, alias_id) DO UPDATE
+  SET
+    pool_id = EXCLUDED.pool_id,
+    is_primary = EXCLUDED.is_primary,
+    note = EXCLUDED.note,
+    updated_at = NOW();
+
+  IF jsonb_array_length(p_pool_character_rows) > 0 THEN
+    DELETE FROM public.pool_characters
+    WHERE pool_id = BTRIM(p_pool_id);
+
+    INSERT INTO public.pool_characters (
+      pool_id,
+      character_id,
+      is_up
+    )
+    SELECT
+      BTRIM(p_pool_id),
+      BTRIM(character_entry.value->>'character_id'),
+      COALESCE((character_entry.value->>'is_up')::BOOLEAN, FALSE)
+    FROM jsonb_array_elements(p_pool_character_rows) AS character_entry(value)
+    WHERE
+      jsonb_typeof(character_entry.value) = 'object'
+      AND COALESCE(BTRIM(character_entry.value->>'character_id'), '') <> ''
+    ON CONFLICT (pool_id, character_id) DO UPDATE
+    SET is_up = EXCLUDED.is_up;
+  END IF;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.admin_upsert_pool_with_aliases(
+  TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ,
+  TEXT, TEXT[], TEXT, JSONB, JSONB, UUID
+) TO authenticated;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION public.admin_upsert_pool_with_aliases(
+      TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ,
+      TEXT, TEXT[], TEXT, JSONB, JSONB, UUID
+    ) TO service_role;
+  END IF;
+END;
+$$;
+
+COMMENT ON FUNCTION public.admin_upsert_pool_with_aliases(
+  TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ,
+  TEXT, TEXT[], TEXT, JSONB, JSONB, UUID
+) IS
+  '兼容旧参数形式的卡池写入 RPC；extra 可保持未分类，且不会覆盖已有附加寻访分类。';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid = 'public.history'::REGCLASS
+      AND constraint_row.contype IN ('p', 'u')
+      AND (
+        SELECT array_agg(attribute.attname::TEXT ORDER BY key_column.ordinality)
+        FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key_column(attnum, ordinality)
+        JOIN pg_attribute AS attribute
+          ON attribute.attrelid = constraint_row.conrelid
+         AND attribute.attnum = key_column.attnum
+      ) = ARRAY['user_id', 'game_uid', 'server_scope', 'pool_id', 'seq_id']::TEXT[]
+  ) THEN
+    RAISE EXCEPTION USING
+      ERRCODE = '55000',
+      MESSAGE = 'official_import_history_conflict_constraint_missing';
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.commit_official_import_records(
+  p_task_id UUID,
+  p_user_id UUID,
+  p_pools JSONB,
+  p_history JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_task public.official_import_tasks%ROWTYPE;
+  v_pools JSONB := COALESCE(p_pools, '[]'::JSONB);
+  v_history JSONB := COALESCE(p_history, '[]'::JSONB);
+  v_pool_count INTEGER := 0;
+  v_history_count INTEGER := 0;
+  v_expected_count INTEGER := 0;
+  v_result JSONB;
+BEGIN
+  IF jsonb_typeof(v_pools) <> 'array' OR jsonb_typeof(v_history) <> 'array' THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'official_import_payload_must_be_arrays';
+  END IF;
+
+  SELECT *
+  INTO v_task
+  FROM public.official_import_tasks
+  WHERE id = p_task_id
+    AND user_id = p_user_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'official_import_task_not_found';
+  END IF;
+  IF v_task.status = 'committed' THEN
+    RETURN COALESCE(v_task.summary -> 'commitResult', '{}'::JSONB);
+  END IF;
+  IF v_task.status <> 'confirming' THEN
+    RAISE EXCEPTION USING ERRCODE = '55000', MESSAGE = 'official_import_task_not_confirming';
+  END IF;
+
+  IF NOT public.is_account_credential_allowed(p_user_id) THEN
+    RAISE EXCEPTION USING ERRCODE = '28000', MESSAGE = 'temporary_password_expired';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_to_recordset(v_history) AS item(
+      record_id TEXT,
+      pool_id TEXT,
+      seq_id TEXT,
+      game_uid TEXT,
+      rarity INTEGER,
+      timestamp TIMESTAMPTZ
+    )
+    WHERE NULLIF(btrim(item.record_id), '') IS NULL
+      OR NULLIF(btrim(item.pool_id), '') IS NULL
+      OR NULLIF(btrim(item.seq_id), '') IS NULL
+      OR NULLIF(btrim(item.game_uid), '') IS NULL
+      OR item.rarity IS NULL
+      OR item.rarity NOT BETWEEN 3 AND 6
+      OR item.timestamp IS NULL
+  ) THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'official_import_history_record_invalid';
+  END IF;
+
+  INSERT INTO public.pools (
+    user_id,
+    pool_id,
+    name,
+    type,
+    extra_subtype,
+    extra_rule_profile,
+    extra_series_key,
+    extra_series_phase,
+    start_time,
+    end_time,
+    up_character,
+    featured_characters,
+    created_at,
+    updated_at
+  )
+  SELECT
+    p_user_id,
+    item.pool_id,
+    COALESCE(NULLIF(btrim(item.name), ''), item.pool_id),
+    item.type,
+    item.extra_subtype,
+    item.extra_rule_profile,
+    item.extra_series_key,
+    item.extra_series_phase,
+    item.start_time,
+    item.end_time,
+    NULLIF(btrim(item.up_character), ''),
+    item.featured_characters,
+    COALESCE(item.created_at, NOW()),
+    NOW()
+  FROM jsonb_to_recordset(v_pools) AS item(
+    pool_id TEXT,
+    name TEXT,
+    type TEXT,
+    extra_subtype TEXT,
+    extra_rule_profile TEXT,
+    extra_series_key TEXT,
+    extra_series_phase INTEGER,
+    start_time TIMESTAMPTZ,
+    end_time TIMESTAMPTZ,
+    up_character TEXT,
+    featured_characters TEXT[],
+    created_at TIMESTAMPTZ
+  )
+  WHERE NULLIF(btrim(item.pool_id), '') IS NOT NULL
+    AND NULLIF(btrim(item.type), '') IS NOT NULL
+  ON CONFLICT (pool_id) DO NOTHING;
+  GET DIAGNOSTICS v_pool_count = ROW_COUNT;
+
+  INSERT INTO public.history (
+    user_id,
+    record_id,
+    pool_id,
+    seq_id,
+    game_uid,
+    nick_name,
+    rarity,
+    character_name,
+    item_name,
+    character_id,
+    timestamp,
+    pity,
+    is_free,
+    is_info_book,
+    is_new,
+    is_standard,
+    server_id,
+    region,
+    batch_id,
+    special_type,
+    created_at,
+    updated_at
+  )
+  SELECT
+    p_user_id,
+    item.record_id,
+    item.pool_id,
+    item.seq_id,
+    item.game_uid,
+    item.nick_name,
+    item.rarity,
+    item.character_name,
+    item.item_name,
+    item.character_id,
+    item.timestamp,
+    LEAST(GREATEST(COALESCE(item.pity, 0), 0), 80),
+    COALESCE(item.is_free, FALSE),
+    COALESCE(item.is_info_book, FALSE),
+    COALESCE(item.is_new, FALSE),
+    COALESCE(item.is_standard, FALSE),
+    item.server_id,
+    item.region,
+    item.batch_id,
+    item.special_type,
+    COALESCE(item.created_at, NOW()),
+    NOW()
+  FROM jsonb_to_recordset(v_history) AS item(
+    record_id TEXT,
+    pool_id TEXT,
+    seq_id TEXT,
+    game_uid TEXT,
+    nick_name TEXT,
+    rarity INTEGER,
+    character_name TEXT,
+    item_name TEXT,
+    character_id TEXT,
+    timestamp TIMESTAMPTZ,
+    pity INTEGER,
+    is_free BOOLEAN,
+    is_info_book BOOLEAN,
+    is_new BOOLEAN,
+    is_standard BOOLEAN,
+    server_id TEXT,
+    region TEXT,
+    batch_id TEXT,
+    special_type TEXT,
+    created_at TIMESTAMPTZ
+  )
+  ON CONFLICT (user_id, game_uid, server_scope, pool_id, seq_id)
+  DO UPDATE SET
+    record_id = EXCLUDED.record_id,
+    nick_name = EXCLUDED.nick_name,
+    rarity = EXCLUDED.rarity,
+    character_name = EXCLUDED.character_name,
+    item_name = EXCLUDED.item_name,
+    character_id = EXCLUDED.character_id,
+    timestamp = EXCLUDED.timestamp,
+    pity = EXCLUDED.pity,
+    is_free = EXCLUDED.is_free,
+    is_info_book = EXCLUDED.is_info_book,
+    is_new = EXCLUDED.is_new,
+    is_standard = EXCLUDED.is_standard,
+    server_id = EXCLUDED.server_id,
+    region = EXCLUDED.region,
+    batch_id = EXCLUDED.batch_id,
+    special_type = EXCLUDED.special_type,
+    updated_at = NOW();
+  GET DIAGNOSTICS v_history_count = ROW_COUNT;
+
+  v_expected_count := COALESCE((v_task.summary ->> 'newRecords')::INTEGER, v_history_count);
+  v_result := jsonb_build_object(
+    'savedRecords', v_history_count,
+    'skippedRecords', GREATEST(v_expected_count - v_history_count, 0),
+    'createdPools', v_pool_count,
+    'atomicCommit', TRUE
+  );
+
+  UPDATE public.official_import_tasks
+  SET
+    status = 'committed',
+    summary = COALESCE(summary, '{}'::JSONB) || jsonb_build_object('commitResult', v_result),
+    committed_at = NOW(),
+    updated_at = NOW()
+  WHERE id = p_task_id
+    AND user_id = p_user_id
+    AND status = 'confirming';
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'official_import_task_state_changed';
+  END IF;
+
+  RETURN v_result;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.commit_official_import_records(UUID, UUID, JSONB, JSONB)
+  FROM PUBLIC, anon, authenticated;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION public.commit_official_import_records(UUID, UUID, JSONB, JSONB)
+      TO service_role;
+  END IF;
+END;
+$$;
+
+COMMENT ON FUNCTION public.commit_official_import_records(UUID, UUID, JSONB, JSONB) IS
+  '确认官方导入时原子写入卡池分类与历史；已有 canonical 卡池保持原目录字段。';
+
+DO $$
+DECLARE
+  v_definition TEXT;
+BEGIN
+  v_definition := pg_get_functiondef(
+    'public.commit_official_import_records(uuid,uuid,jsonb,jsonb)'::REGPROCEDURE
+  );
+
+  IF v_definition !~* 'ON CONFLICT\s*\(\s*user_id\s*,\s*game_uid\s*,\s*server_scope\s*,\s*pool_id\s*,\s*seq_id\s*\)' THEN
+    RAISE EXCEPTION USING
+      ERRCODE = '55000',
+      MESSAGE = 'official_import_history_conflict_target_invalid';
+  END IF;
+
+  IF v_definition ~* 'ON CONFLICT\s*\(\s*user_id\s*,\s*game_uid\s*,\s*server_id\s*,' THEN
+    RAISE EXCEPTION USING
+      ERRCODE = '55000',
+      MESSAGE = 'official_import_legacy_conflict_target_present';
+  END IF;
+END;
+$$;
+
+NOTIFY pgrst, 'reload schema';
+-- <<< END MIGRATION: active/177_add_extra_pool_subtypes.sql
+
+-- >>> BEGIN MIGRATION: active/178_seed_reconstruction_pools_and_promotion.sql
+-- 178: seed the first reconstruction series and atomically promote manual pool IDs.
+
+-- The generated baseline does not include the historical high-risk pool primary-key
+-- conversion. Normalize that shape here so system-owned pools can use user_id = NULL.
+DO $$
+DECLARE
+  v_primary_key_name TEXT;
+  v_primary_key_is_pool_id BOOLEAN := FALSE;
+BEGIN
+  SELECT
+    constraint_row.conname,
+    constraint_row.conkey = ARRAY[
+      (SELECT attnum FROM pg_attribute WHERE attrelid = 'public.pools'::REGCLASS AND attname = 'pool_id')
+    ]::SMALLINT[]
+  INTO v_primary_key_name, v_primary_key_is_pool_id
+  FROM pg_constraint AS constraint_row
+  WHERE constraint_row.conrelid = 'public.pools'::REGCLASS
+    AND constraint_row.contype = 'p'
+  LIMIT 1;
+
+  IF v_primary_key_name IS NOT NULL AND NOT v_primary_key_is_pool_id THEN
+    EXECUTE format('ALTER TABLE public.pools DROP CONSTRAINT %I', v_primary_key_name);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint AS constraint_row
+    WHERE constraint_row.conrelid = 'public.pools'::REGCLASS
+      AND constraint_row.contype = 'p'
+  ) THEN
+    ALTER TABLE public.pools
+      ADD CONSTRAINT pools_pkey PRIMARY KEY (pool_id);
+  END IF;
+END;
+$$;
+
+ALTER TABLE public.pools
+  ALTER COLUMN user_id DROP NOT NULL;
+
+-- Service-role-only maintenance RPCs need to preserve the locked flag even
+-- when no interactive super-admin session exists.
+CREATE OR REPLACE FUNCTION public.protect_locked_field()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_user_role TEXT;
+BEGIN
+  IF OLD.locked IS NOT DISTINCT FROM NEW.locked THEN
+    RETURN NEW;
+  END IF;
+
+  IF auth.role() = 'service_role' THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT role
+  INTO v_user_role
+  FROM public.profiles
+  WHERE id = auth.uid();
+
+  IF v_user_role = 'super_admin' THEN
+    RETURN NEW;
+  END IF;
+
+  RAISE EXCEPTION 'Only super admin or service role can modify locked field';
+END;
+$$;
+
+-- The empty-database baseline still contains legacy entity IDs only. Seed the
+-- canonical rows conservatively: keep managed media/config and union aliases.
+INSERT INTO public.characters (id, name, rarity, type, is_limited, aliases)
+VALUES
+  ('chr_0017_yvonne', '伊冯', 6, 'character', TRUE, ARRAY['伊冯', '伊文', 'Yiwen', 'Yvonne']),
+  ('chr_0009_azrila', '余烬', 6, 'character', FALSE, ARRAY['余烬', 'Yujin', 'Azrila']),
+  ('chr_0015_lifeng', '黎风', 6, 'character', FALSE, ARRAY['黎风', 'Lifeng']),
+  ('chr_0025_ardelia', '艾尔黛拉', 6, 'character', FALSE, ARRAY['艾尔黛拉', 'Eldelra', 'Ardelia']),
+  ('chr_0026_lastrite', '别礼', 6, 'character', FALSE, ARRAY['别礼', '别离', 'Bieli', 'Lastrite']),
+  ('chr_0029_pograni', '骏卫', 6, 'character', FALSE, ARRAY['骏卫', 'Junwei', 'Pograni']),
+  ('wpn_pistol_0010', '艺术暴君', 6, 'weapon', TRUE, ARRAY['艺术暴君', 'Art Tyrant', 'Arttyrant'])
+ON CONFLICT (id) DO UPDATE
+SET
+  name = COALESCE(NULLIF(BTRIM(characters.name), ''), EXCLUDED.name),
+  rarity = COALESCE(characters.rarity, EXCLUDED.rarity),
+  type = COALESCE(NULLIF(BTRIM(characters.type), ''), EXCLUDED.type),
+  is_limited = COALESCE(characters.is_limited, EXCLUDED.is_limited),
+  aliases = ARRAY(
+    SELECT DISTINCT alias_value
+    FROM UNNEST(
+      COALESCE(characters.aliases, ARRAY[]::TEXT[])
+      || COALESCE(EXCLUDED.aliases, ARRAY[]::TEXT[])
+    ) AS alias_value
+    WHERE NULLIF(BTRIM(alias_value), '') IS NOT NULL
+  ),
+  updated_at = NOW();
+
+INSERT INTO public.character_id_aliases (
+  source,
+  alias_id,
+  character_id,
+  is_primary,
+  note
+)
+VALUES
+  ('legacy_manual', 'char_yiwen', 'chr_0017_yvonne', FALSE, 'Migration 178 legacy character alias'),
+  ('legacy_manual', 'char_yujin', 'chr_0009_azrila', FALSE, 'Migration 178 legacy character alias'),
+  ('legacy_manual', 'char_lifeng', 'chr_0015_lifeng', FALSE, 'Migration 178 legacy character alias'),
+  ('legacy_manual', 'char_eldela', 'chr_0025_ardelia', FALSE, 'Migration 178 legacy character alias'),
+  ('legacy_manual', 'char_eldelra', 'chr_0025_ardelia', FALSE, 'Migration 178 legacy character alias'),
+  ('legacy_manual', 'char_bieli', 'chr_0026_lastrite', FALSE, 'Migration 178 legacy character alias'),
+  ('legacy_manual', 'char_junwei', 'chr_0029_pograni', FALSE, 'Migration 178 legacy character alias')
+ON CONFLICT (source, alias_id) DO UPDATE
+SET
+  character_id = EXCLUDED.character_id,
+  is_primary = FALSE,
+  note = EXCLUDED.note,
+  updated_at = NOW();
+
+INSERT INTO public.pools (
+  user_id,
+  pool_id,
+  name,
+  type,
+  extra_subtype,
+  extra_rule_profile,
+  extra_series_key,
+  extra_series_phase,
+  locked,
+  is_limited_weapon,
+  description,
+  banner_url,
+  start_time,
+  end_time,
+  up_character,
+  featured_characters
+)
+VALUES
+  (
+    NULL,
+    'joint_manual_extra_reconstruction_yvonne_p1',
+    '绚丽异彩',
+    'extra',
+    'reconstruction',
+    'reconstruction_character_v1',
+    'reconstruction-xuesong-youmeng',
+    1,
+    TRUE,
+    NULL,
+    '官方图片仅标注“版本更新维护前”，结束时间尚未公布，因此 end_time 保持为空。',
+    NULL,
+    '2026-09-24T12:00:00+08:00'::TIMESTAMPTZ,
+    NULL,
+    '伊冯',
+    ARRAY['chr_0017_yvonne']::TEXT[]
+  ),
+  (
+    NULL,
+    'joint_manual_extra_reconstruction_arttyrant_p1',
+    '点绘申领',
+    'extra',
+    'reconstruction',
+    'reconstruction_weapon_v1',
+    'reconstruction-xuesong-youmeng',
+    1,
+    TRUE,
+    NULL,
+    '官方图片仅标注“版本更新维护前”，结束时间尚未公布，因此 end_time 保持为空。',
+    NULL,
+    '2026-09-24T12:00:00+08:00'::TIMESTAMPTZ,
+    NULL,
+    '艺术暴君',
+    ARRAY['wpn_pistol_0010']::TEXT[]
+  )
+ON CONFLICT (pool_id) DO UPDATE
+SET
+  user_id = NULL,
+  name = EXCLUDED.name,
+  type = EXCLUDED.type,
+  extra_subtype = EXCLUDED.extra_subtype,
+  extra_rule_profile = EXCLUDED.extra_rule_profile,
+  extra_series_key = EXCLUDED.extra_series_key,
+  extra_series_phase = EXCLUDED.extra_series_phase,
+  locked = EXCLUDED.locked,
+  is_limited_weapon = EXCLUDED.is_limited_weapon,
+  description = EXCLUDED.description,
+  banner_url = NULL,
+  start_time = EXCLUDED.start_time,
+  end_time = NULL,
+  up_character = EXCLUDED.up_character,
+  featured_characters = EXCLUDED.featured_characters,
+  updated_at = NOW();
+
+INSERT INTO public.pool_characters (pool_id, character_id, is_up)
+VALUES
+  ('joint_manual_extra_reconstruction_yvonne_p1', 'chr_0017_yvonne', TRUE),
+  ('joint_manual_extra_reconstruction_yvonne_p1', 'chr_0009_azrila', FALSE),
+  ('joint_manual_extra_reconstruction_yvonne_p1', 'chr_0015_lifeng', FALSE),
+  ('joint_manual_extra_reconstruction_yvonne_p1', 'chr_0025_ardelia', FALSE),
+  ('joint_manual_extra_reconstruction_yvonne_p1', 'chr_0026_lastrite', FALSE),
+  ('joint_manual_extra_reconstruction_yvonne_p1', 'chr_0029_pograni', FALSE),
+  ('joint_manual_extra_reconstruction_arttyrant_p1', 'wpn_pistol_0010', TRUE)
+ON CONFLICT (pool_id, character_id) DO UPDATE
+SET is_up = EXCLUDED.is_up;
+
+INSERT INTO public.pool_id_aliases (source, alias_id, pool_id, is_primary, note)
+SELECT
+  alias_source,
+  seeded_pool.pool_id,
+  seeded_pool.pool_id,
+  TRUE,
+  'Migration 178 reconstruction pool self alias'
+FROM (
+  VALUES
+    ('joint_manual_extra_reconstruction_yvonne_p1'),
+    ('joint_manual_extra_reconstruction_arttyrant_p1')
+) AS seeded_pool(pool_id)
+CROSS JOIN (
+  VALUES ('internal'), ('manual_placeholder')
+) AS source_row(alias_source)
+ON CONFLICT (source, alias_id) DO UPDATE
+SET
+  pool_id = EXCLUDED.pool_id,
+  is_primary = TRUE,
+  note = EXCLUDED.note,
+  updated_at = NOW();
+
+-- Add version 6 without replacing unrelated snapshot fields or existing events.
+DO $$
+DECLARE
+  v_version_start TIMESTAMPTZ;
+  v_character_event JSONB := jsonb_build_object(
+    'id', 'reconstruction-xuesong-youmeng-character-p1',
+    'category', 'operator',
+    'title', '「绚丽异彩」重构寻访',
+    'start', '2026-09-24T12:00:00+08:00',
+    'end', NULL,
+    'endLabel', '版本更新维护前',
+    'lane', 0,
+    'symbol', '绚',
+    'visual', 'reconstruction'
+  );
+  v_weapon_event JSONB := jsonb_build_object(
+    'id', 'reconstruction-xuesong-youmeng-weapon-p1',
+    'category', 'arsenal',
+    'title', '「点绘申领」重构申领',
+    'start', '2026-09-24T12:00:00+08:00',
+    'end', NULL,
+    'endLabel', '版本更新维护前',
+    'lane', 0,
+    'symbol', '绘',
+    'visual', 'reconstruction'
+  );
+  v_existing_content JSONB;
+  v_existing_bindings JSONB;
+  v_merged_events JSONB;
+BEGIN
+  SELECT COALESCE(
+    (SELECT ends_at FROM public.version_content_snapshots WHERE version_key = 'version-5' ORDER BY revision DESC LIMIT 1),
+    '2026-09-02T06:00:00+08:00'::TIMESTAMPTZ
+  ) INTO v_version_start;
+
+  SELECT content, pool_bindings
+  INTO v_existing_content, v_existing_bindings
+  FROM public.version_content_snapshots
+  WHERE version_key = 'version-6'
+    AND revision = 1;
+
+  v_existing_content := COALESCE(v_existing_content, '{}'::JSONB);
+  v_existing_bindings := COALESCE(v_existing_bindings, '{}'::JSONB);
+
+  SELECT COALESCE(jsonb_agg(event_row), '[]'::JSONB)
+  INTO v_merged_events
+  FROM jsonb_array_elements(
+    CASE
+      WHEN jsonb_typeof(v_existing_content->'events') = 'array' THEN v_existing_content->'events'
+      ELSE '[]'::JSONB
+    END
+  ) AS event_row
+  WHERE event_row->>'id' NOT IN (
+    'reconstruction-xuesong-youmeng-character-p1',
+    'reconstruction-xuesong-youmeng-weapon-p1'
+  );
+
+  v_merged_events := v_merged_events || jsonb_build_array(v_character_event, v_weapon_event);
+
+  INSERT INTO public.version_content_snapshots (
+    version_key,
+    version_number,
+    revision,
+    title,
+    starts_at,
+    ends_at,
+    content,
+    pool_bindings,
+    source_meta,
+    is_active,
+    published_at
+  ) VALUES (
+    'version-6',
+    '6',
+    1,
+    '雪凇幽梦',
+    v_version_start,
+    NULL,
+    v_existing_content || jsonb_build_object('events', v_merged_events),
+    v_existing_bindings || jsonb_build_object(
+      'reconstruction-xuesong-youmeng-character-p1', 'joint_manual_extra_reconstruction_yvonne_p1',
+      'reconstruction-xuesong-youmeng-weapon-p1', 'joint_manual_extra_reconstruction_arttyrant_p1'
+    ),
+    jsonb_build_object(
+      'source', 'official-version-calendar',
+      'timezone', 'Asia/Shanghai',
+      'notes', '结束时间按官方图片记为“版本更新维护前”。'
+    ),
+    TRUE,
+    NOW()
+  )
+  ON CONFLICT (version_key, revision) DO UPDATE
+  SET
+    version_number = '6',
+    title = '雪凇幽梦',
+    starts_at = v_version_start,
+    ends_at = NULL,
+    content = version_content_snapshots.content || jsonb_build_object('events', v_merged_events),
+    pool_bindings = version_content_snapshots.pool_bindings || jsonb_build_object(
+      'reconstruction-xuesong-youmeng-character-p1', 'joint_manual_extra_reconstruction_yvonne_p1',
+      'reconstruction-xuesong-youmeng-weapon-p1', 'joint_manual_extra_reconstruction_arttyrant_p1'
+    ),
+    is_active = TRUE,
+    published_at = COALESCE(version_content_snapshots.published_at, NOW()),
+    updated_at = NOW();
+END;
+$$;
+
+-- Merge the home timeline entry while preserving root keys, other versions and
+-- any user-managed fields already present on version-6.
+DO $$
+DECLARE
+  v_config JSONB := '{}'::JSONB;
+  v_versions JSONB := '[]'::JSONB;
+  v_existing_version JSONB := '{}'::JSONB;
+  v_existing_pool_ids JSONB := '[]'::JSONB;
+  v_version_start TEXT;
+BEGIN
+  SELECT COALESCE(
+    (SELECT ends_at::TEXT FROM public.version_content_snapshots WHERE version_key = 'version-5' ORDER BY revision DESC LIMIT 1),
+    '2026-09-02 06:00:00+08'
+  ) INTO v_version_start;
+
+  BEGIN
+    SELECT value::JSONB
+    INTO v_config
+    FROM public.site_config
+    WHERE key = 'home_version_timeline';
+  EXCEPTION
+    WHEN invalid_text_representation THEN
+      v_config := '{}'::JSONB;
+  END;
+
+  v_config := COALESCE(v_config, '{}'::JSONB);
+  IF jsonb_typeof(v_config->'versions') = 'array' THEN
+    v_versions := v_config->'versions';
+  END IF;
+
+  SELECT COALESCE(version_row, '{}'::JSONB)
+  INTO v_existing_version
+  FROM jsonb_array_elements(v_versions) WITH ORDINALITY AS version_item(version_row, ordinal)
+  WHERE version_row->>'id' = 'version-6'
+  ORDER BY ordinal
+  LIMIT 1;
+
+  v_existing_version := COALESCE(v_existing_version, '{}'::JSONB);
+
+  IF jsonb_typeof(v_existing_version->'pool_ids') = 'array' THEN
+    v_existing_pool_ids := v_existing_version->'pool_ids';
+  END IF;
+
+  SELECT COALESCE(jsonb_agg(to_jsonb(pool_id) ORDER BY first_ordinal), '[]'::JSONB)
+  INTO v_existing_pool_ids
+  FROM (
+    SELECT pool_id, MIN(ordinal) AS first_ordinal
+    FROM (
+      SELECT pool_value #>> '{}' AS pool_id, ordinal
+      FROM jsonb_array_elements(
+        v_existing_pool_ids || jsonb_build_array(
+          'joint_manual_extra_reconstruction_yvonne_p1',
+          'joint_manual_extra_reconstruction_arttyrant_p1'
+        )
+      ) WITH ORDINALITY AS pool_item(pool_value, ordinal)
+    ) AS pool_values
+    WHERE NULLIF(BTRIM(pool_id), '') IS NOT NULL
+    GROUP BY pool_id
+  ) AS unique_pool_ids;
+
+  v_existing_version := v_existing_version || jsonb_build_object(
+    'id', 'version-6',
+    'name', '雪凇幽梦',
+    'starts_at', COALESCE(v_existing_version->>'starts_at', v_version_start),
+    'ends_at', NULL,
+    'enabled', TRUE,
+    'order', 60,
+    'pool_ids', v_existing_pool_ids
+  );
+
+  SELECT COALESCE(jsonb_agg(version_row ORDER BY ordinal), '[]'::JSONB)
+  INTO v_versions
+  FROM jsonb_array_elements(v_versions) WITH ORDINALITY AS version_item(version_row, ordinal)
+  WHERE version_row->>'id' IS DISTINCT FROM 'version-6';
+
+  v_versions := v_versions || jsonb_build_array(v_existing_version);
+  v_config := v_config || jsonb_build_object('versions', v_versions);
+
+  INSERT INTO public.site_config (key, value, label, category, updated_at)
+  VALUES (
+    'home_version_timeline',
+    v_config::TEXT,
+    '首页版本时间线',
+    'content',
+    NOW()
+  )
+  ON CONFLICT (key) DO UPDATE
+  SET
+    value = EXCLUDED.value,
+    updated_at = NOW();
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.promote_manual_pool_to_official_id(
+  p_manual_pool_id TEXT,
+  p_official_pool JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_manual public.pools%ROWTYPE;
+  v_official public.pools%ROWTYPE;
+  v_official_id TEXT;
+  v_payload_featured TEXT[];
+  v_binding_record RECORD;
+  v_config JSONB;
+  v_versions JSONB := '[]'::JSONB;
+  v_version JSONB;
+  v_version_result JSONB := '[]'::JSONB;
+  v_pool_ids JSONB;
+  v_pool_ids_result JSONB;
+  v_pool_value JSONB;
+  v_pool_text TEXT;
+  v_seen_pool_ids TEXT[];
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'service_role_required';
+  END IF;
+
+  IF COALESCE(BTRIM(p_manual_pool_id), '') = '' THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'manual_pool_id_required';
+  END IF;
+
+  IF p_official_pool IS NULL OR jsonb_typeof(p_official_pool) <> 'object' THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'official_pool_payload_required';
+  END IF;
+
+  v_official_id := COALESCE(
+    NULLIF(BTRIM(p_official_pool->>'pool_id'), ''),
+    NULLIF(BTRIM(p_official_pool->>'id'), '')
+  );
+
+  IF v_official_id IS NULL OR v_official_id = BTRIM(p_manual_pool_id) OR v_official_id LIKE '%\_manual\_%' ESCAPE '\' THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'official_pool_id_invalid';
+  END IF;
+
+  SELECT *
+  INTO v_manual
+  FROM public.pools
+  WHERE pool_id = BTRIM(p_manual_pool_id)
+  FOR UPDATE;
+
+  IF NOT FOUND
+    OR v_manual.pool_id NOT LIKE '%\_manual\_%' ESCAPE '\'
+    OR v_manual.type <> 'extra'
+    OR v_manual.extra_subtype <> 'reconstruction'
+    OR v_manual.extra_rule_profile NOT IN ('reconstruction_character_v1', 'reconstruction_weapon_v1')
+  THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'manual_reconstruction_pool_invalid';
+  END IF;
+
+  SELECT *
+  INTO v_official
+  FROM public.pools
+  WHERE pool_id = v_official_id
+  FOR UPDATE;
+
+  IF jsonb_typeof(p_official_pool->'featured_characters') = 'array' THEN
+    SELECT ARRAY_AGG(featured_id)
+    INTO v_payload_featured
+    FROM jsonb_array_elements_text(p_official_pool->'featured_characters') AS featured_id;
+  END IF;
+
+  INSERT INTO public.pools (
+    user_id,
+    pool_id,
+    name,
+    name_en,
+    type,
+    extra_subtype,
+    extra_rule_profile,
+    extra_series_key,
+    extra_series_phase,
+    locked,
+    is_limited_weapon,
+    description,
+    banner_url,
+    start_time,
+    end_time,
+    up_character,
+    featured_characters
+  ) VALUES (
+    v_manual.user_id,
+    v_official_id,
+    COALESCE(NULLIF(BTRIM(p_official_pool->>'name'), ''), v_official.name, v_manual.name),
+    COALESCE(NULLIF(BTRIM(p_official_pool->>'name_en'), ''), v_official.name_en, v_manual.name_en),
+    v_manual.type,
+    v_manual.extra_subtype,
+    v_manual.extra_rule_profile,
+    v_manual.extra_series_key,
+    v_manual.extra_series_phase,
+    COALESCE(v_manual.locked, FALSE) OR COALESCE(v_official.locked, FALSE),
+    COALESCE(v_manual.is_limited_weapon, v_official.is_limited_weapon),
+    COALESCE(v_manual.description, v_official.description, NULLIF(BTRIM(p_official_pool->>'description'), '')),
+    COALESCE(v_manual.banner_url, v_official.banner_url, NULLIF(BTRIM(p_official_pool->>'banner_url'), '')),
+    COALESCE(NULLIF(BTRIM(p_official_pool->>'start_time'), '')::TIMESTAMPTZ, v_manual.start_time, v_official.start_time),
+    COALESCE(NULLIF(BTRIM(p_official_pool->>'end_time'), '')::TIMESTAMPTZ, v_manual.end_time, v_official.end_time),
+    COALESCE(NULLIF(BTRIM(p_official_pool->>'up_character'), ''), v_manual.up_character, v_official.up_character),
+    COALESCE(v_payload_featured, v_manual.featured_characters, v_official.featured_characters)
+  )
+  ON CONFLICT (pool_id) DO UPDATE
+  SET
+    user_id = EXCLUDED.user_id,
+    name = EXCLUDED.name,
+    name_en = EXCLUDED.name_en,
+    type = EXCLUDED.type,
+    extra_subtype = EXCLUDED.extra_subtype,
+    extra_rule_profile = EXCLUDED.extra_rule_profile,
+    extra_series_key = EXCLUDED.extra_series_key,
+    extra_series_phase = EXCLUDED.extra_series_phase,
+    locked = EXCLUDED.locked,
+    is_limited_weapon = EXCLUDED.is_limited_weapon,
+    description = EXCLUDED.description,
+    banner_url = EXCLUDED.banner_url,
+    start_time = EXCLUDED.start_time,
+    end_time = EXCLUDED.end_time,
+    up_character = EXCLUDED.up_character,
+    featured_characters = EXCLUDED.featured_characters,
+    updated_at = NOW();
+
+  -- Keep an existing official copy when the same import record already exists.
+  DELETE FROM public.history AS manual_history
+  USING public.history AS official_history
+  WHERE manual_history.pool_id = v_manual.pool_id
+    AND official_history.pool_id = v_official_id
+    AND manual_history.user_id = official_history.user_id
+    AND manual_history.game_uid = official_history.game_uid
+    AND manual_history.server_scope = official_history.server_scope
+    AND manual_history.seq_id = official_history.seq_id
+    AND manual_history.game_uid IS NOT NULL
+    AND manual_history.seq_id IS NOT NULL;
+
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'history'
+      AND column_name = 'legacy_pool_id'
+  ) THEN
+    EXECUTE $sql$
+      UPDATE public.history
+      SET
+        pool_id = $1,
+        legacy_pool_id = COALESCE(legacy_pool_id, $2),
+        updated_at = NOW()
+      WHERE pool_id = $2
+    $sql$
+    USING v_official_id, v_manual.pool_id;
+  ELSE
+    UPDATE public.history
+    SET
+      pool_id = v_official_id,
+      updated_at = NOW()
+    WHERE pool_id = v_manual.pool_id;
+  END IF;
+
+  INSERT INTO public.pool_characters (pool_id, character_id, is_up, created_at)
+  SELECT v_official_id, character_id, is_up, created_at
+  FROM public.pool_characters
+  WHERE pool_id = v_manual.pool_id
+  ON CONFLICT (pool_id, character_id) DO UPDATE
+  SET is_up = COALESCE(pool_characters.is_up, FALSE) OR COALESCE(EXCLUDED.is_up, FALSE);
+
+  DELETE FROM public.pool_characters
+  WHERE pool_id = v_manual.pool_id;
+
+  UPDATE public.pool_id_aliases
+  SET
+    pool_id = v_official_id,
+    is_primary = FALSE,
+    updated_at = NOW()
+  WHERE pool_id = v_manual.pool_id;
+
+  INSERT INTO public.pool_id_aliases (source, alias_id, pool_id, is_primary, note)
+  VALUES
+    ('manual_placeholder', v_manual.pool_id, v_official_id, FALSE, 'Migration 178 promoted manual pool ID'),
+    ('internal', v_official_id, v_official_id, TRUE, 'Migration 178 official pool self alias'),
+    ('official_api', v_official_id, v_official_id, TRUE, 'Migration 178 official source self alias')
+  ON CONFLICT (source, alias_id) DO UPDATE
+  SET
+    pool_id = EXCLUDED.pool_id,
+    is_primary = EXCLUDED.is_primary,
+    note = EXCLUDED.note,
+    updated_at = NOW();
+
+  FOR v_binding_record IN
+    SELECT snapshot.id
+    FROM public.version_content_snapshots AS snapshot
+    WHERE EXISTS (
+      SELECT 1
+      FROM jsonb_each(snapshot.pool_bindings) AS binding(binding_key, binding_value)
+      WHERE binding_value = to_jsonb(v_manual.pool_id)
+    )
+  LOOP
+    UPDATE public.version_content_snapshots AS snapshot
+    SET
+      pool_bindings = (
+        SELECT jsonb_object_agg(
+          binding_key,
+          CASE
+            WHEN binding_value = to_jsonb(v_manual.pool_id) THEN to_jsonb(v_official_id)
+            ELSE binding_value
+          END
+        )
+        FROM jsonb_each(snapshot.pool_bindings) AS binding(binding_key, binding_value)
+      ),
+      updated_at = NOW()
+    WHERE snapshot.id = v_binding_record.id;
+  END LOOP;
+
+  BEGIN
+    SELECT value::JSONB
+    INTO v_config
+    FROM public.site_config
+    WHERE key = 'home_version_timeline'
+    FOR UPDATE;
+
+    IF jsonb_typeof(v_config->'versions') = 'array' THEN
+      FOR v_version IN
+        SELECT version_row
+        FROM jsonb_array_elements(v_config->'versions') AS version_row
+      LOOP
+        IF jsonb_typeof(v_version->'pool_ids') = 'array' THEN
+          v_pool_ids := v_version->'pool_ids';
+          v_pool_ids_result := '[]'::JSONB;
+          v_seen_pool_ids := ARRAY[]::TEXT[];
+
+          FOR v_pool_value IN
+            SELECT pool_value
+            FROM jsonb_array_elements(v_pool_ids) AS pool_value
+          LOOP
+            v_pool_text := v_pool_value #>> '{}';
+            IF v_pool_text = v_manual.pool_id THEN
+              v_pool_text := v_official_id;
+            END IF;
+
+            IF v_pool_text IS NOT NULL AND NOT (v_pool_text = ANY(v_seen_pool_ids)) THEN
+              v_seen_pool_ids := array_append(v_seen_pool_ids, v_pool_text);
+              v_pool_ids_result := v_pool_ids_result || jsonb_build_array(v_pool_text);
+            END IF;
+          END LOOP;
+
+          v_version := jsonb_set(v_version, '{pool_ids}', v_pool_ids_result, TRUE);
+        END IF;
+
+        v_version_result := v_version_result || jsonb_build_array(v_version);
+      END LOOP;
+
+      v_config := jsonb_set(v_config, '{versions}', v_version_result, TRUE);
+      UPDATE public.site_config
+      SET
+        value = v_config::TEXT,
+        updated_at = NOW()
+      WHERE key = 'home_version_timeline';
+    END IF;
+  EXCEPTION
+    WHEN invalid_text_representation THEN
+      NULL;
+  END;
+
+  DELETE FROM public.pools
+  WHERE pool_id = v_manual.pool_id;
+
+  INSERT INTO public.site_config (key, value, label, category, updated_at)
+  VALUES (
+    'public_cache_epoch',
+    jsonb_build_object(
+      'version', ((EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT)::TEXT,
+      'scope', 'pool-id-promotion',
+      'reason', 'promote_manual_pool_to_official_id',
+      'updatedAt', NOW()
+    )::TEXT,
+    '公开缓存版本',
+    'system',
+    NOW()
+  )
+  ON CONFLICT (key) DO UPDATE
+  SET
+    value = EXCLUDED.value,
+    updated_at = NOW();
+
+  PERFORM pg_notify('pgrst', 'reload schema');
+
+  RETURN jsonb_build_object(
+    'manualPoolId', v_manual.pool_id,
+    'officialPoolId', v_official_id,
+    'promoted', TRUE
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.promote_manual_pool_to_official_id(TEXT, JSONB)
+  FROM PUBLIC, anon, authenticated;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION public.promote_manual_pool_to_official_id(TEXT, JSONB)
+      TO service_role;
+  END IF;
+END;
+$$;
+
+COMMENT ON FUNCTION public.promote_manual_pool_to_official_id(TEXT, JSONB) IS
+  '由 service_role 原子晋升重构寻访临时 ID，并迁移历史、阵容、别名与版本配置引用。';
+
+INSERT INTO public.site_config (key, value, label, category, updated_at)
+VALUES (
+  'public_cache_epoch',
+  jsonb_build_object(
+    'version', ((EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT)::TEXT,
+    'scope', 'reconstruction-pool-seed',
+    'reason', 'migration:178_seed_reconstruction_pools_and_promotion',
+    'updatedAt', NOW()
+  )::TEXT,
+  '公开缓存版本',
+  'system',
+  NOW()
+)
+ON CONFLICT (key) DO UPDATE
+SET
+  value = EXCLUDED.value,
+  updated_at = NOW();
+
+NOTIFY pgrst, 'reload schema';
+-- <<< END MIGRATION: active/178_seed_reconstruction_pools_and_promotion.sql
+
+-- >>> BEGIN MIGRATION: active/179_split_reconstruction_claim_subtype.sql
+-- 179: split reconstruction weapon claims into their own product subtype.
+
+ALTER TABLE public.pools
+  DROP CONSTRAINT IF EXISTS pools_extra_subtype_check,
+  DROP CONSTRAINT IF EXISTS pools_extra_rule_profile_check,
+  DROP CONSTRAINT IF EXISTS pools_extra_metadata_contract_check;
+
+CREATE OR REPLACE FUNCTION public.canonicalize_reconstruction_claim_subtype()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.type = 'extra'
+    AND NEW.extra_subtype = 'reconstruction'
+    AND NEW.extra_rule_profile = 'reconstruction_weapon_v1' THEN
+    NEW.extra_subtype := 'reconstruction_claim';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS canonicalize_reconstruction_claim_subtype_trigger ON public.pools;
+CREATE TRIGGER canonicalize_reconstruction_claim_subtype_trigger
+  BEFORE INSERT OR UPDATE ON public.pools
+  FOR EACH ROW
+  EXECUTE FUNCTION public.canonicalize_reconstruction_claim_subtype();
+
+UPDATE public.pools
+SET
+  extra_subtype = 'reconstruction_claim',
+  updated_at = NOW()
+WHERE type = 'extra'
+  AND extra_subtype = 'reconstruction'
+  AND extra_rule_profile = 'reconstruction_weapon_v1';
+
+ALTER TABLE public.pools
+  ADD CONSTRAINT pools_extra_subtype_check CHECK (
+    extra_subtype IS NULL
+    OR extra_subtype IN ('reconstruction', 'reconstruction_claim', 'special')
+  ),
+  ADD CONSTRAINT pools_extra_rule_profile_check CHECK (
+    extra_rule_profile IS NULL
+    OR extra_rule_profile IN (
+      'reconstruction_character_v1',
+      'reconstruction_weapon_v1',
+      'brilliance_festival_v1'
+    )
+  ),
+  ADD CONSTRAINT pools_extra_metadata_contract_check CHECK ((
+    (
+      type <> 'extra'
+      AND extra_subtype IS NULL
+      AND extra_rule_profile IS NULL
+      AND extra_series_key IS NULL
+      AND extra_series_phase IS NULL
+    )
+    OR (
+      type = 'extra'
+      AND (
+        (
+          extra_subtype IS NULL
+          AND extra_rule_profile IS NULL
+          AND extra_series_key IS NULL
+          AND extra_series_phase IS NULL
+        )
+        OR (
+          extra_subtype = 'special'
+          AND extra_rule_profile = 'brilliance_festival_v1'
+          AND extra_series_key IS NULL
+          AND extra_series_phase IS NULL
+        )
+        OR (
+          extra_subtype = 'reconstruction'
+          AND extra_rule_profile = 'reconstruction_character_v1'
+          AND NULLIF(BTRIM(extra_series_key), '') IS NOT NULL
+          AND extra_series_phase > 0
+        )
+        OR (
+          extra_subtype = 'reconstruction_claim'
+          AND extra_rule_profile = 'reconstruction_weapon_v1'
+          AND NULLIF(BTRIM(extra_series_key), '') IS NOT NULL
+          AND extra_series_phase > 0
+        )
+      )
+    )
+  ) IS TRUE);
+
+COMMENT ON COLUMN public.pools.extra_subtype IS
+  '附加寻访产品子类：reconstruction（重构寻访）、reconstruction_claim（重构申领）或 special（特殊寻访）；可为空表示未分类。';
+
+-- Rebuild only the JSON overload. The legacy positional overload from 177 is
+-- intentionally preserved so old callers can still write unclassified extras.
+CREATE OR REPLACE FUNCTION public.admin_upsert_pool_with_aliases(
+  p_pool_id TEXT,
+  p_insert_payload JSONB,
+  p_update_payload JSONB DEFAULT '{}'::jsonb,
+  p_alias_rows JSONB DEFAULT '[]'::jsonb,
+  p_pool_character_rows JSONB DEFAULT '[]'::jsonb,
+  p_actor_user_id UUID DEFAULT NULL
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_actor_user_id UUID;
+  v_pool_type TEXT;
+  v_extra_subtype TEXT;
+  v_extra_rule_profile TEXT;
+  v_extra_series_key TEXT;
+  v_extra_series_phase_text TEXT;
+BEGIN
+  IF NOT public.is_super_admin() THEN
+    RAISE EXCEPTION 'only super_admin can manage pools';
+  END IF;
+
+  IF COALESCE(BTRIM(p_pool_id), '') = '' THEN
+    RAISE EXCEPTION 'p_pool_id is required';
+  END IF;
+
+  IF p_insert_payload IS NULL OR jsonb_typeof(p_insert_payload) <> 'object' THEN
+    RAISE EXCEPTION 'p_insert_payload must be a JSON object';
+  END IF;
+
+  IF p_update_payload IS NULL THEN
+    p_update_payload := '{}'::jsonb;
+  END IF;
+  IF jsonb_typeof(p_update_payload) <> 'object' THEN
+    RAISE EXCEPTION 'p_update_payload must be a JSON object';
+  END IF;
+
+  IF p_alias_rows IS NULL THEN
+    p_alias_rows := '[]'::jsonb;
+  END IF;
+  IF jsonb_typeof(p_alias_rows) <> 'array' THEN
+    RAISE EXCEPTION 'p_alias_rows must be a JSON array';
+  END IF;
+
+  IF p_pool_character_rows IS NULL THEN
+    p_pool_character_rows := '[]'::jsonb;
+  END IF;
+  IF jsonb_typeof(p_pool_character_rows) <> 'array' THEN
+    RAISE EXCEPTION 'p_pool_character_rows must be a JSON array';
+  END IF;
+
+  v_pool_type := COALESCE(NULLIF(BTRIM(p_insert_payload->>'type'), ''), 'limited');
+  v_extra_subtype := NULLIF(BTRIM(p_insert_payload->>'extra_subtype'), '');
+  v_extra_rule_profile := NULLIF(BTRIM(p_insert_payload->>'extra_rule_profile'), '');
+  v_extra_series_key := NULLIF(BTRIM(p_insert_payload->>'extra_series_key'), '');
+  v_extra_series_phase_text := NULLIF(BTRIM(p_insert_payload->>'extra_series_phase'), '');
+
+  IF v_pool_type = 'extra'
+    AND v_extra_subtype = 'reconstruction'
+    AND v_extra_rule_profile = 'reconstruction_weapon_v1' THEN
+    v_extra_subtype := 'reconstruction_claim';
+    p_insert_payload := jsonb_set(
+      p_insert_payload,
+      '{extra_subtype}',
+      to_jsonb(v_extra_subtype),
+      TRUE
+    );
+  END IF;
+
+  IF COALESCE(NULLIF(BTRIM(p_update_payload->>'type'), ''), v_pool_type) = 'extra'
+    AND COALESCE(NULLIF(BTRIM(p_update_payload->>'extra_subtype'), ''), v_extra_subtype) = 'reconstruction'
+    AND COALESCE(NULLIF(BTRIM(p_update_payload->>'extra_rule_profile'), ''), v_extra_rule_profile) = 'reconstruction_weapon_v1' THEN
+    p_update_payload := jsonb_set(
+      p_update_payload,
+      '{extra_subtype}',
+      to_jsonb('reconstruction_claim'::TEXT),
+      TRUE
+    );
+  END IF;
+
+  IF v_pool_type <> 'extra' THEN
+    IF v_extra_subtype IS NOT NULL
+      OR v_extra_rule_profile IS NOT NULL
+      OR v_extra_series_key IS NOT NULL
+      OR v_extra_series_phase_text IS NOT NULL THEN
+      RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'extra_pool_fields_not_allowed';
+    END IF;
+  ELSIF v_extra_subtype = 'special' THEN
+    IF v_extra_rule_profile IS DISTINCT FROM 'brilliance_festival_v1'
+      OR v_extra_series_key IS NOT NULL
+      OR v_extra_series_phase_text IS NOT NULL THEN
+      RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'brilliance_pool_metadata_invalid';
+    END IF;
+  ELSIF v_extra_subtype = 'reconstruction' THEN
+    IF v_extra_rule_profile IS DISTINCT FROM 'reconstruction_character_v1'
+      OR v_extra_series_key IS NULL
+      OR v_extra_series_phase_text !~ '^[1-9][0-9]*$' THEN
+      RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'reconstruction_pool_metadata_invalid';
+    END IF;
+  ELSIF v_extra_subtype = 'reconstruction_claim' THEN
+    IF v_extra_rule_profile IS DISTINCT FROM 'reconstruction_weapon_v1'
+      OR v_extra_series_key IS NULL
+      OR v_extra_series_phase_text !~ '^[1-9][0-9]*$' THEN
+      RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'reconstruction_claim_pool_metadata_invalid';
+    END IF;
+  ELSE
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'extra_pool_template_required';
+  END IF;
+
+  v_actor_user_id := COALESCE(
+    p_actor_user_id,
+    CASE
+      WHEN COALESCE(BTRIM(p_insert_payload->>'user_id'), '') <> ''
+      THEN BTRIM(p_insert_payload->>'user_id')::UUID
+      ELSE NULL
+    END,
+    auth.uid()
+  );
+
+  IF v_actor_user_id IS NULL AND auth.role() = 'service_role' THEN
+    SELECT id
+      INTO v_actor_user_id
+      FROM public.profiles
+     WHERE role = 'super_admin'
+     ORDER BY created_at ASC NULLS LAST, id ASC
+     LIMIT 1;
+  END IF;
+
+  IF v_actor_user_id IS NULL THEN
+    RAISE EXCEPTION 'pool owner is required';
+  END IF;
+
+  INSERT INTO public.pools (
+    user_id,
+    pool_id,
+    name,
+    name_en,
+    type,
+    extra_subtype,
+    extra_rule_profile,
+    extra_series_key,
+    extra_series_phase,
+    locked,
+    is_limited_weapon,
+    description,
+    start_time,
+    end_time,
+    banner_url,
+    featured_characters,
+    up_character
+  )
+  VALUES (
+    v_actor_user_id,
+    BTRIM(p_pool_id),
+    BTRIM(p_insert_payload->>'name'),
+    NULLIF(BTRIM(p_insert_payload->>'name_en'), ''),
+    COALESCE(NULLIF(BTRIM(p_insert_payload->>'type'), ''), 'limited'),
+    NULLIF(BTRIM(p_insert_payload->>'extra_subtype'), ''),
+    NULLIF(BTRIM(p_insert_payload->>'extra_rule_profile'), ''),
+    NULLIF(BTRIM(p_insert_payload->>'extra_series_key'), ''),
+    NULLIF(BTRIM(p_insert_payload->>'extra_series_phase'), '')::INTEGER,
+    COALESCE((p_insert_payload->>'locked')::BOOLEAN, FALSE),
+    CASE
+      WHEN p_insert_payload ? 'is_limited_weapon'
+        AND jsonb_typeof(p_insert_payload->'is_limited_weapon') = 'boolean'
+      THEN (p_insert_payload->>'is_limited_weapon')::BOOLEAN
+      ELSE NULL
+    END,
+    NULLIF(BTRIM(p_insert_payload->>'description'), ''),
+    NULLIF(BTRIM(p_insert_payload->>'start_time'), '')::TIMESTAMPTZ,
+    NULLIF(BTRIM(p_insert_payload->>'end_time'), '')::TIMESTAMPTZ,
+    NULLIF(BTRIM(p_insert_payload->>'banner_url'), ''),
+    CASE
+      WHEN p_insert_payload ? 'featured_characters'
+        AND jsonb_typeof(p_insert_payload->'featured_characters') = 'array'
+      THEN ARRAY(
+        SELECT jsonb_array_elements_text(p_insert_payload->'featured_characters')
+      )
+      ELSE NULL
+    END,
+    NULLIF(BTRIM(p_insert_payload->>'up_character'), '')
+  )
+  ON CONFLICT (pool_id) DO UPDATE
+  SET
+    name = CASE
+      WHEN p_update_payload ? 'name'
+      THEN COALESCE(NULLIF(BTRIM(p_update_payload->>'name'), ''), public.pools.name)
+      ELSE public.pools.name
+    END,
+    name_en = CASE
+      WHEN p_update_payload ? 'name_en'
+      THEN NULLIF(BTRIM(p_update_payload->>'name_en'), '')
+      ELSE public.pools.name_en
+    END,
+    type = CASE
+      WHEN p_update_payload ? 'type'
+      THEN COALESCE(NULLIF(BTRIM(p_update_payload->>'type'), ''), public.pools.type)
+      ELSE public.pools.type
+    END,
+    extra_subtype = CASE
+      WHEN p_update_payload ? 'extra_subtype'
+      THEN NULLIF(BTRIM(p_update_payload->>'extra_subtype'), '')
+      ELSE public.pools.extra_subtype
+    END,
+    extra_rule_profile = CASE
+      WHEN p_update_payload ? 'extra_rule_profile'
+      THEN NULLIF(BTRIM(p_update_payload->>'extra_rule_profile'), '')
+      ELSE public.pools.extra_rule_profile
+    END,
+    extra_series_key = CASE
+      WHEN p_update_payload ? 'extra_series_key'
+      THEN NULLIF(BTRIM(p_update_payload->>'extra_series_key'), '')
+      ELSE public.pools.extra_series_key
+    END,
+    extra_series_phase = CASE
+      WHEN p_update_payload ? 'extra_series_phase'
+      THEN NULLIF(BTRIM(p_update_payload->>'extra_series_phase'), '')::INTEGER
+      ELSE public.pools.extra_series_phase
+    END,
+    locked = CASE
+      WHEN p_update_payload ? 'locked'
+        AND jsonb_typeof(p_update_payload->'locked') = 'boolean'
+      THEN (p_update_payload->>'locked')::BOOLEAN
+      ELSE public.pools.locked
+    END,
+    is_limited_weapon = CASE
+      WHEN p_update_payload ? 'is_limited_weapon'
+        AND jsonb_typeof(p_update_payload->'is_limited_weapon') = 'boolean'
+      THEN (p_update_payload->>'is_limited_weapon')::BOOLEAN
+      WHEN p_update_payload ? 'is_limited_weapon'
+        AND jsonb_typeof(p_update_payload->'is_limited_weapon') = 'null'
+      THEN NULL
+      ELSE public.pools.is_limited_weapon
+    END,
+    description = CASE
+      WHEN p_update_payload ? 'description'
+      THEN NULLIF(BTRIM(p_update_payload->>'description'), '')
+      ELSE public.pools.description
+    END,
+    start_time = CASE
+      WHEN p_update_payload ? 'start_time'
+      THEN NULLIF(BTRIM(p_update_payload->>'start_time'), '')::TIMESTAMPTZ
+      ELSE public.pools.start_time
+    END,
+    end_time = CASE
+      WHEN p_update_payload ? 'end_time'
+      THEN NULLIF(BTRIM(p_update_payload->>'end_time'), '')::TIMESTAMPTZ
+      ELSE public.pools.end_time
+    END,
+    banner_url = CASE
+      WHEN p_update_payload ? 'banner_url'
+      THEN NULLIF(BTRIM(p_update_payload->>'banner_url'), '')
+      ELSE public.pools.banner_url
+    END,
+    featured_characters = CASE
+      WHEN p_update_payload ? 'featured_characters'
+        AND jsonb_typeof(p_update_payload->'featured_characters') = 'array'
+      THEN ARRAY(
+        SELECT jsonb_array_elements_text(p_update_payload->'featured_characters')
+      )
+      WHEN p_update_payload ? 'featured_characters'
+        AND jsonb_typeof(p_update_payload->'featured_characters') = 'null'
+      THEN NULL
+      ELSE public.pools.featured_characters
+    END,
+    up_character = CASE
+      WHEN p_update_payload ? 'up_character'
+      THEN NULLIF(BTRIM(p_update_payload->>'up_character'), '')
+      ELSE public.pools.up_character
+    END;
+
+  INSERT INTO public.pool_id_aliases (
+    source,
+    alias_id,
+    pool_id,
+    is_primary,
+    note
+  )
+  SELECT
+    BTRIM(alias_entry.value->>'source'),
+    BTRIM(alias_entry.value->>'alias_id'),
+    BTRIM(p_pool_id),
+    COALESCE((alias_entry.value->>'is_primary')::BOOLEAN, FALSE),
+    NULLIF(BTRIM(alias_entry.value->>'note'), '')
+  FROM jsonb_array_elements(p_alias_rows) AS alias_entry(value)
+  WHERE
+    jsonb_typeof(alias_entry.value) = 'object'
+    AND COALESCE(BTRIM(alias_entry.value->>'source'), '') <> ''
+    AND COALESCE(BTRIM(alias_entry.value->>'alias_id'), '') <> ''
+  ON CONFLICT (source, alias_id) DO UPDATE
+  SET
+    pool_id = EXCLUDED.pool_id,
+    is_primary = EXCLUDED.is_primary,
+    note = EXCLUDED.note,
+    updated_at = NOW();
+
+  IF jsonb_array_length(p_pool_character_rows) > 0 THEN
+    DELETE FROM public.pool_characters
+    WHERE pool_id = BTRIM(p_pool_id);
+
+    INSERT INTO public.pool_characters (
+      pool_id,
+      character_id,
+      is_up
+    )
+    SELECT
+      BTRIM(p_pool_id),
+      BTRIM(character_entry.value->>'character_id'),
+      COALESCE((character_entry.value->>'is_up')::BOOLEAN, FALSE)
+    FROM jsonb_array_elements(p_pool_character_rows) AS character_entry(value)
+    WHERE
+      jsonb_typeof(character_entry.value) = 'object'
+      AND COALESCE(BTRIM(character_entry.value->>'character_id'), '') <> ''
+    ON CONFLICT (pool_id, character_id) DO UPDATE
+    SET is_up = EXCLUDED.is_up;
+  END IF;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.admin_upsert_pool_with_aliases(TEXT, JSONB, JSONB, JSONB, JSONB, UUID)
+  TO authenticated;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION public.admin_upsert_pool_with_aliases(TEXT, JSONB, JSONB, JSONB, JSONB, UUID)
+      TO service_role;
+  END IF;
+END;
+$$;
+
+COMMENT ON FUNCTION public.admin_upsert_pool_with_aliases(TEXT, JSONB, JSONB, JSONB, JSONB, UUID) IS
+  '管理端原子化写入单个卡池；严格校验三种附加寻访产品，并兼容旧 reconstruction 武器 tuple。';
+
+CREATE OR REPLACE FUNCTION public.promote_manual_pool_to_official_id(
+  p_manual_pool_id TEXT,
+  p_official_pool JSONB
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_manual public.pools%ROWTYPE;
+  v_official public.pools%ROWTYPE;
+  v_official_id TEXT;
+  v_payload_featured TEXT[];
+  v_binding_record RECORD;
+  v_config JSONB;
+  v_versions JSONB := '[]'::JSONB;
+  v_version JSONB;
+  v_version_result JSONB := '[]'::JSONB;
+  v_pool_ids JSONB;
+  v_pool_ids_result JSONB;
+  v_pool_value JSONB;
+  v_pool_text TEXT;
+  v_seen_pool_ids TEXT[];
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'service_role_required';
+  END IF;
+
+  IF COALESCE(BTRIM(p_manual_pool_id), '') = '' THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'manual_pool_id_required';
+  END IF;
+
+  IF p_official_pool IS NULL OR jsonb_typeof(p_official_pool) <> 'object' THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'official_pool_payload_required';
+  END IF;
+
+  v_official_id := COALESCE(
+    NULLIF(BTRIM(p_official_pool->>'pool_id'), ''),
+    NULLIF(BTRIM(p_official_pool->>'id'), '')
+  );
+
+  IF v_official_id IS NULL OR v_official_id = BTRIM(p_manual_pool_id) OR v_official_id LIKE '%\_manual\_%' ESCAPE '\' THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'official_pool_id_invalid';
+  END IF;
+
+  SELECT *
+  INTO v_manual
+  FROM public.pools
+  WHERE pool_id = BTRIM(p_manual_pool_id)
+  FOR UPDATE;
+
+  IF NOT FOUND
+    OR v_manual.pool_id NOT LIKE '%\_manual\_%' ESCAPE '\'
+    OR v_manual.type <> 'extra'
+    OR NOT (
+      (
+        v_manual.extra_subtype = 'reconstruction'
+        AND v_manual.extra_rule_profile = 'reconstruction_character_v1'
+      )
+      OR (
+        v_manual.extra_subtype = 'reconstruction_claim'
+        AND v_manual.extra_rule_profile = 'reconstruction_weapon_v1'
+      )
+    )
+  THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'manual_reconstruction_pool_invalid';
+  END IF;
+
+  SELECT *
+  INTO v_official
+  FROM public.pools
+  WHERE pool_id = v_official_id
+  FOR UPDATE;
+
+  IF jsonb_typeof(p_official_pool->'featured_characters') = 'array' THEN
+    SELECT ARRAY_AGG(featured_id)
+    INTO v_payload_featured
+    FROM jsonb_array_elements_text(p_official_pool->'featured_characters') AS featured_id;
+  END IF;
+
+  INSERT INTO public.pools (
+    user_id,
+    pool_id,
+    name,
+    name_en,
+    type,
+    extra_subtype,
+    extra_rule_profile,
+    extra_series_key,
+    extra_series_phase,
+    locked,
+    is_limited_weapon,
+    description,
+    banner_url,
+    start_time,
+    end_time,
+    up_character,
+    featured_characters
+  ) VALUES (
+    v_manual.user_id,
+    v_official_id,
+    COALESCE(NULLIF(BTRIM(p_official_pool->>'name'), ''), v_official.name, v_manual.name),
+    COALESCE(NULLIF(BTRIM(p_official_pool->>'name_en'), ''), v_official.name_en, v_manual.name_en),
+    v_manual.type,
+    v_manual.extra_subtype,
+    v_manual.extra_rule_profile,
+    v_manual.extra_series_key,
+    v_manual.extra_series_phase,
+    COALESCE(v_manual.locked, FALSE) OR COALESCE(v_official.locked, FALSE),
+    COALESCE(v_manual.is_limited_weapon, v_official.is_limited_weapon),
+    COALESCE(v_manual.description, v_official.description, NULLIF(BTRIM(p_official_pool->>'description'), '')),
+    COALESCE(v_manual.banner_url, v_official.banner_url, NULLIF(BTRIM(p_official_pool->>'banner_url'), '')),
+    COALESCE(NULLIF(BTRIM(p_official_pool->>'start_time'), '')::TIMESTAMPTZ, v_manual.start_time, v_official.start_time),
+    COALESCE(NULLIF(BTRIM(p_official_pool->>'end_time'), '')::TIMESTAMPTZ, v_manual.end_time, v_official.end_time),
+    COALESCE(NULLIF(BTRIM(p_official_pool->>'up_character'), ''), v_manual.up_character, v_official.up_character),
+    COALESCE(v_payload_featured, v_manual.featured_characters, v_official.featured_characters)
+  )
+  ON CONFLICT (pool_id) DO UPDATE
+  SET
+    user_id = EXCLUDED.user_id,
+    name = EXCLUDED.name,
+    name_en = EXCLUDED.name_en,
+    type = EXCLUDED.type,
+    extra_subtype = EXCLUDED.extra_subtype,
+    extra_rule_profile = EXCLUDED.extra_rule_profile,
+    extra_series_key = EXCLUDED.extra_series_key,
+    extra_series_phase = EXCLUDED.extra_series_phase,
+    locked = EXCLUDED.locked,
+    is_limited_weapon = EXCLUDED.is_limited_weapon,
+    description = EXCLUDED.description,
+    banner_url = EXCLUDED.banner_url,
+    start_time = EXCLUDED.start_time,
+    end_time = EXCLUDED.end_time,
+    up_character = EXCLUDED.up_character,
+    featured_characters = EXCLUDED.featured_characters,
+    updated_at = NOW();
+
+  -- Keep an existing official copy when the same import record already exists.
+  DELETE FROM public.history AS manual_history
+  USING public.history AS official_history
+  WHERE manual_history.pool_id = v_manual.pool_id
+    AND official_history.pool_id = v_official_id
+    AND manual_history.user_id = official_history.user_id
+    AND manual_history.game_uid = official_history.game_uid
+    AND manual_history.server_scope = official_history.server_scope
+    AND manual_history.seq_id = official_history.seq_id
+    AND manual_history.game_uid IS NOT NULL
+    AND manual_history.seq_id IS NOT NULL;
+
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'history'
+      AND column_name = 'legacy_pool_id'
+  ) THEN
+    EXECUTE $sql$
+      UPDATE public.history
+      SET
+        pool_id = $1,
+        legacy_pool_id = COALESCE(legacy_pool_id, $2),
+        updated_at = NOW()
+      WHERE pool_id = $2
+    $sql$
+    USING v_official_id, v_manual.pool_id;
+  ELSE
+    UPDATE public.history
+    SET
+      pool_id = v_official_id,
+      updated_at = NOW()
+    WHERE pool_id = v_manual.pool_id;
+  END IF;
+
+  INSERT INTO public.pool_characters (pool_id, character_id, is_up, created_at)
+  SELECT v_official_id, character_id, is_up, created_at
+  FROM public.pool_characters
+  WHERE pool_id = v_manual.pool_id
+  ON CONFLICT (pool_id, character_id) DO UPDATE
+  SET is_up = COALESCE(pool_characters.is_up, FALSE) OR COALESCE(EXCLUDED.is_up, FALSE);
+
+  DELETE FROM public.pool_characters
+  WHERE pool_id = v_manual.pool_id;
+
+  UPDATE public.pool_id_aliases
+  SET
+    pool_id = v_official_id,
+    is_primary = FALSE,
+    updated_at = NOW()
+  WHERE pool_id = v_manual.pool_id;
+
+  INSERT INTO public.pool_id_aliases (source, alias_id, pool_id, is_primary, note)
+  VALUES
+    ('manual_placeholder', v_manual.pool_id, v_official_id, FALSE, 'Migration 179 promoted manual pool ID'),
+    ('internal', v_official_id, v_official_id, TRUE, 'Migration 179 official pool self alias'),
+    ('official_api', v_official_id, v_official_id, TRUE, 'Migration 179 official source self alias')
+  ON CONFLICT (source, alias_id) DO UPDATE
+  SET
+    pool_id = EXCLUDED.pool_id,
+    is_primary = EXCLUDED.is_primary,
+    note = EXCLUDED.note,
+    updated_at = NOW();
+
+  FOR v_binding_record IN
+    SELECT snapshot.id
+    FROM public.version_content_snapshots AS snapshot
+    WHERE EXISTS (
+      SELECT 1
+      FROM jsonb_each(snapshot.pool_bindings) AS binding(binding_key, binding_value)
+      WHERE binding_value = to_jsonb(v_manual.pool_id)
+    )
+  LOOP
+    UPDATE public.version_content_snapshots AS snapshot
+    SET
+      pool_bindings = (
+        SELECT jsonb_object_agg(
+          binding_key,
+          CASE
+            WHEN binding_value = to_jsonb(v_manual.pool_id) THEN to_jsonb(v_official_id)
+            ELSE binding_value
+          END
+        )
+        FROM jsonb_each(snapshot.pool_bindings) AS binding(binding_key, binding_value)
+      ),
+      updated_at = NOW()
+    WHERE snapshot.id = v_binding_record.id;
+  END LOOP;
+
+  BEGIN
+    SELECT value::JSONB
+    INTO v_config
+    FROM public.site_config
+    WHERE key = 'home_version_timeline'
+    FOR UPDATE;
+
+    IF jsonb_typeof(v_config->'versions') = 'array' THEN
+      FOR v_version IN
+        SELECT version_row
+        FROM jsonb_array_elements(v_config->'versions') AS version_row
+      LOOP
+        IF jsonb_typeof(v_version->'pool_ids') = 'array' THEN
+          v_pool_ids := v_version->'pool_ids';
+          v_pool_ids_result := '[]'::JSONB;
+          v_seen_pool_ids := ARRAY[]::TEXT[];
+
+          FOR v_pool_value IN
+            SELECT pool_value
+            FROM jsonb_array_elements(v_pool_ids) AS pool_value
+          LOOP
+            v_pool_text := v_pool_value #>> '{}';
+            IF v_pool_text = v_manual.pool_id THEN
+              v_pool_text := v_official_id;
+            END IF;
+
+            IF v_pool_text IS NOT NULL AND NOT (v_pool_text = ANY(v_seen_pool_ids)) THEN
+              v_seen_pool_ids := array_append(v_seen_pool_ids, v_pool_text);
+              v_pool_ids_result := v_pool_ids_result || jsonb_build_array(v_pool_text);
+            END IF;
+          END LOOP;
+
+          v_version := jsonb_set(v_version, '{pool_ids}', v_pool_ids_result, TRUE);
+        END IF;
+
+        v_version_result := v_version_result || jsonb_build_array(v_version);
+      END LOOP;
+
+      v_config := jsonb_set(v_config, '{versions}', v_version_result, TRUE);
+      UPDATE public.site_config
+      SET
+        value = v_config::TEXT,
+        updated_at = NOW()
+      WHERE key = 'home_version_timeline';
+    END IF;
+  EXCEPTION
+    WHEN invalid_text_representation THEN
+      NULL;
+  END;
+
+  DELETE FROM public.pools
+  WHERE pool_id = v_manual.pool_id;
+
+  INSERT INTO public.site_config (key, value, label, category, updated_at)
+  VALUES (
+    'public_cache_epoch',
+    jsonb_build_object(
+      'version', ((EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT)::TEXT,
+      'scope', 'pool-id-promotion',
+      'reason', 'promote_manual_pool_to_official_id',
+      'updatedAt', NOW()
+    )::TEXT,
+    '公开缓存版本',
+    'system',
+    NOW()
+  )
+  ON CONFLICT (key) DO UPDATE
+  SET
+    value = EXCLUDED.value,
+    updated_at = NOW();
+
+  PERFORM pg_notify('pgrst', 'reload schema');
+
+  RETURN jsonb_build_object(
+    'manualPoolId', v_manual.pool_id,
+    'officialPoolId', v_official_id,
+    'promoted', TRUE
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.promote_manual_pool_to_official_id(TEXT, JSONB)
+  FROM PUBLIC, anon, authenticated;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    GRANT EXECUTE ON FUNCTION public.promote_manual_pool_to_official_id(TEXT, JSONB)
+      TO service_role;
+  END IF;
+END;
+$$;
+
+COMMENT ON FUNCTION public.promote_manual_pool_to_official_id(TEXT, JSONB) IS
+  '由 service_role 原子晋升重构寻访或重构申领临时 ID，并迁移历史、阵容、别名与版本配置引用。';
+
+NOTIFY pgrst, 'reload schema';
+-- <<< END MIGRATION: active/179_split_reconstruction_claim_subtype.sql
 

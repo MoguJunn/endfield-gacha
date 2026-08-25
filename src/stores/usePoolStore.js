@@ -5,8 +5,10 @@ import {
   POOL_GROUP_PREFIX,
   GROUP_TYPE_LABELS,
   isPoolGroupId,
+  parsePoolGroupId,
   getPoolGroupType,
-  getPoolsForGroupType
+  getPoolGroupSubtype,
+  getPoolsForGroupType,
 } from '../utils/poolGroupUtils.js';
 import appLogger from '../utils/appLogger.js';
 import { readStorageValue, removeStorageValue, STORAGE_KEYS, writeStorageValue } from '../utils/storageUtils.js';
@@ -16,21 +18,23 @@ export {
   POOL_GROUP_PREFIX,
   GROUP_TYPE_LABELS,
   isPoolGroupId,
+  parsePoolGroupId,
   getPoolGroupType,
-  getPoolsForGroupType
+  getPoolGroupSubtype,
+  getPoolsForGroupType,
 };
 
 /**
  * 卡池类型映射：官方 poolId 前缀 -> 本地类型
  */
 const POOL_TYPE_MAP = {
-  'joint': 'extra',                    // 附加寻访
-  'extra': 'extra',                    // 附加寻访（本地兼容）
-  'special': 'limited_character',      // 限定角色池（特许寻访）
-  'standard': 'standard',              // 常驻池（基础寻访）
-  'beginner': 'beginner',              // 新手池（启程寻访）
-  'weponbox': 'limited_weapon',        // 武器池（注意官方拼写错误）
-  'weaponbox': 'limited_weapon',       // 武器池
+  joint: 'extra', // 附加寻访
+  extra: 'extra', // 附加寻访（本地兼容）
+  special: 'limited_character', // 限定角色池（特许寻访）
+  standard: 'standard', // 常驻池（基础寻访）
+  beginner: 'beginner', // 新手池（启程寻访）
+  weponbox: 'limited_weapon', // 武器池（注意官方拼写错误）
+  weaponbox: 'limited_weapon', // 武器池
 };
 
 /**
@@ -139,12 +143,8 @@ const usePoolStore = create((set, get) => ({
    * 清空，避免沿用上一个站点账号的游戏 UID 或卡池。
    */
   restoreOwnerSelection: (ownerId) => {
-    const currentPoolId = readStoredUiValue(
-      getOwnerScopedStorageKey(STORAGE_KEYS.CURRENT_POOL_ID, ownerId)
-    );
-    const currentGameUid = readStoredUiValue(
-      getOwnerScopedStorageKey(STORAGE_KEYS.CURRENT_GAME_UID, ownerId)
-    );
+    const currentPoolId = readStoredUiValue(getOwnerScopedStorageKey(STORAGE_KEYS.CURRENT_POOL_ID, ownerId));
+    const currentGameUid = readStoredUiValue(getOwnerScopedStorageKey(STORAGE_KEYS.CURRENT_GAME_UID, ownerId));
     set({ currentPoolId, currentGameUid });
     return { currentPoolId, currentGameUid };
   },
@@ -202,7 +202,7 @@ const usePoolStore = create((set, get) => ({
    */
   switchGameAccount: (gameUid) => {
     // ⚠️ 修复：确保不会保存字符串 "null"
-    const normalizedUid = (!gameUid || gameUid === 'null' || gameUid === 'undefined') ? null : gameUid;
+    const normalizedUid = !gameUid || gameUid === 'null' || gameUid === 'undefined' ? null : gameUid;
     set({ currentGameUid: normalizedUid });
 
     if (normalizedUid === null) {
@@ -230,7 +230,7 @@ const usePoolStore = create((set, get) => ({
       type: poolData.type || getPoolTypeFromId(poolId),
       locked: false,
       user_id: userId,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
     };
 
     const updatedPools = [...pools, newPool];
@@ -249,7 +249,7 @@ const usePoolStore = create((set, get) => ({
     const { pools } = get();
 
     // 先查找是否已存在
-    let pool = pools.find(p => p.id === poolId);
+    let pool = pools.find((p) => p.id === poolId);
     if (pool) {
       // 如果名称有更新，更新卡池名称
       if (poolName && pool.name !== poolName) {
@@ -266,7 +266,7 @@ const usePoolStore = create((set, get) => ({
     return get().createPool({
       id: poolId,
       name: name,
-      type: type
+      type: type,
     });
   },
 
@@ -291,7 +291,7 @@ const usePoolStore = create((set, get) => ({
    */
   deletePool: (poolId) => {
     const { pools, currentPoolId } = get();
-    const updatedPools = pools.filter(p => p.id !== poolId);
+    const updatedPools = pools.filter((p) => p.id !== poolId);
     get().setPools(updatedPools);
 
     // 如果删除的是当前卡池，切换到第一个
@@ -306,11 +306,10 @@ const usePoolStore = create((set, get) => ({
   updatePool: (poolId, updates) => {
     const { pools } = get();
 
-    const updatedPools = pools.map(p =>
+    const updatedPools = pools.map((p) =>
       p.id === poolId ? { ...p, ...updates, updated_at: new Date().toISOString() } : p
     );
     get().setPools(updatedPools);
-
   },
 
   /**
@@ -320,7 +319,7 @@ const usePoolStore = create((set, get) => ({
     const { pools, currentPoolId } = get();
     return getPreferredPool(pools, {
       preferredPoolId: currentPoolId,
-      includeDefaultPool: true
+      includeDefaultPool: true,
     });
   },
 
@@ -333,9 +332,7 @@ const usePoolStore = create((set, get) => ({
 
     // 先按搜索词过滤
     const filteredPools = poolSearchQuery.trim()
-      ? pools.filter(pool =>
-          pool.name.toLowerCase().includes(poolSearchQuery.toLowerCase())
-        )
+      ? pools.filter((pool) => pool.name.toLowerCase().includes(poolSearchQuery.toLowerCase()))
       : pools;
 
     // 按类型分组
@@ -344,10 +341,10 @@ const usePoolStore = create((set, get) => ({
       limited_character: { label: '限定角色池', pools: [] },
       standard: { label: '常驻池', pools: [] },
       beginner: { label: '新手池', pools: [] },
-      limited_weapon: { label: '武器池', pools: [] }
+      limited_weapon: { label: '武器池', pools: [] },
     };
 
-    filteredPools.forEach(pool => {
+    filteredPools.forEach((pool) => {
       // 统一类型映射
       let type = pool.type || 'standard';
       if (type === 'extra') type = 'extra';
@@ -363,11 +360,11 @@ const usePoolStore = create((set, get) => ({
 
     // 转换为数组，按预定顺序，过滤空分组
     return ['limited_character', 'extra', 'standard', 'beginner', 'limited_weapon']
-      .map(type => ({
+      .map((type) => ({
         type,
-        ...groups[type]
+        ...groups[type],
       }))
-      .filter(group => group.pools.length > 0);
+      .filter((group) => group.pools.length > 0);
   },
 }));
 

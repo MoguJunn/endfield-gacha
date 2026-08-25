@@ -2,11 +2,17 @@ import { getSupabaseAdminClient } from '../../_lib/authAdmin.js';
 import { rejectDisallowedBrowserOrigin } from '../../_lib/http.js';
 import { requireSuperAdminUser } from '../../_lib/siteAuth.js';
 import { buildManualCharacterId, buildManualPoolId } from '../../../src/utils/canonicalEntityUtils.js';
+import { resolvePoolCapabilities } from '../../../src/utils/poolCapabilities.js';
+import { isTargetSixStarHistoryRecord } from '../../../src/utils/poolScopedHistory.js';
 import {
   buildCharacterSelfAliasRows,
   buildPoolSelfAliasRows,
   inferPoolAliasSource,
 } from '../../../shared/idAliasService.js';
+import {
+  getCanonicalExtraPoolMetadata,
+  getCanonicalExtraPoolSubtype,
+} from '../../../shared/extraPoolSubtype.js';
 
 const HISTORY_RECALCULATE_BATCH_SIZE = 50;
 
@@ -46,6 +52,17 @@ function normalizePoolType(type) {
   if (type === 'limited_character') return 'limited';
   if (type === 'limited_weapon') return 'weapon';
   return type || 'limited';
+}
+
+function normalizePoolExtraFields(poolData = {}) {
+  const type = normalizePoolType(poolData.type);
+  const extraMetadata = getCanonicalExtraPoolMetadata(poolData);
+
+  return {
+    ...poolData,
+    type,
+    ...extraMetadata,
+  };
 }
 
 function uniqueAliasRows(rows = []) {
@@ -113,6 +130,123 @@ function normalizePoolCharacterRows(rows = [], characters = [], poolData = {}) {
   return Array.from(dedupedRows.values());
 }
 
+function validatePoolExtraContract(poolData, poolCharacterRows, characters) {
+  const poolType = normalizePoolType(poolData?.type);
+  const extraFields = [
+    poolData?.extra_subtype,
+    poolData?.extra_rule_profile,
+    poolData?.extra_series_key,
+    poolData?.extra_series_phase,
+  ];
+
+  if (poolType !== 'extra') {
+    if (extraFields.some((value) => value !== null && value !== undefined && value !== '')) {
+      return {
+        ok: false,
+        error: '非附加寻访不能保存附加寻访模板字段',
+        code: 'extra_pool_fields_not_allowed',
+      };
+    }
+    return { ok: true };
+  }
+
+  const subtype = poolData.extra_subtype;
+  const profile = poolData.extra_rule_profile;
+  const featuredValues = (Array.isArray(poolData.featured_characters) ? poolData.featured_characters : [])
+    .map((value) => normalizeName(value))
+    .filter(Boolean);
+  const featuredSet = new Set(featuredValues);
+  const characterById = new Map(
+    (Array.isArray(characters) ? characters : [])
+      .filter((character) => character?.id)
+      .map((character) => [character.id, character])
+  );
+  const upRows = (Array.isArray(poolCharacterRows) ? poolCharacterRows : []).filter((row) => row?.is_up);
+  const upCandidates = upRows.map((row) => characterById.get(row.character_id)).filter(Boolean);
+
+  if (subtype === 'special' && profile === 'brilliance_festival_v1') {
+    if (poolData.extra_series_key !== null || poolData.extra_series_phase !== null) {
+      return {
+        ok: false,
+        error: '辉光庆典不能保存重构系列字段',
+        code: 'brilliance_series_fields_not_allowed',
+      };
+    }
+    if (featuredValues.length !== 4 || featuredSet.size !== 4 || upRows.length !== 4 || upCandidates.length !== 4) {
+      return {
+        ok: false,
+        error: '辉光庆典必须配置恰好 4 名不重复的 6★角色并全部标记为 UP',
+        code: 'brilliance_featured_roster_invalid',
+      };
+    }
+    const invalidCandidate = upCandidates.some((character) => (
+      character.type !== 'character'
+      || Number(character.rarity) !== 6
+      || (!featuredSet.has(character.id) && !featuredSet.has(normalizeName(character.name)))
+    ));
+    if (invalidCandidate) {
+      return {
+        ok: false,
+        error: '辉光庆典的 4 名 UP 必须都是已登记的 6★角色',
+        code: 'brilliance_featured_character_invalid',
+      };
+    }
+    return { ok: true };
+  }
+
+  const reconstructionSubtypeByProfile = {
+    reconstruction_character_v1: 'reconstruction',
+    reconstruction_weapon_v1: 'reconstruction_claim',
+  };
+  if (!reconstructionSubtypeByProfile[profile] || subtype !== reconstructionSubtypeByProfile[profile]) {
+    return {
+      ok: false,
+      error: '附加寻访必须选择重构角色、重构申领或辉光庆典模板',
+      code: 'extra_pool_template_required',
+    };
+  }
+
+  if (!poolData.extra_series_key) {
+    return {
+      ok: false,
+      error: '重构寻访必须填写系列 key',
+      code: 'reconstruction_series_key_required',
+    };
+  }
+  if (!Number.isInteger(poolData.extra_series_phase) || poolData.extra_series_phase <= 0) {
+    return {
+      ok: false,
+      error: '重构寻访阶段必须是正整数',
+      code: 'reconstruction_series_phase_invalid',
+    };
+  }
+  if (featuredValues.length !== 1 || featuredSet.size !== 1 || upRows.length !== 1 || upCandidates.length !== 1) {
+    return {
+      ok: false,
+      error: '重构寻访必须配置且仅配置 1 个 UP 项',
+      code: 'reconstruction_up_roster_invalid',
+    };
+  }
+
+  const expectedType = profile === 'reconstruction_weapon_v1' ? 'weapon' : 'character';
+  const upCandidate = upCandidates[0];
+  const upCharacter = normalizeName(poolData.up_character);
+  if (
+    upCandidate.type !== expectedType
+    || Number(upCandidate.rarity) !== 6
+    || (!featuredSet.has(upCandidate.id) && !featuredSet.has(normalizeName(upCandidate.name)))
+    || (upCharacter !== upCandidate.id && upCharacter !== normalizeName(upCandidate.name))
+  ) {
+    return {
+      ok: false,
+      error: `重构寻访的单 UP 必须是已登记的 6★${expectedType === 'weapon' ? '武器' : '角色'}`,
+      code: 'reconstruction_up_candidate_invalid',
+    };
+  }
+
+  return { ok: true };
+}
+
 function buildPoolAliasRowsForSave({
   canonicalPoolId,
   editingPool = null,
@@ -149,7 +283,10 @@ async function loadPools(adminClient) {
     .select('*')
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  return (Array.isArray(data) ? data : []).map((pool) => ({
+    ...pool,
+    extra_subtype: getCanonicalExtraPoolSubtype(pool),
+  }));
 }
 
 async function loadCharacters(adminClient) {
@@ -277,7 +414,30 @@ async function handleCreateUpCharacter(res, adminClient, body) {
   }
 
   const poolType = normalizePoolType(body.poolType || body.pool_type);
-  const characterType = poolType === 'weapon' ? 'weapon' : 'character';
+  const extraRuleProfile = normalizeName(body.extraRuleProfile || body.extra_rule_profile);
+  const reconstructionTypeByProfile = {
+    reconstruction_character_v1: 'character',
+    reconstruction_weapon_v1: 'weapon',
+  };
+  if (poolType === 'extra' && !reconstructionTypeByProfile[extraRuleProfile]) {
+    return sendError(
+      res,
+      400,
+      '附加寻访仅能在显式选择合法重构模板后自动创建 UP 项',
+      'extra_up_character_profile_required'
+    );
+  }
+  const requestedItemType = normalizeName(body.itemType || body.item_type);
+  const profileItemType = reconstructionTypeByProfile[extraRuleProfile] || null;
+  const characterType = profileItemType
+    || (['character', 'weapon'].includes(requestedItemType)
+      ? requestedItemType
+      : poolType === 'weapon'
+        ? 'weapon'
+        : 'character');
+  if (profileItemType && requestedItemType && requestedItemType !== profileItemType) {
+    return sendError(res, 400, '重构模板与 UP 项对象类型不一致', 'reconstruction_item_type_mismatch');
+  }
   const charId = buildManualCharacterId(characterName, characterType);
   const safeRotationBaseCount = Number(body.rotationBaseCount || body.rotation_base_count) || 0;
   const newCharacter = {
@@ -285,7 +445,7 @@ async function handleCreateUpCharacter(res, adminClient, body) {
     name: characterName,
     rarity: 6,
     type: characterType,
-    is_limited: poolType === 'limited' || poolType === 'weapon',
+    is_limited: poolType === 'limited' || poolType === 'weapon' || Boolean(profileItemType),
     aliases: [],
     avatar_url: null,
     pool_config: {
@@ -302,13 +462,17 @@ async function handleCreateUpCharacter(res, adminClient, body) {
 }
 
 async function handleSavePool(res, adminClient, authResult, body) {
-  const poolData = body.poolData || body.pool_data || {};
+  const poolData = normalizePoolExtraFields(body.poolData || body.pool_data || {});
   const editingPool = body.editingPool || body.editing_pool || null;
   const characters = Array.isArray(body.characters) ? body.characters : [];
   const editingPoolCharacters = Array.isArray(body.editingPoolCharacters)
     ? body.editingPoolCharacters
     : [];
   const poolCharacterRows = normalizePoolCharacterRows(editingPoolCharacters, characters, poolData);
+  const extraContract = validatePoolExtraContract(poolData, poolCharacterRows, characters);
+  if (!extraContract.ok) {
+    return sendError(res, 400, extraContract.error, extraContract.code);
+  }
 
   if (editingPool) {
     const targetPoolId = normalizeName(poolData.pool_id || editingPool.pool_id);
@@ -330,6 +494,7 @@ async function handleSavePool(res, adminClient, authResult, body) {
         editingPool,
         poolData,
       }),
+      poolCharacterRows,
     });
     await replacePoolCharacters(adminClient, targetPoolId, poolCharacterRows);
     return res.status(200).json({
@@ -363,6 +528,7 @@ async function handleSavePool(res, adminClient, authResult, body) {
       canonicalPoolId: poolId,
       poolData: newPoolData,
     }),
+    poolCharacterRows,
   });
   await replacePoolCharacters(adminClient, poolId, poolCharacterRows);
 
@@ -421,28 +587,40 @@ async function handleRemoveCharacterFromPool(res, adminClient, body) {
   });
 }
 
-function calculateIsStandard(record, pools) {
+function buildRecalculationPoolLookup(pools) {
   const poolInfoMap = new Map();
   (Array.isArray(pools) ? pools : []).forEach((pool) => {
-    poolInfoMap.set(pool.pool_id, {
-      type: pool.type,
-      up_character: pool.up_character,
-    });
+    const poolId = pool?.id || pool?.pool_id;
+    if (!poolId) return;
+
+    const poolInfo = {
+      ...pool,
+      id: poolId,
+      type: pool?.type || pool?.pool_type,
+      up_character: pool?.up_character ?? pool?.upCharacter,
+      extra_subtype: getCanonicalExtraPoolSubtype(pool),
+      extra_rule_profile: pool?.extra_rule_profile ?? pool?.extraRuleProfile,
+      extra_series_key: pool?.extra_series_key ?? pool?.extraSeriesKey,
+      extra_series_phase: pool?.extra_series_phase ?? pool?.extraSeriesPhase,
+    };
+    poolInfoMap.set(String(poolId), poolInfo);
   });
 
-  const poolInfo = poolInfoMap.get(record.pool_id);
-  const characterName = record.character_name || record.item_name || '';
-  if (!poolInfo) return record.is_standard ?? false;
-  const poolType = poolInfo.type;
-  const upCharacter = poolInfo.up_character;
+  return poolInfoMap;
+}
 
-  if (poolType === 'standard' || poolType === 'beginner') return true;
-  if (poolType === 'extra') return false;
-  if (['limited', 'limited_character', 'weapon', 'limited_weapon'].includes(poolType)) {
-    if (!upCharacter) return false;
-    return !characterName.includes(upCharacter) && !upCharacter.includes(characterName);
+function calculateIsStandard(record, poolInfoMap) {
+  const poolInfo = poolInfoMap.get(String(record.pool_id));
+  if (!poolInfo) return record.is_standard ?? false;
+
+  const capabilities = resolvePoolCapabilities(poolInfo);
+  if (!capabilities.isResolved) {
+    return record.is_standard;
   }
-  return record.is_standard ?? false;
+  if (capabilities.targetMode === 'none') {
+    return true;
+  }
+  return !isTargetSixStarHistoryRecord(record, poolInfo);
 }
 
 async function handleRecalculateIsStandard(res, adminClient, body) {
@@ -465,9 +643,10 @@ async function handleRecalculateIsStandard(res, adminClient, body) {
     });
   }
 
+  const poolInfoMap = buildRecalculationPoolLookup(pools);
   const updates = [];
   records.forEach((record) => {
-    const nextIsStandard = calculateIsStandard(record, pools);
+    const nextIsStandard = calculateIsStandard(record, poolInfoMap);
     if (nextIsStandard !== record.is_standard) {
       updates.push({
         record_id: record.record_id,

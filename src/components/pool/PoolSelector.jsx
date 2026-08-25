@@ -9,7 +9,7 @@ import {
   formatFreshnessAbsolute,
   formatFreshnessRelative,
   getFreshnessTone,
-  getLatestHistoryTimestampMs
+  getLatestHistoryTimestampMs,
 } from '../../utils/dataFreshness.js';
 import { getAccountLastImportTimestamp } from '../../utils/accountFreshness.js';
 import { isPoolGroupId } from '../../stores/usePoolStore';
@@ -36,15 +36,7 @@ function getFreshnessToneClasses(tone) {
   }
 }
 
-function CompactFreshnessCard({
-  label,
-  title,
-  badgeText,
-  metaText,
-  detailText,
-  tone,
-  fallback = false
-}) {
+function CompactFreshnessCard({ label, title, badgeText, metaText, detailText, tone, fallback = false }) {
   return (
     <div className="min-w-0 border border-zinc-200 bg-white/80 px-3.5 py-3 dark:border-zinc-800 dark:bg-zinc-900/80">
       <div className="flex items-start justify-between gap-3">
@@ -52,19 +44,15 @@ function CompactFreshnessCard({
           <div className="text-[9px] font-bold uppercase tracking-[0.16em] text-slate-400 dark:text-zinc-500">
             {label}
           </div>
-          <div className="text-sm font-bold leading-tight text-slate-800 dark:text-zinc-100 break-words">
-            {title}
-          </div>
-          <div className="text-[11px] leading-tight text-slate-500 dark:text-zinc-400 break-words">
-            {metaText}
-          </div>
+          <div className="text-sm font-bold leading-tight text-slate-800 dark:text-zinc-100 break-words">{title}</div>
+          <div className="text-[11px] leading-tight text-slate-500 dark:text-zinc-400 break-words">{metaText}</div>
           {detailText && (
-            <div className="text-[10px] leading-tight text-slate-400 dark:text-zinc-500 break-words">
-              {detailText}
-            </div>
+            <div className="text-[10px] leading-tight text-slate-400 dark:text-zinc-500 break-words">{detailText}</div>
           )}
         </div>
-        <span className={`mt-0.5 shrink-0 px-2 py-1 text-[10px] font-bold border whitespace-nowrap ${getFreshnessToneClasses(tone)} ${fallback ? 'opacity-80' : ''}`}>
+        <span
+          className={`mt-0.5 shrink-0 px-2 py-1 text-[10px] font-bold border whitespace-nowrap ${getFreshnessToneClasses(tone)} ${fallback ? 'opacity-80' : ''}`}
+        >
           {badgeText}
         </span>
       </div>
@@ -98,8 +86,9 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
     effectiveGameUid,
     filteredHistory,
     zeroPullPoolCount,
-    selectorPools,
     groupedPools: sortedPoolsWithGroups,
+    visiblePoolCount,
+    toggleSubgroup,
     totalPulls,
     showOverviewOptions,
   } = usePoolScopeSelectorState({
@@ -108,7 +97,6 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
     hideZeroPullPools,
   });
   const totalPools = pools.length;
-  const visiblePools = selectorPools.length;
   const allOverviewId = getPoolGroupId('all');
 
   const currentAccount = useMemo(() => {
@@ -155,11 +143,11 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
     ? t('pool.selector.currentBanner', { name: localizePoolName(currentPool, { locale }) })
     : t('pool.selector.currentFilter');
 
-  const totalPart = visiblePools !== totalPools ? `/${formatNumber(totalPools)}` : '';
+  const totalPart = visiblePoolCount !== totalPools ? `/${formatNumber(totalPools)}` : '';
   const summaryLabel = t('pool.selector.summary', {
-    visible: formatNumber(visiblePools),
+    visible: formatNumber(visiblePoolCount),
     totalPart,
-    pulls: formatNumber(totalPulls)
+    pulls: formatNumber(totalPulls),
   });
   const importRequestedByQuery = useMemo(() => {
     const searchParams = new URLSearchParams(location.search);
@@ -220,7 +208,10 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
                 style={{ clipPath: 'polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%)' }}
               >
                 <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 ease-in-out" />
-                <Upload size={14} className="group-hover:-translate-y-0.5 transition-transform duration-300 relative z-10" />
+                <Upload
+                  size={14}
+                  className="group-hover:-translate-y-0.5 transition-transform duration-300 relative z-10"
+                />
                 <span className="relative z-10">{t('pool.selector.import')}</span>
               </button>
               {typeof onOpenExportOptions === 'function' && (
@@ -245,70 +236,82 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
           {gameAccounts.length > 1 && (
             <div className="flex items-center gap-1.5">
               <div className="relative">
-              <button
-                onClick={() => setShowAccountDropdown(!showAccountDropdown)}
-                className="flex w-auto min-w-[140px] max-w-[224px] items-center justify-between gap-2 px-3 py-2 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 hover:border-yellow-500 dark:hover:border-yellow-500 text-xs transition-all duration-300 group hover:shadow-[0_0_15px_rgba(234,179,8,0.15)] relative overflow-hidden"
-                style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%)' }}
-              >
-                <div className="absolute inset-y-0 left-0 w-1 bg-yellow-500 scale-y-0 group-hover:scale-y-100 transition-transform duration-300 origin-bottom" />
-                <div className="flex items-center gap-2 min-w-0 z-10 relative">
-                  <User size={14} className="text-slate-400 dark:text-zinc-500 group-hover:text-yellow-600 dark:group-hover:text-yellow-500 transition-colors shrink-0" />
-                  <span className="min-w-0 truncate text-slate-700 dark:text-zinc-300 font-bold group-hover:text-yellow-600 dark:group-hover:text-yellow-500 transition-colors">
-                    {currentAccount?.nickName || t('pool.selector.selectAccount')}
-                  </span>
-                  {currentAccountServerTag && (
-                    <span className="shrink-0 whitespace-nowrap px-1.5 py-0.5 text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 group-hover:border-yellow-500/50 group-hover:text-yellow-600 dark:group-hover:text-yellow-500 transition-colors">
-                      {currentAccountServerTag}
-                    </span>
-                  )}
-                </div>
-                <ChevronDown size={12} className={`text-slate-400 transition-transform duration-300 z-10 relative shrink-0 ml-1 ${showAccountDropdown ? 'rotate-180 text-yellow-500' : ''}`} />
-              </button>
-
-              {showAccountDropdown && (
-                <div
-                  className="absolute top-full left-0 mt-1 w-72 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-xl z-20"
+                <button
+                  onClick={() => setShowAccountDropdown(!showAccountDropdown)}
+                  className="flex w-auto min-w-[140px] max-w-[224px] items-center justify-between gap-2 px-3 py-2 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 hover:border-yellow-500 dark:hover:border-yellow-500 text-xs transition-all duration-300 group hover:shadow-[0_0_15px_rgba(234,179,8,0.15)] relative overflow-hidden"
                   style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%)' }}
                 >
-                  {gameAccounts.map(account => {
-                    const accountValue = getGameAccountSelectionValue(account);
-                    const isSelectedAccount = isGameAccountSelectionMatch(account, effectiveGameUid);
+                  <div className="absolute inset-y-0 left-0 w-1 bg-yellow-500 scale-y-0 group-hover:scale-y-100 transition-transform duration-300 origin-bottom" />
+                  <div className="flex items-center gap-2 min-w-0 z-10 relative">
+                    <User
+                      size={14}
+                      className="text-slate-400 dark:text-zinc-500 group-hover:text-yellow-600 dark:group-hover:text-yellow-500 transition-colors shrink-0"
+                    />
+                    <span className="min-w-0 truncate text-slate-700 dark:text-zinc-300 font-bold group-hover:text-yellow-600 dark:group-hover:text-yellow-500 transition-colors">
+                      {currentAccount?.nickName || t('pool.selector.selectAccount')}
+                    </span>
+                    {currentAccountServerTag && (
+                      <span className="shrink-0 whitespace-nowrap px-1.5 py-0.5 text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 group-hover:border-yellow-500/50 group-hover:text-yellow-600 dark:group-hover:text-yellow-500 transition-colors">
+                        {currentAccountServerTag}
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown
+                    size={12}
+                    className={`text-slate-400 transition-transform duration-300 z-10 relative shrink-0 ml-1 ${showAccountDropdown ? 'rotate-180 text-yellow-500' : ''}`}
+                  />
+                </button>
 
-                    return (
-                    <button
-                      key={accountValue || account.gameUid}
-                      onClick={() => {
-                        switchGameAccount(accountValue || account.gameUid);
-                        setShowAccountDropdown(false);
-                      }}
-                      className={`w-full px-3 py-2 text-left text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors ${
-                        isSelectedAccount ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400' : 'text-slate-600 dark:text-zinc-400'
-                      }`}
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <div className="min-w-0 truncate font-bold">{account.nickName}</div>
-                        {account.serverTag && (
-                          <span className="shrink-0 whitespace-nowrap px-1.5 py-0.5 text-[10px] font-bold rounded-sm bg-slate-200 dark:bg-zinc-700 text-slate-600 dark:text-zinc-300">
-                            {localizeGameAccountServerTag(account.serverTag, locale)}
-                          </span>
-                        )}
-                      </div>
-                      <div className="truncate text-[11px] text-slate-500 dark:text-zinc-400">
-                        {t('pool.selector.accountRecordCount', {
-                          uid: account.gameUid,
-                          count: formatNumber(account.recordCount || 0)
-                        })}
-                      </div>
-                      <div className="mt-0.5 truncate text-[11px] text-slate-400 dark:text-zinc-500">
-                        {t('settings.lastImport', {
-                          value: formatFreshnessRelative(getAccountLastImportTimestamp(account), t('common.timeUnknown'), locale)
-                        })}
-                      </div>
-                    </button>
-                    );
-                  })}
-                </div>
-              )}
+                {showAccountDropdown && (
+                  <div
+                    className="absolute top-full left-0 mt-1 w-72 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 shadow-xl z-20"
+                    style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%)' }}
+                  >
+                    {gameAccounts.map((account) => {
+                      const accountValue = getGameAccountSelectionValue(account);
+                      const isSelectedAccount = isGameAccountSelectionMatch(account, effectiveGameUid);
+
+                      return (
+                        <button
+                          key={accountValue || account.gameUid}
+                          onClick={() => {
+                            switchGameAccount(accountValue || account.gameUid);
+                            setShowAccountDropdown(false);
+                          }}
+                          className={`w-full px-3 py-2 text-left text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors ${
+                            isSelectedAccount
+                              ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'
+                              : 'text-slate-600 dark:text-zinc-400'
+                          }`}
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <div className="min-w-0 truncate font-bold">{account.nickName}</div>
+                            {account.serverTag && (
+                              <span className="shrink-0 whitespace-nowrap px-1.5 py-0.5 text-[10px] font-bold rounded-sm bg-slate-200 dark:bg-zinc-700 text-slate-600 dark:text-zinc-300">
+                                {localizeGameAccountServerTag(account.serverTag, locale)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="truncate text-[11px] text-slate-500 dark:text-zinc-400">
+                            {t('pool.selector.accountRecordCount', {
+                              uid: account.gameUid,
+                              count: formatNumber(account.recordCount || 0),
+                            })}
+                          </div>
+                          <div className="mt-0.5 truncate text-[11px] text-slate-400 dark:text-zinc-500">
+                            {t('settings.lastImport', {
+                              value: formatFreshnessRelative(
+                                getAccountLastImportTimestamp(account),
+                                t('common.timeUnknown'),
+                                locale
+                              ),
+                            })}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
               <div
                 className="relative"
@@ -357,13 +360,28 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
                 <div
                   className={`flex items-center gap-1.5 px-2 py-1 border text-[10px] transition-colors ${getFreshnessToneClasses(getFreshnessTone(getAccountLastImportTimestamp(currentAccount)))}`}
                   style={{ clipPath: 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)' }}
-                  title={currentAccount
-                    ? `${currentAccount.nickName} · ${t('pool.selector.meta.imported', { value: formatFreshnessAbsolute(getAccountLastImportTimestamp(currentAccount), null, locale, { includeYear: false }) })}`
-                    : t('pool.selector.switchAccountHint')}
+                  title={
+                    currentAccount
+                      ? `${currentAccount.nickName} · ${t('pool.selector.meta.imported', { value: formatFreshnessAbsolute(getAccountLastImportTimestamp(currentAccount), null, locale, { includeYear: false }) })}`
+                      : t('pool.selector.switchAccountHint')
+                  }
                 >
-                  <span className={`w-1.5 h-1.5 ${!currentAccount ? 'bg-zinc-400' : getFreshnessTone(getAccountLastImportTimestamp(currentAccount)) === 'fresh' ? 'bg-emerald-500 animate-pulse' : getFreshnessTone(getAccountLastImportTimestamp(currentAccount)) === 'notice' ? 'bg-amber-500' : 'bg-red-500'}`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 2px), calc(100% - 2px) 100%, 0 100%)' }} />
-                  <span className="hidden xl:inline font-bold tracking-widest uppercase">{t('pool.selector.accountStatus', 'ACCOUNT')}:</span>
-                  <span>{currentAccount ? formatFreshnessRelative(getAccountLastImportTimestamp(currentAccount), t('common.importTimeUnknown'), locale) : t('pool.selector.switchAccountHint')}</span>
+                  <span
+                    className={`w-1.5 h-1.5 ${!currentAccount ? 'bg-zinc-400' : getFreshnessTone(getAccountLastImportTimestamp(currentAccount)) === 'fresh' ? 'bg-emerald-500 animate-pulse' : getFreshnessTone(getAccountLastImportTimestamp(currentAccount)) === 'notice' ? 'bg-amber-500' : 'bg-red-500'}`}
+                    style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 2px), calc(100% - 2px) 100%, 0 100%)' }}
+                  />
+                  <span className="hidden xl:inline font-bold tracking-widest uppercase">
+                    {t('pool.selector.accountStatus', 'ACCOUNT')}:
+                  </span>
+                  <span>
+                    {currentAccount
+                      ? formatFreshnessRelative(
+                          getAccountLastImportTimestamp(currentAccount),
+                          t('common.importTimeUnknown'),
+                          locale
+                        )
+                      : t('pool.selector.switchAccountHint')}
+                  </span>
                 </div>
               )}
               {currentPoolLatestRecordAt && (
@@ -372,9 +390,16 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
                   style={{ clipPath: 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)' }}
                   title={`${currentPoolFreshnessLabel} · ${t('pool.selector.meta.latestRecord', { value: formatFreshnessAbsolute(currentPoolLatestRecordAt, null, locale, { includeYear: false }) })}`}
                 >
-                  <span className={`w-1.5 h-1.5 ${getFreshnessTone(currentPoolLatestRecordAt) === 'fresh' ? 'bg-emerald-500 animate-pulse' : getFreshnessTone(currentPoolLatestRecordAt) === 'notice' ? 'bg-amber-500' : 'bg-red-500'}`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 2px), calc(100% - 2px) 100%, 0 100%)' }} />
-                  <span className="hidden xl:inline font-bold tracking-widest uppercase">{t('pool.selector.poolStatus', 'POOL')}:</span>
-                  <span>{formatFreshnessRelative(currentPoolLatestRecordAt, t('pool.selector.noRecords'), locale)}</span>
+                  <span
+                    className={`w-1.5 h-1.5 ${getFreshnessTone(currentPoolLatestRecordAt) === 'fresh' ? 'bg-emerald-500 animate-pulse' : getFreshnessTone(currentPoolLatestRecordAt) === 'notice' ? 'bg-amber-500' : 'bg-red-500'}`}
+                    style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 2px), calc(100% - 2px) 100%, 0 100%)' }}
+                  />
+                  <span className="hidden xl:inline font-bold tracking-widest uppercase">
+                    {t('pool.selector.poolStatus', 'POOL')}:
+                  </span>
+                  <span>
+                    {formatFreshnessRelative(currentPoolLatestRecordAt, t('pool.selector.noRecords'), locale)}
+                  </span>
                 </div>
               )}
             </div>
@@ -391,15 +416,25 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
                 style={{ clipPath: 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)' }}
                 title={hideZeroPullPools ? t('pool.selector.hideZeroTitle') : t('pool.selector.showZeroTitle')}
               >
-                <div className={`absolute inset-0 bg-yellow-500/10 transition-transform duration-300 ease-out origin-left ${hideZeroPullPools ? 'hidden' : 'scale-x-0 group-hover:scale-x-100'}`} />
-                <span className={`h-2 w-2 transition-colors duration-300 relative z-10 ${hideZeroPullPools ? 'bg-black' : 'bg-zinc-300 dark:bg-zinc-700 group-hover:bg-yellow-500'}`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%)' }} />
-                <span className="relative z-10 transition-colors duration-300">{hideZeroPullPools ? t('pool.selector.hideZeroLabel') : t('pool.selector.showZeroLabel')}</span>
+                <div
+                  className={`absolute inset-0 bg-yellow-500/10 transition-transform duration-300 ease-out origin-left ${hideZeroPullPools ? 'hidden' : 'scale-x-0 group-hover:scale-x-100'}`}
+                />
+                <span
+                  className={`h-2 w-2 transition-colors duration-300 relative z-10 ${hideZeroPullPools ? 'bg-black' : 'bg-zinc-300 dark:bg-zinc-700 group-hover:bg-yellow-500'}`}
+                  style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%)' }}
+                />
+                <span className="relative z-10 transition-colors duration-300">
+                  {hideZeroPullPools ? t('pool.selector.hideZeroLabel') : t('pool.selector.showZeroLabel')}
+                </span>
               </button>
             )}
 
             {totalPools > 5 && (
               <div className="relative group flex items-center">
-                <Search size={14} className="absolute left-2.5 text-slate-400 dark:text-zinc-500 group-focus-within:text-yellow-500 transition-colors z-10" />
+                <Search
+                  size={14}
+                  className="absolute left-2.5 text-slate-400 dark:text-zinc-500 group-focus-within:text-yellow-500 transition-colors z-10"
+                />
                 <input
                   type="text"
                   value={searchQuery}
@@ -421,9 +456,7 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
           </div>
 
           {/* 统计 */}
-          <div className="text-xs text-slate-500 dark:text-zinc-400">
-            {summaryLabel}
-          </div>
+          <div className="text-xs text-slate-500 dark:text-zinc-400">{summaryLabel}</div>
         </div>
       </div>
 
@@ -434,19 +467,28 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
           currentSelectionId={currentPoolId}
           onSelectGroup={showOverviewOptions ? switchToPoolGroup : undefined}
           onSelectPool={switchPool}
+          onToggleSubgroup={toggleSubgroup}
           showGroupOverviewCards={showOverviewOptions}
-          leadingOverview={showOverviewOptions ? {
-            title: t('pool.selector.allOverview'),
-            totalPools: visiblePools,
-            totalPulls,
-            isSelected: currentPoolId === allOverviewId,
-            onClick: () => switchToPoolGroup('all')
-          } : null}
+          leadingOverview={
+            showOverviewOptions
+              ? {
+                  title: t('pool.selector.allOverview'),
+                  totalPools: visiblePoolCount,
+                  totalPulls,
+                  isSelected: currentPoolId === allOverviewId,
+                  onClick: () => switchToPoolGroup('all'),
+                }
+              : null
+          }
         />
       ) : (
         <div className="text-center py-12 border border-dashed border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
           <div className="text-slate-400 dark:text-zinc-500 text-sm">
-            {searchQuery ? t('pool.selector.noMatches') : (user ? t('pool.selector.noPoolDataImport') : t('pool.selector.noPoolData'))}
+            {searchQuery
+              ? t('pool.selector.noMatches')
+              : user
+                ? t('pool.selector.noPoolDataImport')
+                : t('pool.selector.noPoolData')}
           </div>
         </div>
       )}

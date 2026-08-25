@@ -4,7 +4,12 @@ import { getCharacterAvatarUrl } from '../../utils/characterUtils';
 import { useI18n } from '../../i18n/index.js';
 import { localizeEntityName } from '../../utils/gameDataI18n.js';
 import { bindHorizontalWheelScroll } from '../../utils/horizontalScroll.js';
-import { getPoolFeaturedLabel, getPoolSelectorFeaturedCharacters } from '../../utils/poolSelectorDisplay.js';
+import {
+  getPoolFeaturedLabel,
+  getPoolSelectorAvatarLookupNames,
+  getPoolSelectorFeaturedCharacters,
+} from '../../utils/poolSelectorDisplay.js';
+import { resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
 
 export const VERSION_CALENDAR_URL = 'https://ef-cal.mogujun.icu/';
 
@@ -18,6 +23,21 @@ function getFeaturedTextFontClass(featuredText = '') {
   }
 
   return 'text-[11px] leading-4';
+}
+
+function getScheduleEndDate(endDate) {
+  if (!endDate) {
+    return null;
+  }
+
+  const parsed = new Date(endDate);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isSchedulePoolActive(pool, now) {
+  const start = new Date(pool.startDate);
+  const end = getScheduleEndDate(pool.endDate);
+  return !Number.isNaN(start.getTime()) && now >= start && (!end || now < end);
 }
 
 const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSchedule, versionSections, now }) {
@@ -42,8 +62,7 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
   for (let index = 0; index < displayPools.length; index += 1) {
     const pool = displayPools[index];
     const start = new Date(pool.startDate);
-    const end = new Date(pool.endDate);
-    if (now >= start && now < end) {
+    if (isSchedulePoolActive(pool, now)) {
       currentActiveIndex = index;
       break;
     }
@@ -52,9 +71,7 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
     }
   }
   const activeLimitedTimelineIndex = limitedTimeline.findIndex(({ pool }) => {
-    const start = new Date(pool.startDate);
-    const end = new Date(pool.endDate);
-    return now >= start && now < end;
+    return isSchedulePoolActive(pool, now);
   });
   const hasActiveLimitedPool = activeLimitedTimelineIndex !== -1;
   let currentLimitedTimelineIndex = activeLimitedTimelineIndex;
@@ -68,6 +85,9 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
     key,
     currentLimitedTimelineIndex === -1 ? null : index - currentLimitedTimelineIndex,
   ]));
+  const hasActiveReconstructionCharacter = displayPools.some((pool) => (
+    pool.homeNodeKind === 'reconstruction-character' && isSchedulePoolActive(pool, now)
+  ));
 
   const focusIndex = currentActiveIndex !== -1
     ? currentActiveIndex
@@ -95,28 +115,43 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
   } = {}) => {
     const index = displayPools.findIndex((item) => getPoolKey(item) === getPoolKey(pool));
     const poolStart = new Date(pool.startDate);
-    const poolEnd = new Date(pool.endDate);
+    const poolEnd = getScheduleEndDate(pool.endDate);
     const poolData = pool.poolData || pool;
     const isExtraPool = pool.poolType === 'extra' || poolData.type === 'extra';
-    const isPast = now >= poolEnd;
-    const isActivePool = now >= poolStart && now < poolEnd;
+    const isReconstructionCharacter = pool.homeNodeKind === 'reconstruction-character';
+    const usesLimitedCardStyle = !isExtraPool || isReconstructionCharacter;
+    const poolCapabilities = resolvePoolCapabilities(poolData);
+    const isReconstructionPool = isExtraPool
+      && ['reconstruction', 'reconstruction_claim'].includes(poolCapabilities.extraSubtype);
+    const usesSingleExtraAvatar = isExtraPool && poolCapabilities.targetMode === 'single-up';
+    const isPast = Boolean(poolEnd && now >= poolEnd);
+    const isActivePool = now >= poolStart && (!poolEnd || now < poolEnd);
     const offset = isExtraPool ? null : limitedOffsetByKey.get(getPoolKey(pool));
     const displayOffset = !isExtraPool && offset !== null
       ? (hasActiveLimitedPool ? offset : offset + 1)
       : null;
     const isCurrent = isActivePool;
     const isInPool = !isExtraPool && hasActiveLimitedPool && offset !== null && offset >= -2 && offset < 0;
+    const showInPoolState = isInPool && !hasActiveReconstructionCharacter;
 
     let statusLabel = null;
-    if (isExtraPool) {
-      statusLabel = isCurrent
-        ? tt('home.rotation.status.extraCurrent', 'Extra Pool Live')
-        : tt('home.rotation.status.extraNode', 'Extra Pool');
+    if (isReconstructionCharacter) {
+      statusLabel = now < poolStart
+        ? tt('home.rotation.status.rerunNext', 'Next Rerun')
+        : tt('home.rotation.status.rerunCurrent', 'Current Rerun');
+    } else if (isExtraPool) {
+      statusLabel = isReconstructionPool
+        ? (isCurrent
+          ? tt('home.rotation.status.extraReconstructionCurrent', 'Current Reconstruction')
+          : tt('home.rotation.status.extraReconstructionNode', 'Reconstruction Pool'))
+        : (isCurrent
+          ? tt('home.rotation.status.extraCurrent', 'Current Extra')
+          : tt('home.rotation.status.extraNode', 'Extra Pool'));
     } else if (isCurrent) {
       statusLabel = tt('home.rotation.status.current', 'Current UP');
-    } else if (hasActiveLimitedPool && offset === -1) {
+    } else if (showInPoolState && offset === -1) {
       statusLabel = tt('home.rotation.status.inPoolSecond', 'Leaves in 2');
-    } else if (hasActiveLimitedPool && offset === -2) {
+    } else if (showInPoolState && offset === -2) {
       statusLabel = tt('home.rotation.status.inPoolNext', 'Leaves Next');
     } else if (displayOffset === 1) {
       statusLabel = tt('home.rotation.status.next', 'Next UP');
@@ -124,34 +159,48 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
       statusLabel = tt('home.rotation.status.nextNext', 'UP After Next');
     }
 
-    const avatarUrl = getCharacterAvatarUrl(pool.name);
-    const localizedPoolName = isExtraPool
-      ? pool.displayName || pool.name
-      : localizeEntityName(pool.name, { locale, type: 'character' }) || pool.name;
+    const homeCharacterName = isReconstructionCharacter
+      ? pool.homeCharacterName || pool.name
+      : pool.name;
+    const avatarUrl = getCharacterAvatarUrl(homeCharacterName);
+    const localizedPoolName = isReconstructionCharacter
+      ? localizeEntityName(homeCharacterName, { locale, type: 'character' }) || homeCharacterName
+      : isExtraPool
+        ? pool.displayName || pool.name
+        : localizeEntityName(pool.name, { locale, type: 'character' }) || pool.name;
     const featuredCharacterNames = isExtraPool
       ? getPoolSelectorFeaturedCharacters(poolData, { locale })
       : [];
     const featuredText = featuredCharacterNames.join(' / ');
     const featuredLabel = isExtraPool ? getPoolFeaturedLabel(poolData, { locale, short: true }) : '';
     const avatarLookupNames = isExtraPool
-      ? (Array.isArray(pool.featuredNames) && pool.featuredNames.length > 0
-        ? pool.featuredNames
-        : featuredCharacterNames).slice(0, 4)
+      ? getPoolSelectorAvatarLookupNames(poolData).slice(0, 4)
       : [];
     const extraAvatarUrls = avatarLookupNames
       .map((name) => getCharacterAvatarUrl(name))
       .filter(Boolean)
       .slice(0, 4);
-    const foldedExtraText = Array.isArray(pool.foldedExtraPools) && pool.foldedExtraPools.length > 0
-      ? pool.foldedExtraPools.map((extraPool) => extraPool.displayName || extraPool.name).filter(Boolean).join(' / ')
-      : '';
+    const foldedExtraLabels = Array.isArray(pool.foldedExtraPools)
+      ? pool.foldedExtraPools.map((extraPool) => {
+        if (extraPool.mergeKind === 'current-rerun') {
+          const characterName = localizeEntityName(extraPool.characterName, { locale, type: 'character' })
+            || extraPool.characterName;
+          return tt('home.rotation.folded.currentRerun', 'Merged current rerun: {name}', { name: characterName });
+        }
+
+        const extraName = extraPool.displayName || extraPool.name;
+        return extraName
+          ? tt('home.rotation.folded.extra', 'Merged: {name}', { name: extraName })
+          : null;
+      }).filter(Boolean)
+      : [];
 
     let containerClass = 'bg-zinc-50 dark:bg-zinc-900/80 border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400';
     if (isCurrent) {
       containerClass = 'bg-endfield-yellow/10 border-endfield-yellow text-amber-600 dark:text-endfield-yellow ring-1 ring-endfield-yellow/50 shadow-[0_0_15px_rgba(255,250,0,0.1)]';
-    } else if (isExtraPool && !isPast) {
+    } else if (isExtraPool && !isReconstructionCharacter && !isPast) {
       containerClass = 'bg-cyan-50 dark:bg-cyan-950/20 border-cyan-200 dark:border-cyan-800/50 text-cyan-700 dark:text-cyan-300';
-    } else if (isInPool) {
+    } else if (showInPoolState) {
       containerClass = 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400';
     } else if (isPast) {
       containerClass = 'bg-zinc-100 dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-800/80 text-zinc-400 dark:text-zinc-600 opacity-60';
@@ -161,29 +210,38 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
       <React.Fragment key={pool.id || pool.name}>
         <div
           ref={index === focusIndex ? focusItemRef : null}
-          className={`shrink-0 px-4 py-3 text-xs font-mono transition-all border ${containerClass} ${isExtraPool ? 'min-w-[240px]' : 'min-w-[200px]'} flex flex-col justify-center relative`}
+          className={`shrink-0 px-4 py-3 text-xs font-mono transition-all border ${containerClass} ${usesLimitedCardStyle ? 'min-w-[200px]' : 'min-w-[240px]'} flex flex-col justify-center relative`}
         >
           <div className="font-bold flex items-center gap-3">
-            <div className={`${isExtraPool ? 'w-12 h-10 rounded-sm' : 'w-8 h-8 rounded-full'} flex items-center justify-center shrink-0 overflow-hidden ${
+            <div data-home-avatar-kind={usesLimitedCardStyle ? 'character' : 'extra'} className={`${usesLimitedCardStyle ? 'w-8 h-8 rounded-full' : 'w-12 h-10 rounded-sm'} flex items-center justify-center shrink-0 overflow-hidden ${
               isCurrent
                 ? 'bg-gradient-to-br from-orange-400 to-pink-500 ring-2 ring-endfield-yellow/50'
-                : isInPool
+                : showInPoolState
                   ? 'bg-blue-200 dark:bg-blue-800/50'
                   : 'bg-zinc-200 dark:bg-zinc-700/50'
             }`}
             >
-              {isExtraPool ? (
+              {!usesLimitedCardStyle ? (
                 extraAvatarUrls.length > 0 ? (
-                  <div className="grid grid-cols-2 grid-rows-2 h-full w-full">
-                    {extraAvatarUrls.map((url, avatarIndex) => (
-                      <img
-                        key={`${url}-${avatarIndex}`}
-                        src={url}
-                        alt={featuredCharacterNames[avatarIndex] || localizedPoolName}
-                        className={`h-full w-full object-cover object-center ${isPast ? 'grayscale opacity-50' : ''}`}
-                      />
-                    ))}
-                  </div>
+                  usesSingleExtraAvatar ? (
+                    <img
+                      src={extraAvatarUrls[0]}
+                      alt={featuredCharacterNames[0] || localizedPoolName}
+                      data-avatar-layout="single"
+                      className={`h-full w-full object-cover object-center ${isPast ? 'grayscale opacity-50' : ''}`}
+                    />
+                  ) : (
+                    <div data-avatar-layout="grid" className="grid h-full w-full grid-cols-2 grid-rows-2">
+                      {extraAvatarUrls.map((url, avatarIndex) => (
+                        <img
+                          key={`${url}-${avatarIndex}`}
+                          src={url}
+                          alt={featuredCharacterNames[avatarIndex] || localizedPoolName}
+                          className={`h-full w-full object-cover object-center ${isPast ? 'grayscale opacity-50' : ''}`}
+                        />
+                      ))}
+                    </div>
+                  )
                 ) : (
                   <div className="w-full h-full items-center justify-center text-white/80 flex">
                     <User size={14} />
@@ -193,14 +251,14 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
                 <img
                   src={avatarUrl}
                   alt={localizedPoolName}
-                  className={`w-full h-full object-cover ${isPast && !isInPool ? 'grayscale opacity-50' : ''}`}
+                  className={`w-full h-full object-cover ${isPast && !showInPoolState ? 'grayscale opacity-50' : ''}`}
                   onError={(event) => {
                     event.target.style.display = 'none';
                     event.target.nextSibling.style.display = 'flex';
                   }}
                 />
               ) : null}
-              {!isExtraPool && (
+              {usesLimitedCardStyle && (
                 <div className={`w-full h-full items-center justify-center text-white/80 ${avatarUrl ? 'hidden' : 'flex'}`}>
                   <User size={14} />
                 </div>
@@ -208,21 +266,21 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
             </div>
             <div className="flex flex-col">
               <div className="flex items-center gap-2">
-                <span className={`text-sm truncate max-w-[100px] ${isPast && !isInPool ? 'opacity-60' : ''}`}>{localizedPoolName}</span>
+                <span className={`text-sm truncate max-w-[100px] ${isPast && !showInPoolState ? 'opacity-60' : ''}`}>{localizedPoolName}</span>
                 {isCurrent && !isExtraPool && <span className="text-[9px] font-bold bg-endfield-yellow/20 px-1 py-0.5 rounded text-amber-500 dark:text-endfield-yellow">UP</span>}
-                {isInPool && !isCurrent && <span className="text-[9px] bg-blue-500/10 px-1 py-0.5 rounded opacity-80">{tt('home.rotation.inPoolBadge', 'IN POOL')}</span>}
+                {showInPoolState && !isCurrent && <span className="text-[9px] bg-blue-500/10 px-1 py-0.5 rounded opacity-80">{tt('home.rotation.inPoolBadge', 'IN POOL')}</span>}
               </div>
               {statusLabel && (
                 <div className={`text-[10px] mt-0.5 font-bold tracking-wide truncate max-w-[120px] ${
                   isCurrent ? 'text-amber-600 dark:text-endfield-yellow' :
-                  isInPool ? 'text-blue-500 dark:text-blue-400' :
+                  showInPoolState ? 'text-blue-500 dark:text-blue-400' :
                   'text-zinc-400 dark:text-zinc-500'
                 }`}
                 >
                   {statusLabel}
                 </div>
               )}
-              {isExtraPool && featuredText && (
+              {isExtraPool && !isReconstructionCharacter && featuredText && (
                 <div className="mt-0.5 border-l-2 border-cyan-500/40 pl-1.5 max-w-[150px]">
                   <span className="block text-[9px] leading-3 text-cyan-600 dark:text-cyan-300 opacity-80">{featuredLabel}</span>
                   <span className={`block line-clamp-2 text-zinc-700 dark:text-zinc-200 ${getFeaturedTextFontClass(featuredText)}`}>
@@ -230,11 +288,11 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
                   </span>
                 </div>
               )}
-              {foldedExtraText && (
-                <div className="mt-1 max-w-[150px] truncate text-[10px] font-medium text-cyan-600 dark:text-cyan-300">
-                  已合并：{foldedExtraText}
+              {foldedExtraLabels.map((label) => (
+                <div key={label} className="mt-1 max-w-[150px] truncate text-[10px] font-medium text-cyan-600 dark:text-cyan-300">
+                  {label}
                 </div>
-              )}
+              ))}
             </div>
           </div>
 
@@ -247,7 +305,11 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
             <span className="truncate">
               {formatDateTime(poolStart, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}
               <span className="mx-1 opacity-50">-</span>
-              {formatDateTime(poolEnd, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}
+              {poolEnd
+                ? formatDateTime(poolEnd, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+                : pool.hasDefaultEndLabel
+                  ? tt('home.rotation.endLabel.openEnded', 'Before Version Update Maintenance')
+                  : pool.endLabel || tt('home.rotation.endLabel.openEnded', 'Before Version Update Maintenance')}
             </span>
           </div>
         </div>

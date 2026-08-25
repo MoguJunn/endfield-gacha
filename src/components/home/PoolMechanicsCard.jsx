@@ -35,6 +35,79 @@ const CharacterRow = ({
   );
 };
 
+const ExtraMechanicsRuleCard = ({ title, badge, items, accentClassName }) => (
+  <div className={`bg-white dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-700/50 p-4 shadow-sm dark:shadow-none ${accentClassName}`}>
+    <div className="flex items-center justify-between gap-3 mb-3 pb-2 border-b border-zinc-100 dark:border-zinc-800">
+      <h5 className="font-bold text-zinc-800 dark:text-zinc-200 text-sm">{title}</h5>
+      <span className="shrink-0 text-[9px] px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 font-mono uppercase tracking-wider">
+        {badge}
+      </span>
+    </div>
+    <ul className="space-y-2 text-xs leading-5 text-zinc-600 dark:text-zinc-400">
+      {items.map((item) => (
+        <li key={item} className="flex gap-2">
+          <span className="mt-2 h-1 w-1 shrink-0 bg-current opacity-60" />
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
+);
+
+function ExtraPoolMechanicsOverview({ tt }) {
+  const cards = [
+    {
+      title: tt('home.poolMechanics.extra.reconstructionCharacter.title', '重构寻访 · 角色'),
+      badge: tt('home.poolMechanics.extra.reconstruction.badge', '重构'),
+      accentClassName: 'hover:border-fuchsia-400 dark:hover:border-fuchsia-500/50 transition-colors',
+      items: [
+        tt('home.poolMechanics.extra.reconstructionCharacter.base', '复用普通限定寻访基础规则，设置单一概率提升目标。'),
+        tt('home.poolMechanics.extra.reconstructionCharacter.free', '累计 30 / 60 / 90 抽各赠一次免费十连；免费十连不推进付费保底或奖励进度。'),
+        tt('home.poolMechanics.extra.reconstructionCharacter.target', '120 抽内确保目标角色一次；每 240 抽赠送目标信物。'),
+        tt('home.poolMechanics.extra.reconstructionCharacter.carryOver', '保底与奖励按同一系列跨期继承。'),
+      ],
+    },
+    {
+      title: tt('home.poolMechanics.extra.reconstructionWeapon.title', '重构申领 · 武器'),
+      badge: tt('home.poolMechanics.extra.reconstruction.badge', '重构'),
+      accentClassName: 'hover:border-slate-400 dark:hover:border-slate-500/50 transition-colors',
+      items: [
+        tt('home.poolMechanics.extra.reconstructionWeapon.base', '复用武器寻访基础规则，设置单一概率提升武器。'),
+        tt('home.poolMechanics.extra.reconstructionWeapon.target', '前 8 次申领内确保目标武器一次。'),
+        tt('home.poolMechanics.extra.reconstructionWeapon.rewards', '第 10 次申领赠武库赠礼，第 18 次赠概率提升武器，之后每 8 次交替；同系列奖励继承。'),
+        tt('home.poolMechanics.extra.reconstructionWeapon.pity', '普通 6★ 保底最多 4 次申领，按单池独立计算。'),
+      ],
+    },
+    {
+      title: tt('home.poolMechanics.extra.brilliance.title', '特殊寻访 · 辉光庆典'),
+      badge: tt('home.poolMechanics.extra.special.badge', '特殊'),
+      accentClassName: 'hover:border-amber-400 dark:hover:border-amber-500/50 transition-colors',
+      items: [
+        tt('home.poolMechanics.extra.brilliance.targets', '四名 6★ 目标等概率出现。'),
+        tt('home.poolMechanics.extra.brilliance.free', '累计 30 抽赠送一次免费十连，免费十连不推进保底或奖励进度。'),
+        tt('home.poolMechanics.extra.brilliance.pity', '保底独立计算，不继承到其他寻访。'),
+      ],
+    },
+  ];
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h4 className="font-bold text-zinc-700 dark:text-zinc-300 text-xs flex items-center gap-2 uppercase tracking-widest">
+          <Layers size={14} className="text-blue-500" />
+          {tt('home.poolMechanics.extra.title', '附加寻访规则')}
+        </h4>
+        <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-500">
+          {tt('home.poolMechanics.extra.subtitle', '附加寻访分为重构寻访与特殊寻访；重构规则优先展示。')}
+        </p>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {cards.map((card) => <ExtraMechanicsRuleCard key={card.title} {...card} />)}
+      </div>
+    </section>
+  );
+}
+
 function PoolMechanicsCard({
   currentUpInfo,
   isOpen,
@@ -129,6 +202,8 @@ function PoolMechanicsCard({
 
       <CollapsibleContent isOpen={interactive ? isOpen : true}>
         <div className="p-6 space-y-6 bg-zinc-50/50 dark:bg-black/20">
+          <ExtraPoolMechanicsOverview tt={tt} />
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-700/50 p-4 relative group/pool hover:border-fuchsia-400 dark:hover:border-fuchsia-500/50 transition-colors shadow-sm dark:shadow-none">
               <div className="flex items-center gap-2 mb-4 pb-2 border-b border-zinc-100 dark:border-zinc-800">

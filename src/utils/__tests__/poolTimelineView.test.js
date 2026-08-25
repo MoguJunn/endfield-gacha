@@ -40,6 +40,25 @@ vi.mock('../gameDataI18n.js', () => ({
 }));
 
 describe('poolTimelineView', () => {
+  it('uses weapon milestones for reconstruction weapon timelines', () => {
+    const section = buildSinglePoolTimelineSection({
+      pool: {
+        id: 'reconstruction-weapon',
+        type: 'extra',
+        name: '重构申领',
+        extra_rule_profile: 'reconstruction_weapon_v1',
+      },
+      history: [],
+      locale: 'zh-CN',
+    });
+
+    expect(section.entries[0]).toMatchObject({
+      isCurrentStage: true,
+      targetPulls: 40,
+    });
+    expect(section.scaleMax).toBeGreaterThanOrEqual(40);
+  });
+
   it('uses inherited limited pity for the first six-star milestone in single-pool timeline', () => {
     const pool = {
       id: 'pool_new',

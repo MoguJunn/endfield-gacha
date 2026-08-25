@@ -76,6 +76,26 @@ describe('version calendar snapshot', () => {
     expect(result[0].name).toBe('临渊望北');
   });
 
+  it('keeps reconstruction claims in the version calendar as arsenal pools', () => {
+    const result = buildVersionCalendarPoolCatalog([{
+      pool_id: 'reclaim_9_0_2',
+      name: '点绘申领',
+      type: 'extra',
+      extra_subtype: 'reconstruction_claim',
+      extra_rule_profile: 'reconstruction_weapon_v1',
+      up_character: '艺术暴君',
+      start_time: '2026-09-24T04:00:00+00:00',
+    }]);
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        poolId: 'reclaim_9_0_2',
+        name: '点绘申领',
+        type: 'arsenal',
+      }),
+    ]);
+  });
+
   it('uses the UP character artwork for operator and matching weapon pools', () => {
     const result = buildVersionCalendarPoolCatalog([
       {

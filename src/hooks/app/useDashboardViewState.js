@@ -5,6 +5,8 @@ import { getCharacterAvatarUrl } from '../../utils/characterUtils';
 import { buildCharacterStats } from '../../utils/dashboardCharacterStats';
 import { buildDashboardResourceSummary } from '../../utils/dashboardResourceSummary.js';
 import { getPoolFeaturedLead } from '../../utils/poolFeaturedResolver.js';
+import { resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
+import { buildScopedPaidHistoryTimeline, isTargetSixStarHistoryRecord } from '../../utils/poolScopedHistory.js';
 import { useCurrentPoolData } from './useCurrentPoolData';
 import { usePoolStats } from './usePoolStats';
 import { readBooleanStorageValue, STORAGE_KEYS, writeBooleanStorageValue } from '../../utils/storageUtils.js';
@@ -23,18 +25,65 @@ function isLimitedPoolType(type) {
   return type === 'limited' || type === 'limited_character';
 }
 
+export function getDashboardPoolViewMeta(pool) {
+  const capabilities = resolvePoolCapabilities(pool);
+  const normalizedPoolType = normalizePoolType(pool?.type);
+  return {
+    capabilities,
+    normalizedPoolType,
+    isLimited: normalizedPoolType === 'limited',
+    isExtra: normalizedPoolType === 'extra',
+    isWeapon: capabilities.entityType === 'weapon',
+    isStandard: capabilities.basePoolType === 'standard',
+    maxPity: Number(capabilities.rules?.sixStarPity || 80),
+    usesInheritedPity: capabilities.pityScope === 'shared' || capabilities.pityScope === 'series',
+    resourceSummaryVariant: capabilities.entityType === 'weapon' ? 'weapon' : 'character',
+  };
+}
+
+export function buildDashboardSpecialProgress({
+  capabilities,
+  paidTotal = 0,
+  freePullCount = 0,
+  targetProgress = null,
+} = {}) {
+  const normalizedPaidTotal = Math.max(Number(paidTotal) || 0, 0);
+  const normalizedFreePullCount = Math.max(Number(freePullCount) || 0, 0);
+  return {
+    paidTotal: normalizedPaidTotal,
+    freeTenMilestones: (capabilities?.freeTenPullMilestones || []).map((threshold, index) => ({
+      threshold,
+      progress: Math.min(normalizedPaidTotal, threshold),
+      reached: normalizedPaidTotal >= threshold,
+      received: normalizedFreePullCount >= (index + 1) * 10,
+    })),
+    targetGuarantee:
+      Number(capabilities?.rules?.guaranteedLimitedPity || 0) > 0
+        ? {
+            threshold: Number(capabilities.rules.guaranteedLimitedPity),
+            progress: Math.min(
+              Number(targetProgress?.validPullCount ?? normalizedPaidTotal) || 0,
+              Number(capabilities.rules.guaranteedLimitedPity)
+            ),
+            reached: Number(targetProgress?.firstTargetIndex || 0) > 0,
+          }
+        : null,
+    giftInterval: Number(capabilities?.rules?.giftInterval || 0),
+  };
+}
+
 export function useDashboardViewState() {
   const { locale } = useI18n();
-  const user = useAuthStore(state => state.user);
+  const user = useAuthStore((state) => state.user);
   const currentPoolId = usePoolStore((state) => state.currentPoolId);
   const currentGameUid = usePoolStore((state) => state.currentGameUid);
   const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
   const analysisOwnerAccounts = usePersonalAnalysisStore((state) => state.owner?.accounts);
   const analysisScope = usePersonalAnalysisStore((state) => state.scope);
   const [charViewMode, setCharViewMode] = useState('waterfall');
-  const [includeFreePullsInStats, setIncludeFreePullsInStatsState] = useState(() => (
+  const [includeFreePullsInStats, setIncludeFreePullsInStatsState] = useState(() =>
     readBooleanStorageValue(STORAGE_KEYS.DASHBOARD_INCLUDE_FREE_PULLS, false, { raw: true })
-  ));
+  );
   const setIncludeFreePullsInStats = (valueOrUpdater) => {
     setIncludeFreePullsInStatsState((current) => {
       const next = typeof valueOrUpdater === 'function' ? valueOrUpdater(current) : valueOrUpdater;
@@ -53,163 +102,202 @@ export function useDashboardViewState() {
     allLimitedHistory,
     crossPoolPityMap,
     hasMergedAccountView,
-    groupType
+    groupType,
   } = useCurrentPoolData();
 
-  const normalizedPoolType = normalizePoolType(currentPool?.type);
-  const isLimited = normalizedPoolType === 'limited';
-  const isExtra = normalizedPoolType === 'extra';
-  const isWeapon = normalizedPoolType === 'weapon';
-  const isStandard = normalizedPoolType === 'standard';
-  const maxPity = isWeapon ? 40 : 80;
+  const poolViewMeta = useMemo(() => getDashboardPoolViewMeta(currentPool), [currentPool]);
+  const {
+    capabilities: currentPoolCapabilities,
+    normalizedPoolType,
+    isLimited,
+    isExtra,
+    isWeapon,
+    isStandard,
+    maxPity,
+    usesInheritedPity,
+  } = poolViewMeta;
   const hasPoolData = poolsArray.length > 0;
   const isGroupMode = currentPool?.isGroupMode === true;
   const isAllPoolsOverview = currentPool?.isAllPoolsOverview === true;
-  const visibleLimitedPoolIds = useMemo(() => (
-    new Set(
-      selectedPools
-        .filter((pool) => isLimitedPoolType(pool?.type))
-        .map((pool) => pool?.id)
-        .filter(Boolean)
-    )
-  ), [selectedPools]);
+  const usesLimitedCharacterStats =
+    currentPoolCapabilities.basePoolType === 'limited' && currentPoolCapabilities.entityType === 'character';
+  const visibleLimitedPoolIds = useMemo(
+    () =>
+      new Set(
+        selectedPools
+          .filter((pool) => {
+            const capabilities = resolvePoolCapabilities(pool);
+            return (
+              isLimitedPoolType(pool?.type) ||
+              (capabilities.basePoolType === 'limited' && capabilities.entityType === 'character')
+            );
+          })
+          .map((pool) => pool?.id)
+          .filter(Boolean)
+      ),
+    [selectedPools]
+  );
 
   const {
     stats: computedStats,
     effectivePity: computedEffectivePity,
-    groupedHistory
+    groupedHistory,
   } = usePoolStats({
     normalizedCurrentPoolHistory: normalizedPoolHistory,
     currentPool,
     allLimitedHistory,
+    accountHistory: annotatedAccountHistoryArray,
+    poolCatalog: poolsArray,
     currentPoolId: currentPool?.id,
     selectedPools,
-    includeFreePullsInStats
+    includeFreePullsInStats,
   });
 
-  const computedCharacterStats = useMemo(() => (
-    buildCharacterStats({
-      history: normalizedPoolHistory,
-      isLimitedPool: isLimited,
+  const computedCharacterStats = useMemo(
+    () =>
+      buildCharacterStats({
+        history: normalizedPoolHistory,
+        isLimitedPool: usesLimitedCharacterStats,
+        crossPoolPityMap,
+        limitedPoolIds: isGroupMode ? visibleLimitedPoolIds : null,
+        includeFreePullsInStats,
+      }),
+    [
       crossPoolPityMap,
-      limitedPoolIds: isGroupMode ? visibleLimitedPoolIds : null,
-      includeFreePullsInStats
-    })
-  ), [crossPoolPityMap, includeFreePullsInStats, isGroupMode, isLimited, normalizedPoolHistory, visibleLimitedPoolIds]);
+      includeFreePullsInStats,
+      isGroupMode,
+      normalizedPoolHistory,
+      usesLimitedCharacterStats,
+      visibleLimitedPoolIds,
+    ]
+  );
 
   const computedCheckLimitedInFirstN = useMemo(() => {
-    const sortedHistory = [...normalizedPoolHistory].sort((a, b) => {
-      const timeA = typeof a.timestamp === 'number' ? a.timestamp : new Date(a.timestamp).getTime();
-      const timeB = typeof b.timestamp === 'number' ? b.timestamp : new Date(b.timestamp).getTime();
-      return timeA - timeB;
-    });
+    const poolLookup = new Map(
+      poolsArray
+        .flatMap((pool) => [pool?.id, pool?.pool_id].map((poolId) => [String(poolId || ''), pool]))
+        .filter(([poolId]) => Boolean(poolId))
+    );
+    const targetTimeline = isGroupMode
+      ? normalizedPoolHistory.filter(
+          (item) =>
+            item?.specialType !== 'gift' &&
+            item?.special_type !== 'gift' &&
+            item?.isFree !== true &&
+            item?.is_free !== true
+        )
+      : buildScopedPaidHistoryTimeline({
+          history: annotatedAccountHistoryArray,
+          pools: poolsArray,
+          pool: currentPool,
+          scopeType: 'target',
+        });
+    let firstTargetIndex = 0;
 
-    let pullCount = 0;
-    let firstLimitedIndex120 = 0;
-    let firstLimitedIndex80 = 0;
-
-    for (const item of sortedHistory) {
-      if (item.specialType === 'gift' || item.special_type === 'gift' || item.isFree || item.is_free) {
-        continue;
-      }
-
-      pullCount++;
-      if (item.rarity === 6 && !item.isStandard) {
-        if (firstLimitedIndex120 === 0 && pullCount <= 120) firstLimitedIndex120 = pullCount;
-        if (firstLimitedIndex80 === 0 && pullCount <= 80) firstLimitedIndex80 = pullCount;
+    for (let index = 0; index < targetTimeline.length; index += 1) {
+      const item = targetTimeline[index];
+      const sourcePool = poolLookup.get(String(item?.poolId || item?.pool_id || '')) || currentPool;
+      if (isTargetSixStarHistoryRecord(item, sourcePool)) {
+        firstTargetIndex = index + 1;
+        break;
       }
     }
 
-    return { firstLimitedIndex120, firstLimitedIndex80, validPullCount: pullCount };
-  }, [normalizedPoolHistory]);
-
-  const computedHasReceivedFreeTen = useMemo(() => {
-    return normalizedPoolHistory.some(item => item.isFree || item.is_free);
-  }, [normalizedPoolHistory]);
+    return {
+      firstTargetIndex,
+      firstLimitedIndex120: firstTargetIndex > 0 && firstTargetIndex <= 120 ? firstTargetIndex : 0,
+      firstLimitedIndex80: firstTargetIndex > 0 && firstTargetIndex <= 80 ? firstTargetIndex : 0,
+      validPullCount: targetTimeline.length,
+    };
+  }, [annotatedAccountHistoryArray, currentPool, isGroupMode, normalizedPoolHistory, poolsArray]);
 
   const analysisScopeAccountKey = String(analysisScope?.account?.accountKey || '').trim();
-  const effectiveAnalysisAccountKey = useMemo(() => resolveEffectiveGameUid({
-    currentGameUid,
-    gameAccounts: analysisOwnerAccounts,
-  }), [analysisOwnerAccounts, currentGameUid]);
-  const isAnalysisScopeCurrent = !effectiveAnalysisAccountKey
-    || analysisScopeAccountKey === effectiveAnalysisAccountKey;
+  const effectiveAnalysisAccountKey = useMemo(
+    () =>
+      resolveEffectiveGameUid({
+        currentGameUid,
+        gameAccounts: analysisOwnerAccounts,
+      }),
+    [analysisOwnerAccounts, currentGameUid]
+  );
+  const isAnalysisScopeCurrent =
+    !effectiveAnalysisAccountKey || analysisScopeAccountKey === effectiveAnalysisAccountKey;
   const analysisViewKey = String(currentPoolId || currentPool?.id || '').trim();
-  const snapshotView = isAnalysisScopeCurrent
-    && ['ready', 'stale', 'empty'].includes(analysisAvailability)
-    ? analysisScope?.dashboard?.views?.[analysisViewKey]
-    : null;
-  const snapshotVariant = snapshotView?.[
-    includeFreePullsInStats ? 'includeFree' : 'excludeFree'
-  ] || null;
+  const snapshotView =
+    isAnalysisScopeCurrent && ['ready', 'stale', 'empty'].includes(analysisAvailability)
+      ? analysisScope?.dashboard?.views?.[analysisViewKey]
+      : null;
+  const snapshotVariant = snapshotView?.[includeFreePullsInStats ? 'includeFree' : 'excludeFree'] || null;
   const isAnalysisBacked = Boolean(snapshotVariant);
-  const stats = isAnalysisBacked && snapshotVariant.stats
-    ? snapshotVariant.stats
-    : computedStats;
-  const effectivePity = isAnalysisBacked && snapshotVariant.effectivePity
-    ? snapshotVariant.effectivePity
-    : computedEffectivePity;
-  const characterStats = isAnalysisBacked && Array.isArray(snapshotVariant.characterStats)
-    ? snapshotVariant.characterStats
-    : computedCharacterStats;
-  const checkLimitedInFirstN = isAnalysisBacked && snapshotVariant.checkLimitedInFirstN
-    ? snapshotVariant.checkLimitedInFirstN
-    : computedCheckLimitedInFirstN;
+  const stats = isAnalysisBacked && snapshotVariant.stats ? snapshotVariant.stats : computedStats;
+  const effectivePity =
+    isAnalysisBacked && snapshotVariant.effectivePity ? snapshotVariant.effectivePity : computedEffectivePity;
+  const characterStats =
+    isAnalysisBacked && Array.isArray(snapshotVariant.characterStats)
+      ? snapshotVariant.characterStats
+      : computedCharacterStats;
+  const checkLimitedInFirstN =
+    isAnalysisBacked && snapshotVariant.checkLimitedInFirstN
+      ? snapshotVariant.checkLimitedInFirstN
+      : computedCheckLimitedInFirstN;
   const hasReceivedFreeTen = isAnalysisBacked
-    && typeof snapshotVariant.hasReceivedFreeTen === 'boolean'
-    ? snapshotVariant.hasReceivedFreeTen
-    : computedHasReceivedFreeTen;
-  const snapshotSplitOverviewStats = isAnalysisBacked
-    ? snapshotVariant.splitOverviewStats ?? null
-    : null;
+    && Object.prototype.hasOwnProperty.call(snapshotVariant, 'hasReceivedFreeTen')
+    ? Boolean(snapshotVariant.hasReceivedFreeTen)
+    : Number(stats.rewardFreePullCount ?? stats.freePullCount ?? 0) > 0;
+  const snapshotSplitOverviewStats = isAnalysisBacked ? (snapshotVariant.splitOverviewStats ?? null) : null;
   const snapshotTimelineSections = isAnalysisBacked
-    ? analysisScope?.dashboard?.timelineViews?.[locale]?.[analysisViewKey]
-      || analysisScope?.dashboard?.timelineViews?.['zh-CN']?.[analysisViewKey]
-      || null
+    ? analysisScope?.dashboard?.timelineViews?.[locale]?.[analysisViewKey] ||
+      analysisScope?.dashboard?.timelineViews?.['zh-CN']?.[analysisViewKey] ||
+      null
     : null;
 
   const totalCharacterCount = useMemo(() => {
     return characterStats.reduce((sum, char) => sum + char.count, 0);
   }, [characterStats]);
 
+  const specialProgress = useMemo(
+    () =>
+      buildDashboardSpecialProgress({
+        capabilities: currentPoolCapabilities,
+        paidTotal: stats.rewardPaidTotal ?? stats.paidTotal ?? stats.total,
+        freePullCount: stats.rewardFreePullCount ?? stats.freePullCount,
+        targetProgress: checkLimitedInFirstN,
+      }),
+    [
+      checkLimitedInFirstN,
+      currentPoolCapabilities,
+      stats.freePullCount,
+      stats.paidTotal,
+      stats.rewardFreePullCount,
+      stats.rewardPaidTotal,
+      stats.total,
+    ]
+  );
+
   const weaponGifts = useMemo(() => {
-    if (normalizedPoolType !== 'weapon') {
+    if (!isWeapon) {
       return null;
     }
 
-    const giftThresholds = [100, 180, 260, 340, 420, 500];
-    const paidTotal = stats.paidTotal ?? stats.total;
-    let nextGift = 0;
-    let nextGiftType = 'standard';
-    let standardCount = 0;
-    let limitedCount = 0;
-
-    for (const threshold of giftThresholds) {
-      if (paidTotal >= threshold) {
-        if (threshold === 180 || threshold === 340 || threshold === 500) {
-          limitedCount++;
-        } else {
-          standardCount++;
-        }
-      }
+    const paidTotal = stats.rewardPaidTotal ?? stats.paidTotal ?? stats.total;
+    const firstStandardGift = Number(currentPoolCapabilities.rules?.firstStandardGift || 0);
+    const firstLimitedGift = Number(currentPoolCapabilities.rules?.firstLimitedGift || 0);
+    const interval = Number(currentPoolCapabilities.rules?.giftAlternateInterval || 0);
+    let nextGift = paidTotal < firstStandardGift ? firstStandardGift : firstLimitedGift;
+    let nextGiftType = paidTotal < firstStandardGift ? 'standard' : 'limited';
+    if (firstLimitedGift > 0 && paidTotal >= firstLimitedGift && interval > 0) {
+      const completedIntervals = Math.floor((paidTotal - firstLimitedGift) / interval);
+      nextGift = firstLimitedGift + (completedIntervals + 1) * interval;
+      nextGiftType = completedIntervals % 2 === 0 ? 'standard' : 'limited';
     }
 
-    for (const threshold of giftThresholds) {
-      if (paidTotal < threshold) {
-        nextGift = threshold;
-        nextGiftType = (threshold === 180 || threshold === 340 || threshold === 500) ? 'limited' : 'standard';
-        break;
-      }
-    }
-
-    if (nextGift === 0 && paidTotal >= 500) {
-      const cycle = Math.floor((paidTotal - 180) / 160);
-      nextGift = 180 + (cycle + 1) * 160;
-      nextGiftType = nextGift % 160 === 20 ? 'limited' : 'standard';
-    }
-
-    return { nextGift, nextGiftType, standardCount, limitedCount };
-  }, [normalizedPoolType, stats.paidTotal, stats.total]);
+    return {
+      nextGift,
+      nextGiftType,
+      standardCount: stats.gifts?.standardCount || 0,
+      limitedCount: stats.gifts?.limitedCount || 0,
+    };
+  }, [currentPoolCapabilities.rules, isWeapon, stats.gifts, stats.paidTotal, stats.rewardPaidTotal, stats.total]);
 
   const currentUpPool = useMemo(() => {
     if ((isLimited || isExtra) && currentPool?.start_time && currentPool?.end_time) {
@@ -241,27 +329,43 @@ export function useDashboardViewState() {
     return getCharacterAvatarUrl(name);
   };
 
-  const computedDashboardResourceSummary = useMemo(() => (
-    buildDashboardResourceSummary({
-      isAllPoolsOverview,
-      pools: selectedPools,
-      history: currentPoolHistory,
-      includeFreePullsInStats,
-      stats: computedStats
-    })
-  ), [computedStats, currentPoolHistory, includeFreePullsInStats, isAllPoolsOverview, selectedPools]);
-  const dashboardResourceSummary = isAnalysisBacked
-    && Object.prototype.hasOwnProperty.call(snapshotVariant, 'dashboardResourceSummary')
-    ? snapshotVariant.dashboardResourceSummary
-    : computedDashboardResourceSummary;
+  const computedDashboardResourceSummary = useMemo(
+    () =>
+      buildDashboardResourceSummary({
+        isAllPoolsOverview,
+        pools: selectedPools,
+        history: currentPoolHistory,
+        includeFreePullsInStats,
+        stats: computedStats,
+      }),
+    [computedStats, currentPoolHistory, includeFreePullsInStats, isAllPoolsOverview, selectedPools]
+  );
+  const dashboardResourceSummary =
+    isAnalysisBacked && Object.prototype.hasOwnProperty.call(snapshotVariant, 'dashboardResourceSummary')
+      ? snapshotVariant.dashboardResourceSummary
+      : computedDashboardResourceSummary;
 
   const resourceSummaryVariant = useMemo(() => {
     if (isAllPoolsOverview) {
       return 'all';
     }
 
-    return normalizedPoolType === 'weapon' ? 'weapon' : 'character';
-  }, [isAllPoolsOverview, normalizedPoolType]);
+    if (isGroupMode) {
+      const entityTypes = new Set(
+        selectedPools
+          .map((pool) => resolvePoolCapabilities(pool).entityType)
+          .filter((entityType) => entityType === 'character' || entityType === 'weapon')
+      );
+      if (entityTypes.has('character') && entityTypes.has('weapon')) {
+        return 'all';
+      }
+      if (entityTypes.has('weapon')) {
+        return 'weapon';
+      }
+    }
+
+    return poolViewMeta.resourceSummaryVariant;
+  }, [isAllPoolsOverview, isGroupMode, poolViewMeta.resourceSummaryVariant, selectedPools]);
 
   return {
     user,
@@ -285,6 +389,7 @@ export function useDashboardViewState() {
     isStandard,
     isAllPoolsOverview,
     maxPity,
+    usesInheritedPity,
     hasPoolData,
     isGroupMode,
     groupType,
@@ -295,6 +400,7 @@ export function useDashboardViewState() {
     totalCharacterCount,
     checkLimitedInFirstN,
     hasReceivedFreeTen,
+    specialProgress,
     weaponGifts,
     currentUpPool,
     getProgressClass,
@@ -303,7 +409,7 @@ export function useDashboardViewState() {
     resourceSummaryVariant,
     isAnalysisBacked,
     snapshotSplitOverviewStats,
-    snapshotTimelineSections
+    snapshotTimelineSections,
   };
 }
 

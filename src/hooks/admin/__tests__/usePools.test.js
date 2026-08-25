@@ -76,6 +76,76 @@ describe('usePools draft helpers', () => {
     ]);
   });
 
+  it('builds reconstruction character and weapon template metadata', () => {
+    const characterPool = buildPoolDataFromForm({
+      name: '重构角色测试',
+      type: 'extra',
+      extra_rule_profile: 'reconstruction_character_v1',
+      extra_series_key: 'reconstruction-laevatain',
+      extra_series_phase: '2',
+      up_character: '莱万汀',
+    });
+    const weaponPool = buildPoolDataFromForm({
+      name: '重构申领测试',
+      type: 'extra',
+      extra_rule_profile: 'reconstruction_weapon_v1',
+      extra_series_key: 'reconstruction-weapon-a',
+      extra_series_phase: 1,
+      up_character: '武器A',
+    });
+
+    expect(characterPool).toMatchObject({
+      expectedCharacterType: 'character',
+      featuredCharacters: ['莱万汀'],
+      poolData: {
+        type: 'extra',
+        extra_subtype: 'reconstruction',
+        extra_rule_profile: 'reconstruction_character_v1',
+        extra_series_key: 'reconstruction-laevatain',
+        extra_series_phase: 2,
+        up_character: '莱万汀',
+        featured_characters: ['莱万汀'],
+      },
+    });
+    expect(weaponPool).toMatchObject({
+      expectedCharacterType: 'weapon',
+      poolData: {
+        extra_subtype: 'reconstruction_claim',
+        extra_rule_profile: 'reconstruction_weapon_v1',
+        extra_series_key: 'reconstruction-weapon-a',
+        extra_series_phase: 1,
+        featured_characters: ['武器A'],
+      },
+    });
+    expect(normalizeDraftPoolCharacters(
+      [{ character_id: 'char_a', is_up: true }, { character_id: 'weapon_a', is_up: false }],
+      characters,
+      'extra',
+      ['武器A'],
+      'reconstruction_weapon_v1'
+    )).toEqual([{ character_id: 'weapon_a', is_up: true }]);
+  });
+
+  it('builds brilliance festival metadata without series fields', () => {
+    const result = buildPoolDataFromForm({
+      name: '辉光庆典',
+      type: 'extra',
+      extra_rule_profile: 'brilliance_festival_v1',
+      extra_series_key: 'must-be-cleared',
+      extra_series_phase: '3',
+      featured_characters_text: '莱万汀\n伊冯\n洁尔佩塔\n余烬',
+    });
+
+    expect(result.poolData).toMatchObject({
+      type: 'extra',
+      extra_subtype: 'special',
+      extra_rule_profile: 'brilliance_festival_v1',
+      extra_series_key: null,
+      extra_series_phase: null,
+      featured_characters: ['莱万汀', '伊冯', '洁尔佩塔', '余烬'],
+    });
+  });
+
   it('reports field-level and roster-level changes before saving', () => {
     const diff = buildPoolDraftDiff({
       editingPool: {

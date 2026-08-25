@@ -84,6 +84,21 @@ function normalizeRoadmapStatus(status) {
   return 'planned';
 }
 
+function getRotationEndDate(endDate) {
+  if (!endDate) {
+    return null;
+  }
+
+  const parsed = new Date(endDate);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isRotationPoolActive(pool, now) {
+  const start = new Date(pool.startDate);
+  const end = getRotationEndDate(pool.endDate);
+  return !Number.isNaN(start.getTime()) && now >= start && (!end || now < end);
+}
+
 export default function MobileHomePageView() {
   const navigate = useNavigate();
   const { t, isEnglish, locale, formatDateTime } = useI18n();
@@ -188,12 +203,17 @@ export default function MobileHomePageView() {
       return limitedCountdown;
     }
 
-    const activeHomeCountdownPools = getActiveHomeCountdownPools(poolsArray, now);
+    const activeHomeCountdownPools = getActiveHomeCountdownPools(poolsArray, now)
+      .filter((pool) => pool.targetDate);
     const activeExtraCountdown = activeHomeCountdownPools.find((pool) => pool.poolType === 'extra');
     return activeExtraCountdown || activeHomeCountdownPools[0] || limitedCountdown;
   }, [now, poolsArray, schedule]);
   const localizedCountdownName = useMemo(() => (
-    countdown?.poolType === 'extra'
+    countdown?.homeNodeKind === 'reconstruction-character'
+      ? localizeEntityName(countdown.homeCharacterName, { locale, type: 'character' })
+        || countdown.homeCharacterName
+        || t('common.unknown')
+      : countdown?.poolType === 'extra'
       ? countdown.displayName || countdown.name || t('common.unknown')
       : localizeEntityName(countdown?.name, {
         locale,
@@ -217,39 +237,63 @@ export default function MobileHomePageView() {
       .flatMap((section) => (section.pools || []).map((pool) => ({
         ...pool,
         versionName: section.name,
-        foldedExtraCount: Array.isArray(pool.foldedExtraPools) ? pool.foldedExtraPools.length : 0,
       })))
       .sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
     if (!sorted.length) return [];
-    let index = sorted.findIndex((pool) => now >= new Date(pool.startDate) && now < new Date(pool.endDate));
+    let index = sorted.findIndex((pool) => isRotationPoolActive(pool, now));
     if (index === -1) index = sorted.findIndex((pool) => now < new Date(pool.startDate));
     if (index === -1) index = Math.max(sorted.length - 1, 0);
     return sorted.slice(Math.max(0, index - 1), index + 3).map((pool) => {
-      const active = now >= new Date(pool.startDate) && now < new Date(pool.endDate);
-      const ended = now >= new Date(pool.endDate);
+      const poolEnd = getRotationEndDate(pool.endDate);
+      const active = isRotationPoolActive(pool, now);
+      const ended = Boolean(poolEnd && now >= poolEnd);
       const isExtraPool = pool.poolType === 'extra' || pool?.poolData?.type === 'extra';
-      const localizedCharacterName = isExtraPool
+      const isReconstructionCharacter = pool.homeNodeKind === 'reconstruction-character';
+      const localizedCharacterName = isExtraPool && !isReconstructionCharacter
         ? null
-        : localizeEntityName(pool.name, {
+        : localizeEntityName(isReconstructionCharacter ? pool.homeCharacterName : pool.name, {
           locale,
           type: pool?.poolData?.type === 'weapon' ? 'weapon' : 'character'
         });
       const localizedPoolName = localizePoolName(pool.poolData || pool, { locale });
+      const foldedExtraPools = pool.foldedExtraPools || [];
+      const foldedMergeLabels = foldedExtraPools.map((extraPool) => {
+        if (extraPool.mergeKind === 'current-rerun') {
+          const characterName = localizeEntityName(extraPool.characterName, { locale, type: 'character' })
+            || extraPool.characterName;
+          return t('home.rotation.folded.currentRerun', { name: characterName });
+        }
+
+        return null;
+      }).filter(Boolean);
 
       return {
         ...pool,
         displayName: localizedCharacterName
+          || (isReconstructionCharacter ? pool.homeCharacterName : null)
           || localizedPoolName
           || pool.name,
         active,
         ended,
         isExtraPool,
+        isReconstructionCharacter,
         versionName: pool.versionName,
-        foldedExtraCount: pool.foldedExtraCount,
-        label: active ? (isEnglish ? 'Live' : '进行中') : ended ? (isEnglish ? 'Ended' : '已结束') : (isEnglish ? 'Queued' : '待开启'),
+        foldedGenericExtraCount: foldedExtraPools.filter((extraPool) => extraPool.mergeKind !== 'current-rerun').length,
+        foldedMergeLabels,
+        label: isReconstructionCharacter
+          ? (active
+            ? t('home.rotation.status.rerunCurrent')
+            : ended
+              ? (isEnglish ? 'Ended' : '已结束')
+              : t('home.rotation.status.rerunNext'))
+          : active
+            ? (isEnglish ? 'Live' : '进行中')
+            : ended
+              ? (isEnglish ? 'Ended' : '已结束')
+              : (isEnglish ? 'Queued' : '待开启'),
       };
     });
-  }, [homeRotationVersionSections, isEnglish, locale, now]);
+  }, [homeRotationVersionSections, isEnglish, locale, now, t]);
 
   const featureLinks = [
     {
@@ -421,7 +465,10 @@ export default function MobileHomePageView() {
                     <span className="block truncate font-bold text-slate-900 dark:text-white">{pool.displayName || pool.name}</span>
                     <span className="mt-0.5 block truncate text-[9px] text-slate-500 dark:text-zinc-500">
                       {pool.versionName || t('home.mobile.currentRotation')}
-                      {pool.foldedExtraCount > 0 ? ` · 已合并 ${pool.foldedExtraCount} 个过期附加池` : ''}
+                      {pool.foldedMergeLabels.length > 0 ? ` · ${pool.foldedMergeLabels.join(' · ')}` : ''}
+                      {pool.foldedGenericExtraCount > 0
+                        ? ` · ${t('home.rotation.folded.extraCount', { count: pool.foldedGenericExtraCount })}`
+                        : ''}
                     </span>
                   </span>
                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0 ${pool.active ? 'bg-green-500/20 text-green-700 dark:text-green-400' : (pool.ended ? 'bg-zinc-200 dark:bg-zinc-800 text-slate-500 dark:text-zinc-500' : 'bg-blue-500/20 text-blue-700 dark:text-blue-300')}`}>{pool.label}</span>

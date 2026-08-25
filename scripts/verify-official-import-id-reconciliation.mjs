@@ -90,6 +90,18 @@ function upsertRows(state, table, rows, options = {}) {
 function createAdminClient(initialState) {
   const state = clone(initialState);
   return {
+    async rpc(functionName) {
+      if (functionName === 'promote_manual_pool_to_official_id') {
+        return {
+          data: null,
+          error: {
+            code: 'PGRST202',
+            message: 'Verification client exercises the compatibility migration path',
+          },
+        };
+      }
+      return { data: null, error: null };
+    },
     from(table) {
       return {
         select() {

@@ -6,13 +6,16 @@ import {
   clearSimulatorMultipleFreeTenPreference,
   clearSimulatorOriginitePromptSuppressDate,
   clearSimulatorSkipAnimationPreference,
+  clearSimulatorSeriesState,
   convertSimulatorHistoryToImportFormat,
   loadSimulatorCurrentPoolId,
   loadSimulatorOriginitePromptSuppressDate,
   loadSimulatorSkipAnimationPreference,
+  loadSimulatorSeriesState,
   saveSimulatorCurrentPoolId,
   saveSimulatorOriginitePromptSuppressDate,
   saveSimulatorSkipAnimationPreference,
+  saveSimulatorSeriesState,
   saveSimulatorState,
 } from '../simulatorStorage.js';
 
@@ -85,5 +88,22 @@ describe('simulatorStorage', () => {
     clearSimulatorMultipleFreeTenPreference();
 
     expect(localStorage.getItem('simulator_multipleFreeTen')).toBeNull();
+  });
+
+  it('stores series state under the profile plus series key and account scope', () => {
+    const seriesStateKey = 'reconstruction_character_v1::series-a';
+    const state = {
+      seriesStateKey,
+      sixStarPity: 21,
+      guaranteedLimitedPity: 80,
+    };
+
+    saveSimulatorSeriesState(seriesStateKey, state, 'u:test|g:1001');
+
+    expect(loadSimulatorSeriesState(seriesStateKey, 'u:test|g:1001')).toEqual(state);
+    expect(loadSimulatorSeriesState(seriesStateKey, 'u:test|g:1002')).toBeNull();
+
+    clearSimulatorSeriesState(seriesStateKey, 'u:test|g:1001');
+    expect(loadSimulatorSeriesState(seriesStateKey, 'u:test|g:1001')).toBeNull();
   });
 });

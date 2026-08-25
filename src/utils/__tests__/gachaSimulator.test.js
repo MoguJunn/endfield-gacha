@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createSimulator } from '../gachaSimulator.js';
+import { createSimulator, getRulesByPoolType } from '../gachaSimulator.js';
+import { EXTRA_POOL_RULES, LIMITED_POOL_RULES, UNRESOLVED_POOL_RULES, WEAPON_POOL_RULES } from '../../constants/index.js';
 
 describe('gachaSimulator state import', () => {
   afterEach(() => {
@@ -156,5 +157,86 @@ describe('gachaSimulator state import', () => {
     });
     expect(simulator.getState().pullHistory).toHaveLength(10);
     expect(simulator.getStatistics().avgPullsPerSixStar).toBe('10.0');
+  });
+
+  it('resolves extra simulator rules from the pool profile', () => {
+    expect(getRulesByPoolType({
+      type: 'extra',
+      extra_rule_profile: 'reconstruction_character_v1',
+    })).toBe(LIMITED_POOL_RULES);
+    expect(getRulesByPoolType({
+      type: 'extra',
+      extra_rule_profile: 'reconstruction_weapon_v1',
+    })).toBe(WEAPON_POOL_RULES);
+    expect(getRulesByPoolType({
+      type: 'extra',
+      extra_rule_profile: 'brilliance_festival_v1',
+    })).toBe(EXTRA_POOL_RULES);
+    expect(getRulesByPoolType({
+      id: 'joint_unknown',
+      type: 'extra',
+    })).toBe(UNRESOLVED_POOL_RULES);
+  });
+
+  it('uses limited single-UP rules and three free milestones for reconstruction characters', () => {
+    const simulator = createSimulator({
+      id: 'recon-char',
+      type: 'extra',
+      extra_rule_profile: 'reconstruction_character_v1',
+      extra_series_key: 'series-c',
+    });
+    simulator.updateState({ totalPulls: 90 });
+
+    expect(simulator.poolType).toBe('limited');
+    expect(simulator.rules).toBe(LIMITED_POOL_RULES);
+    expect(simulator.getPityInfo().sixStar.max).toBe(80);
+    expect(simulator.getStatistics().freeTenPulls).toMatchObject({
+      count: 3,
+      nextGiftAt: null,
+    });
+    expect(simulator.checkInfoBook(simulator.getState())).toBe(false);
+  });
+
+  it('records all three reconstruction free ten-pull claims without truncating at one', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.999);
+    const simulator = createSimulator({
+      id: 'recon-char-free',
+      type: 'extra',
+      extra_rule_profile: 'reconstruction_character_v1',
+      extra_series_key: 'series-c',
+    });
+    simulator.updateState({ seriesRewardPulls: 90, totalPulls: 10 });
+
+    simulator.pullFreeTen();
+    simulator.pullFreeTen();
+    simulator.pullFreeTen();
+    simulator.pullFreeTen();
+
+    expect(simulator.getState().freeTenPullsReceived).toBe(3);
+    expect(simulator.getState().pullHistory).toHaveLength(40);
+    expect(simulator.getStatistics().freeTenPulls.count).toBe(3);
+  });
+
+  it('uses claim-based weapon rules for reconstruction weapons', () => {
+    const simulator = createSimulator({
+      id: 'recon-weapon',
+      type: 'extra',
+      extra_rule_profile: 'reconstruction_weapon_v1',
+    });
+
+    expect(simulator.poolType).toBe('weapon');
+    expect(simulator.getPityInfo().sixStar.max).toBe(40);
+    expect(() => simulator.pullSingle()).toThrow('武器池按申领进行');
+  });
+
+  it('refuses to simulate unknown extra profiles as brilliance festivals', () => {
+    const simulator = createSimulator({
+      id: 'joint_future',
+      type: 'extra',
+      extra_rule_profile: 'future_profile_v2',
+    });
+
+    expect(simulator.rules).toBe(UNRESOLVED_POOL_RULES);
+    expect(() => simulator.pullSingle()).toThrow('规则尚未识别');
   });
 });

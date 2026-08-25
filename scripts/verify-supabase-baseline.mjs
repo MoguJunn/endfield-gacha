@@ -13,6 +13,16 @@ function toPosixPath(filePath) {
   return filePath.split(path.sep).join(path.posix.sep);
 }
 
+function normalizeMigrationContent(content) {
+  return content
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .trim();
+}
+
 function compareMigrationNames(a, b) {
   const aName = path.basename(a);
   const bName = path.basename(b);
@@ -78,12 +88,25 @@ async function main() {
     throw new Error(`Baseline coverage header mismatch. Expected: ${expectedCoverageLine}`);
   }
 
-  for (const migrationFile of [firstMigration, lastMigration]) {
+  for (const migrationFile of migrationFiles) {
     const beginMarker = `-- >>> BEGIN MIGRATION: ${migrationFile}`;
     const endMarker = `-- <<< END MIGRATION: ${migrationFile}`;
 
     if (!baseline.includes(beginMarker) || !baseline.includes(endMarker)) {
       throw new Error(`Baseline is missing markers for ${migrationFile}`);
+    }
+
+    const isArchived = migrationFile.startsWith('archive/');
+    const relativePath = migrationFile.replace(/^(archive|active)\//, '');
+    const sourcePath = path.join(
+      isArchived ? archivedMigrationsDir : activeMigrationsDir,
+      ...relativePath.split('/')
+    );
+    const sourceContent = normalizeMigrationContent(await readFile(sourcePath, 'utf8'));
+    const expectedBlock = `${beginMarker}\n${sourceContent}\n${endMarker}`;
+
+    if (!baseline.includes(expectedBlock)) {
+      throw new Error(`Baseline content differs from ${migrationFile}`);
     }
   }
 

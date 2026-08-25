@@ -144,4 +144,44 @@ describe('validators', () => {
     expect(invalidResult.isValid).toBe(false);
     expect(invalidResult.errors.some((error) => error.includes('应至少包含1件目标武器'))).toBe(true);
   });
+
+  it('shares only reconstruction weapon target claims across stages', () => {
+    const stageA = {
+      id: 'recon-weapon-a',
+      type: 'extra',
+      extra_rule_profile: 'reconstruction_weapon_v1',
+      extra_series_key: 'weapon-series',
+    };
+    const stageB = {
+      ...stageA,
+      id: 'recon-weapon-b',
+    };
+    const nonTargetClaim = [
+      { rarity: 6, isUp: false, isLimited: false, isStandard: true },
+      ...Array.from({ length: 9 }, () => ({ rarity: 4 })),
+    ];
+    const priorSeriesHistory = Array.from({ length: 7 }, (_, claimIndex) => (
+      nonTargetClaim.map((pull, pullIndex) => ({
+        ...pull,
+        id: `a-${claimIndex}-${pullIndex}`,
+        poolId: stageA.id,
+        timestamp: claimIndex * 10 + pullIndex,
+      }))
+    )).flat();
+    const invalidEighthClaim = [
+      { rarity: 6, isUp: false, isLimited: false, isStandard: true },
+      ...Array.from({ length: 9 }, () => ({ rarity: 4 })),
+    ];
+
+    const invalidResult = validateBatchAgainstRules({
+      batchData: invalidEighthClaim,
+      existingPulls: [],
+      allLimitedPoolPulls: priorSeriesHistory,
+      pools: [stageA, stageB],
+      pool: stageB,
+    });
+
+    expect(invalidResult.errors.some((error) => error.includes('应至少包含1件目标武器'))).toBe(true);
+    expect(invalidResult.errors.some((error) => error.includes('连续 4 次申领未获得6星'))).toBe(false);
+  });
 });

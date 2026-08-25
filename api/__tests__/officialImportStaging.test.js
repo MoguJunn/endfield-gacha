@@ -196,7 +196,15 @@ async function createReview(supabase) {
     source: 'cn',
     importMode: 'incremental',
     account: { gameUid: '10001', serverId: '1', region: 'cn' },
-    pools: [{ pool_id: 'special_test', name: '测试卡池', type: 'limited' }],
+    pools: [{
+      pool_id: 'special_test',
+      name: '测试卡池',
+      type: 'extra',
+      extra_subtype: 'reconstruction',
+      extra_rule_profile: 'reconstruction_character_v1',
+      extra_series_key: 'staged-series',
+      extra_series_phase: 2,
+    }],
     stagedRecords: [
       createStagedRecord(),
       createStagedRecord({ blocked: true, ordinalName: '异常记录' }),
@@ -229,6 +237,14 @@ describe('official import staging', () => {
     const staged = await createReview(supabase);
 
     expect(staged.accessKey).toBeTruthy();
+    expect(supabase.tables.official_import_staged_records[0].normalized_record.pool).toMatchObject({
+      pool_id: 'special_test',
+      type: 'extra',
+      extra_subtype: 'reconstruction',
+      extra_rule_profile: 'reconstruction_character_v1',
+      extra_series_key: 'staged-series',
+      extra_series_phase: 2,
+    });
     expect(supabase.tables.official_import_tasks[0].access_key_hash).not.toBe(staged.accessKey);
     expect(JSON.stringify(supabase.tables)).not.toContain(staged.accessKey);
     expect(staged.records.map((record) => record.selectedAction)).toEqual(['keep', 'skip']);
