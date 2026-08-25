@@ -30,7 +30,7 @@
 
 2026-08-01 的真实本地 Supabase/PostgreSQL 17 空库导入已补齐两项此前静态检查未覆盖的边界：`archive/004_tickets_system.sql` 必须在表不存在时也能执行清理；Phase A/B 必须显式授予 `service_role` 访问 `profiles` 与私有 Session 撤销状态所需的 DML 权限，同时保持 `anon/authenticated` 对私有撤销状态的拒绝。`test:supabase-baseline:smoke` 与 `test:auth-hardening-phase-a` 已加入对应回归断言。
 
-本分支 baseline 覆盖到 `active/172_quarantine_oauth_email_artifact_atomically.sql` 后，不要再把 `001~172` 的主站标准迁移重复叠加到同版本 baseline。主站发布链原到 158；共享生产 schema 另含独立抽奖 160–165。认证 166/167/168 已按顺序生产应用并通过回填、权限、函数、RLS 与触发器核验；迁移 169 已生产应用（PR #15），正式导入修复迁移 170 已生产应用（PR #16），consumed Magic Link 空壳识别迁移 171 已生产应用（PR #17）。迁移 172 将 claim 后的 Auth 空壳邮箱、唯一 email identity、封禁和 intent metadata 改为数据库内一次性隔离，并在活动 intent 期间冻结 identity 的新增、删除和非预期修改，避免 GoTrue Admin 多步更新暴露的中间状态。
+当前 baseline 覆盖到 `active/178_schedule_personal_analysis_worker_with_pg_cron.sql`。不要再把已包含在 baseline 中的标准迁移重复叠加到同版本新环境。迁移 173–177 提供个人分析 owner/scope revision、安全租约、快照持久化、目录失效与活跃用户优先队列；迁移 178 在支持相应扩展的自建 Supabase 中通过 Vault、`pg_net` 与 `pg_cron` 每分钟触发一次 Worker，并保留 GitHub `workflow_dispatch` 作为人工应急入口。
 
 ### migration 编号说明
 

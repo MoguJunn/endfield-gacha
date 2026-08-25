@@ -31,6 +31,14 @@ const ERROR_MESSAGES = {
     zh: '抽卡记录在翻页期间发生了变化，请从第一页重新加载。',
     en: 'Your gacha history changed while paging. Reload it from the first page.',
   },
+  personal_analysis_queue_unavailable: {
+    zh: '统计任务队列暂时不可用，系统没有假装进入排队。请稍后重试或联系站点管理员。',
+    en: 'The statistics queue is unavailable and the request was not reported as queued. Try again later or contact the administrator.',
+  },
+  personal_analysis_queue_not_queued: {
+    zh: '统计任务未能进入后台队列，请稍后重试或联系站点管理员。',
+    en: 'The statistics request could not enter the background queue. Try again later or contact the administrator.',
+  },
 };
 
 function normalizeDiagnosticValue(value, maxLength = 128) {

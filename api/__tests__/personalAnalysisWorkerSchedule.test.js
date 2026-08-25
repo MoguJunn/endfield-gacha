@@ -22,8 +22,8 @@ describe('personal analysis worker production schedule', () => {
     ]));
   });
 
-  it('schedules an authenticated and validated GitHub Actions worker call', async () => {
-    const [workflow, runner] = await Promise.all([
+  it('uses Supabase pg_cron while keeping GitHub as a manual fallback', async () => {
+    const [workflow, runner, migration] = await Promise.all([
       readFile(
         path.join(projectRoot, '.github', 'workflows', 'personal-analysis-worker.yml'),
         'utf8'
@@ -32,9 +32,19 @@ describe('personal analysis worker production schedule', () => {
         path.join(projectRoot, '.github', 'scripts', 'run-personal-analysis-worker.mjs'),
         'utf8'
       ),
+      readFile(
+        path.join(
+          projectRoot,
+          'supabase',
+          'migrations',
+          '178_schedule_personal_analysis_worker_with_pg_cron.sql'
+        ),
+        'utf8'
+      ),
     ]);
 
-    expect(workflow).toContain("cron: '*/5 * * * *'");
+    expect(workflow).not.toContain('schedule:');
+    expect(workflow).not.toContain('cron:');
     expect(workflow).toContain('workflow_dispatch:');
     expect(workflow).toContain('secrets.PERSONAL_ANALYSIS_WORKER_SECRET');
     expect(workflow).toContain('/api/personal-analysis-worker');
@@ -47,5 +57,12 @@ describe('personal analysis worker production schedule', () => {
     expect(runner).toContain('attempt <= 3');
     expect(runner).toContain('batchNumber <= maxBatches');
     expect(runner).toContain("headers['x-vercel-protection-bypass']");
+    expect(migration).toContain("CREATE EXTENSION IF NOT EXISTS pg_cron");
+    expect(migration).toContain("CREATE EXTENSION IF NOT EXISTS pg_net");
+    expect(migration).toContain("FROM vault.decrypted_secrets");
+    expect(migration).toContain("'personal-analysis-worker'");
+    expect(migration).toContain("'* * * * *'");
+    expect(migration).toContain("'SELECT public.dispatch_personal_analysis_worker();'");
+    expect(migration).not.toContain('Authorization: Bearer');
   });
 });

@@ -396,7 +396,13 @@ async function prioritizePersonalAnalysisJobs(dbClient, userId, {
   forceOwner = false,
   forceScope = false,
 } = {}) {
-  if (!dbClient?.rpc || !userId) return false;
+  if (!dbClient?.rpc || !userId) {
+    throw new AccountGachaDataRequestError(
+      'Personal analysis queue is unavailable',
+      'personal_analysis_queue_unavailable',
+      503
+    );
+  }
 
   const { data, error } = await dbClient.rpc('prioritize_personal_analysis_jobs', {
     p_user_id: userId,
@@ -406,10 +412,22 @@ async function prioritizePersonalAnalysisJobs(dbClient, userId, {
     p_force_scope: Boolean(forceScope),
   });
   if (error) {
-    if (isMissingPersonalAnalysisPriorityRpcError(error)) return false;
-    throw error;
+    throw new AccountGachaDataRequestError(
+      isMissingPersonalAnalysisPriorityRpcError(error)
+        ? 'Personal analysis queue migration is not available'
+        : 'Personal analysis queue request failed',
+      'personal_analysis_queue_unavailable',
+      503
+    );
   }
-  return data?.queued === true;
+  if (data?.queued !== true) {
+    throw new AccountGachaDataRequestError(
+      'Personal analysis update could not be queued',
+      'personal_analysis_queue_not_queued',
+      503
+    );
+  }
+  return true;
 }
 
 async function loadPersonalAnalysisScopeState(dbClient, userId, scope) {

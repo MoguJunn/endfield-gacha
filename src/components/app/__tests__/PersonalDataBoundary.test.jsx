@@ -147,6 +147,42 @@ describe('PersonalDataBoundary', () => {
     expect(onRetry).toHaveBeenCalledTimes(4);
   });
 
+  it('组件重挂载后沿用全局重试截止时间而不是从头计时', () => {
+    vi.useFakeTimers();
+    const onRetry = vi.fn();
+    usePersonalDataStore.setState({
+      ...createPersonalDataInitialState(),
+      ownerId: 'user-1',
+      ownerGeneration: 7,
+      phase: 'building',
+      hasSnapshot: false,
+    });
+    usePersonalAnalysisStore.setState({
+      ...createPersonalAnalysisInitialState(),
+      ownerId: 'user-1',
+      availability: 'building',
+      meta: { ownerId: 'user-1', revision: '42', retryAfterSeconds: 30 },
+    });
+
+    const first = render(
+      <PersonalDataBoundary user={{ id: 'user-1' }} onRetry={onRetry}>
+        <div>hidden</div>
+      </PersonalDataBoundary>
+    );
+    act(() => vi.advanceTimersByTime(10_000));
+    first.unmount();
+
+    render(
+      <PersonalDataBoundary user={{ id: 'user-1' }} onRetry={onRetry}>
+        <div>hidden</div>
+      </PersonalDataBoundary>
+    );
+    act(() => vi.advanceTimersByTime(19_999));
+    expect(onRetry).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(1));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
   it('analysis stale 且无错误时显示非阻断提示', () => {
     usePersonalDataStore.setState({
       ...createPersonalDataInitialState(),

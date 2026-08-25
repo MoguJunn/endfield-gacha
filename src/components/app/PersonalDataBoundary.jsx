@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 import {
   usePersonalAnalysisStore,
@@ -63,11 +63,20 @@ function PersonalDataStatusPanel({
 export default function PersonalDataBoundary({ user, onRetry, children }) {
   const { isEnglish } = useI18n();
   const ownerId = usePersonalDataStore((state) => state.ownerId);
+  const ownerGeneration = usePersonalDataStore((state) => state.ownerGeneration);
   const phase = usePersonalDataStore((state) => state.phase);
   const hasSnapshot = usePersonalDataStore((state) => state.hasSnapshot);
   const refreshing = usePersonalDataStore((state) => state.refreshing);
   const activeRequest = usePersonalDataStore((state) => state.activeRequest);
   const error = usePersonalDataStore((state) => state.error);
+  const analysisRetry = usePersonalDataStore((state) => state.analysisRetry);
+  const ensureAnalysisRetrySchedule = usePersonalDataStore(
+    (state) => state.ensureAnalysisRetrySchedule
+  );
+  const markAnalysisRetryFired = usePersonalDataStore(
+    (state) => state.markAnalysisRetryFired
+  );
+  const resetAnalysisRetry = usePersonalDataStore((state) => state.resetAnalysisRetry);
   const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
   const analysisMeta = usePersonalAnalysisStore((state) => state.meta);
   const matchesOwner = Boolean(user?.id && ownerId === user.id);
@@ -76,15 +85,20 @@ export default function PersonalDataBoundary({ user, onRetry, children }) {
   const retryMode = !hasSnapshot && phase === 'building'
     ? 'building'
     : isAnalysisStale ? 'stale' : null;
-  const retryKey = retryMode ? `${ownerId || ''}:${retryMode}` : '';
-  const [autoRetryState, setAutoRetryState] = useState({ key: '', attempt: 0 });
-  const autoRetryAttempt = autoRetryState.key === retryKey
-    ? autoRetryState.attempt
+  const retryRevision = analysisMeta?.scopeRevision
+    || analysisMeta?.revision
+    || analysisMeta?.ownerSnapshotRevision
+    || 'pending';
+  const retryKey = retryMode
+    ? JSON.stringify([ownerId, ownerGeneration, retryMode, retryRevision])
+    : '';
+  const autoRetryAttempt = analysisRetry.key === retryKey
+    ? analysisRetry.attempt
     : 0;
   const automaticRetriesExhausted = autoRetryAttempt >= AUTO_RETRY_DELAYS_SECONDS.length;
 
   const retryManually = () => {
-    setAutoRetryState({ key: retryKey, attempt: 0 });
+    resetAnalysisRetry(retryKey);
     void onRetry?.({ automatic: false, phase: retryMode });
   };
 
@@ -104,20 +118,28 @@ export default function PersonalDataBoundary({ user, onRetry, children }) {
       AUTO_RETRY_DELAYS_SECONDS[autoRetryAttempt],
       Number.isFinite(configuredDelay) ? Math.max(2, configuredDelay) : 0
     );
+    const schedule = ensureAnalysisRetrySchedule(
+      retryKey,
+      retryAfterSeconds * 1000
+    );
+    const remainingDelayMs = Math.max(
+      0,
+      Number(schedule?.nextRetryAt || Date.now()) - Date.now()
+    );
     const timerId = window.setTimeout(() => {
-      setAutoRetryState((state) => ({
-        key: retryKey,
-        attempt: state.key === retryKey ? state.attempt + 1 : 1,
-      }));
+      if (!markAnalysisRetryFired(retryKey)) return;
       void onRetry({ automatic: true, phase: retryMode });
-    }, retryAfterSeconds * 1000);
+    }, remainingDelayMs);
 
     return () => window.clearTimeout(timerId);
   }, [
     activeRequest,
     analysisMeta?.retryAfterSeconds,
+    analysisRetry.nextRetryAt,
     autoRetryAttempt,
     automaticRetriesExhausted,
+    ensureAnalysisRetrySchedule,
+    markAnalysisRetryFired,
     matchesOwner,
     onRetry,
     retryKey,

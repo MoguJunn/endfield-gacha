@@ -266,6 +266,8 @@ function createAdminClient() {
     deleteCalls: [],
     updateCalls: [],
     rpcCalls: [],
+    priorityRpcError: null,
+    priorityQueued: true,
     selectCalls: [],
     scopeState: {
       history_revision: 7,
@@ -337,9 +339,12 @@ function createAdminClient() {
     rpc: vi.fn(async (functionName, params = {}) => {
       state.rpcCalls.push({ functionName, params });
       if (functionName === 'prioritize_personal_analysis_jobs') {
+        if (state.priorityRpcError) {
+          return { data: null, error: state.priorityRpcError };
+        }
         return {
           data: {
-            queued: true,
+            queued: state.priorityQueued,
             ownerRows: 1,
             scopeRows: 1,
           },
@@ -541,6 +546,45 @@ describe('/api/account-gacha-data', () => {
         p_force_owner: true,
         p_force_scope: false,
       },
+    });
+  });
+
+  it('returns an explicit 503 when the active queue RPC is unavailable', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.ownerSnapshot = null;
+    adminClient.__state.priorityRpcError = {
+      code: 'PGRST202',
+      message: 'Could not find the function in the schema cache',
+    };
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis',
+    }), res);
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'personal_analysis_queue_unavailable',
+    });
+  });
+
+  it('does not claim a building response when the user was not queued', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.ownerSnapshot = null;
+    adminClient.__state.priorityQueued = false;
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis',
+    }), res);
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'personal_analysis_queue_not_queued',
     });
   });
 

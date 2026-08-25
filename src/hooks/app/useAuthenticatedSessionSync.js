@@ -58,6 +58,7 @@ export function useAuthenticatedSessionSync({
       currentOwnerId: previousPersonalState.ownerId,
       nextUser: targetUser,
       hasSnapshot: previousPersonalState.hasSnapshot,
+      personalDataPhase: previousPersonalState.phase,
       refreshKind,
     });
 
@@ -127,6 +128,7 @@ export function useAuthenticatedSessionSync({
       currentOwnerId: previousPersonalState.ownerId,
       nextOwnerId: null,
       hasSnapshot: previousPersonalState.hasSnapshot,
+      personalDataPhase: previousPersonalState.phase,
     });
 
     previousPersonalState.clearOwner(`${source}:${classification.classification}`);
