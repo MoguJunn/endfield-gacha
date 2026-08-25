@@ -148,6 +148,7 @@ function createAdminClient({
 function enabledConfig(overrides = {}) {
   return {
     enabled: true,
+    backfillEnabled: true,
     batchSize: 1,
     backfillBatchSize: 100,
     leaseSeconds: 50,
@@ -211,6 +212,34 @@ describe('personal analysis worker', () => {
       hasMore: true,
     });
     expect(JSON.stringify(result)).not.toContain(USER_ID);
+  });
+
+  it('skips the expensive history backfill during regular scheduled runs', async () => {
+    const { client, rpc } = createAdminClient();
+    const result = await runPersonalAnalysisWorker({
+      adminClient: client,
+      config: enabledConfig({ backfillEnabled: false }),
+      leaseId: LEASE_ID,
+    });
+
+    expect(rpc.mock.calls[0]).toEqual([
+      'claim_personal_analysis_jobs',
+      {
+        p_lease_id: LEASE_ID,
+        p_limit: 1,
+        p_lease_seconds: 50,
+      },
+    ]);
+    expect(rpc).not.toHaveBeenCalledWith(
+      'enqueue_personal_analysis_backfill',
+      expect.any(Object)
+    );
+    expect(result.backfill).toEqual({
+      processedUsers: 0,
+      insertedOwnerStates: 0,
+      insertedScopeStates: 0,
+      hasMore: false,
+    });
   });
 
   it('loads one user once and publishes owner plus every matching account scope', async () => {
