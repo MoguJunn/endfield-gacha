@@ -31,11 +31,24 @@ function runDocker(args, options = {}) {
 }
 
 function waitForPostgres() {
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    const result = spawnSync('docker', ['exec', containerName, 'pg_isready', '-U', 'postgres', '-d', 'postgres'], {
-      encoding: 'utf8',
-    });
-    if (result.status === 0) return;
+  let successStreak = 0;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const result = spawnSync(
+      'docker',
+      [
+        'exec', containerName,
+        'psql', '-X', '-qAt', '-v', 'ON_ERROR_STOP=1',
+        '-U', 'postgres', '-d', 'postgres',
+        '-c', 'SELECT 1',
+      ],
+      { encoding: 'utf8' }
+    );
+    successStreak = result.status === 0 && result.stdout.trim() === '1'
+      ? successStreak + 1
+      : 0;
+    // The official image briefly exposes a temporary init server before
+    // restarting Postgres. Consecutive real queries avoid that socket race.
+    if (successStreak >= 3) return;
     execFileSync(process.execPath, ['-e', 'setTimeout(() => {}, 500)']);
   }
   throw new Error('PostgreSQL test container did not become ready');
