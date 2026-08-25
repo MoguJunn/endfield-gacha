@@ -612,9 +612,9 @@ BEGIN
 
   INSERT INTO public.pool_id_aliases (source, alias_id, pool_id, is_primary, note)
   VALUES
-    ('manual_placeholder', v_manual.pool_id, v_official_id, FALSE, 'Migration 178 promoted manual pool ID'),
-    ('internal', v_official_id, v_official_id, TRUE, 'Migration 178 official pool self alias'),
-    ('official_api', v_official_id, v_official_id, TRUE, 'Migration 178 official source self alias')
+    ('manual_placeholder', v_manual.pool_id, v_official_id, FALSE, 'Migration 182 promoted manual pool ID'),
+    ('internal', v_official_id, v_official_id, TRUE, 'Migration 182 official pool self alias'),
+    ('official_api', v_official_id, v_official_id, TRUE, 'Migration 182 official source self alias')
   ON CONFLICT (source, alias_id) DO UPDATE
   SET
     pool_id = EXCLUDED.pool_id,

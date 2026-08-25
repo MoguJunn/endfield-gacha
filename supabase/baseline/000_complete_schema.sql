@@ -5,7 +5,7 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-08-26T08:39:01.105Z
+--   4. 生成时间: 2026-08-26T08:49:46.326Z
 --   5. 覆盖范围: archive/001_init_tables.sql -> active/183_split_reconstruction_claim_subtype.sql
 -- ============================================
 
@@ -34486,9 +34486,9 @@ BEGIN
 
   INSERT INTO public.pool_id_aliases (source, alias_id, pool_id, is_primary, note)
   VALUES
-    ('manual_placeholder', v_manual.pool_id, v_official_id, FALSE, 'Migration 178 promoted manual pool ID'),
-    ('internal', v_official_id, v_official_id, TRUE, 'Migration 178 official pool self alias'),
-    ('official_api', v_official_id, v_official_id, TRUE, 'Migration 178 official source self alias')
+    ('manual_placeholder', v_manual.pool_id, v_official_id, FALSE, 'Migration 182 promoted manual pool ID'),
+    ('internal', v_official_id, v_official_id, TRUE, 'Migration 182 official pool self alias'),
+    ('official_api', v_official_id, v_official_id, TRUE, 'Migration 182 official source self alias')
   ON CONFLICT (source, alias_id) DO UPDATE
   SET
     pool_id = EXCLUDED.pool_id,
@@ -35261,9 +35261,9 @@ BEGIN
 
   INSERT INTO public.pool_id_aliases (source, alias_id, pool_id, is_primary, note)
   VALUES
-    ('manual_placeholder', v_manual.pool_id, v_official_id, FALSE, 'Migration 179 promoted manual pool ID'),
-    ('internal', v_official_id, v_official_id, TRUE, 'Migration 179 official pool self alias'),
-    ('official_api', v_official_id, v_official_id, TRUE, 'Migration 179 official source self alias')
+    ('manual_placeholder', v_manual.pool_id, v_official_id, FALSE, 'Migration 183 promoted manual pool ID'),
+    ('internal', v_official_id, v_official_id, TRUE, 'Migration 183 official pool self alias'),
+    ('official_api', v_official_id, v_official_id, TRUE, 'Migration 183 official source self alias')
   ON CONFLICT (source, alias_id) DO UPDATE
   SET
     pool_id = EXCLUDED.pool_id,
