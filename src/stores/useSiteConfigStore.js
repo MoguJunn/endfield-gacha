@@ -13,6 +13,11 @@ import {
   HOME_NEXT_VERSION_TARGET_CONFIG_KEY,
   HOME_VERSION_TIMELINE_CONFIG_KEY,
 } from '../utils/homeVersionTimeline.js';
+import {
+  isPublicSiteConfigKey,
+  pickPublicSiteConfig,
+  PUBLIC_SITE_CONFIG_KEYS,
+} from '../../shared/publicSiteConfig.js';
 
 export {
   DEFAULT_HOME_NEXT_VERSION_TARGET_DATE,
@@ -31,7 +36,7 @@ function isBlankConfigValue(value) {
 }
 
 function normalizeVersionConfig(config) {
-  const normalizedConfig = config && typeof config === 'object' ? { ...config } : {};
+  const normalizedConfig = pickPublicSiteConfig(config);
 
   return {
     ...normalizedConfig,
@@ -57,7 +62,7 @@ function readSiteConfigSnapshot() {
 
     const parsedSnapshot = JSON.parse(rawSnapshot);
     return parsedSnapshot && typeof parsedSnapshot.config === 'object' && parsedSnapshot.config !== null
-      ? normalizeVersionConfig(parsedSnapshot.config)
+      ? normalizeVersionConfig(pickPublicSiteConfig(parsedSnapshot.config))
       : {};
   } catch {
     return {};
@@ -71,7 +76,7 @@ function writeSiteConfigSnapshot(config) {
 
   try {
     writeStorageValue(STORAGE_KEYS.SITE_CONFIG_SNAPSHOT_V1, JSON.stringify({
-      config: normalizeVersionConfig(config),
+      config: normalizeVersionConfig(pickPublicSiteConfig(config)),
       fetchedAt: Date.now(),
     }), { raw: true });
   } catch {
@@ -108,17 +113,19 @@ const useSiteConfigStore = create((set, get) => ({
         const { data, error } = await executeSupabaseRead(
           () => supabase
             .from('site_config')
-            .select('key, value'),
+            .select('key, value')
+            .in('key', PUBLIC_SITE_CONFIG_KEYS),
           {
             label: 'load site config'
           }
         );
 
         if (!error && Array.isArray(data) && data.length > 0) {
-          const nextConfig = data.reduce((config, row) => {
-            config[row.key] = row.value;
-            return config;
-          }, {});
+          const nextConfig = Object.fromEntries(
+            data
+              .filter((row) => isPublicSiteConfigKey(row?.key))
+              .map((row) => [row.key, row.value])
+          );
           const normalizedConfig = normalizeVersionConfig(nextConfig);
           writeSiteConfigSnapshot(normalizedConfig);
           set({ config: normalizedConfig, loaded: true });
@@ -168,9 +175,13 @@ const useSiteConfigStore = create((set, get) => ({
         category: meta.category || versionMeta?.category || 'general',
       });
 
-      const nextConfig = normalizeVersionConfig({ ...get().config, [key]: savedItem?.value ?? value });
-      writeSiteConfigSnapshot(nextConfig);
-      set({ config: nextConfig, updateError: null });
+      if (isPublicSiteConfigKey(key)) {
+        const nextConfig = normalizeVersionConfig({ ...get().config, [key]: savedItem?.value ?? value });
+        writeSiteConfigSnapshot(nextConfig);
+        set({ config: nextConfig, updateError: null });
+      } else {
+        set({ updateError: null });
+      }
 
       if (key !== 'public_cache_epoch') {
         await invalidatePublicCache('site-config', `admin:site-config:${key}`);

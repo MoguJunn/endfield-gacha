@@ -10,6 +10,7 @@ import {
   getPrimaryAccountPasswordError,
   validateAccountPassword,
 } from '../../utils/authSecurity.js';
+import { isContributorDemoModeEnabled } from '../../dev/contributorDemoMode.js';
 
 function normalizeFriendlyError(error, fallback) {
   return error?.message || fallback;
@@ -59,6 +60,14 @@ export default function ResetPasswordPage() {
     let active = true;
 
     async function checkRecoverySession() {
+      if (isContributorDemoModeEnabled()) {
+        if (active) {
+          setRecoveryReady(false);
+          setError(tt('本地内容沙盒不启用真实密码重置。', 'Real password reset is disabled in the local content sandbox.'));
+          setCheckingSession(false);
+        }
+        return;
+      }
       if (!supabase) {
         if (active) {
           setError(tt('当前环境未启用认证服务，无法重置密码。', 'Auth service is unavailable in this environment, so password reset cannot continue.'));
@@ -79,7 +88,7 @@ export default function ResetPasswordPage() {
           return;
         }
 
-        if (session?.user || recoveryType === 'recovery') {
+        if (session?.user && (recoveryType === 'recovery' || enteredFromCode)) {
           setRecoveryReady(true);
           setError('');
         } else if (enteredFromCode) {
@@ -112,8 +121,17 @@ export default function ResetPasswordPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (isContributorDemoModeEnabled()) {
+      setError(tt('本地内容沙盒不启用真实密码重置。', 'Real password reset is disabled in the local content sandbox.'));
+      return;
+    }
     if (!supabase) {
       setError(tt('当前环境未启用认证服务，无法重置密码。', 'Auth service is unavailable in this environment, so password reset cannot continue.'));
+      return;
+    }
+
+    if (!recoveryReady) {
+      setError(tt('当前没有有效的密码恢复会话。', 'There is no valid password recovery session.'));
       return;
     }
 

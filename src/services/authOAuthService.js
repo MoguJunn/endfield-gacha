@@ -1,4 +1,8 @@
 import { supabase } from '../supabaseClient.js';
+import {
+  createContributorDemoReadonlyError,
+  isContributorDemoModeEnabled,
+} from '../dev/contributorDemoMode.js';
 
 const OAUTH_PROVIDER_META = Object.freeze({
   github: {
@@ -33,6 +37,7 @@ function isProviderReady(provider, env) {
 }
 
 export function getEnabledOAuthProviders(env = import.meta.env) {
+  if (isContributorDemoModeEnabled()) return [];
   return Object.values(OAUTH_PROVIDER_META)
     .filter((provider) => isEnvEnabled(env?.[provider.enabledEnv]) && isProviderReady(provider, env))
     .map(({ key, label, strategy }) => ({ key, label, strategy }));
@@ -94,6 +99,9 @@ export function buildOAuthStartUrl(provider, {
   intent = 'login',
   origin = window.location.origin,
 } = {}) {
+  if (isContributorDemoModeEnabled()) {
+    throw createContributorDemoReadonlyError('oauth-start-url');
+  }
   const { key } = getOAuthProviderStrategy(provider);
 
   const url = new URL(`/api/auth/oauth/${key}/start`, origin);
@@ -107,6 +115,9 @@ export function buildOAuthStartUrl(provider, {
 }
 
 export async function startOAuthLogin(provider, options = {}) {
+  if (isContributorDemoModeEnabled()) {
+    throw createContributorDemoReadonlyError('oauth-login');
+  }
   const meta = getOAuthProviderStrategy(provider, options.env || import.meta.env);
   const returnTo = options.returnTo || `${window.location.pathname}${window.location.search}${window.location.hash}`;
   const origin = options.origin || window.location.origin;

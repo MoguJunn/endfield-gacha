@@ -13,6 +13,12 @@ import {
 } from './publicResourceClient.js';
 import { appLogger } from '../utils/appLogger.js';
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from '../utils/storageUtils.js';
+import { isContributorDemoModeEnabled } from '../dev/contributorDemoMode.js';
+import {
+  getContributorDemoSandboxSnapshot,
+  initializeContributorDemoSandbox,
+} from '../dev/contributorDemoSandboxStore.js';
+import { sanitizePublicResourceUrl } from '../utils/publicResourceUrl.js';
 
 /**
  * 统计服务
@@ -28,6 +34,28 @@ const STATS_API_TIMEOUT_MS = 25000;
 const STATS_API_TYPE_TIMEOUT_MS = {
   character_catalog: 12000,
 };
+
+export function sanitizeCharacterCatalogMedia(catalog) {
+  if (!catalog || typeof catalog !== 'object') return catalog;
+  return {
+    ...catalog,
+    rows: Array.isArray(catalog.rows)
+      ? catalog.rows.map(({ avatar_url: legacyAvatarUrl, ...row }) => ({
+        ...row,
+        avatarUrl: sanitizePublicResourceUrl(row?.avatarUrl || legacyAvatarUrl),
+      }))
+      : catalog.rows,
+  };
+}
+
+export function sanitizeGlobalSummaryMedia(summary) {
+  if (!summary || typeof summary !== 'object') return summary;
+  return {
+    ...summary,
+    characterCatalog: sanitizeCharacterCatalogMedia(summary.characterCatalog),
+  };
+}
+
 const EXPECTED_LIMITED_UP_DISPLAY_COUNT = 6;
 const globalStatsRequestState = {
   data: null,
@@ -48,6 +76,105 @@ const characterCatalogRequestState = {
 };
 
 const userRankingRequestStates = new Map();
+
+function createContributorSandboxGlobalStats() {
+  return {
+    totalPulls: 128640,
+    totalPullsWithFree: 132480,
+    freePullCount: 3840,
+    chargedCharacterPulls: 82400,
+    chargedWeaponPulls: 46240,
+    infoBookPullCount: 1260,
+    totalUsers: 2360,
+    activeUsers30d: 1180,
+    newUsers30d: 184,
+    activeUsers90d: 1940,
+    newUsers90d: 520,
+    totalContributors: 1780,
+    contributorsByRegion: { cn: 1450, intl: 330 },
+    contributorActivity: null,
+    sixStarTotal: 3420,
+    sixStarLimited: 2310,
+    sixStarStandard: 1110,
+    fiveStar: 15480,
+    fourStar: 113580,
+    counts: { 6: 2310, '6_std': 1110, 5: 15480, 4: 113580 },
+    distribution: [],
+    chartData: [],
+    byType: {
+      extra: createEmptyTypeStats(),
+      limited: createEmptyTypeStats(),
+      weapon: createEmptyTypeStats(),
+      standard: createEmptyTypeStats(),
+      character: createEmptyTypeStats(),
+    },
+    avgPity: 37.6,
+    charGift: 72,
+    weaponGiftLimited: 48,
+    weaponGiftStandard: 19,
+    giftTotal: 139,
+    resources: buildResourceSummaryFromAggregates(),
+  };
+}
+
+function buildContributorSandboxCatalog() {
+  const snapshot = getContributorDemoSandboxSnapshot();
+  const totalContributors = 1780;
+  const rows = snapshot.characters.filter((item) => Number(item.rarity) >= 4).map((item, index) => {
+    const ownerUsers = Math.max(120, 1680 - index * 13);
+    const fullPotentialUsers = Math.max(4, 190 - index * 2);
+    return {
+      id: item.id,
+      name: item.name,
+      avatarUrl: item.avatar_url || null,
+      rarity: Number(item.rarity),
+      type: item.type,
+      isLimited: Boolean(item.is_limited),
+      releaseDate: item.release_date || null,
+      ownerUsers,
+      unownedUsers: Math.max(totalContributors - ownerUsers, 0),
+      ownershipRate: ownerUsers / totalContributors,
+      fullPotentialUsers,
+      fullPotentialRateOfOwners: fullPotentialUsers / ownerUsers,
+      fullPotentialRateOfContributors: fullPotentialUsers / totalContributors,
+      totalCopies: ownerUsers + fullPotentialUsers * 2,
+      avgCopiesPerOwner: (ownerUsers + fullPotentialUsers * 2) / ownerUsers,
+      copyDistribution: { 1: Math.max(ownerUsers - fullPotentialUsers, 0), 6: fullPotentialUsers },
+      quota: {},
+      dataSource: 'global',
+      rankingInfo: [],
+    };
+  });
+  return {
+    totalContributors,
+    summary: {
+      totalCharacters: rows.length,
+      ownedCharacters: rows.length,
+      unownedCharacters: 0,
+      ownershipRate: 1,
+      fullPotentialCharacters: rows.length,
+      quota: {},
+      characterQuota: {},
+      weaponQuota: {},
+      excessTrustTokens: 620,
+    },
+    rows,
+    meta: { status: 'ready', source: 'contributor-local-sandbox' },
+  };
+}
+
+function buildContributorSandboxRanking() {
+  const entries = getContributorDemoSandboxSnapshot().characters
+    .filter((item) => Number(item.rarity) >= 5)
+    .map((item, index) => ({ id: item.id, name: item.name, count: Math.max(8, 420 - index * 7), avgPity: 28 + (index % 8) * 2.3 }));
+  return {
+    extra: { sixStarUp: entries.filter((item) => item.id.startsWith('chr_')).slice(0, 8) },
+    limited: { sixStarUp: entries.filter((item) => item.id.startsWith('chr_')).slice(0, 12) },
+    standard: { sixStar: entries.filter((item) => item.id.startsWith('chr_')).slice(0, 12) },
+    weapon: { sixStarUp: entries.filter((item) => item.id.startsWith('wpn_')).slice(0, 12) },
+    meta: { status: 'ready', source: 'contributor-local-sandbox' },
+  };
+}
 
 function readPersistedSnapshot(key) {
   try {
@@ -650,6 +777,14 @@ function logStatsFailure(scope, error) {
  * @returns {Promise<Object|null>} 归一化后的全服统计数据
  */
 export async function getGlobalSummaryStats(forceRefresh = false) {
+  if (isContributorDemoModeEnabled()) {
+    await initializeContributorDemoSandbox();
+    return {
+      ...createContributorSandboxGlobalStats(),
+      characterCatalog: buildContributorSandboxCatalog(),
+      meta: { status: 'ready', source: 'contributor-local-sandbox', fetchedAt: Date.now() },
+    };
+  }
   try {
     return await runCachedRequest(
       globalStatsRequestState,
@@ -659,7 +794,7 @@ export async function getGlobalSummaryStats(forceRefresh = false) {
           getCharacterCatalogStats(forceRefresh).catch(() => null)
         ]);
         if (apiPayload?.globalSummary) {
-          const normalizedFromApi = withStatsMeta(
+          const normalizedFromApi = sanitizeGlobalSummaryMedia(withStatsMeta(
             mergeCatalogQuotaIntoSummary(
               normalizeGlobalStats(apiPayload.globalSummary),
               catalogPayload
@@ -668,7 +803,7 @@ export async function getGlobalSummaryStats(forceRefresh = false) {
             source: 'api',
             fetchedAt: Date.now()
             }
-          );
+          ));
           writePersistedSnapshot(STORAGE_KEYS.GLOBAL_SUMMARY_STATS_SNAPSHOT, normalizedFromApi);
           return normalizedFromApi;
         }
@@ -676,7 +811,7 @@ export async function getGlobalSummaryStats(forceRefresh = false) {
         if (shouldAllowPublicSupabaseFallback()) {
           const directSummary = await fetchGlobalSummaryDirect().catch(() => null);
           if (directSummary) {
-            const normalizedFromDirect = withStatsMeta(
+            const normalizedFromDirect = sanitizeGlobalSummaryMedia(withStatsMeta(
               mergeCatalogQuotaIntoSummary(
                 normalizeGlobalStats(directSummary),
                 catalogPayload
@@ -685,14 +820,17 @@ export async function getGlobalSummaryStats(forceRefresh = false) {
               source: 'supabase-direct',
               fetchedAt: Date.now()
               }
-            );
+            ));
             writePersistedSnapshot(STORAGE_KEYS.GLOBAL_SUMMARY_STATS_SNAPSHOT, normalizedFromDirect);
             return normalizedFromDirect;
           }
         }
 
-        const persistedSnapshot = readPersistedSnapshot(STORAGE_KEYS.GLOBAL_SUMMARY_STATS_SNAPSHOT);
+        const persistedSnapshot = sanitizeGlobalSummaryMedia(
+          readPersistedSnapshot(STORAGE_KEYS.GLOBAL_SUMMARY_STATS_SNAPSHOT)
+        );
         if (persistedSnapshot) {
+          writePersistedSnapshot(STORAGE_KEYS.GLOBAL_SUMMARY_STATS_SNAPSHOT, persistedSnapshot);
           return withStatsMeta(persistedSnapshot, {
             status: 'stale',
             source: 'local-cache'
@@ -708,10 +846,12 @@ export async function getGlobalSummaryStats(forceRefresh = false) {
     );
   } catch (error) {
     logStatsFailure('获取全服统计', error);
-    const persisted = readPersistedSnapshot(STORAGE_KEYS.GLOBAL_SUMMARY_STATS_SNAPSHOT);
+    const persisted = sanitizeGlobalSummaryMedia(
+      readPersistedSnapshot(STORAGE_KEYS.GLOBAL_SUMMARY_STATS_SNAPSHOT)
+    );
 
     if (globalStatsRequestState.data) {
-      return withStatsMeta(globalStatsRequestState.data, {
+      return withStatsMeta(sanitizeGlobalSummaryMedia(globalStatsRequestState.data), {
         status: 'stale',
         source: 'memory-cache',
         lastErrorCode: error?.code || null
@@ -735,13 +875,19 @@ export async function getGlobalSummaryStats(forceRefresh = false) {
 }
 
 export async function getCharacterCatalogStats(forceRefresh = false) {
+  if (isContributorDemoModeEnabled()) {
+    await initializeContributorDemoSandbox();
+    return buildContributorSandboxCatalog();
+  }
   try {
     return await runCachedRequest(
       characterCatalogRequestState,
       async () => {
         const apiPayload = await fetchStatsApi('character_catalog').catch(() => null);
         if (apiPayload?.characterCatalog) {
-          const normalizedFromApi = normalizeGlobalCharacterCatalog(apiPayload.characterCatalog);
+          const normalizedFromApi = sanitizeCharacterCatalogMedia(
+            normalizeGlobalCharacterCatalog(apiPayload.characterCatalog)
+          );
           writePersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT, normalizedFromApi);
           return normalizedFromApi;
         }
@@ -749,26 +895,36 @@ export async function getCharacterCatalogStats(forceRefresh = false) {
         if (shouldAllowPublicSupabaseFallback()) {
           const directCatalog = await fetchCharacterCatalogDirect().catch(() => null);
           if (directCatalog) {
-            const normalizedFromDirect = normalizeGlobalCharacterCatalog(directCatalog);
+            const normalizedFromDirect = sanitizeCharacterCatalogMedia(
+              normalizeGlobalCharacterCatalog(directCatalog)
+            );
             writePersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT, normalizedFromDirect);
             return normalizedFromDirect;
           }
 
           const uncachedCatalog = await fetchCharacterCatalogUncached().catch(() => null);
           if (uncachedCatalog) {
-            const normalizedFromUncached = normalizeGlobalCharacterCatalog(uncachedCatalog);
+            const normalizedFromUncached = sanitizeCharacterCatalogMedia(
+              normalizeGlobalCharacterCatalog(uncachedCatalog)
+            );
             writePersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT, normalizedFromUncached);
             return normalizedFromUncached;
           }
         }
 
-        return readPersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT);
+        const persisted = sanitizeCharacterCatalogMedia(
+          readPersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT)
+        );
+        if (persisted) writePersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT, persisted);
+        return persisted;
       },
       { cacheTtl: CHARACTER_CATALOG_CACHE_TTL, forceRefresh }
     );
   } catch (error) {
     logStatsFailure('获取角色图鉴', error);
-    return characterCatalogRequestState.data || readPersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT) || null;
+    return sanitizeCharacterCatalogMedia(
+      characterCatalogRequestState.data || readPersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT)
+    ) || null;
   }
 }
 
@@ -778,6 +934,10 @@ export async function getCharacterCatalogStats(forceRefresh = false) {
  * @returns {Promise<Object>} 角色排名数据
  */
 export async function getCharacterRankingStats(forceRefresh = false) {
+  if (isContributorDemoModeEnabled()) {
+    await initializeContributorDemoSandbox();
+    return buildContributorSandboxRanking();
+  }
   try {
     return await runCachedRequest(
       characterRankingRequestState,
@@ -818,6 +978,10 @@ export async function getCharacterRankingStats(forceRefresh = false) {
  * @returns {Promise<Object>} 用户个人排名数据
  */
 export async function getUserRankingStats(userId) {
+  if (isContributorDemoModeEnabled()) {
+    await initializeContributorDemoSandbox();
+    return buildContributorSandboxRanking();
+  }
   try {
     if (!supabase) {
       appLogger.warn('[statsService] Supabase 未配置，无法获取用户排名');

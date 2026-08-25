@@ -160,7 +160,7 @@ describe('/api/stats version_calendar', () => {
               versionNumber: '5',
               pools: [expect.objectContaining({
                 poolId: 'pool-a',
-                bannerUrl: 'https://cdn.example/pool-a.webp',
+                bannerUrl: null,
                 backgroundCharacter: '诀',
                 backgroundUrl: '/avatars/characters/char-manual-jue.png',
               })],

@@ -1,3 +1,5 @@
+import { sanitizePublicCatalogResourceUrl } from '../../shared/publicCatalogDto.js';
+
 const POOL_MAINTENANCE_SUFFIX = /\s*（前瞻(?:，[^）]*)?）\s*$/u;
 
 const WEAPON_POOL_PATTERN = /(?:weapon|wepon|arsenal|武器|申领)/iu;
@@ -139,11 +141,13 @@ export function sanitizeVersionCalendarPool(row, backgroundCharacter = null) {
     type: WEAPON_POOL_PATTERN.test(typeHint) ? 'arsenal' : 'operator',
     startsAt: row.start_time || null,
     endsAt: row.end_time || null,
-    bannerUrl: row.banner_url || null,
+    bannerUrl: sanitizePublicCatalogResourceUrl(row.banner_url),
     upCharacter: row.up_character || null,
     backgroundCharacter: backgroundCharacter?.name || null,
     backgroundType: backgroundCharacter?.type || null,
-    backgroundUrl: backgroundCharacter?.avatar_url || backgroundCharacter?.avatarUrl || null,
+    backgroundUrl: sanitizePublicCatalogResourceUrl(
+      backgroundCharacter?.avatar_url || backgroundCharacter?.avatarUrl
+    ),
     description: row.description || null,
     featuredCharacters: Array.isArray(row.featured_characters)
       ? row.featured_characters

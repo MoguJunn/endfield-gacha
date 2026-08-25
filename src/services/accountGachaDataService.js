@@ -1,5 +1,14 @@
 import { getSameOriginAuthHeaders } from './authFetchService.js';
 import { fetchJsonWithTimeout } from './supabaseRequest.js';
+import {
+  createContributorDemoReadonlyError,
+  isContributorDemoSessionActive,
+} from '../dev/contributorDemoMode.js';
+import {
+  getContributorDemoRuntimeAnalysis,
+  getContributorDemoRuntimeHistory,
+  getContributorDemoRuntimeHistoryPage,
+} from '../dev/contributorDemoRuntimeData.js';
 
 const PERSONAL_ANALYSIS_TIMEOUT_MS = 120000;
 
@@ -25,6 +34,15 @@ function createAccountGachaDataError(data, response, fallbackMessage, fallbackCo
 }
 
 export async function loadAccountGachaData() {
+  if (isContributorDemoSessionActive()) {
+    const history = getContributorDemoRuntimeHistory();
+    return {
+      history,
+      source: 'contributor-local-sandbox',
+      meta: { ownerId: 'demo:contributor-admin', count: history.length, readOnly: true },
+      warnings: [{ code: 'contributor_local_sandbox' }],
+    };
+  }
   const headers = await buildAccountGachaHeaders();
 
   const { response, data } = await fetchJsonWithTimeout('/api/account-gacha-data', {
@@ -49,6 +67,9 @@ export async function loadAccountGachaData() {
 }
 
 export async function loadAccountGachaAnalysis({ accountKey = '', viewKey = '', locale = 'zh-CN' } = {}) {
+  if (isContributorDemoSessionActive()) {
+    return getContributorDemoRuntimeAnalysis({ accountKey, viewKey, locale });
+  }
   const headers = await buildAccountGachaHeaders();
   const params = new URLSearchParams({ mode: 'analysis' });
   if (accountKey) {
@@ -104,6 +125,19 @@ export async function loadAccountGachaAnalysis({ accountKey = '', viewKey = '', 
 }
 
 export async function loadAccountGachaSeqKeys({ gameUid = '', accountKey = '', serverId = '', region = '' } = {}) {
+  if (isContributorDemoSessionActive()) {
+    const history = getContributorDemoRuntimeHistory();
+    return {
+      keys: history.map((record) => ({
+        gameUid: record.game_uid,
+        poolId: record.pool_id,
+        seqId: record.seq_id,
+      })),
+      source: 'contributor-local-sandbox',
+      meta: { ownerId: 'demo:contributor-admin', readOnly: true, gameUid, accountKey, serverId, region },
+      warnings: [{ code: 'contributor_demo_data' }],
+    };
+  }
   const headers = await buildAccountGachaHeaders();
   const params = new URLSearchParams({ mode: 'seq-keys' });
   if (gameUid) {
@@ -149,6 +183,9 @@ export async function loadAccountGachaHistoryPage({
   cursor = '',
   limit = 50,
 } = {}) {
+  if (isContributorDemoSessionActive()) {
+    return getContributorDemoRuntimeHistoryPage({ poolId, cursor, limit });
+  }
   const headers = await buildAccountGachaHeaders();
   const params = new URLSearchParams({
     mode: 'history',
@@ -393,6 +430,9 @@ export async function loadAllAccountGachaHistoryForAccounts({
 }
 
 export async function saveAccountGachaData({ pools = [], history = [] } = {}) {
+  if (isContributorDemoSessionActive()) {
+    throw createContributorDemoReadonlyError('saveAccountGachaData');
+  }
   const headers = await buildAccountGachaHeaders();
   headers['Content-Type'] = 'application/json';
 
@@ -425,6 +465,9 @@ export async function updateAccountGachaServerLabel({
   region = '',
   mergeGameUid = false,
 } = {}) {
+  if (isContributorDemoSessionActive()) {
+    throw createContributorDemoReadonlyError('updateAccountGachaServerLabel');
+  }
   const headers = await buildAccountGachaHeaders();
   headers['Content-Type'] = 'application/json';
 
@@ -460,6 +503,12 @@ export async function updateAccountGachaServerLabel({
 }
 
 export async function resolveAccountGachaAliases({ poolIds = [], characterIds = [] } = {}) {
+  if (isContributorDemoSessionActive()) {
+    return {
+      poolAliases: Object.fromEntries((poolIds || []).map((id) => [id, id])),
+      characterAliases: Object.fromEntries((characterIds || []).map((id) => [id, id])),
+    };
+  }
   const headers = await buildAccountGachaHeaders();
   headers['Content-Type'] = 'application/json';
 
@@ -497,6 +546,9 @@ export async function updateAccountGachaRecord({
   changes,
   reason = '',
 } = {}) {
+  if (isContributorDemoSessionActive()) {
+    throw createContributorDemoReadonlyError('updateAccountGachaRecord');
+  }
   const headers = await buildAccountGachaHeaders();
   headers['Content-Type'] = 'application/json';
 
@@ -530,6 +582,9 @@ export async function updateAccountGachaRecord({
 }
 
 export async function deleteAccountGachaData(payload) {
+  if (isContributorDemoSessionActive()) {
+    throw createContributorDemoReadonlyError('deleteAccountGachaData');
+  }
   const headers = await buildAccountGachaHeaders();
   headers['Content-Type'] = 'application/json';
 

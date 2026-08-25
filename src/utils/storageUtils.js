@@ -27,6 +27,7 @@ export const STORAGE_KEYS = {
   CHARACTER_CACHE_SNAPSHOT_V1: 'character_cache_snapshot_v1',
   SITE_CONFIG_SNAPSHOT_V1: 'site_config_snapshot_v1',
   PUBLIC_BOOTSTRAP_SNAPSHOT_V2: 'public_bootstrap_snapshot_v2',
+  PUBLIC_BOOTSTRAP_SNAPSHOT_V3: 'public_bootstrap_snapshot_v3',
   GLOBAL_SUMMARY_STATS_SNAPSHOT: 'global_summary_stats_snapshot',
   CHARACTER_RANKING_SNAPSHOT: 'character_ranking_snapshot_v2',
   CHARACTER_CATALOG_SNAPSHOT: 'character_catalog_snapshot_v1',

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { isSupabaseRealtimeEnabled, supabase } from '../../supabaseClient';
 import { usePoolStore, useAuthStore } from '../../stores';
 import { formatVisiblePoolRecord } from '../../services/poolReadService';
+import { isContributorDemoModeEnabled } from '../../dev/contributorDemoMode.js';
 
 function mapRealtimePoolRecord(record) {
   return formatVisiblePoolRecord({
@@ -66,7 +67,7 @@ export function usePoolRealtimeSubscription({ showToast }) {
 
   // 订阅只在组件挂载时执行一次
   useEffect(() => {
-    if (!supabase || !canEdit || !isSupabaseRealtimeEnabled()) return;
+    if (isContributorDemoModeEnabled() || !supabase || !canEdit || !isSupabaseRealtimeEnabled()) return;
 
     // 订阅 pools 表的所有变化
     const channel = supabase

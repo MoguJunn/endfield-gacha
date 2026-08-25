@@ -190,6 +190,8 @@ const PoolCard = ({ pool, poolCharacters, characters, actionLoading, onEdit, onD
           <img
             src={pool.banner_url}
             alt={pool.name}
+            crossOrigin="anonymous"
+            referrerPolicy="no-referrer"
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
             onError={(e) => {
               e.target.style.display = 'none';

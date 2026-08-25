@@ -1,3 +1,8 @@
+import {
+  createContributorDemoReadonlyError,
+  isContributorDemoModeEnabled,
+} from '../dev/contributorDemoMode.js';
+
 const DEV_READ_TIMEOUT_MS = 45000;
 const DEV_RPC_TIMEOUT_MS = 60000;
 const DEV_MUTATION_TIMEOUT_MS = 40000;
@@ -80,6 +85,9 @@ async function executeWithTimeout(buildRequest, {
 }
 
 export async function executeSupabaseRead(buildRequest, options = {}) {
+  if (isContributorDemoModeEnabled()) {
+    throw createContributorDemoReadonlyError(options.label || 'supabase-read');
+  }
   return executeWithTimeout(buildRequest, {
     timeoutMs: SUPABASE_READ_TIMEOUT_MS,
     retries: 1,
@@ -88,6 +96,9 @@ export async function executeSupabaseRead(buildRequest, options = {}) {
 }
 
 export async function executeSupabaseRpc(buildRequest, options = {}) {
+  if (isContributorDemoModeEnabled()) {
+    throw createContributorDemoReadonlyError(options.label || 'supabase-rpc');
+  }
   return executeWithTimeout(buildRequest, {
     timeoutMs: SUPABASE_RPC_TIMEOUT_MS,
     retries: 1,
@@ -96,6 +107,9 @@ export async function executeSupabaseRpc(buildRequest, options = {}) {
 }
 
 export async function executeSupabaseMutation(buildRequest, options = {}) {
+  if (isContributorDemoModeEnabled()) {
+    throw createContributorDemoReadonlyError(options.label || 'supabase-mutation');
+  }
   return executeWithTimeout(buildRequest, {
     timeoutMs: SUPABASE_MUTATION_TIMEOUT_MS,
     retries: 0,
@@ -109,6 +123,9 @@ export async function fetchWithTimeout(input, init = {}, {
   retries = 0,
   retryDelayMs = 1500,
 } = {}) {
+  if (isContributorDemoModeEnabled()) {
+    throw createContributorDemoReadonlyError(`${String(init?.method || 'GET').toUpperCase()} ${String(input || '')}`);
+  }
   let lastError = null;
 
   for (let attempt = 0; attempt <= retries; attempt += 1) {

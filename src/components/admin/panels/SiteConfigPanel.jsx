@@ -494,7 +494,7 @@ function EditableConfigItem({ item, isJsonField, editValue, setEditValue, onSave
  * 站点配置管理面板
  * 编辑备案号、作者信息、版本号等从数据库读取的站点配置
  */
-const SiteConfigPanel = ({ showToast }) => {
+const SiteConfigPanel = ({ showToast, configAdapter = null }) => {
   const [configItems, setConfigItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingKey, setEditingKey] = useState(null);
@@ -506,7 +506,9 @@ const SiteConfigPanel = ({ showToast }) => {
     const fetchAll = async () => {
       setLoading(true);
       try {
-        const data = await loadAdminSiteConfigItems();
+        const data = configAdapter
+          ? await configAdapter.loadItems()
+          : await loadAdminSiteConfigItems();
         const mergedItems = [...data];
         VIRTUAL_CONFIG_ITEMS.forEach((virtualItem) => {
           if (!mergedItems.some((item) => item.key === virtualItem.key)) {
@@ -524,7 +526,7 @@ const SiteConfigPanel = ({ showToast }) => {
       }
     };
     fetchAll();
-  }, [showToast]);
+  }, [configAdapter, showToast]);
 
   const startEdit = (item) => {
     setEditingKey(item.key);
@@ -541,10 +543,10 @@ const SiteConfigPanel = ({ showToast }) => {
     setSaving(true);
     try {
       const currentItem = configItems.find((item) => item.key === editingKey);
-      const success = await useSiteConfigStore.getState().updateConfig(editingKey, editValue, {
-        label: currentItem?.label,
-        category: currentItem?.category,
-      });
+      const metadata = { label: currentItem?.label, category: currentItem?.category };
+      const success = configAdapter
+        ? await configAdapter.updateConfig(editingKey, editValue, metadata)
+        : await useSiteConfigStore.getState().updateConfig(editingKey, editValue, metadata);
       if (success) {
         setConfigItems(prev => prev.map(item =>
           item.key === editingKey ? { ...item, value: editValue, updated_at: new Date().toISOString() } : item
@@ -552,7 +554,7 @@ const SiteConfigPanel = ({ showToast }) => {
         showToast?.('配置已更新', 'success');
         cancelEdit();
       } else {
-        const updateError = useSiteConfigStore.getState().updateError;
+        const updateError = configAdapter?.getError?.() || useSiteConfigStore.getState().updateError;
         showToast?.(`保存失败: ${updateError?.message || '请检查登录状态和超级管理员权限'}`, 'error');
       }
     } catch (error) {
@@ -572,7 +574,7 @@ const SiteConfigPanel = ({ showToast }) => {
   }
 
   // 按 category 分组
-  const grouped = {};
+  const grouped = Object.create(null);
   configItems.forEach(item => {
     const cat = item.category || 'general';
     if (!grouped[cat]) grouped[cat] = [];

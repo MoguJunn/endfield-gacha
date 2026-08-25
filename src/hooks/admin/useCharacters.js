@@ -78,7 +78,12 @@ export const INITIAL_BATCH_EDIT_FORM = {
  * @param {Function} options.showToast - Toast 提示函数
  * @returns {Object} 角色管理状态和方法
  */
-export function useCharacters({ showToast }) {
+export function useCharacters({
+  showToast,
+  service = characterService,
+  invalidateCache = invalidatePublicCache,
+  sandboxMode = false,
+}) {
   const userRole = useAuthStore(state => state.userRole);
 
   const formatDateTimeLocal = useCallback((utcDateString) => {
@@ -140,14 +145,14 @@ export function useCharacters({ showToast }) {
   // 加载角色列表
   const loadCharacters = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await characterService.loadCharacters();
+    const { data, error } = await service.loadCharacters();
     if (error) {
       showToast('加载角色失败: ' + error.message, 'error');
     } else {
       setCharacters(data);
     }
     setLoading(false);
-  }, [showToast]);
+  }, [service, showToast]);
 
   // 初始化加载
   useEffect(() => {
@@ -430,10 +435,10 @@ export function useCharacters({ showToast }) {
     };
 
     try {
-      const { success, error } = await characterService.saveCharacter(characterData, editingCharacter);
+      const { success, error } = await service.saveCharacter(characterData, editingCharacter);
 
       if (success) {
-        await invalidatePublicCache('characters', 'admin:character:save');
+        await invalidateCache('characters', 'admin:character:save');
         showToast(editingCharacter ? '角色已更新' : '角色已创建', 'success');
         await loadCharacters();
         resetForm();
@@ -451,7 +456,7 @@ export function useCharacters({ showToast }) {
     } finally {
       setActionLoading(null);
     }
-  }, [characterForm, editingCharacter, ensureSuperAdmin, showToast, loadCharacters, resetForm]);
+  }, [characterForm, editingCharacter, ensureSuperAdmin, invalidateCache, loadCharacters, resetForm, service, showToast]);
 
   // 删除角色
   const deleteCharacter = useCallback(async (character) => {
@@ -463,10 +468,10 @@ export function useCharacters({ showToast }) {
 
     setActionLoading(character.id);
 
-    const { success, error } = await characterService.deleteCharacter(character.id);
+    const { success, error } = await service.deleteCharacter(character.id);
 
     if (success) {
-      await invalidatePublicCache('characters', 'admin:character:delete');
+      await invalidateCache('characters', 'admin:character:delete');
       showToast('角色已删除', 'success');
       await loadCharacters();
     } else {
@@ -474,7 +479,7 @@ export function useCharacters({ showToast }) {
     }
 
     setActionLoading(null);
-  }, [ensureSuperAdmin, showToast, loadCharacters]);
+  }, [ensureSuperAdmin, invalidateCache, loadCharacters, service, showToast]);
 
   // 批量删除
   const handleBatchDelete = useCallback(async () => {
@@ -486,10 +491,10 @@ export function useCharacters({ showToast }) {
 
     setActionLoading('batch-delete');
 
-    const { success, error } = await characterService.batchDeleteCharacters(Array.from(selectedIds));
+    const { success, error } = await service.batchDeleteCharacters(Array.from(selectedIds));
 
     if (success) {
-      await invalidatePublicCache('characters', 'admin:character:batch-delete');
+      await invalidateCache('characters', 'admin:character:batch-delete');
       showToast(`成功删除 ${selectedIds.size} 个项目`, 'success');
       setSelectedIds(new Set());
       await loadCharacters();
@@ -498,7 +503,7 @@ export function useCharacters({ showToast }) {
     }
 
     setActionLoading(null);
-  }, [ensureSuperAdmin, selectedIds, activeTab, showToast, loadCharacters]);
+  }, [activeTab, ensureSuperAdmin, invalidateCache, loadCharacters, selectedIds, service, showToast]);
 
   // 打开批量编辑对话框
   const openBatchEditDialog = useCallback(() => {
@@ -523,13 +528,13 @@ export function useCharacters({ showToast }) {
 
     setActionLoading('batch-edit');
 
-    const { success, updateCount, error } = await characterService.batchUpdateCharacters(
+    const { success, updateCount, error } = await service.batchUpdateCharacters(
       Array.from(selectedIds),
       batchEditForm
     );
 
     if (success) {
-      await invalidatePublicCache('characters', 'admin:character:batch-update');
+      await invalidateCache('characters', 'admin:character:batch-update');
       showToast(`成功更新 ${updateCount} 个项目`, 'success');
       setSelectedIds(new Set());
       await loadCharacters();
@@ -539,22 +544,26 @@ export function useCharacters({ showToast }) {
     }
 
     setActionLoading(null);
-  }, [ensureSuperAdmin, selectedIds, batchEditForm, showToast, loadCharacters, closeBatchEditDialog]);
+  }, [batchEditForm, closeBatchEditDialog, ensureSuperAdmin, invalidateCache, loadCharacters, selectedIds, service, showToast]);
 
   // 从 API 同步
   const handleSyncFromAPI = useCallback(async () => {
     if (!ensureSuperAdmin()) return;
+    if (sandboxMode) {
+      showToast('本地沙盒请使用顶部“刷新正式目录”，不会执行外部图鉴同步或上传。', 'info');
+      return;
+    }
 
     setIsSyncing(true);
     setSyncProgress('正在获取数据...');
 
-    const result = await characterService.syncFromAPI({
+    const result = await service.syncFromAPI({
       onProgress: setSyncProgress,
       existingIds: characters.map(c => c.id)
     });
 
     if (result.success) {
-      await invalidatePublicCache('characters', 'admin:character:sync');
+      await invalidateCache('characters', 'admin:character:sync');
       await loadCharacters();
 
       let message = `同步完成！新增 ${result.newCount} 个`;
@@ -588,7 +597,7 @@ export function useCharacters({ showToast }) {
 
     setIsSyncing(false);
     setSyncProgress('');
-  }, [ensureSuperAdmin, characters, loadCharacters, showToast]);
+  }, [characters, ensureSuperAdmin, invalidateCache, loadCharacters, sandboxMode, service, showToast]);
 
   const copySklandExtractScript = useCallback(async () => {
     if (!ensureSuperAdmin()) return;
@@ -610,6 +619,10 @@ export function useCharacters({ showToast }) {
 
   const applySklandImages = useCallback(async () => {
     if (!ensureSuperAdmin()) return;
+    if (sandboxMode) {
+      showToast('本地沙盒不执行外部图鉴图片写入。可直接编辑实体的头像 URL 字段。', 'info');
+      return;
+    }
 
     if (sklandImportPreview.error) {
       showToast(sklandImportPreview.error, 'error');
@@ -623,12 +636,12 @@ export function useCharacters({ showToast }) {
 
     setActionLoading('skland-import');
 
-    const { success, updateCount, errorCount, error } = await characterService.batchUpdateCharacterAvatars(
+    const { success, updateCount, errorCount, error } = await service.batchUpdateCharacterAvatars(
       sklandImportPreview.updates
     );
 
     if (success || updateCount > 0) {
-      await invalidatePublicCache('characters', 'admin:character:avatar-update');
+      await invalidateCache('characters', 'admin:character:avatar-update');
       await loadCharacters();
       const parts = [`成功写入 ${updateCount} 个${activeTab === 'weapon' ? '武器' : '角色'}图片`];
       if (sklandImportPreview.unmatchedCount > 0) {
@@ -650,7 +663,7 @@ export function useCharacters({ showToast }) {
     }
 
     setActionLoading(null);
-  }, [activeTab, ensureSuperAdmin, loadCharacters, showToast, sklandImportPreview]);
+  }, [activeTab, ensureSuperAdmin, invalidateCache, loadCharacters, sandboxMode, service, showToast, sklandImportPreview]);
 
   return {
     // 数据状态

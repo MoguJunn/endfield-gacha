@@ -14,6 +14,12 @@ import { getUsernameValidationCode, normalizeUsername } from './utils/usernameVa
 import AuthModalView from './components/auth/AuthModalView';
 import { useAuthModalState } from './hooks/auth/useAuthModalState';
 import { useI18n } from './i18n/index.js';
+import {
+  CONTRIBUTOR_DEMO_CREDENTIALS,
+  isContributorDemoCredentials,
+  isContributorDemoModeEnabled,
+} from './dev/contributorDemoMode.js';
+import { activateContributorDemoSession } from './dev/contributorDemoSession.js';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const AUTH_REQUEST_TIMEOUT_MS = import.meta.env?.DEV ? 30000 : 25000;
@@ -132,6 +138,10 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, addDurableNo
   }, []);
 
   const handleOAuthLogin = React.useCallback(async (provider) => {
+    if (isContributorDemoModeEnabled()) {
+      setError(tt('本地内容沙盒不启用真实第三方登录。', 'Real OAuth sign-in is disabled in the local content sandbox.'));
+      return;
+    }
     setError('');
     setMessage('');
     setLoading(true);
@@ -416,6 +426,23 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, addDurableNo
     setError('');
 
     try {
+      if (isContributorDemoModeEnabled()) {
+        if (!isContributorDemoCredentials(email, password)) {
+          setError(tt(
+            '贡献者演示模式只接受页面提供的本地演示账号。',
+            'Contributor demo mode only accepts the local demo account shown on this page.'
+          ));
+          return;
+        }
+        const demoUser = await activateContributorDemoSession();
+        if (!demoUser) {
+          throw new Error('contributor_demo_activation_failed');
+        }
+        onAuthSuccess(demoUser);
+        onClose();
+        return;
+      }
+
       const captchaPayload = await buildAuthCaptchaPayload('login');
       const rateLimitResult = await checkRateLimit('login', { email, ...captchaPayload });
       if (!rateLimitResult.allowed) {
@@ -716,6 +743,10 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, addDurableNo
   };
 
   const handleEmailCodeSubmit = async () => {
+    if (isContributorDemoModeEnabled()) {
+      setError(tt('本地内容沙盒不验证真实邮件验证码。', 'Real email verification is disabled in the local content sandbox.'));
+      return;
+    }
     const code = String(emailCodeState.code || '').replace(/\D/g, '').slice(0, 6);
     if (code.length !== 6 || !EMAIL_REGEX.test(emailCodeState.email || email)) {
       setError(tt('请输入邮件中的 6 位验证码。', 'Enter the 6-digit code from the email.'));
@@ -897,6 +928,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, addDurableNo
     <AuthModalView
       agreedToTerms={agreedToTerms}
       confirmPassword={confirmPassword}
+      contributorDemoOnly={isContributorDemoModeEnabled()}
       email={email}
       emailDomainError={emailDomainError}
       emailValid={emailValid}
@@ -925,6 +957,16 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, addDurableNo
       }}
       onEmailCodeSubmit={handleEmailCodeSubmit}
       oauthProviders={oauthProviders}
+      contributorDemoCredentials={isContributorDemoModeEnabled() ? CONTRIBUTOR_DEMO_CREDENTIALS : null}
+      onUseContributorDemo={() => {
+        handleEmailChange({ target: { value: CONTRIBUTOR_DEMO_CREDENTIALS.email } });
+        setPassword(CONTRIBUTOR_DEMO_CREDENTIALS.password);
+        setError('');
+        setMessage(tt(
+          '已填入本地沙盒管理员账号；点击登录即可编辑本地公告、卡池、角色和站点内容。',
+          'Local sandbox admin credentials filled. Sign in to edit local announcements, pools, entities, and site content.'
+        ));
+      }}
       onOAuthLogin={handleOAuthLogin}
       recoverySubmitDisabled={recoveryRequestLoading || (captchaAction === 'account_recovery' && !captchaReady)}
       onSwitchMode={switchMode}

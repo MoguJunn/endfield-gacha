@@ -62,12 +62,7 @@ export function resolveSiteLegalConfig(config = {}, origin = '') {
   }
 
   if (hostname === REGISTERED_DOMAIN_HOSTNAME) {
-    return normalizeLegalEntry({
-      icpNumber: config.icp_number_ef_nepst_cn,
-      icpUrl: config.icp_url_ef_nepst_cn,
-      policeNumber: config.police_number_ef_nepst_cn,
-      policeUrl: config.police_url_ef_nepst_cn,
-    });
+    return normalizeLegalEntry({});
   }
 
   return resolveGenericLegalConfig(config);

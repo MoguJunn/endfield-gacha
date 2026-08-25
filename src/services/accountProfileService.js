@@ -1,6 +1,11 @@
 import { getSupabaseAccessToken } from './authFetchService.js';
 import { fetchJsonWithTimeout } from './supabaseRequest.js';
 import { normalizeUsername } from '../utils/usernameValidation.js';
+import {
+  CONTRIBUTOR_DEMO_USER,
+  createContributorDemoReadonlyError,
+  isContributorDemoSessionActive,
+} from '../dev/contributorDemoMode.js';
 
 async function buildAccountProfileHeaders(extraHeaders = {}) {
   const accessToken = await getSupabaseAccessToken({
@@ -42,6 +47,19 @@ function mergeUpdatedUser(user, payloadUser, profile) {
 }
 
 export async function loadCurrentAccountProfile() {
+  if (isContributorDemoSessionActive()) {
+    return {
+      profile: {
+        id: CONTRIBUTOR_DEMO_USER.id,
+        username: CONTRIBUTOR_DEMO_USER.user_metadata.username,
+        email: CONTRIBUTOR_DEMO_USER.email,
+        role: 'super_admin',
+        contributor_demo: true,
+      },
+      user: CONTRIBUTOR_DEMO_USER,
+      source: 'contributor-demo',
+    };
+  }
   const headers = await buildAccountProfileHeaders();
   const { response, data } = await fetchJsonWithTimeout('/api/account-profile', {
     method: 'GET',
@@ -65,6 +83,9 @@ export async function loadCurrentAccountProfile() {
 }
 
 export async function updateOwnUsername(user, nextUsername) {
+  if (isContributorDemoSessionActive()) {
+    throw createContributorDemoReadonlyError('updateOwnUsername');
+  }
   if (!user?.id) {
     throw new Error('当前登录态已失效，请重新登录后再试');
   }

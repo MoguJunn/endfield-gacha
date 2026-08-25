@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import appLogger from './utils/appLogger.js';
+import { isContributorDemoModeEnabled } from './dev/contributorDemoMode.js';
 
 function normalizeEnvValue(value) {
   return typeof value === 'string' ? value.trim() : ''
@@ -27,7 +28,7 @@ if (!supabaseUrl || !supabasePublishableKey) {
   }
 }
 
-export const supabase = supabaseUrl && supabasePublishableKey
+export const supabase = !isContributorDemoModeEnabled() && supabaseUrl && supabasePublishableKey
   ? createClient(supabaseUrl, supabasePublishableKey, {
     auth: {
       flowType: 'pkce',

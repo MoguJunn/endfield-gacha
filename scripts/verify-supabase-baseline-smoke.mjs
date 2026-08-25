@@ -150,6 +150,8 @@ SELECT 'service_profiles_select=' || has_table_privilege('service_role', 'public
 SELECT 'service_profiles_update=' || has_table_privilege('service_role', 'public.profiles', 'UPDATE');
 SELECT 'service_revocation_select=' || has_table_privilege('service_role', 'public.app_session_revocation_states', 'SELECT');
 SELECT 'anon_revocation_select=' || has_table_privilege('anon', 'public.app_session_revocation_states', 'SELECT');
+SELECT 'anon_pool_id_select=' || has_column_privilege('anon', 'public.pools', 'pool_id', 'SELECT');
+SELECT 'anon_pool_owner_select=' || has_column_privilege('anon', 'public.pools', 'user_id', 'SELECT');
 SELECT ((public.get_global_stats())::jsonb ? 'contributorsByRegion')::text AS has_contributor_regions;
 SELECT (((public.get_global_stats())::jsonb -> 'byType' -> 'limited') ? 'avgPityTarget')::text AS has_limited_avg_pity_target;
 SELECT (((public.get_global_stats())::jsonb -> 'byType' -> 'weapon') ? 'avgPityTarget')::text AS has_weapon_avg_pity_target;
@@ -1855,6 +1857,8 @@ async function main() {
       'service_profiles_update=true',
       'service_revocation_select=true',
       'anon_revocation_select=false',
+      'anon_pool_id_select=true',
+      'anon_pool_owner_select=false',
       'true',
       'limited_avg_target=15.5',
       'weapon_avg_target=8.0',

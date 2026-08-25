@@ -12,6 +12,7 @@ import { useI18n } from '../../i18n/index.js';
 import { useOAuthCallbackNotice } from '../../hooks/auth/useOAuthCallbackNotice.js';
 import { useSummerLotterySsoContinuation } from '../../hooks/auth/useSummerLotterySsoContinuation.js';
 import PersonalDataBoundary from '../../components/app/PersonalDataBoundary.jsx';
+import ContributorDemoBanner from '../../components/dev/ContributorDemoBanner.jsx';
 
 const DeveloperApiDocsPage = lazy(() => import('../../components/docs/DeveloperApiDocsPage'));
 const SummerLotteryOperatorPage = lazy(() => import('../../components/admin/SummerLotteryOperatorPage'));
@@ -78,6 +79,7 @@ function MobileLayout({ onOAuthSessionSynced, onRetryPersonalData }) {
   return (
     <div data-testid="mobile-app-shell" className="flex flex-col h-[100dvh] w-full overflow-hidden bg-ef-light dark:bg-ef-dark text-slate-900 dark:text-white font-sans transition-colors duration-300">
       <MobileHeader onMenuClick={() => setIsDrawerOpen(true)} activeTab={activeTab} />
+      <ContributorDemoBanner />
 
       <main className="flex-1 relative overflow-hidden flex flex-col">
         <Suspense fallback={<MobileRouteFallback label={t('common.loading')} />}>

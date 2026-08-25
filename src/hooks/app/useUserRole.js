@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { loadCurrentAccountProfile } from '../../services/accountProfileService.js';
 import { useAuthStore } from '../../stores';
+import { isContributorDemoUser } from '../../dev/contributorDemoMode.js';
 
 /**
  * 用户角色 Hook
@@ -13,6 +14,11 @@ export function useUserRole() {
   useEffect(() => {
     if (!user) {
       setUserRole(null);
+      return;
+    }
+
+    if (isContributorDemoUser(user)) {
+      setUserRole('super_admin');
       return;
     }
 

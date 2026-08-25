@@ -1,11 +1,17 @@
 import { supabase } from '../supabaseClient';
-import { loadPublicProfilesMap } from './publicProfileService';
 import { executeSupabaseRead, executeSupabaseRpc } from './supabaseRequest';
 import {
   fetchPublicApiJson,
   shouldAllowPublicSupabaseFallback,
 } from './publicResourceClient';
 import { getCanonicalExtraPoolSubtype } from '../../shared/extraPoolSubtype.js';
+import { isContributorDemoModeEnabled } from '../dev/contributorDemoMode.js';
+import {
+  getContributorDemoSandboxSnapshot,
+  initializeContributorDemoSandbox,
+} from '../dev/contributorDemoSandboxStore.js';
+import { sanitizePublicPoolRecord } from '../../shared/publicCatalogDto.js';
+import { APPROVED_PUBLIC_RESOURCE_HOSTS } from '../utils/publicResourceUrl.js';
 
 const PUBLIC_STATS_API_TIMEOUT_MS = 25000;
 const PUBLIC_DATA_CACHE_TTL = 60 * 1000;
@@ -117,7 +123,7 @@ async function loadPoolRowsByIds(poolIds) {
   const { data: poolRows, error } = await executeSupabaseRead(
     () => supabase
       .from('pools')
-      .select('pool_id, name, name_en, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase, locked, is_limited_weapon, created_at, updated_at, user_id, up_character, description, banner_url, start_time, end_time, featured_characters')
+      .select('pool_id, name, name_en, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase, locked, is_limited_weapon, created_at, updated_at, up_character, description, banner_url, start_time, end_time, featured_characters')
       .in('pool_id', normalizedIds),
     {
       label: 'loadPoolRowsByIds',
@@ -140,7 +146,7 @@ async function loadAllPoolRows() {
   const { data: poolRows, error } = await executeSupabaseRead(
     () => supabase
       .from('pools')
-      .select('pool_id, name, name_en, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase, locked, is_limited_weapon, created_at, updated_at, user_id, up_character, description, banner_url, start_time, end_time, featured_characters'),
+      .select('pool_id, name, name_en, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase, locked, is_limited_weapon, created_at, updated_at, up_character, description, banner_url, start_time, end_time, featured_characters'),
     {
       label: 'loadAllPoolRows',
       retries: 1
@@ -185,7 +191,7 @@ export function formatVisiblePoolRecord(record) {
   const limitedWeaponFlag = record?.is_limited_weapon ?? record?.isLimitedWeapon;
   const sixStarEntities = normalizeSixStarEntities(record);
 
-  return {
+  return sanitizePublicPoolRecord({
     id: record.pool_id || record.id || null,
     name: record.name,
     name_en: record.name_en || null,
@@ -198,9 +204,6 @@ export function formatVisiblePoolRecord(record) {
     isLimitedWeapon: limitedWeaponFlag !== false,
     created_at: record.created_at || null,
     updated_at: record.updated_at || null,
-    user_id: record.user_id || record.userId || null,
-    creator_username: record.creator_username || record.creatorUsername || null,
-    creator_role: record.creator_role || record.creatorRole || null,
     up_character: record.up_character || null,
     description: record.description || null,
     banner_url: record.banner_url || null,
@@ -212,7 +215,7 @@ export function formatVisiblePoolRecord(record) {
       (record?.six_star_roster_complete ?? record?.sixStarRosterComplete) === true
       && sixStarEntities.length > 0
     )
-  };
+  }, { allowedHosts: APPROVED_PUBLIC_RESOURCE_HOSTS });
 }
 
 export function mergePoolCollections(primaryPools = [], fallbackPools = []) {
@@ -234,6 +237,10 @@ export function mergePoolCollections(primaryPools = [], fallbackPools = []) {
 }
 
 export async function loadVisiblePools(options = {}) {
+  if (isContributorDemoModeEnabled()) {
+    await initializeContributorDemoSandbox();
+    return getContributorDemoSandboxSnapshot().pools;
+  }
   const { forceRefresh = false } = options;
 
   return runCachedCollectionRequest(requestState.visiblePools, async () => {
@@ -273,6 +280,12 @@ export async function loadPoolsByIds(poolIds) {
     return [];
   }
 
+  if (isContributorDemoModeEnabled()) {
+    await initializeContributorDemoSandbox();
+    const ids = new Set(normalizedIds);
+    return getContributorDemoSandboxSnapshot().pools.filter((pool) => ids.has(pool.id));
+  }
+
   const cachedPoolCatalog = Array.isArray(requestState.poolCatalog.data)
     ? requestState.poolCatalog.data
     : [];
@@ -299,14 +312,7 @@ export async function loadPoolsByIds(poolIds) {
     return cachedPools.sort(sortVisiblePoolRecords);
   }
 
-  const profilesMap = await loadPublicProfilesMap((poolRows || []).map((row) => row.user_id));
-
   const hydratedPools = poolRows
-    .map((row) => ({
-      ...row,
-      creator_username: profilesMap.get(row.user_id)?.username || null,
-      creator_role: profilesMap.get(row.user_id)?.role || null
-    }))
     .sort(sortVisiblePoolRecords)
     .map(formatVisiblePoolRecord);
 
@@ -314,6 +320,10 @@ export async function loadPoolsByIds(poolIds) {
 }
 
 export async function loadAllPoolsForCatalog(options = {}) {
+  if (isContributorDemoModeEnabled()) {
+    await initializeContributorDemoSandbox();
+    return getContributorDemoSandboxSnapshot().pools;
+  }
   const { forceRefresh = false } = options;
 
   return runCachedCollectionRequest(requestState.poolCatalog, async () => {
@@ -331,14 +341,7 @@ export async function loadAllPoolsForCatalog(options = {}) {
       return [];
     }
 
-    const profilesMap = await loadPublicProfilesMap((poolRows || []).map((row) => row.user_id));
-
     return poolRows
-      .map((row) => ({
-        ...row,
-        creator_username: profilesMap.get(row.user_id)?.username || null,
-        creator_role: profilesMap.get(row.user_id)?.role || null
-      }))
       .sort(sortVisiblePoolRecords)
       .map(formatVisiblePoolRecord);
   }, { forceRefresh });

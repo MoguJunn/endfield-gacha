@@ -1,5 +1,6 @@
 import { supabase } from '../supabaseClient.js';
 import { fetchJsonWithTimeout } from './supabaseRequest.js';
+import { isContributorDemoModeEnabled } from '../dev/contributorDemoMode.js';
 
 let cachedSiteSession = null;
 let cachedSiteSessionSyncedAt = 0;
@@ -26,6 +27,7 @@ function buildSupabaseSessionPayload(payload) {
 }
 
 export async function syncSiteSessionToSupabase(payload) {
+  if (isContributorDemoModeEnabled()) return false;
   const sessionPayload = buildSupabaseSessionPayload(payload);
   if (!supabase || !sessionPayload) {
     return false;
@@ -75,6 +77,9 @@ function getCachedSiteSession({ syncSupabase = true } = {}) {
 }
 
 export async function bootstrapSiteSessionFromSupabaseToken(accessToken = '') {
+  if (isContributorDemoModeEnabled()) {
+    return { bootstrapped: false, authenticated: false, source: null };
+  }
   if (!supabase) {
     return {
       bootstrapped: false,
@@ -160,6 +165,16 @@ export async function getCurrentSiteSession({
   syncSupabase = false,
   useCache = false,
 } = {}) {
+  if (isContributorDemoModeEnabled()) {
+    clearSiteSessionCache();
+    return {
+      authenticated: false,
+      user: null,
+      profile: null,
+      identities: [],
+      supabaseSessionSynced: false,
+    };
+  }
   if (useCache) {
     const cached = getCachedSiteSession({ syncSupabase });
     if (cached) {
@@ -231,22 +246,34 @@ export async function getCurrentSiteSession({
 }
 
 export async function logoutSiteSession() {
+  let confirmed = false;
   try {
-    await fetchJsonWithTimeout('/api/auth/session/logout', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        Accept: 'application/json',
-      },
-    }, {
-      label: 'auth-session-logout',
-      timeoutMs: 10000,
-      retries: 0,
-    });
+    if (isContributorDemoModeEnabled()) {
+      const response = await fetch('/api/auth/session/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      });
+      confirmed = response.ok;
+    } else {
+      const { response } = await fetchJsonWithTimeout('/api/auth/session/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+        },
+      }, {
+        label: 'auth-session-logout',
+        timeoutMs: 10000,
+        retries: 0,
+      });
+      confirmed = response.ok;
+    }
   } catch {
     // Supabase sign-out and local state cleanup should still continue.
   }
   clearSiteSessionCache();
+  return confirmed;
 }
 
 export default {

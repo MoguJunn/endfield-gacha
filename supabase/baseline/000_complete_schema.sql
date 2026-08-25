@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-08-26T08:49:46.326Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/183_split_reconstruction_claim_subtype.sql
+--   4. 生成时间: 2026-08-27T21:17:14.649Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/186_restrict_public_pool_column_reads.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -35393,4 +35393,192 @@ COMMENT ON FUNCTION public.promote_manual_pool_to_official_id(TEXT, JSONB) IS
 
 NOTIFY pgrst, 'reload schema';
 -- <<< END MIGRATION: active/183_split_reconstruction_claim_subtype.sql
+
+-- >>> BEGIN MIGRATION: active/184_restrict_public_site_config_reads.sql
+-- Restrict anonymous/authenticated table reads to configuration that is
+-- intentionally rendered by the public frontend. Private operational
+-- settings remain available to service-role APIs and super administrators.
+
+DROP POLICY IF EXISTS "site_config_select_all" ON public.site_config;
+DROP POLICY IF EXISTS "site_config_select_public" ON public.site_config;
+
+CREATE POLICY "site_config_select_public" ON public.site_config
+  FOR SELECT
+  USING (
+    key IN (
+      'site_version',
+      'build_info',
+      'author_name',
+      'author_bilibili',
+      'github_url',
+      'icp_number',
+      'icp_url',
+      'police_number',
+      'police_url',
+      'legal_registration_by_domain',
+      'about_disclaimer',
+      'home_hero_slogan',
+      'qq_group_number',
+      'home_next_version_target_at',
+      'home_version_timeline',
+      'home_roadmap_items',
+      'home_friendly_links',
+      'about_features',
+      'pool_localizations',
+      'entity_localizations'
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM public.profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role = 'super_admin'
+    )
+  );
+-- <<< END MIGRATION: active/184_restrict_public_site_config_reads.sql
+
+-- >>> BEGIN MIGRATION: active/185_remove_pool_creator_fields_from_public_rpc.sql
+-- Keep pool ownership available for server-side visibility/ranking decisions,
+-- but never return authentication UUIDs or roles from the anonymous RPC.
+
+DROP FUNCTION IF EXISTS public.get_app_visible_pools();
+
+CREATE OR REPLACE FUNCTION public.get_app_visible_pools()
+RETURNS TABLE (
+  pool_id TEXT,
+  name TEXT,
+  name_en TEXT,
+  type TEXT,
+  extra_subtype TEXT,
+  extra_rule_profile TEXT,
+  extra_series_key TEXT,
+  extra_series_phase INTEGER,
+  locked BOOLEAN,
+  is_limited_weapon BOOLEAN,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  up_character TEXT,
+  description TEXT,
+  banner_url TEXT,
+  start_time TIMESTAMPTZ,
+  end_time TIMESTAMPTZ,
+  featured_characters TEXT[]
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  WITH visible_pools AS (
+    SELECT p.*
+    FROM public.pools AS p
+    WHERE
+      p.pool_id IN ('standard', 'beginner')
+      OR split_part(p.pool_id, '_', 1) IN ('special', 'weponbox', 'weaponbox')
+      OR p.user_id IS NULL
+      OR p.user_id = auth.uid()
+      OR p.locked = true
+      OR EXISTS (
+        SELECT 1
+        FROM public.profiles AS owner_profile
+        WHERE owner_profile.id = p.user_id
+          AND owner_profile.role IN ('admin', 'super_admin')
+      )
+  ),
+  ranked_pools AS (
+    SELECT
+      p.pool_id,
+      p.name,
+      p.name_en,
+      p.type,
+      p.extra_subtype,
+      p.extra_rule_profile,
+      p.extra_series_key,
+      p.extra_series_phase,
+      p.locked,
+      p.is_limited_weapon,
+      p.created_at,
+      p.updated_at,
+      p.up_character,
+      p.description,
+      p.banner_url,
+      p.start_time,
+      p.end_time,
+      p.featured_characters,
+      ROW_NUMBER() OVER (
+        PARTITION BY p.pool_id
+        ORDER BY
+          (
+            CASE WHEN NULLIF(BTRIM(COALESCE(p.up_character, '')), '') IS NOT NULL THEN 4 ELSE 0 END +
+            CASE WHEN p.start_time IS NOT NULL THEN 2 ELSE 0 END +
+            CASE WHEN p.end_time IS NOT NULL THEN 2 ELSE 0 END +
+            CASE WHEN COALESCE(array_length(p.featured_characters, 1), 0) > 0 THEN 1 ELSE 0 END +
+            CASE WHEN NULLIF(BTRIM(COALESCE(p.banner_url, '')), '') IS NOT NULL THEN 1 ELSE 0 END +
+            CASE WHEN NULLIF(BTRIM(COALESCE(p.description, '')), '') IS NOT NULL THEN 1 ELSE 0 END +
+            CASE WHEN NULLIF(BTRIM(COALESCE(p.name_en, '')), '') IS NOT NULL THEN 1 ELSE 0 END +
+            CASE WHEN p.locked THEN 1 ELSE 0 END
+          ) DESC,
+          CASE WHEN p.user_id = auth.uid() THEN 1 ELSE 0 END DESC,
+          COALESCE(p.start_time, p.updated_at, p.created_at, to_timestamp(0)) DESC,
+          COALESCE(p.updated_at, p.created_at, to_timestamp(0)) DESC
+      ) AS row_rank
+    FROM visible_pools AS p
+  )
+  SELECT
+    pool_id,
+    name,
+    name_en,
+    type,
+    extra_subtype,
+    extra_rule_profile,
+    extra_series_key,
+    extra_series_phase,
+    locked,
+    is_limited_weapon,
+    created_at,
+    updated_at,
+    up_character,
+    description,
+    banner_url,
+    start_time,
+    end_time,
+    featured_characters
+  FROM ranked_pools
+  WHERE row_rank = 1
+  ORDER BY COALESCE(start_time, created_at, updated_at, to_timestamp(0)) DESC, pool_id ASC;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_app_visible_pools() TO anon, authenticated;
+
+COMMENT ON FUNCTION public.get_app_visible_pools() IS
+  '返回 app 端可见卡池及附加寻访分类字段；不公开创建者认证标识或角色。';
+-- <<< END MIGRATION: active/185_remove_pool_creator_fields_from_public_rpc.sql
+
+-- >>> BEGIN MIGRATION: active/186_restrict_public_pool_column_reads.sql
+-- Public clients must use the visible-pools RPC or explicitly select this
+-- safe column set. Pool ownership UUIDs remain available only to trusted
+-- server/service-role paths and are not part of the browser REST contract.
+
+REVOKE SELECT ON TABLE public.pools FROM anon, authenticated;
+
+GRANT SELECT (
+  pool_id,
+  name,
+  name_en,
+  type,
+  extra_subtype,
+  extra_rule_profile,
+  extra_series_key,
+  extra_series_phase,
+  locked,
+  is_limited_weapon,
+  created_at,
+  updated_at,
+  up_character,
+  description,
+  banner_url,
+  start_time,
+  end_time,
+  featured_characters
+) ON TABLE public.pools TO anon, authenticated;
+-- <<< END MIGRATION: active/186_restrict_public_pool_column_reads.sql
 

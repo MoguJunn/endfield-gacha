@@ -10,6 +10,10 @@
  * @date 2026-02-08
  */
 import appLogger from './appLogger.js';
+import {
+  createContributorDemoReadonlyError,
+  isContributorDemoModeEnabled,
+} from '../dev/contributorDemoMode.js';
 
 /**
  * 请求队列类
@@ -333,6 +337,9 @@ const globalRequestQueue = new RequestQueue();
  * @returns {Promise<Response>}
  */
 export async function queuedFetch(url, options = {}, queueOptions = {}) {
+  if (isContributorDemoModeEnabled()) {
+    throw createContributorDemoReadonlyError(`queuedFetch:${String(options?.method || 'GET').toUpperCase()} ${String(url || '')}`);
+  }
   return globalRequestQueue.enqueue(
     // 🆕 请求函数接受 signal 参数，用于取消请求
     (signal) => fetch(url, { ...options, signal }),
@@ -347,6 +354,9 @@ export async function queuedFetch(url, options = {}, queueOptions = {}) {
  * @returns {Promise}
  */
 export async function queuedRequest(fn, queueOptions = {}) {
+  if (isContributorDemoModeEnabled()) {
+    throw createContributorDemoReadonlyError('queuedRequest');
+  }
   return globalRequestQueue.enqueue(fn, queueOptions);
 }
 

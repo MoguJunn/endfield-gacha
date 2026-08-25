@@ -94,6 +94,9 @@ describe('/api/stats pool_catalog', () => {
                 extra_series_key: null,
                 extra_series_phase: null,
                 user_id: 'public-owner',
+                creator_username: '公开维护者',
+                creator_role: 'admin',
+                banner_url: 'https://127.0.0.1/private.png',
                 up_character: '莱万汀',
                 start_time: '2026-01-22T03:00:00+00:00',
                 end_time: '2026-02-07T03:55:00+00:00',
@@ -188,6 +191,10 @@ describe('/api/stats pool_catalog', () => {
     });
     expect(mocks.from).toHaveBeenCalledWith('pool_characters');
     expect(JSON.stringify(res.body)).not.toContain('chr_five');
+    expect(res.body.data.pools[0].banner_url).toBeNull();
+    expect(res.body.data.pools[0]).not.toHaveProperty('user_id');
+    expect(res.body.data.pools[0]).not.toHaveProperty('creator_username');
+    expect(res.body.data.pools[0]).not.toHaveProperty('creator_role');
   });
 
   it('keeps the pool catalog available when the optional roster query fails', async () => {
