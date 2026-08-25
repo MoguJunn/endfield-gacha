@@ -136,13 +136,16 @@ export default function GachaAnalyzer() {
 
   // 应用初始化 Hook - 处理会话、全局统计、last_seen 更新
   useAppInitialization({ refreshPersonalData, loadPublicPools });
-  const retryPersonalData = useCallback(async () => {
+  const retryPersonalData = useCallback(async (retryOptions = {}) => {
     if (!user?.id) {
       return;
     }
+    const automaticPhase = retryOptions?.automatic
+      ? String(retryOptions.phase || '').trim()
+      : '';
     const result = await refreshPersonalData(user, {
-      kind: 'explicit',
-      reason: 'dashboard_retry',
+      kind: automaticPhase ? `${automaticPhase}-poll` : 'explicit',
+      reason: automaticPhase ? `${automaticPhase}_poll` : 'dashboard_retry',
     });
     if (!result?.ok && !result?.stale) {
       showToast(

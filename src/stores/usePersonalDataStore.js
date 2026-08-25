@@ -122,10 +122,15 @@ const usePersonalDataStore = create((set, get) => ({
       requestGeneration,
       kind,
     });
+    const preserveBuildingPhase = !current.hasSnapshot
+      && current.phase === 'building'
+      && kind === 'building-poll';
 
     set({
       requestGeneration,
-      phase: current.hasSnapshot ? current.phase : 'loading',
+      phase: current.hasSnapshot
+        ? current.phase
+        : preserveBuildingPhase ? 'building' : 'loading',
       refreshing: current.hasSnapshot,
       error: null,
       activeRequest: token,

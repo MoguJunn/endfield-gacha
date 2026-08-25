@@ -292,7 +292,11 @@ function createAdminClient() {
       computed_at: '2026-08-04T12:00:00.000Z',
       payload: {
         defaultAccountKey: 'game-1::server:2',
-        accounts: [{ accountKey: 'game-1::server:2' }],
+        accounts: [{
+          accountKey: 'game-1::server:2',
+          gameUid: 'game-1',
+          serverScope: '2',
+        }],
         summary: { total: 1 },
       },
     },
@@ -332,6 +336,16 @@ function createAdminClient() {
     })),
     rpc: vi.fn(async (functionName, params = {}) => {
       state.rpcCalls.push({ functionName, params });
+      if (functionName === 'prioritize_personal_analysis_jobs') {
+        return {
+          data: {
+            queued: true,
+            ownerRows: 1,
+            scopeRows: 1,
+          },
+          error: null,
+        };
+      }
       if (functionName === 'delete_history_records_controlled') {
         return {
           data: {
@@ -499,7 +513,7 @@ describe('/api/account-gacha-data', () => {
     }), res);
 
     expect(res.statusCode).toBe(202);
-    expect(res.headers['Retry-After']).toBe('10');
+    expect(res.headers['Retry-After']).toBe('60');
     expect(res.body).toMatchObject({
       success: true,
       mode: 'analysis',
@@ -508,6 +522,8 @@ describe('/api/account-gacha-data', () => {
         ownerId: 'user-1',
         rawIncluded: false,
         verifiedEmpty: false,
+        retryAfterSeconds: 60,
+        updateQueued: true,
       },
       owner: null,
       scope: null,
@@ -516,6 +532,16 @@ describe('/api/account-gacha-data', () => {
     const historyReads = adminClient.__state.selectCalls.filter((call) => call.table === 'history');
     expect(historyReads).toHaveLength(0);
     expect(adminClient.from).toHaveBeenCalledWith('history');
+    expect(adminClient.__state.rpcCalls).toContainEqual({
+      functionName: 'prioritize_personal_analysis_jobs',
+      params: {
+        p_user_id: 'user-1',
+        p_scope_game_uid: null,
+        p_server_scope: null,
+        p_force_owner: true,
+        p_force_scope: false,
+      },
+    });
   });
 
   it('only reports verified empty after a bounded history existence check', async () => {
@@ -545,6 +571,40 @@ describe('/api/account-gacha-data', () => {
     });
   });
 
+  it('prioritizes the selected scope when its account snapshot is missing', async () => {
+    const adminClient = createAdminClient();
+    delete adminClient.__state.accountSnapshots['game-1::server:2'];
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2',
+    }), res);
+
+    expect(res.statusCode).toBe(202);
+    expect(res.headers['Retry-After']).toBe('60');
+    expect(res.body).toMatchObject({
+      availability: 'building',
+      meta: {
+        accountKey: 'game-1::server:2',
+        retryAfterSeconds: 60,
+        updateQueued: true,
+      },
+      owner: expect.any(Object),
+      scope: null,
+    });
+    expect(adminClient.__state.rpcCalls).toContainEqual({
+      functionName: 'prioritize_personal_analysis_jobs',
+      params: {
+        p_user_id: 'user-1',
+        p_scope_game_uid: 'game-1',
+        p_server_scope: '2',
+        p_force_owner: false,
+        p_force_scope: true,
+      },
+    });
+  });
+
   it('serves the last analysis as stale when its owner revision is behind', async () => {
     const adminClient = createAdminClient();
     adminClient.__state.ownerState.history_revision = 8;
@@ -561,8 +621,20 @@ describe('/api/account-gacha-data', () => {
       meta: {
         revision: '8',
         ownerSnapshotRevision: '7',
+        retryAfterSeconds: 60,
+        updateQueued: true,
       },
       warnings: [{ code: 'personal_analysis_owner_stale' }],
+    });
+    expect(adminClient.__state.rpcCalls).toContainEqual({
+      functionName: 'prioritize_personal_analysis_jobs',
+      params: {
+        p_user_id: 'user-1',
+        p_scope_game_uid: 'game-1',
+        p_server_scope: '2',
+        p_force_owner: false,
+        p_force_scope: false,
+      },
     });
   });
 

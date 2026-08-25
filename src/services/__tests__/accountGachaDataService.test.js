@@ -157,6 +157,26 @@ describe('accountGachaDataService', () => {
     );
   });
 
+  it('rejects an unknown analysis availability instead of polling forever', async () => {
+    fetchJsonWithTimeout.mockResolvedValue({
+      response: {
+        ok: true,
+        status: 200,
+        headers: { get: vi.fn(() => 'request-invalid-analysis') },
+      },
+      data: {
+        success: true,
+        availability: 'queued-somewhere',
+      },
+    });
+
+    await expect(loadAccountGachaAnalysis()).rejects.toMatchObject({
+      code: 'personal_analysis_response_invalid',
+      status: 200,
+      requestId: 'request-invalid-analysis',
+    });
+  });
+
   it('uses a native Supabase token only when no site session is active', async () => {
     getSameOriginAuthHeaders.mockResolvedValue({
       headers: {

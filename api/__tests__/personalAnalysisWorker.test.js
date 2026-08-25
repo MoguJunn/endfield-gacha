@@ -78,6 +78,7 @@ function createAdminClient({
     eq(column, value) { this.filters.push(['eq', column, value]); return this; }
     gt(column, value) { this.filters.push(['gt', column, value]); return this; }
     in(column, values) { this.filters.push(['in', column, values]); return this; }
+    or(value) { this.filters.push(['or', value]); return this; }
     order() { return this; }
     limit(value) { this.limitValue = value; return this; }
     range(from, to) { this.rangeValue = [from, to]; return this; }
@@ -95,6 +96,9 @@ function createAdminClient({
         if (operator === 'eq') data = data.filter((row) => row?.[column] === value);
         if (operator === 'gt') data = data.filter((row) => row?.[column] > value);
         if (operator === 'in') data = data.filter((row) => value.includes(row?.[column]));
+        if (operator === 'or' && column === 'game_uid.is.null,game_uid.eq.') {
+          data = data.filter((row) => row?.game_uid == null || row?.game_uid === '');
+        }
       });
       if (this.table === 'history') {
         data = [...data].sort((left, right) => Number(left.id) - Number(right.id));
@@ -402,6 +406,64 @@ describe('personal analysis worker', () => {
     ));
     expect(publishCall[1].p_snapshots).toEqual([]);
     expect(result.stats.succeeded).toBe(1);
+  });
+
+  it('does not mark a scope fresh when legacy identity folding drops live history', async () => {
+    const { client, rpc } = createAdminClient({
+      claimed: {
+        ownerJobs: [],
+        scopeJobs: [{
+          userId: USER_ID,
+          scopeGameUid: 'legacy',
+          serverScope: '9',
+          historyRevision: '7',
+          analysisSchemaVersion: 1,
+        }],
+      },
+      history: [
+        createHistoryRow({
+          id: 1,
+          record_id: 'legacy-9',
+          game_uid: null,
+          server_scope: '9',
+          server_id: '9',
+          timestamp: '2026-08-01T00:00:00.000Z',
+        }),
+        createHistoryRow({
+          id: 2,
+          record_id: 'legacy-10',
+          game_uid: null,
+          server_scope: '10',
+          server_id: '10',
+          timestamp: '2026-08-02T00:00:00.000Z',
+        }),
+      ],
+      pools: [createPoolRow()],
+    });
+
+    const result = await runPersonalAnalysisWorker({
+      adminClient: client,
+      config: enabledConfig(),
+      leaseId: LEASE_ID,
+    });
+
+    expect(result.stats).toMatchObject({ succeeded: 0, failed: 1 });
+    expect(result.results).toContainEqual({
+      kind: 'scope',
+      status: 'failed',
+      code: 'personal_analysis_scope_identity_mismatch',
+    });
+    expect(rpc).not.toHaveBeenCalledWith(
+      'publish_personal_analysis_scope_snapshots',
+      expect.any(Object)
+    );
+    expect(rpc).toHaveBeenCalledWith(
+      'fail_personal_analysis_job',
+      expect.objectContaining({
+        p_kind: 'scope',
+        p_error_code: 'personal_analysis_scope_identity_mismatch',
+      })
+    );
   });
 
   it('counts a false publish as stale instead of failed', async () => {

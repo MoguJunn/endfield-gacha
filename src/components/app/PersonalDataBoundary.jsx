@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 import {
   usePersonalAnalysisStore,
@@ -7,7 +7,16 @@ import {
 import { useI18n } from '../../i18n/index.js';
 import { getPersonalDataErrorPresentation } from '../../utils/personalDataError.js';
 
-function PersonalDataStatusPanel({ kind, message, detail = '', onRetry, retryLabel = '重试' }) {
+const AUTO_RETRY_DELAYS_SECONDS = Object.freeze([30, 60, 120, 300]);
+
+function PersonalDataStatusPanel({
+  kind,
+  message,
+  detail = '',
+  onRetry,
+  retryLabel = '重试',
+  allowRetryWhileLoading = false,
+}) {
   const isLoading = kind === 'loading' || kind === 'building';
 
   return (
@@ -31,7 +40,7 @@ function PersonalDataStatusPanel({ kind, message, detail = '', onRetry, retryLab
             {detail}
           </p>
         )}
-        {!isLoading && typeof onRetry === 'function' && (
+        {(!isLoading || allowRetryWhileLoading) && typeof onRetry === 'function' && (
           <button
             type="button"
             onClick={onRetry}
@@ -57,33 +66,63 @@ export default function PersonalDataBoundary({ user, onRetry, children }) {
   const phase = usePersonalDataStore((state) => state.phase);
   const hasSnapshot = usePersonalDataStore((state) => state.hasSnapshot);
   const refreshing = usePersonalDataStore((state) => state.refreshing);
+  const activeRequest = usePersonalDataStore((state) => state.activeRequest);
   const error = usePersonalDataStore((state) => state.error);
   const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
   const analysisMeta = usePersonalAnalysisStore((state) => state.meta);
   const matchesOwner = Boolean(user?.id && ownerId === user.id);
   const errorPresentation = getPersonalDataErrorPresentation(error, { isEnglish });
   const isAnalysisStale = hasSnapshot && analysisAvailability === 'stale' && !error;
+  const retryMode = !hasSnapshot && phase === 'building'
+    ? 'building'
+    : isAnalysisStale ? 'stale' : null;
+  const retryKey = retryMode ? `${ownerId || ''}:${retryMode}` : '';
+  const [autoRetryState, setAutoRetryState] = useState({ key: '', attempt: 0 });
+  const autoRetryAttempt = autoRetryState.key === retryKey
+    ? autoRetryState.attempt
+    : 0;
+  const automaticRetriesExhausted = autoRetryAttempt >= AUTO_RETRY_DELAYS_SECONDS.length;
+
+  const retryManually = () => {
+    setAutoRetryState({ key: retryKey, attempt: 0 });
+    void onRetry?.({ automatic: false, phase: retryMode });
+  };
 
   useEffect(() => {
     if (
       !matchesOwner
-      || hasSnapshot
-      || phase !== 'building'
+      || !retryMode
+      || activeRequest
+      || automaticRetriesExhausted
       || typeof onRetry !== 'function'
     ) {
       return undefined;
     }
 
     const configuredDelay = Number(analysisMeta?.retryAfterSeconds);
-    const retryAfterSeconds = Number.isFinite(configuredDelay)
-      ? Math.min(30, Math.max(2, configuredDelay))
-      : 3;
+    const retryAfterSeconds = Math.max(
+      AUTO_RETRY_DELAYS_SECONDS[autoRetryAttempt],
+      Number.isFinite(configuredDelay) ? Math.max(2, configuredDelay) : 0
+    );
     const timerId = window.setTimeout(() => {
-      onRetry();
+      setAutoRetryState((state) => ({
+        key: retryKey,
+        attempt: state.key === retryKey ? state.attempt + 1 : 1,
+      }));
+      void onRetry({ automatic: true, phase: retryMode });
     }, retryAfterSeconds * 1000);
 
     return () => window.clearTimeout(timerId);
-  }, [analysisMeta?.retryAfterSeconds, hasSnapshot, matchesOwner, onRetry, phase]);
+  }, [
+    activeRequest,
+    analysisMeta?.retryAfterSeconds,
+    autoRetryAttempt,
+    automaticRetriesExhausted,
+    matchesOwner,
+    onRetry,
+    retryKey,
+    retryMode,
+  ]);
 
   if (!user?.id) {
     return children;
@@ -104,9 +143,16 @@ export default function PersonalDataBoundary({ user, onRetry, children }) {
     return (
       <PersonalDataStatusPanel
         kind="building"
-        message={isEnglish
-          ? 'Your statistics are being prepared. This page will retry automatically…'
-          : '正在生成你的统计快照，本页面稍后会自动重试…'}
+        message={automaticRetriesExhausted
+          ? (isEnglish
+            ? 'Your statistics are still queued. You can retry later without keeping this page open.'
+            : '统计快照仍在后台排队，无需停留在本页面，可稍后手动重试。')
+          : (isEnglish
+            ? 'Your statistics are being prepared. This page will retry with a gradual delay…'
+            : '正在生成你的统计快照，本页面将逐步延长重试间隔…')}
+        onRetry={automaticRetriesExhausted ? retryManually : null}
+        retryLabel={isEnglish ? 'Retry now' : '立即重试'}
+        allowRetryWhileLoading={automaticRetriesExhausted}
       />
     );
   }
@@ -146,9 +192,13 @@ export default function PersonalDataBoundary({ user, onRetry, children }) {
                   ? 'Refresh failed. The last successful analysis remains visible.'
                   : '刷新失败，继续显示上次成功读取的分析。')
                 : isAnalysisStale
-                  ? (isEnglish
-                    ? 'Statistics are updating. Showing the previous result.'
-                    : '统计正在更新，当前显示上次结果')
+                  ? (automaticRetriesExhausted
+                    ? (isEnglish
+                      ? 'The previous result remains visible while the update waits in the background.'
+                      : '更新仍在后台排队，当前继续显示上次结果。')
+                    : (isEnglish
+                      ? 'Statistics are updating. Showing the previous result.'
+                      : '统计正在更新，当前显示上次结果'))
                   : (isEnglish ? 'Refreshing in the background…' : '正在后台刷新，当前分析仍可使用…')}
             </span>
             {error && <span>{errorPresentation.message}</span>}
@@ -161,10 +211,11 @@ export default function PersonalDataBoundary({ user, onRetry, children }) {
               </span>
             )}
           </span>
-          {error && typeof onRetry === 'function' && (
+          {(error || (isAnalysisStale && automaticRetriesExhausted))
+            && typeof onRetry === 'function' && (
             <button
               type="button"
-              onClick={onRetry}
+              onClick={error ? onRetry : retryManually}
               className="min-h-9 shrink-0 border border-current px-3 py-1 font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current"
             >
               {isEnglish ? 'Retry' : '重试'}

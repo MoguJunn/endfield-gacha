@@ -41,6 +41,9 @@ jobs:
       - name: Unit test suite
         run: npm run test:unit
 
+      - name: Personal analysis queue SQL behavior
+        run: npm run test:personal-analysis-queue
+
       - name: Prepare cn-font-split FFI runtime
         # cn-font-split 7.4.1 的 postinstall 依赖 ungh.cc 查询最新版本，该服务不稳定；
         # 显式固定下载 7.6.8 的 libffi 二进制，避免字体构建因共享库缺失失败。

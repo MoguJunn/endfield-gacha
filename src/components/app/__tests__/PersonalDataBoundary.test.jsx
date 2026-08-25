@@ -105,7 +105,7 @@ describe('PersonalDataBoundary', () => {
     expect(screen.queryByText('server detail must not be rendered directly')).toBeNull();
   });
 
-  it('building 阶段不暴露空页面并按服务端时间自动重试', () => {
+  it('building 阶段使用递增退避且达到上限后停止自动重试', () => {
     vi.useFakeTimers();
     const onRetry = vi.fn();
     usePersonalDataStore.setState({
@@ -119,7 +119,7 @@ describe('PersonalDataBoundary', () => {
       ...createPersonalAnalysisInitialState(),
       ownerId: 'user-1',
       availability: 'building',
-      meta: { ownerId: 'user-1', retryAfterSeconds: 1 },
+      meta: { ownerId: 'user-1', retryAfterSeconds: 10 },
     });
 
     render(
@@ -131,10 +131,20 @@ describe('PersonalDataBoundary', () => {
     expect(screen.queryByText('0 抽 暂无卡池数据')).toBeNull();
     expect(screen.getByTestId('personal-data-building')).toBeTruthy();
 
-    act(() => vi.advanceTimersByTime(1999));
+    act(() => vi.advanceTimersByTime(29_999));
     expect(onRetry).not.toHaveBeenCalled();
     act(() => vi.advanceTimersByTime(1));
-    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onRetry).toHaveBeenNthCalledWith(1, { automatic: true, phase: 'building' });
+
+    act(() => vi.advanceTimersByTime(60_000));
+    act(() => vi.advanceTimersByTime(120_000));
+    act(() => vi.advanceTimersByTime(300_000));
+    expect(onRetry).toHaveBeenCalledTimes(4);
+    expect(screen.getByText('统计快照仍在后台排队，无需停留在本页面，可稍后手动重试。')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '立即重试' })).toBeTruthy();
+
+    act(() => vi.advanceTimersByTime(600_000));
+    expect(onRetry).toHaveBeenCalledTimes(4);
   });
 
   it('analysis stale 且无错误时显示非阻断提示', () => {
