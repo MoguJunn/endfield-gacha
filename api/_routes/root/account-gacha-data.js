@@ -379,6 +379,39 @@ function isMissingPersonalAnalysisInfrastructureError(error) {
     );
 }
 
+function isMissingPersonalAnalysisPriorityRpcError(error) {
+  const code = String(error?.code || '').trim();
+  const message = String(error?.message || '').toLowerCase();
+  return code === '42883'
+    || code === 'PGRST202'
+    || message.includes('prioritize_personal_analysis_jobs') && (
+      message.includes('does not exist')
+      || message.includes('schema cache')
+      || message.includes('could not find')
+    );
+}
+
+async function prioritizePersonalAnalysisJobs(dbClient, userId, {
+  scope = null,
+  forceOwner = false,
+  forceScope = false,
+} = {}) {
+  if (!dbClient?.rpc || !userId) return false;
+
+  const { data, error } = await dbClient.rpc('prioritize_personal_analysis_jobs', {
+    p_user_id: userId,
+    p_scope_game_uid: scope?.gameUid || null,
+    p_server_scope: scope?.serverScope || null,
+    p_force_owner: Boolean(forceOwner),
+    p_force_scope: Boolean(forceScope),
+  });
+  if (error) {
+    if (isMissingPersonalAnalysisPriorityRpcError(error)) return false;
+    throw error;
+  }
+  return data?.queued === true;
+}
+
 async function loadPersonalAnalysisScopeState(dbClient, userId, scope) {
   const { data, error } = await dbClient
     .from('personal_analysis_scope_state')
@@ -660,7 +693,11 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
       return;
     }
 
-    res.setHeader('Retry-After', '10');
+    const updateQueued = await prioritizePersonalAnalysisJobs(dbClient, userId, {
+      forceOwner: true,
+    });
+
+    res.setHeader('Retry-After', '60');
     res.status(202).json({
       success: true,
       mode: 'analysis',
@@ -672,7 +709,8 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
         rawIncluded: false,
         verifiedEmpty: false,
         revision: ownerState?.historyRevision || null,
-        retryAfterSeconds: 10,
+        retryAfterSeconds: 60,
+        updateQueued,
       },
       owner: null,
       scope: null,
@@ -736,7 +774,11 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
   ]);
 
   if (accountKey && !accountSnapshot) {
-    res.setHeader('Retry-After', '10');
+    const updateQueued = await prioritizePersonalAnalysisJobs(dbClient, userId, {
+      scope: manifestScope,
+      forceScope: true,
+    });
+    res.setHeader('Retry-After', '60');
     res.status(202).json({
       success: true,
       mode: 'analysis',
@@ -749,7 +791,8 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
         verifiedEmpty: false,
         revision: ownerState?.historyRevision || ownerSnapshot.inputRevision,
         accountKey,
-        retryAfterSeconds: 10,
+        retryAfterSeconds: 60,
+        updateQueued,
       },
       owner: ownerSnapshot.payload,
       scope: null,
@@ -788,6 +831,17 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
   if (!scopeFresh) {
     warnings.push({ code: 'personal_analysis_scope_stale' });
   }
+  const queueScope = manifestScope?.gameUid && manifestScope?.serverScope
+    ? manifestScope
+    : accountSnapshot ? {
+      gameUid: accountSnapshot.sourceGameUid,
+      serverScope: accountSnapshot.sourceServerScope,
+    } : null;
+  const updateQueued = availability === 'stale'
+    ? await prioritizePersonalAnalysisJobs(dbClient, userId, {
+      scope: queueScope,
+    })
+    : false;
 
   res.status(200).json({
     success: true,
@@ -807,6 +861,8 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
       generatedAt: accountSnapshot?.computedAt || ownerSnapshot.computedAt,
       viewKey: viewKey || null,
       locale,
+      retryAfterSeconds: availability === 'stale' ? 60 : null,
+      updateQueued,
     },
     owner: ownerSnapshot.payload,
     scope: accountSnapshot?.payload || null,
@@ -2153,6 +2209,7 @@ export const __internal = {
   loadProjectedPersonalAnalysisAccountSnapshot,
   loadPersonalAnalysisSnapshot,
   loadPersonalAnalysisScopeState,
+  prioritizePersonalAnalysisJobs,
   readHistoryPageScope,
   shouldUseTransientPersonalAnalysis,
 };

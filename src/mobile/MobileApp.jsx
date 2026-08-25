@@ -32,13 +32,16 @@ function MobileApplicationShell() {
 
   // 通知徽标 Hook - 加载公告与工单等
   useNotificationBadges();
-  const retryPersonalData = useCallback(async () => {
+  const retryPersonalData = useCallback(async (retryOptions = {}) => {
     if (!user?.id) {
       return;
     }
+    const automaticPhase = retryOptions?.automatic
+      ? String(retryOptions.phase || '').trim()
+      : '';
     const result = await refreshPersonalData(user, {
-      kind: 'explicit',
-      reason: 'mobile_retry',
+      kind: automaticPhase ? `${automaticPhase}-poll` : 'explicit',
+      reason: automaticPhase ? `${automaticPhase}_poll` : 'mobile_retry',
     });
     if (!result?.ok && !result?.stale) {
       showToast(result?.error?.message || '个人数据刷新失败', 'error');

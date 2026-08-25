@@ -23,18 +23,29 @@ describe('personal analysis worker production schedule', () => {
   });
 
   it('schedules an authenticated and validated GitHub Actions worker call', async () => {
-    const workflow = await readFile(
-      path.join(projectRoot, '.github', 'workflows', 'personal-analysis-worker.yml'),
-      'utf8'
-    );
+    const [workflow, runner] = await Promise.all([
+      readFile(
+        path.join(projectRoot, '.github', 'workflows', 'personal-analysis-worker.yml'),
+        'utf8'
+      ),
+      readFile(
+        path.join(projectRoot, '.github', 'scripts', 'run-personal-analysis-worker.mjs'),
+        'utf8'
+      ),
+    ]);
 
     expect(workflow).toContain("cron: '*/5 * * * *'");
     expect(workflow).toContain('workflow_dispatch:');
     expect(workflow).toContain('secrets.PERSONAL_ANALYSIS_WORKER_SECRET');
     expect(workflow).toContain('/api/personal-analysis-worker');
-    expect(workflow).toContain('Authorization: Bearer ${WORKER_SECRET}');
-    expect(workflow).toContain('result?.skipped === true');
-    expect(workflow).toContain('payload?.partial === true');
-    expect(workflow).toContain('for attempt in 1 2 3');
+    expect(workflow).not.toContain('ef-gacha.mogujun.icu');
+    expect(workflow).toContain('immutable Vercel deployment URL');
+    expect(workflow).toContain('run-personal-analysis-worker.mjs');
+    expect(runner).toContain('Authorization: `Bearer ${workerSecret}`');
+    expect(runner).toContain('result?.skipped === true');
+    expect(runner).toContain('payload?.partial === true');
+    expect(runner).toContain('attempt <= 3');
+    expect(runner).toContain('batchNumber <= maxBatches');
+    expect(runner).toContain("headers['x-vercel-protection-bypass']");
   });
 });

@@ -74,4 +74,25 @@ describe('usePersonalDataStore.completeRequest', () => {
     expect(usePersonalDataStore.getState().completeRequest(token, snapshot)).toBe(false);
     expect(usePersonalDataStore.getState().hasSnapshot).toBe(false);
   });
+
+  it('building 自动轮询开始时保持 building 而不是退回 loading', () => {
+    const firstToken = beginOwnerRequest();
+    expect(usePersonalDataStore.getState().completeRequest(
+      firstToken,
+      createAnalysisSnapshot('building')
+    )).toBe(true);
+
+    const current = usePersonalDataStore.getState();
+    const pollToken = current.beginRequest({
+      ownerId: current.ownerId,
+      ownerGeneration: current.ownerGeneration,
+      kind: 'building-poll',
+    });
+
+    expect(pollToken).toBeTruthy();
+    expect(usePersonalDataStore.getState()).toMatchObject({
+      phase: 'building',
+      hasSnapshot: false,
+    });
+  });
 });

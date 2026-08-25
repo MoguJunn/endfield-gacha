@@ -78,9 +78,19 @@ export async function loadAccountGachaAnalysis({ accountKey = '', viewKey = '', 
     createAccountGachaDataError(data, response, '账号抽卡分析读取失败', 'account_gacha_analysis_load_failed');
   }
 
-  const availability = ['ready', 'stale', 'building', 'empty'].includes(data?.availability)
-    ? data.availability
-    : 'building';
+  const availability = data?.availability;
+  if (!['ready', 'stale', 'building', 'empty'].includes(availability)) {
+    createAccountGachaDataError(
+      {
+        code: 'personal_analysis_response_invalid',
+        error: '账号抽卡分析返回了无法识别的快照状态',
+        requestId: data?.requestId,
+      },
+      response,
+      '账号抽卡分析响应无效',
+      'personal_analysis_response_invalid'
+    );
+  }
 
   return {
     availability,

@@ -347,6 +347,21 @@ function buildFailedResult(job, errorCode) {
   };
 }
 
+async function hasHistoryForClaimedScope(adminClient, job) {
+  let query = adminClient
+    .from('history')
+    .select('id')
+    .eq('user_id', job.userId)
+    .eq('server_scope', job.serverScope)
+    .limit(1);
+  query = job.scopeGameUid === 'legacy'
+    ? query.or('game_uid.is.null,game_uid.eq.')
+    : query.eq('game_uid', job.scopeGameUid);
+  const { data, error } = await query;
+  if (error) throw error;
+  return Array.isArray(data) && data.length > 0;
+}
+
 async function publishJob(adminClient, job, model, leaseId) {
   try {
     let published;
@@ -368,6 +383,13 @@ async function publishJob(adminClient, job, model, leaseId) {
           scopeKey: scope.scopeKey,
           payload: scope.payload,
         }));
+      if (snapshots.length === 0 && await hasHistoryForClaimedScope(adminClient, job)) {
+        const scopeMismatchError = new Error(
+          'Claimed scope still has history but produced no analysis snapshots'
+        );
+        scopeMismatchError.code = 'personal_analysis_scope_identity_mismatch';
+        throw scopeMismatchError;
+      }
       published = await callRpc(adminClient, 'publish_personal_analysis_scope_snapshots', {
         p_user_id: job.userId,
         p_scope_game_uid: job.scopeGameUid,
@@ -502,6 +524,7 @@ export const __internal = {
   HISTORY_FIELDS,
   POOL_FIELDS,
   formatPoolRow,
+  hasHistoryForClaimedScope,
   loadHistory,
   normalizeErrorCode,
 };
