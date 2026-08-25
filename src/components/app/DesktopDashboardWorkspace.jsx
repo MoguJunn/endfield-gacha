@@ -1,16 +1,30 @@
 import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { ChevronDown, Download, History, LogIn, Lock, Upload } from 'lucide-react';
+import { ChevronDown, History, LogIn, Lock } from 'lucide-react';
 import EditItemModal from '../modals/EditItemModal';
 import DataExportOptionsModal from '../modals/DataExportOptionsModal.jsx';
 import { useI18n } from '../../i18n/index.js';
-import { useHistoryStore, usePoolStore } from '../../stores';
+import { useHistoryStore, usePersonalAnalysisStore, usePoolStore } from '../../stores';
 import { isPoolGroupId } from '../../stores/usePoolStore';
 import { localizePoolName } from '../../utils/gameDataI18n.js';
 import { resolveEffectiveGameUid } from '../../utils/accountScopeUtils.js';
+import { resolveGameAccountServerTag } from '../../utils/gameAccountMetadata.js';
+import PersonalDataBoundary from './PersonalDataBoundary.jsx';
+import AccountServerLabelNotice from './AccountServerLabelNotice.jsx';
+import PoolSelector from '../pool/PoolSelector.jsx';
 
 const DashboardView = lazy(() => import('../dashboard/DashboardView'));
 const RecordsView = lazy(() => import('../records/RecordsView'));
+
+function resolveExportGameAccounts(analysisAccounts, historyAccounts) {
+  const accounts = Array.isArray(analysisAccounts)
+    ? analysisAccounts
+    : Array.isArray(historyAccounts) ? historyAccounts : [];
+  return accounts.map((account) => ({
+    ...account,
+    serverTag: resolveGameAccountServerTag(account) || '区服待确认',
+  }));
+}
 
 function TabPanelFallback({ label = '正在加载模块...' }) {
   return (
@@ -23,171 +37,38 @@ function TabPanelFallback({ label = '正在加载模块...' }) {
   );
 }
 
-function RecordsSectionTitleBar({
-  canEdit,
-  currentPool: fallbackCurrentPool,
-  openImportWizard,
-  handleExportJSON,
-  handleExportCSV,
-  handleExportEndfieldGachaUserDataZip,
-  handleExportEndfieldGachaHelperJSON,
-  handleExportEndfieldGachaHelperCSV,
-  handleExportEndfieldGachaHelperUserDataZip,
-  handleExportEndgachaKwerTopPlainJSON,
-  handleExportEndgachaKwerTopPlainTXT,
-}) {
+function RecordsSectionTitleBar({ currentPool: fallbackCurrentPool }) {
   const { isEnglish, locale, t } = useI18n();
   const tt = (zh, en) => (isEnglish ? en : zh);
-  const pools = usePoolStore((state) => state.pools);
-  const currentPoolId = usePoolStore((state) => state.currentPoolId);
-  const currentGameUid = usePoolStore((state) => state.currentGameUid);
-  const getGameAccountsFromHistory = useHistoryStore((state) => state.getGameAccountsFromHistory);
   const activePool = fallbackCurrentPool;
   const currentPoolName = localizePoolName(activePool, { locale }) || activePool?.name || t('records.unknownPool');
-  const poolOptions = useMemo(
-    () => [...(Array.isArray(pools) ? pools : [])].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-CN')),
-    [pools]
-  );
-  const gameAccounts = getGameAccountsFromHistory();
-  const effectiveGameUid = useMemo(
-    () =>
-      resolveEffectiveGameUid({
-        currentGameUid,
-        gameAccounts,
-      }),
-    [currentGameUid, gameAccounts]
-  );
-
-  const buildDefaultExportOptions = () => ({
-    poolFilter: 'current',
-    poolId: !isPoolGroupId(currentPoolId) && currentPoolId ? currentPoolId : '',
-    accountFilter: effectiveGameUid ? 'current' : 'all',
-    gameUid: effectiveGameUid || '',
-    dateFrom: '',
-    dateTo: '',
-  });
-
-  const [showExportMenu, setShowExportMenu] = useState(false);
-  const [exportOptions, setExportOptions] = useState(buildDefaultExportOptions);
-
-  const closeExportMenu = () => {
-    if (showExportMenu) {
-      setShowExportMenu(false);
-    }
-  };
-
-  const updateExportOption = (key, value) => {
-    setExportOptions((prev) => ({
-      ...prev,
-      [key]: value,
-    }));
-  };
-
-  const buildExportOptions = () => ({
-    poolFilter: exportOptions.poolFilter,
-    poolId: exportOptions.poolFilter === 'specific' ? exportOptions.poolId || null : null,
-    accountFilter: exportOptions.accountFilter,
-    gameUid: ['current', 'specific'].includes(exportOptions.accountFilter)
-      ? exportOptions.gameUid || null
-      : null,
-    dateFrom: exportOptions.dateFrom,
-    dateTo: exportOptions.dateTo,
-  });
-
-  const canExportWithSpecificPool = exportOptions.poolFilter !== 'specific' || Boolean(exportOptions.poolId);
-  const canExportWithSpecificAccount = exportOptions.accountFilter !== 'specific' || Boolean(exportOptions.gameUid);
-  const canExport = canExportWithSpecificPool && canExportWithSpecificAccount;
-  const resetExportOptions = () => setExportOptions(buildDefaultExportOptions());
-
-  const runExport = async (handler) => {
-    if (!canExport || typeof handler !== 'function') {
-      return false;
-    }
-    return handler(buildExportOptions());
-  };
-
-  const handleImportClick = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    openImportWizard();
-  };
-
-  const handleExportClick = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setExportOptions(buildDefaultExportOptions());
-    setShowExportMenu(true);
-  };
 
   return (
-    <>
-      <summary className="bg-white dark:bg-zinc-900 rounded-none shadow-sm border border-zinc-200 dark:border-zinc-800 px-4 py-3 cursor-pointer flex items-center gap-4 hover:bg-slate-50 dark:hover:bg-zinc-800 transition-colors">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
-          <span className="font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2">
-            <History size={18} /> {tt('详细日志', 'Detailed Records')}
-          </span>
-          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-500">
-            {t('records.currentPoolContext')}
-          </span>
-          <span className="min-w-0 max-w-[280px] truncate border border-yellow-500/30 bg-yellow-50 px-2 py-1 text-xs font-bold text-yellow-600 dark:bg-yellow-900/20 dark:text-endfield-yellow">
-            {currentPoolName}
-          </span>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-2">
-          {canEdit && (
-            <button
-              type="button"
-              onClick={handleImportClick}
-              className="text-xs bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border border-slate-300 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-800 px-3 py-1.5 rounded-none flex items-center gap-2 transition-colors shadow-sm"
-            >
-              <Upload size={14} />
-              {t('records.importPoolFile')}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleExportClick}
-            className="text-xs bg-slate-800 text-white hover:bg-slate-700 px-3 py-1.5 rounded-none flex items-center gap-2 transition-colors shadow-sm"
-          >
-            <Download size={14} />
-            {t('records.exportPoolFile')}
-          </button>
-          <ChevronDown
-            size={20}
-            className="ml-1 text-slate-400 dark:text-zinc-500 group-open:rotate-180 transition-transform"
-          />
-        </div>
-      </summary>
-
-      <DataExportOptionsModal
-        isOpen={showExportMenu}
-        onClose={closeExportMenu}
-        onReset={resetExportOptions}
-        exportOptions={exportOptions}
-        onUpdateOption={updateExportOption}
-        canExport={canExport}
-        currentPoolName={currentPoolName}
-        currentGameUid={effectiveGameUid}
-        poolOptions={poolOptions}
-        gameAccounts={gameAccounts}
-        locale={locale}
-        onExportJSON={() => runExport(handleExportJSON)}
-        onExportCSV={() => runExport(handleExportCSV)}
-        onExportEndfieldGachaUserDataZip={() => runExport(handleExportEndfieldGachaUserDataZip)}
-        onExportEndfieldGachaHelperJSON={() => runExport(handleExportEndfieldGachaHelperJSON)}
-        onExportEndfieldGachaHelperCSV={() => runExport(handleExportEndfieldGachaHelperCSV)}
-        onExportEndfieldGachaHelperUserDataZip={() => runExport(handleExportEndfieldGachaHelperUserDataZip)}
-        onExportEndgachaKwerTopPlainJSON={() => runExport(handleExportEndgachaKwerTopPlainJSON)}
-        onExportEndgachaKwerTopPlainTXT={() => runExport(handleExportEndgachaKwerTopPlainTXT)}
+    <summary className="flex min-h-14 cursor-pointer items-center gap-4 border border-zinc-200 bg-white px-4 py-3 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:bg-zinc-800">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+        <span className="flex items-center gap-2 font-bold text-slate-700 dark:text-zinc-300">
+          <History size={18} aria-hidden="true" /> {tt('详细日志', 'Detailed Records')}
+        </span>
+        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-500">
+          {t('records.currentPoolContext')}
+        </span>
+        <span className="min-w-0 max-w-[280px] truncate border border-yellow-500/30 bg-yellow-50 px-2 py-1 text-xs font-bold text-yellow-600 dark:bg-yellow-900/20 dark:text-endfield-yellow">
+          {currentPoolName}
+        </span>
+      </div>
+      <ChevronDown
+        size={20}
+        aria-hidden="true"
+        className="shrink-0 text-slate-400 transition-transform group-open:rotate-180 dark:text-zinc-500"
       />
-    </>
+    </summary>
   );
 }
 
 export default function DesktopDashboardWorkspace({
   user,
   showToast,
+  onRetryPersonalData,
   canEdit,
   canEditCurrentPool,
   currentPool,
@@ -213,6 +94,7 @@ export default function DesktopDashboardWorkspace({
   const currentPoolId = usePoolStore((state) => state.currentPoolId);
   const currentGameUid = usePoolStore((state) => state.currentGameUid);
   const getGameAccountsFromHistory = useHistoryStore((state) => state.getGameAccountsFromHistory);
+  const analysisAccounts = usePersonalAnalysisStore((state) => state.owner?.accounts);
   const activeExportPool = currentPool;
   const exportCurrentPoolName =
     localizePoolName(activeExportPool, { locale }) || activeExportPool?.name || t('records.unknownPool');
@@ -220,7 +102,8 @@ export default function DesktopDashboardWorkspace({
     () => [...(Array.isArray(pools) ? pools : [])].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-CN')),
     [pools]
   );
-  const exportGameAccounts = getGameAccountsFromHistory();
+  const historyGameAccounts = getGameAccountsFromHistory();
+  const exportGameAccounts = resolveExportGameAccounts(analysisAccounts, historyGameAccounts);
   const effectiveExportGameUid = useMemo(
     () =>
       resolveEffectiveGameUid({
@@ -334,13 +217,17 @@ export default function DesktopDashboardWorkspace({
 
       {user && (
         <div className="animate-fade-in">
-          <Suspense fallback={<TabPanelFallback label={tt('正在加载卡池分析...', 'Loading banner analysis...')} />}>
-            <DashboardView
-              showToast={showToast}
-              onOpenImportWizard={openImportWizard}
-              onOpenExportOptions={openQuickExportMenu}
-            />
-          </Suspense>
+          <PersonalDataBoundary user={user} onRetry={onRetryPersonalData}>
+            <AccountServerLabelNotice ownerId={user.id} />
+            <div className="mb-6 border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+              <PoolSelector
+                onOpenImportWizard={openImportWizard}
+                onOpenExportOptions={openQuickExportMenu}
+              />
+            </div>
+            <Suspense fallback={<TabPanelFallback label={tt('正在加载卡池分析...', 'Loading banner analysis...')} />}>
+              <DashboardView showToast={showToast} />
+            </Suspense>
 
           <div className="mt-6">
             <details
@@ -349,19 +236,7 @@ export default function DesktopDashboardWorkspace({
               open={recordsOpen}
               onToggle={(event) => setRecordsOpen(event.currentTarget.open)}
             >
-              <RecordsSectionTitleBar
-                canEdit={canEdit}
-                currentPool={currentPool}
-                openImportWizard={openImportWizard}
-                handleExportJSON={handleExportJSON}
-                handleExportCSV={handleExportCSV}
-                handleExportEndfieldGachaUserDataZip={handleExportEndfieldGachaUserDataZip}
-                handleExportEndfieldGachaHelperJSON={handleExportEndfieldGachaHelperJSON}
-                handleExportEndfieldGachaHelperCSV={handleExportEndfieldGachaHelperCSV}
-                handleExportEndfieldGachaHelperUserDataZip={handleExportEndfieldGachaHelperUserDataZip}
-                handleExportEndgachaKwerTopPlainJSON={handleExportEndgachaKwerTopPlainJSON}
-                handleExportEndgachaKwerTopPlainTXT={handleExportEndgachaKwerTopPlainTXT}
-              />
+              <RecordsSectionTitleBar currentPool={currentPool} />
               {recordsOpen && (
                 <div className="mt-2">
                   <Suspense
@@ -388,27 +263,28 @@ export default function DesktopDashboardWorkspace({
             />
           )}
 
-          <DataExportOptionsModal
-            isOpen={showQuickExportMenu}
-            onClose={closeQuickExportMenu}
-            onReset={resetQuickExportOptions}
-            exportOptions={quickExportOptions}
-            onUpdateOption={updateQuickExportOption}
-            canExport={canQuickExport}
-            currentPoolName={exportCurrentPoolName}
-            currentGameUid={effectiveExportGameUid}
-            poolOptions={exportPoolOptions}
-            gameAccounts={exportGameAccounts}
-            locale={locale}
-            onExportJSON={() => runQuickExport(handleExportJSON)}
-            onExportCSV={() => runQuickExport(handleExportCSV)}
-            onExportEndfieldGachaUserDataZip={() => runQuickExport(handleExportEndfieldGachaUserDataZip)}
-            onExportEndfieldGachaHelperJSON={() => runQuickExport(handleExportEndfieldGachaHelperJSON)}
-            onExportEndfieldGachaHelperCSV={() => runQuickExport(handleExportEndfieldGachaHelperCSV)}
-            onExportEndfieldGachaHelperUserDataZip={() => runQuickExport(handleExportEndfieldGachaHelperUserDataZip)}
-            onExportEndgachaKwerTopPlainJSON={() => runQuickExport(handleExportEndgachaKwerTopPlainJSON)}
-            onExportEndgachaKwerTopPlainTXT={() => runQuickExport(handleExportEndgachaKwerTopPlainTXT)}
-          />
+            <DataExportOptionsModal
+              isOpen={showQuickExportMenu}
+              onClose={closeQuickExportMenu}
+              onReset={resetQuickExportOptions}
+              exportOptions={quickExportOptions}
+              onUpdateOption={updateQuickExportOption}
+              canExport={canQuickExport}
+              currentPoolName={exportCurrentPoolName}
+              currentGameUid={effectiveExportGameUid}
+              poolOptions={exportPoolOptions}
+              gameAccounts={exportGameAccounts}
+              locale={locale}
+              onExportJSON={() => runQuickExport(handleExportJSON)}
+              onExportCSV={() => runQuickExport(handleExportCSV)}
+              onExportEndfieldGachaUserDataZip={() => runQuickExport(handleExportEndfieldGachaUserDataZip)}
+              onExportEndfieldGachaHelperJSON={() => runQuickExport(handleExportEndfieldGachaHelperJSON)}
+              onExportEndfieldGachaHelperCSV={() => runQuickExport(handleExportEndfieldGachaHelperCSV)}
+              onExportEndfieldGachaHelperUserDataZip={() => runQuickExport(handleExportEndfieldGachaHelperUserDataZip)}
+              onExportEndgachaKwerTopPlainJSON={() => runQuickExport(handleExportEndgachaKwerTopPlainJSON)}
+              onExportEndgachaKwerTopPlainTXT={() => runQuickExport(handleExportEndgachaKwerTopPlainTXT)}
+            />
+          </PersonalDataBoundary>
         </div>
       )}
     </>

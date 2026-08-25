@@ -5,6 +5,7 @@ import {
   getCurrentUpPoolInfo,
   getHomeRotationPoolSchedule,
   getLimitedPoolScheduleFromDB,
+  getPoolActivityTiming,
 } from '../poolTimeUtils.js';
 
 vi.mock('../characterUtils.js', () => ({
@@ -142,6 +143,33 @@ describe('poolTimeUtils homepage pool schedule', () => {
       id: 'limited_mifu',
       name: '弭弗',
       featuredNames: ['弭弗'],
+    });
+  });
+
+  it('distinguishes active, upcoming and expired pool activity states', () => {
+    const pool = {
+      start_time: '2026-08-24T12:00:00.000Z',
+      end_time: '2026-08-24T13:00:00.000Z',
+    };
+
+    expect(getPoolActivityTiming(pool, '2026-08-24T12:40:30.000Z')).toMatchObject({
+      status: 'active',
+      isActive: true,
+      days: 0,
+      hours: 0,
+      minutes: 20,
+    });
+    expect(getPoolActivityTiming(pool, '2026-08-24T11:50:30.000Z')).toMatchObject({
+      status: 'upcoming',
+      isUpcoming: true,
+      minutes: 10,
+    });
+    expect(getPoolActivityTiming(pool, '2026-08-24T13:00:00.000Z')).toMatchObject({
+      status: 'expired',
+      isExpired: true,
+      days: 0,
+      hours: 0,
+      minutes: 0,
     });
   });
 });

@@ -5,6 +5,8 @@ import {
   bootstrapSiteSessionFromSupabaseToken,
   clearSiteSessionCache,
   getCurrentSiteSession,
+  getKnownSiteSessionUserId,
+  hasKnownAuthenticatedSiteSession,
   revokeAllSiteSessions,
 } from '../siteSessionService.js';
 
@@ -158,6 +160,8 @@ describe('siteSessionService', () => {
     }), expect.objectContaining({
       label: 'auth-session',
     }));
+    expect(hasKnownAuthenticatedSiteSession(new Date('2026-08-03T07:00:00.000Z').getTime())).toBe(true);
+    expect(getKnownSiteSessionUserId(new Date('2026-08-03T07:00:00.000Z').getTime())).toBe('00000000-0000-4000-8000-000000000001');
   });
 
   it('syncs authenticated site sessions back to the Supabase client only when explicitly requested', async () => {

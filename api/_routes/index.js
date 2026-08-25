@@ -41,6 +41,7 @@ import mailDeliveryFeedbackHandler from './root/mail-delivery-feedback.js';
 import mailOutboxWorkerHandler from './root/mail-outbox-worker.js';
 import officialAnnouncementImageHandler from './root/official-announcement-image.js';
 import opsAutomationHandler from './root/ops-automation.js';
+import personalAnalysisWorkerHandler from './root/personal-analysis-worker.js';
 import poolRostersHandler from './root/pool-rosters.js';
 import publicCacheVersionHandler from './root/public-cache-version.js';
 import puzzlesHandler from './root/puzzles.js';
@@ -166,6 +167,7 @@ export const API_ROUTE_ENTRIES = [
   ['/api/mail-outbox-worker', mailOutboxWorkerHandler],
   ['/api/official-announcement-image', officialAnnouncementImageHandler],
   ['/api/ops-automation', opsAutomationHandler],
+  ['/api/personal-analysis-worker', personalAnalysisWorkerHandler],
   ['/api/pool-rosters', poolRostersHandler],
   ['/api/public-cache-version', publicCacheVersionHandler],
   ['/api/puzzles', puzzlesHandler],

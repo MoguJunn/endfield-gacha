@@ -483,3 +483,51 @@ export async function resolvePoolRosterBuckets({
 
   return fallbackBuckets.items.length > 0 ? fallbackBuckets : null;
 }
+
+/**
+ * 解析当前分析范围内的 roster。多池范围只执行一次批量读取；批量读取失败时，
+ * 每个池直接使用本地动态 roster，避免继续逐池请求 Supabase。
+ */
+export async function resolvePoolRosterBucketsBatch(requests = [], { forceRefresh = false } = {}) {
+  const requestByPoolId = new Map();
+  (Array.isArray(requests) ? requests : []).forEach((request) => {
+    const poolId = normalizePoolId(request?.poolId);
+    if (!poolId || requestByPoolId.has(poolId)) {
+      return;
+    }
+
+    requestByPoolId.set(poolId, {
+      ...request,
+      poolId,
+    });
+  });
+
+  const normalizedRequests = Array.from(requestByPoolId.values());
+  if (normalizedRequests.length === 0) {
+    return new Map();
+  }
+
+  if (normalizedRequests.length === 1) {
+    const request = normalizedRequests[0];
+    const roster = await resolvePoolRosterBuckets(request).catch(() => null);
+    return new Map([[request.poolId, roster]]);
+  }
+
+  const poolIds = normalizedRequests.map((request) => request.poolId);
+  const recordsByPoolId = await fetchPoolRosterRecordsBatch(poolIds, { forceRefresh }).catch(() => null);
+  const hasBatchRecords = recordsByPoolId instanceof Map;
+  const rosterEntries = await Promise.all(normalizedRequests.map(async (request) => {
+    const explicitRecords = hasBatchRecords
+      ? (recordsByPoolId.get(request.poolId) || [])
+      : null;
+    const roster = await resolvePoolRosterBuckets({
+      ...request,
+      explicitRecords,
+      skipExplicitFetch: true,
+    }).catch(() => null);
+
+    return [request.poolId, roster];
+  }));
+
+  return new Map(rosterEntries);
+}

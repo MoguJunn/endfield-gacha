@@ -68,6 +68,7 @@ function createQuery(table, state) {
     operation: 'select',
     updatePayload: null,
     selectOptions: null,
+    selectedLimit: null,
     select: vi.fn((selection = '*', options = null) => {
       query.selection = selection;
       query.selectOptions = options;
@@ -94,21 +95,81 @@ function createQuery(table, state) {
       query.filters.push({ op: 'not', column, value });
       return query;
     }),
+    is: vi.fn((column, value) => {
+      query.filters.push({ op: 'is', column, value });
+      return query;
+    }),
+    lt: vi.fn((column, value) => {
+      query.filters.push({ op: 'lt', column, value });
+      return query;
+    }),
+    or: vi.fn((value) => {
+      query.filters.push({ op: 'or', value });
+      return query;
+    }),
+    maybeSingle: vi.fn(async () => {
+      state.selectCalls.push({
+        table,
+        selection: query.selection,
+        selectOptions: query.selectOptions,
+        filters: [...query.filters],
+      });
+      if (table === 'personal_analysis_scope_state') {
+        return {
+          data: state.scopeState,
+          error: state.scopeStateError,
+        };
+      }
+      if (table === 'personal_analysis_owner_state') {
+        return {
+          data: state.ownerState,
+          error: state.ownerStateError,
+        };
+      }
+      if (table === 'personal_analysis_snapshots') {
+        const scopeKind = query.filters.find((filter) => filter.column === 'scope_kind')?.value;
+        const scopeKey = query.filters.find((filter) => filter.column === 'scope_key')?.value;
+        if (scopeKind === 'owner' && scopeKey === 'owner') {
+          return {
+            data: state.ownerSnapshot,
+            error: state.snapshotError,
+          };
+        }
+        return {
+          data: state.accountSnapshots[scopeKey] || null,
+          error: state.snapshotError,
+        };
+      }
+      return { data: null, error: null };
+    }),
+    limit: vi.fn((value) => {
+      query.selectedLimit = value;
+      return query;
+    }),
     order: vi.fn(() => query),
-    range: vi.fn(async () => {
+    range: vi.fn(async (from, to) => {
+      state.selectCalls.push({
+        table,
+        selection: query.selection,
+        selectOptions: query.selectOptions,
+        filters: [...query.filters],
+        from,
+        to,
+      });
+      const count = query.selectOptions?.count === 'exact' ? state.historyRows.length : null;
       if (table === 'history' && query.selection.includes('record_id')) {
-        return { data: state.historyRows, error: null };
+        return { data: state.historyRows, count, error: null };
       }
       if (table === 'history' && query.selection.includes('timestamp')) {
-        return { data: state.dedupeRows, error: null };
+        return { data: state.dedupeRows, count, error: null };
       }
       if (table === 'history' && query.selection.includes('seq_id')) {
-        return { data: state.seqKeyRows, error: null };
+        return { data: state.seqKeyRows, count, error: null };
       }
       if (table === 'history') {
-        return { data: state.historyRows, error: null };
+        return { data: state.historyRows, count, error: null };
       }
-      return { data: [], error: null };
+      return { data: [], count: null, error: null };
     }),
     in: vi.fn(async (column, values) => {
       query.filters.push({ op: 'in', column, values });
@@ -129,12 +190,20 @@ function createQuery(table, state) {
       if (table === 'character_id_aliases') {
         return { data: state.characterAliasRows, error: null };
       }
+      if (table === 'pools') {
+        return { data: state.poolRows, error: null };
+      }
       return { data: [], error: null };
     }),
     then(resolve, reject) {
       const isHeadCount = table === 'history' && query.selectOptions?.head === true;
+      const isBoundedHistoryRead = table === 'history' && query.selectedLimit !== null;
       return Promise.resolve({
-        data: isHeadCount ? null : [],
+        data: isHeadCount
+          ? null
+          : isBoundedHistoryRead
+            ? state.historyRows.slice(0, query.selectedLimit)
+            : [],
         count: isHeadCount ? state.historyRows.length : null,
         error: null,
       }).then(resolve, reject);
@@ -147,6 +216,7 @@ function createAdminClient() {
   const state = {
     historyRows: [
       {
+        id: 2,
         record_id: 'record-1',
         rarity: 6,
         is_standard: false,
@@ -196,6 +266,54 @@ function createAdminClient() {
     deleteCalls: [],
     updateCalls: [],
     rpcCalls: [],
+    selectCalls: [],
+    scopeState: {
+      history_revision: 7,
+      snapshot_revision: 6,
+      analysis_schema_version: 1,
+      computed_at: '2026-08-04T12:00:00.000Z',
+    },
+    scopeStateError: null,
+    ownerState: {
+      history_revision: 7,
+      snapshot_revision: 7,
+      analysis_schema_version: 1,
+      computed_at: '2026-08-04T12:00:00.000Z',
+      last_error: null,
+    },
+    ownerStateError: null,
+    ownerSnapshot: {
+      scope_kind: 'owner',
+      scope_key: 'owner',
+      source_game_uid: null,
+      source_server_scope: null,
+      input_revision: 7,
+      analysis_schema_version: 1,
+      computed_at: '2026-08-04T12:00:00.000Z',
+      payload: {
+        defaultAccountKey: 'game-1::server:2',
+        accounts: [{ accountKey: 'game-1::server:2' }],
+        summary: { total: 1 },
+      },
+    },
+    accountSnapshots: {
+      'game-1::server:2': {
+        scope_kind: 'account',
+        scope_key: 'game-1::server:2',
+        source_game_uid: 'game-1',
+        source_server_scope: '2',
+        input_revision: 7,
+        analysis_schema_version: 1,
+        computed_at: '2026-08-04T12:01:00.000Z',
+        payload: {
+          account: { accountKey: 'game-1::server:2' },
+          selector: { totalPulls: 1 },
+          dashboard: { views: {} },
+        },
+      },
+    },
+    snapshotError: null,
+    poolRows: [],
   };
 
   const client = {
@@ -236,6 +354,7 @@ function createAdminClient() {
 describe('/api/account-gacha-data', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    __internal.clearTransientPersonalAnalysisCache();
     mocks.getSupabaseAdminClient.mockReturnValue(createAdminClient());
     mocks.resolveAuthenticatedRequestUser.mockResolvedValue({
       ok: true,
@@ -244,6 +363,16 @@ describe('/api/account-gacha-data', () => {
         id: 'user-1',
       },
     });
+  });
+
+  it('only enables transient analysis without admin or through an explicit local flag', () => {
+    expect(__internal.shouldUseTransientPersonalAnalysis(null, {})).toBe(true);
+    expect(__internal.shouldUseTransientPersonalAnalysis({}, {
+      PERSONAL_ANALYSIS_TRANSIENT_FALLBACK: 'true',
+    })).toBe(true);
+    expect(__internal.shouldUseTransientPersonalAnalysis({}, {
+      PERSONAL_ANALYSIS_TRANSIENT_FALLBACK: 'false',
+    })).toBe(false);
   });
 
   it('loads current user history through the site-session auth path', async () => {
@@ -264,6 +393,7 @@ describe('/api/account-gacha-data', () => {
       success: true,
       source: 'site_session',
       meta: {
+        ownerId: 'user-1',
         count: 1,
         truncated: false,
       },
@@ -279,6 +409,340 @@ describe('/api/account-gacha-data', () => {
         gameUid: 'game-1',
       }),
     ]);
+  });
+
+  it('returns a ready private analysis snapshot without reading raw history', async () => {
+    const adminClient = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const req = createRequest({
+      url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2',
+    });
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      mode: 'analysis',
+      schemaVersion: 1,
+      availability: 'ready',
+      source: 'site_session',
+      meta: {
+        ownerId: 'user-1',
+        rawIncluded: false,
+        verifiedEmpty: false,
+        revision: '7',
+        accountKey: 'game-1::server:2',
+        scopeRevision: '7',
+      },
+      owner: {
+        summary: { total: 1 },
+      },
+      scope: {
+        account: { accountKey: 'game-1::server:2' },
+        selector: { totalPulls: 1 },
+      },
+      warnings: [],
+    });
+    expect(adminClient.__state.selectCalls.some((call) => call.table === 'history')).toBe(false);
+  });
+
+  it('projects only the requested dashboard view and locale from an account snapshot', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.accountSnapshots['game-1::server:2'].payload.dashboard = {
+      views: {
+        'pool-current': { total: 12 },
+        'pool-other': { total: 34 },
+      },
+      timelineViews: {
+        'zh-CN': {
+          'pool-current': [{ id: 'current-zh' }],
+          'pool-other': [{ id: 'other-zh' }],
+        },
+        'en-US': {
+          'pool-current': [{ id: 'current-en' }],
+        },
+      },
+    };
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2&viewKey=pool-current&locale=en-US',
+    }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.meta).toMatchObject({ viewKey: 'pool-current', locale: 'en-US' });
+    expect(res.body.scope.dashboard).toEqual({
+      views: { 'pool-current': { total: 12 } },
+      timelineViews: { 'en-US': { 'pool-current': [{ id: 'current-en' }] } },
+    });
+    const projectedRead = adminClient.__state.selectCalls.find((call) => (
+      call.table === 'personal_analysis_snapshots'
+      && call.selection.includes('view:payload->dashboard->views->pool-current')
+    ));
+    expect(projectedRead?.selection).toContain(
+      'timeline:payload->dashboard->timelineViews->en-US->pool-current'
+    );
+    expect(JSON.stringify(res.body.scope)).not.toContain('pool-other');
+  });
+
+  it('returns building instead of falling back to a full history read when no snapshot exists', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.ownerSnapshot = null;
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis',
+    }), res);
+
+    expect(res.statusCode).toBe(202);
+    expect(res.headers['Retry-After']).toBe('10');
+    expect(res.body).toMatchObject({
+      success: true,
+      mode: 'analysis',
+      availability: 'building',
+      meta: {
+        ownerId: 'user-1',
+        rawIncluded: false,
+        verifiedEmpty: false,
+      },
+      owner: null,
+      scope: null,
+      warnings: [{ code: 'personal_analysis_build_pending' }],
+    });
+    const historyReads = adminClient.__state.selectCalls.filter((call) => call.table === 'history');
+    expect(historyReads).toHaveLength(0);
+    expect(adminClient.from).toHaveBeenCalledWith('history');
+  });
+
+  it('only reports verified empty after a bounded history existence check', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.ownerState = null;
+    adminClient.__state.ownerSnapshot = null;
+    adminClient.__state.historyRows = [];
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis',
+    }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      availability: 'empty',
+      meta: {
+        ownerId: 'user-1',
+        rawIncluded: false,
+        verifiedEmpty: true,
+        revision: '0',
+      },
+      owner: null,
+      scope: null,
+    });
+  });
+
+  it('serves the last analysis as stale when its owner revision is behind', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.ownerState.history_revision = 8;
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis',
+    }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      availability: 'stale',
+      meta: {
+        revision: '8',
+        ownerSnapshotRevision: '7',
+      },
+      warnings: [{ code: 'personal_analysis_owner_stale' }],
+    });
+  });
+
+  it('rejects an account key that is not present in the owner snapshot', async () => {
+    const adminClient = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis&accountKey=other-account',
+    }), res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'personal_analysis_account_not_found',
+    });
+  });
+
+  it('treats a fresh owner snapshot with no accounts as verified empty', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.ownerState.history_revision = 8;
+    adminClient.__state.ownerState.snapshot_revision = 8;
+    adminClient.__state.ownerSnapshot.input_revision = 8;
+    adminClient.__state.ownerSnapshot.payload = {
+      accounts: [],
+      defaultAccountKey: null,
+      summary: { total: 0 },
+    };
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis',
+    }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      availability: 'empty',
+      meta: {
+        verifiedEmpty: true,
+        revision: '8',
+      },
+      owner: {
+        accounts: [],
+        summary: { total: 0 },
+      },
+      scope: null,
+      warnings: [],
+    });
+  });
+
+  it('returns an owner-scoped bounded history page without changing the legacy GET contract', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.historyRows.push({
+      ...adminClient.__state.historyRows[0],
+      id: 1,
+      record_id: 'record-0',
+      timestamp: '2026-06-04T12:00:00.000Z',
+      seq_id: '0',
+    });
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const req = createRequest({
+      url: '/api/account-gacha-data?mode=history&gameUid=game-1&serverScope=2&poolId=official_pool_alias&limit=1',
+    });
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      mode: 'history',
+      source: 'site_session',
+      meta: {
+        ownerId: 'user-1',
+        rawIncluded: true,
+        count: 1,
+        revision: '7',
+        revisionAvailable: true,
+        snapshotRevision: '6',
+      },
+      scope: {
+        accountKey: 'game-1::server:2',
+        gameUid: 'game-1',
+        serverScope: '2',
+        poolId: 'official_pool_alias',
+      },
+      page: {
+        limit: 1,
+        hasMore: true,
+        total: 2,
+        revision: '7',
+      },
+      warnings: [],
+    });
+    expect(res.body.records).toEqual([
+      expect.objectContaining({
+        id: 'record-1',
+        poolId: 'special_official_001',
+        character_id: 'char_official_001',
+      }),
+    ]);
+    expect(typeof res.body.page.nextCursor).toBe('string');
+
+    const historyRead = adminClient.__state.selectCalls.find((call) => (
+      call.table === 'history' && call.selectOptions?.count === 'exact'
+    ));
+    expect(historyRead).toMatchObject({
+      from: 0,
+      to: 1,
+      filters: expect.arrayContaining([
+        { op: 'eq', column: 'user_id', value: 'user-1' },
+        { op: 'eq', column: 'game_uid', value: 'game-1' },
+        { op: 'eq', column: 'server_scope', value: '2' },
+        { op: 'eq', column: 'pool_id', value: 'official_pool_alias' },
+      ]),
+    });
+  });
+
+  it('binds a history cursor to its account scope and rejects missing scope', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.historyRows.push({
+      ...adminClient.__state.historyRows[0],
+      id: 1,
+      record_id: 'record-0',
+      timestamp: '2026-06-04T12:00:00.000Z',
+    });
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const firstRes = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=history&gameUid=game-1&serverScope=2&limit=1',
+    }), firstRes);
+
+    const cursor = encodeURIComponent(firstRes.body.page.nextCursor);
+    const nextRes = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({
+      url: `/api/account-gacha-data?mode=history&gameUid=game-1&serverScope=2&limit=1&cursor=${cursor}`,
+    }), nextRes);
+    expect(nextRes.statusCode).toBe(200);
+    expect(nextRes.body.page.total).toBeNull();
+    const latestHistoryRead = adminClient.__state.selectCalls
+      .filter((call) => call.table === 'history')
+      .at(-1);
+    expect(latestHistoryRead.filters).toEqual(expect.arrayContaining([
+      expect.objectContaining({ op: 'or' }),
+    ]));
+    expect(latestHistoryRead.filters.find((filter) => filter.op === 'or')?.value)
+      .toContain('id.lt.2');
+
+    adminClient.__state.scopeState.history_revision = 8;
+    const changedRevisionRes = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({
+      url: `/api/account-gacha-data?mode=history&gameUid=game-1&serverScope=2&cursor=${cursor}`,
+    }), changedRevisionRes);
+    expect(changedRevisionRes.statusCode).toBe(409);
+    expect(changedRevisionRes.body).toMatchObject({
+      success: false,
+      code: 'history_revision_changed',
+    });
+
+    const wrongScopeRes = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({
+      url: `/api/account-gacha-data?mode=history&gameUid=game-1&serverScope=3&cursor=${cursor}`,
+    }), wrongScopeRes);
+    expect(wrongScopeRes.statusCode).toBe(400);
+    expect(wrongScopeRes.body).toMatchObject({
+      success: false,
+      code: 'invalid_history_cursor',
+    });
+
+    const missingScopeRes = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=history&gameUid=game-1',
+    }), missingScopeRes);
+    expect(missingScopeRes.statusCode).toBe(400);
+    expect(missingScopeRes.body).toMatchObject({
+      success: false,
+      code: 'history_scope_required',
+    });
   });
 
   it('loads known history pages concurrently with an explicit column list', async () => {
@@ -373,10 +837,82 @@ describe('/api/account-gacha-data', () => {
       success: true,
       source: 'supabase',
       meta: {
+        ownerId: 'user-1',
         count: 1,
         truncated: false,
       },
     });
+  });
+
+  it('builds a transient lightweight analysis with the caller client when admin secrets are absent', async () => {
+    const callerClient = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(null);
+    mocks.resolveAuthenticatedRequestUser.mockResolvedValue({
+      ok: true,
+      source: 'supabase',
+      user: {
+        id: 'user-1',
+      },
+      callerClient,
+    });
+    const req = createRequest({
+      url: '/api/account-gacha-data?mode=analysis',
+      headers: { authorization: 'Bearer native-token' },
+    });
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      mode: 'analysis',
+      availability: 'ready',
+      source: 'supabase',
+      meta: {
+        ownerId: 'user-1',
+        rawIncluded: false,
+        transient: true,
+      },
+      owner: {
+        accounts: [expect.objectContaining({ gameUid: 'game-1' })],
+      },
+      warnings: [{ code: 'personal_analysis_transient_fallback' }],
+    });
+    expect(res.body).not.toHaveProperty('history');
+  });
+
+  it('reuses a transient analysis model for repeated reads by the same owner', async () => {
+    const callerClient = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(null);
+    mocks.resolveAuthenticatedRequestUser.mockResolvedValue({
+      ok: true,
+      source: 'supabase',
+      user: { id: 'user-1' },
+      callerClient,
+    });
+
+    const firstResponse = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis',
+      headers: { authorization: 'Bearer native-token' },
+    }), firstResponse);
+    const firstHistoryReadCount = callerClient.__state.selectCalls.filter((call) => (
+      call.table === 'history'
+    )).length;
+
+    const secondResponse = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis',
+      headers: { authorization: 'Bearer native-token' },
+    }), secondResponse);
+
+    expect(firstHistoryReadCount).toBeGreaterThan(0);
+    expect(callerClient.__state.selectCalls.filter((call) => call.table === 'history')).toHaveLength(
+      firstHistoryReadCount
+    );
+    expect(firstResponse.body.meta.cacheHit).toBe(false);
+    expect(secondResponse.body.meta.cacheHit).toBe(true);
   });
 
   it('returns current user seq keys for import dedupe', async () => {
@@ -400,6 +936,7 @@ describe('/api/account-gacha-data', () => {
         },
       ],
       meta: {
+        ownerId: 'user-1',
         count: 1,
         truncated: false,
       },
@@ -469,6 +1006,37 @@ describe('/api/account-gacha-data', () => {
       server_id: '2',
       region: 'intl',
     });
+  });
+
+  it('does not overwrite a global pool owned by another user', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.poolRows = [{
+      pool_id: 'special_official_001',
+      user_id: 'other-owner',
+    }];
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const req = createRequest({
+      method: 'POST',
+      body: {
+        pools: [{
+          id: 'official_pool_alias',
+          name: '恶意覆盖名称',
+          type: 'limited',
+        }],
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      saved: { pools: 0, history: 0 },
+      skipped: { pools: 1, history: 0 },
+    });
+    expect(adminClient.__state.upsertCalls.some((call) => call.table === 'pools')).toBe(false);
+    expect(adminClient.__state.updateCalls).toEqual([]);
   });
 
   it('skips cross-source duplicate history before saving', async () => {
@@ -656,6 +1224,7 @@ describe('/api/account-gacha-data', () => {
     const adminClient = createAdminClient();
     adminClient.__state.historyRows = [
       {
+        id: 101,
         record_id: 'record-1',
         user_id: 'user-1',
         game_uid: 'game-1',
@@ -663,6 +1232,7 @@ describe('/api/account-gacha-data', () => {
         region: 'cn',
       },
       {
+        id: 102,
         record_id: 'record-2',
         user_id: 'user-1',
         game_uid: 'other-game',
@@ -703,7 +1273,8 @@ describe('/api/account-gacha-data', () => {
       },
       filters: [
         { op: 'eq', column: 'user_id', value: 'user-1' },
-        { op: 'in', column: 'record_id', values: ['record-1'] },
+        { op: 'eq', column: 'game_uid', value: 'game-1' },
+        { op: 'in', column: 'id', values: [101] },
       ],
     });
   });
@@ -712,6 +1283,7 @@ describe('/api/account-gacha-data', () => {
     const adminClient = createAdminClient();
     adminClient.__state.historyRows = [
       {
+        id: 201,
         record_id: 'record-1',
         user_id: 'user-1',
         game_uid: 'game-1',
@@ -727,6 +1299,7 @@ describe('/api/account-gacha-data', () => {
         is_free: false,
       },
       {
+        id: 202,
         record_id: 'record-2',
         user_id: 'user-1',
         game_uid: 'game-1',
@@ -769,19 +1342,21 @@ describe('/api/account-gacha-data', () => {
     expect(adminClient.__state.updateCalls).toHaveLength(1);
     expect(adminClient.__state.updateCalls[0].filters).toContainEqual({
       op: 'in',
-      column: 'record_id',
-      values: ['record-1'],
+      column: 'id',
+      values: [201],
     });
     expect(adminClient.__state.deleteCalls).toHaveLength(1);
     expect(adminClient.__state.deleteCalls[0].filters).toEqual([
       { op: 'eq', column: 'user_id', value: 'user-1' },
-      { op: 'in', column: 'record_id', values: ['record-2'] },
+      { op: 'eq', column: 'game_uid', value: 'game-1' },
+      { op: 'in', column: 'id', values: [202] },
     ]);
   });
 
   it('updates server labels in small record id chunks to avoid long request URLs', async () => {
     const adminClient = createAdminClient();
     adminClient.__state.historyRows = Array.from({ length: 205 }, (_, index) => ({
+      id: index + 1,
       record_id: `record-${index + 1}`,
       user_id: 'user-1',
       game_uid: 'game-1',

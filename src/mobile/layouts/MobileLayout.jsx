@@ -2,23 +2,8 @@ import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import MobileHeader from '../components/MobileHeader';
 import MobileTabBar from '../components/MobileTabBar';
-import MobileDrawer from '../components/MobileDrawer';
-import AuthModal from '../../AuthModal';
 import { getMobilePathForTab, getMobileTabFromPath } from '../../constants/appRoutes';
 
-// 移动端视图
-import MobileHomePageView from '../views/MobileHomePageView';
-import MobileDashboardView from '../views/MobileDashboardView';
-import MobileOverviewView from '../views/MobileOverviewView';
-import MobileStatsView from '../views/MobileStatsView';
-import MobileSimulatorView from '../views/MobileSimulatorView';
-import MobileSettingsView from '../views/MobileSettingsView';
-import MobileAboutView from '../views/MobileAboutView';
-import MobileAdminView from '../views/MobileAdminView';
-import MobileTicketView from '../views/MobileTicketView';
-import MobileAnnouncementsView from '../views/MobileAnnouncementsView';
-import MobileMechanicsView from '../views/MobileMechanicsView';
-import MobileRoadmapView from '../views/MobileRoadmapView';
 import useAuthStore from '../../stores/useAuthStore';
 import { NotificationCenter } from '../../components/ui';
 import { useDurableNotifications } from '../../hooks';
@@ -26,9 +11,24 @@ import { useScrollToHighlight } from '../../hooks/app/useScrollToHighlight';
 import { useI18n } from '../../i18n/index.js';
 import { useOAuthCallbackNotice } from '../../hooks/auth/useOAuthCallbackNotice.js';
 import { useSummerLotterySsoContinuation } from '../../hooks/auth/useSummerLotterySsoContinuation.js';
+import PersonalDataBoundary from '../../components/app/PersonalDataBoundary.jsx';
 
 const DeveloperApiDocsPage = lazy(() => import('../../components/docs/DeveloperApiDocsPage'));
 const SummerLotteryOperatorPage = lazy(() => import('../../components/admin/SummerLotteryOperatorPage'));
+const MobileDrawer = lazy(() => import('../components/MobileDrawer'));
+const AuthModal = lazy(() => import('../../AuthModal'));
+const MobileHomePageView = lazy(() => import('../views/MobileHomePageView'));
+const MobileDashboardView = lazy(() => import('../views/MobileDashboardView'));
+const MobileOverviewView = lazy(() => import('../views/MobileOverviewView'));
+const MobileStatsView = lazy(() => import('../views/MobileStatsView'));
+const MobileSimulatorView = lazy(() => import('../views/MobileSimulatorView'));
+const MobileSettingsView = lazy(() => import('../views/MobileSettingsView'));
+const MobileAboutView = lazy(() => import('../views/MobileAboutView'));
+const MobileAdminView = lazy(() => import('../views/MobileAdminView'));
+const MobileTicketView = lazy(() => import('../views/MobileTicketView'));
+const MobileAnnouncementsView = lazy(() => import('../views/MobileAnnouncementsView'));
+const MobileMechanicsView = lazy(() => import('../views/MobileMechanicsView'));
+const MobileRoadmapView = lazy(() => import('../views/MobileRoadmapView'));
 
 function MobileRouteFallback({ label }) {
   return (
@@ -41,7 +41,7 @@ function MobileRouteFallback({ label }) {
 /**
  * 移动端主布局 (重构版)
  */
-function MobileLayout({ onOAuthSessionSynced }) {
+function MobileLayout({ onOAuthSessionSynced, onRetryPersonalData }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, userRole, authResolved, showAuthModal, openAuthModal, closeAuthModal, setUser } = useAuthStore();
@@ -76,81 +76,103 @@ function MobileLayout({ onOAuthSessionSynced }) {
   }, [activeTab, isHomeSubpage, location.pathname, navigate]);
 
   return (
-    <div className="flex flex-col h-[100dvh] w-full overflow-hidden bg-ef-light dark:bg-ef-dark text-slate-900 dark:text-white font-sans transition-colors duration-300">
+    <div data-testid="mobile-app-shell" className="flex flex-col h-[100dvh] w-full overflow-hidden bg-ef-light dark:bg-ef-dark text-slate-900 dark:text-white font-sans transition-colors duration-300">
       <MobileHeader onMenuClick={() => setIsDrawerOpen(true)} activeTab={activeTab} />
 
       <main className="flex-1 relative overflow-hidden flex flex-col">
-        <Routes>
-          <Route index element={<MobileHomePageView />} />
-          <Route path="announcements" element={<MobileAnnouncementsView />} />
-          <Route path="mechanics" element={<MobileMechanicsView />} />
-          <Route path="roadmap" element={<MobileRoadmapView />} />
-          <Route path="overview" element={<MobileOverviewView />} />
-          <Route path="details" element={<MobileDashboardView />} />
-          <Route path="stats" element={<MobileStatsView />} />
-          <Route path="summary" element={<Navigate to={getMobilePathForTab('overview')} replace />} />
-          <Route path="dashboard" element={<Navigate to={getMobilePathForTab('details')} replace />} />
-          <Route path="simulator" element={<MobileSimulatorView />} />
-          <Route path="settings" element={<MobileSettingsView />} />
-          <Route
-            path="developer-api"
-            element={
-              <Suspense fallback={<MobileRouteFallback label={t('common.loading')} />}>
-                <DeveloperApiDocsPage />
-              </Suspense>
-            }
-          />
-          <Route path="about" element={<MobileAboutView />} />
-          <Route
-            path="lottery-contacts"
-            element={
-              isResolvingRole ? (
-                <MobileRouteFallback label="正在校验兑奖权限..." />
-              ) : user ? (
-                <div className="flex-1 overflow-y-auto p-4">
-                  <Suspense fallback={<MobileRouteFallback label="正在加载兑奖工作台..." />}>
+        <Suspense fallback={<MobileRouteFallback label={t('common.loading')} />}>
+          <Routes>
+            <Route index element={<MobileHomePageView />} />
+            <Route path="announcements" element={<MobileAnnouncementsView />} />
+            <Route path="mechanics" element={<MobileMechanicsView />} />
+            <Route path="roadmap" element={<MobileRoadmapView />} />
+            <Route
+              path="overview"
+              element={(
+                <PersonalDataBoundary user={user} onRetry={onRetryPersonalData}>
+                  <MobileOverviewView />
+                </PersonalDataBoundary>
+              )}
+            />
+            <Route
+              path="details"
+              element={(
+                <PersonalDataBoundary user={user} onRetry={onRetryPersonalData}>
+                  <MobileDashboardView />
+                </PersonalDataBoundary>
+              )}
+            />
+            <Route
+              path="stats"
+              element={(
+                <PersonalDataBoundary user={user} onRetry={onRetryPersonalData}>
+                  <MobileStatsView />
+                </PersonalDataBoundary>
+              )}
+            />
+            <Route path="summary" element={<Navigate to={getMobilePathForTab('overview')} replace />} />
+            <Route path="dashboard" element={<Navigate to={getMobilePathForTab('details')} replace />} />
+            <Route path="simulator" element={<MobileSimulatorView />} />
+            <Route path="settings" element={<MobileSettingsView />} />
+            <Route path="developer-api" element={<DeveloperApiDocsPage />} />
+            <Route path="about" element={<MobileAboutView />} />
+            <Route
+              path="lottery-contacts"
+              element={
+                isResolvingRole ? (
+                  <MobileRouteFallback label="正在校验兑奖权限..." />
+                ) : user ? (
+                  <div className="flex-1 overflow-y-auto p-4">
                     <SummerLotteryOperatorPage />
-                  </Suspense>
-                </div>
-              ) : (
-                <Navigate to={getMobilePathForTab('home')} replace />
-              )
-            }
-          />
-          <Route
-            path="admin"
-            element={
-              isResolvingRole ? (
-                <div className="p-6 text-sm text-zinc-400">
-                  {t('admin.checkingAccess')}
-                </div>
-              ) : isSuperAdmin ? (
-                <MobileAdminView />
-              ) : (
-                <Navigate to={getMobilePathForTab('home')} replace />
-              )
-            }
-          />
-          <Route path="tickets" element={<MobileTicketView addDurableNotification={addDurableNotification} />} />
-          <Route path="*" element={<Navigate to={getMobilePathForTab('home')} replace />} />
-        </Routes>
+                  </div>
+                ) : (
+                  <Navigate to={getMobilePathForTab('home')} replace />
+                )
+              }
+            />
+            <Route
+              path="admin"
+              element={
+                isResolvingRole ? (
+                  <div className="p-6 text-sm text-zinc-400">
+                    {t('admin.checkingAccess')}
+                  </div>
+                ) : isSuperAdmin ? (
+                  <MobileAdminView />
+                ) : (
+                  <Navigate to={getMobilePathForTab('home')} replace />
+                )
+              }
+            />
+            <Route path="tickets" element={<MobileTicketView addDurableNotification={addDurableNotification} />} />
+            <Route path="*" element={<Navigate to={getMobilePathForTab('home')} replace />} />
+          </Routes>
+        </Suspense>
       </main>
 
-      <MobileTabBar activeTab={activeTab} setActiveTab={(tab) => navigate(getMobilePathForTab(tab))} />
+      <MobileTabBar activeTab={activeTab} onSelect={(tab) => navigate(getMobilePathForTab(tab))} />
 
-      <MobileDrawer
-        isOpen={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
-        activeTab={activeTab}
-        setActiveTab={(tab) => navigate(getMobilePathForTab(tab))}
-      />
+      {isDrawerOpen && (
+        <Suspense fallback={null}>
+          <MobileDrawer
+            isOpen={isDrawerOpen}
+            onClose={() => setIsDrawerOpen(false)}
+            activeTab={activeTab}
+            setActiveTab={(tab) => navigate(getMobilePathForTab(tab))}
+          />
+        </Suspense>
+      )}
 
-      <AuthModal
-        isOpen={showAuthModal}
-        onClose={closeAuthModal}
-        onAuthSuccess={setUser}
-        addDurableNotification={addDurableNotification}
-      />
+      {showAuthModal && (
+        <Suspense fallback={null}>
+          <AuthModal
+            isOpen={showAuthModal}
+            onClose={closeAuthModal}
+            onAuthSuccess={setUser}
+            addDurableNotification={addDurableNotification}
+          />
+        </Suspense>
+      )}
 
       <NotificationCenter
         notifications={durableNotifications}

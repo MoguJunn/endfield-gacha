@@ -8,7 +8,6 @@ import {
   User,
   TrendingUp,
   Layers,
-  PieChart as PieChartIcon,
   Clock,
   Upload,
   BarChart3,
@@ -22,12 +21,9 @@ import {
   ToggleLeft,
   ToggleRight,
 } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
 import { RARITY_CONFIG } from '../../constants';
-import { DistributionAreaChart, RainbowGradientDefs } from '../charts';
 import { useDashboardViewState } from '../../hooks';
 import { useTheme } from '../../contexts/ThemeContext';
-import PoolSelector from '../pool/PoolSelector';
 import PoolAnalysisCard from './PoolAnalysisCard';
 import PoolTimelinePanel from './PoolTimelinePanel';
 import AveragePullStatsPanel from './AveragePullStatsPanel';
@@ -63,61 +59,9 @@ import appLogger from '../../utils/appLogger.js';
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from '../../utils/storageUtils.js';
 import { localizeDashboardChartItems } from '../../utils/dashboardChartLabels.js';
 import { normalizeShareThemeMode, resolveShareThemeMode } from '../../utils/shareThemeMode.js';
+import { useHistoryPageStore, useHistoryStore } from '../../stores/index.js';
 
-const PIE_LABEL_MIN_PERCENT = 0.05;
-const PIE_LABEL_RADIAN = Math.PI / 180;
-
-function resolvePieLabelColor(fill, isDark) {
-  if (typeof fill !== 'string' || !fill.startsWith('#')) {
-    return isDark ? '#fafafa' : '#ffffff';
-  }
-
-  const hex = fill.slice(1);
-  const normalized =
-    hex.length === 3
-      ? hex
-          .split('')
-          .map((char) => char + char)
-          .join('')
-      : hex;
-
-  if (normalized.length !== 6) {
-    return isDark ? '#fafafa' : '#ffffff';
-  }
-
-  const r = parseInt(normalized.slice(0, 2), 16);
-  const g = parseInt(normalized.slice(2, 4), 16);
-  const b = parseInt(normalized.slice(4, 6), 16);
-  const luma = 0.299 * r + 0.587 * g + 0.114 * b;
-  return luma > 170 ? '#111827' : '#ffffff';
-}
-
-function renderPiePercentLabel(isDark) {
-  return ({ cx, cy, midAngle, innerRadius, outerRadius, percent, fill }) => {
-    if (!Number.isFinite(percent) || percent < PIE_LABEL_MIN_PERCENT) {
-      return null;
-    }
-
-    const radius = innerRadius + (outerRadius - innerRadius) * 0.58;
-    const x = cx + radius * Math.cos(-midAngle * PIE_LABEL_RADIAN);
-    const y = cy + radius * Math.sin(-midAngle * PIE_LABEL_RADIAN);
-
-    return (
-      <text
-        x={x}
-        y={y}
-        fill={resolvePieLabelColor(fill, isDark)}
-        textAnchor="middle"
-        dominantBaseline="central"
-        fontSize={12}
-        fontWeight={700}
-        style={{ pointerEvents: 'none' }}
-      >
-        {`${(percent * 100).toFixed(1)}%`}
-      </text>
-    );
-  };
-}
+const DashboardCharts = React.lazy(() => import('./DashboardCharts.jsx'));
 
 const ALL_OVERVIEW_FILTER_OPTIONS = [
   { id: 'all', label: '全部卡池' },
@@ -318,7 +262,7 @@ const OverviewTypeMultiSelect = ({ title, options, value, onChange, t }) => {
 /**
  * 仪表盘视图组件
  */
-const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) => {
+const DashboardView = ({ showToast }) => {
   const location = useLocation();
   const { isDark } = useTheme();
   const { t, formatNumber, isEnglish, locale } = useI18n();
@@ -334,6 +278,16 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
   const [customSharePoolIds, setCustomSharePoolIds] = React.useState([]);
   const [customShareExpandedGroupIds, setCustomShareExpandedGroupIds] = React.useState([]);
   const [showTimelineFiveStarDrops, setShowTimelineFiveStarDrops] = React.useState(true);
+  const loadedRawHistoryCount = useHistoryStore((state) => (
+    Array.isArray(state.history) ? state.history.length : 0
+  ));
+  const historyPagePhase = useHistoryPageStore((state) => state.phase);
+  const historyPageHasMore = useHistoryPageStore((state) => state.hasMore);
+  const historyPageTotal = useHistoryPageStore((state) => state.total);
+  const hasCompleteRawHistory = historyPagePhase === 'ready'
+    && historyPageHasMore === false
+    && historyPageTotal !== null
+    && loadedRawHistoryCount >= historyPageTotal;
   const [clipboardImageWarmState, setClipboardImageWarmState] = React.useState('idle');
   const [clipboardImageReadyKey, setClipboardImageReadyKey] = React.useState(null);
   const [shareThemeMode, setShareThemeMode] = React.useState(() => {
@@ -389,6 +343,9 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
     setIncludeFreePullsInStats,
     dashboardResourceSummary,
     resourceSummaryVariant,
+    isAnalysisBacked,
+    snapshotSplitOverviewStats,
+    snapshotTimelineSections,
   } = useDashboardViewState();
 
   React.useEffect(() => {
@@ -579,7 +536,11 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
   );
 
   const visibleCharacterStats = React.useMemo(() => {
-    if (!isAllPoolsOverview || !allOverviewFilterPoolIds) {
+    if (
+      !isAllPoolsOverview
+      || !allOverviewFilterPoolIds
+      || (isAnalysisBacked && !hasCompleteRawHistory)
+    ) {
       return characterStats;
     }
 
@@ -599,7 +560,9 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
     allOverviewFilterPoolIds,
     characterStats,
     crossPoolPityMap,
+    hasCompleteRawHistory,
     isAllPoolsOverview,
+    isAnalysisBacked,
     normalizedPoolHistory,
     normalizedPoolType,
     visibleLimitedPoolIds,
@@ -626,8 +589,14 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
     });
   }, [allLimitedHistory, isGroupMode, normalizedPoolHistory, selectedPools]);
   const timelineSections = React.useMemo(
-    () =>
-      buildDashboardTimelineSections({
+    () => {
+      if (isAnalysisBacked && Array.isArray(snapshotTimelineSections)) {
+        return snapshotTimelineSections;
+      }
+      if (isAnalysisBacked && !hasCompleteRawHistory) {
+        return [];
+      }
+      return buildDashboardTimelineSections({
         currentPool,
         currentPoolHistory: normalizedPoolHistory,
         groupedHistory,
@@ -642,7 +611,8 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
         hasMergedAccountView,
         locale,
         showFiveStarDrops: showTimelineFiveStarDrops,
-      }),
+      });
+    },
     [
       allOverviewPoolFilter,
       analysisPity,
@@ -651,12 +621,15 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
       effectivePity,
       groupedHistory,
       hasMergedAccountView,
+      hasCompleteRawHistory,
+      isAnalysisBacked,
       isAllPoolsOverview,
       isGroupMode,
       locale,
       normalizedPoolHistory,
       overviewAnalysisPityMap,
       showTimelineFiveStarDrops,
+      snapshotTimelineSections,
       selectedPools,
     ]
   );
@@ -665,12 +638,23 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
       return null;
     }
 
+    if (isAnalysisBacked && snapshotSplitOverviewStats) {
+      return snapshotSplitOverviewStats;
+    }
+
     return buildDashboardOverviewSplitStats({
       history: overviewStatsHistory,
       selectedPools: overviewStatsSelection.pools,
       includeFreePullsInStats,
     });
-  }, [includeFreePullsInStats, isAllPoolsOverview, overviewStatsHistory, overviewStatsSelection]);
+  }, [
+    includeFreePullsInStats,
+    isAllPoolsOverview,
+    isAnalysisBacked,
+    overviewStatsHistory,
+    overviewStatsSelection,
+    snapshotSplitOverviewStats,
+  ]);
   const customShareSelectedPools = React.useMemo(
     () => customShareCandidatePools.filter((pool) => customSharePoolIds.includes(pool.id)),
     [customShareCandidatePools, customSharePoolIds]
@@ -679,7 +663,8 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
     () => new Set(customShareSelectedPools.map((pool) => pool.id)),
     [customShareSelectedPools]
   );
-  const shouldBuildCustomShareData = shareMode === 'custom';
+  const shouldBuildCustomShareData = shareMode === 'custom'
+    && (!isAnalysisBacked || hasCompleteRawHistory);
   const customShareHistory = React.useMemo(
     () =>
       shouldBuildCustomShareData
@@ -1294,16 +1279,52 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
     backgroundColor: isDark ? '#18181b' : '#ffffff',
     color: isDark ? '#e4e4e7' : '#27272a',
   };
+  const dashboardChartGroups = splitOverviewStats
+    ? [
+        {
+          key: 'character',
+          title: characterPoolLabel,
+          total: splitOverviewStats.character.total,
+          chartData: localizeChartData(
+            splitOverviewStats.character.chartData,
+            t('dashboard.overview.targetSixStar'),
+            t('dashboard.overview.offrateSixStar')
+          ),
+          hasPityHistory: splitOverviewStats.character.pityStats.history.length > 0,
+          distribution: splitOverviewStats.character.pityStats.distribution,
+          variant: 'character',
+        },
+        {
+          key: 'weapon',
+          title: weaponPoolLabel,
+          total: splitOverviewStats.weapon.total,
+          chartData: localizeChartData(
+            splitOverviewStats.weapon.chartData,
+            t('dashboard.overview.upSixStar'),
+            t('dashboard.overview.offrateSixStar')
+          ),
+          hasPityHistory: splitOverviewStats.weapon.pityStats.history.length > 0,
+          distribution: splitOverviewStats.weapon.pityStats.distribution,
+          variant: 'weapon',
+        },
+      ]
+    : [
+        {
+          key: 'current',
+          title: null,
+          total: stats.total,
+          chartData: localizeChartData(stats.chartData, primarySixStarLabel, secondarySixStarLabel),
+          hasPityHistory: stats.pityStats.history.length > 0,
+          distribution: stats.pityStats.distribution,
+          variant: getDistributionVariant(normalizedPoolType),
+        },
+      ];
 
-  // 如果用户没有任何卡池数据，只显示卡池选择器（导入提示）
+  // 只有已经成功读取的空快照才会到达这里；加载和错误状态由
+  // PersonalDataBoundary 处理。
   if (!hasPoolData) {
     return (
       <div className="space-y-6">
-        {/* 卡池选择器 - 显示导入提示 */}
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 shadow-sm">
-          <PoolSelector onOpenImportWizard={onOpenImportWizard} onOpenExportOptions={onOpenExportOptions} />
-        </div>
-
         {/* 欢迎提示 */}
         {user && (
           <div className="bg-gradient-to-br from-zinc-50 to-slate-50 dark:from-zinc-900 dark:to-zinc-950 border border-zinc-200 dark:border-zinc-800 p-8 text-center">
@@ -1316,16 +1337,6 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
             <p className="text-sm text-slate-500 dark:text-zinc-500 max-w-md mx-auto">
               {t('dashboard.empty.startRecordBody')}
             </p>
-            {typeof onOpenImportWizard === 'function' && (
-              <button
-                type="button"
-                onClick={onOpenImportWizard}
-                className="mt-6 inline-flex items-center justify-center gap-2 border border-yellow-500 bg-endfield-yellow px-5 py-2.5 text-xs font-black uppercase tracking-wider text-black transition-colors hover:bg-yellow-400"
-              >
-                <Upload size={14} />
-                {t('dashboard.empty.openFileImport')}
-              </button>
-            )}
           </div>
         )}
       </div>
@@ -1355,17 +1366,10 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
         </div>
       )}
 
-      {/* 卡池选择器 & 顶部状态栏 */}
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <PoolSelector onOpenImportWizard={onOpenImportWizard} onOpenExportOptions={onOpenExportOptions} />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className={`grid grid-cols-1 items-start gap-6 ${isGroupMode ? 'xl:grid-cols-1' : 'xl:grid-cols-[minmax(0,7fr)_minmax(0,13fr)]'}`}>
         {/* 左列：保底机制分析 (聚合模式下隐藏) */}
         {!isGroupMode && (
-          <div className="md:col-span-1 space-y-6">
+          <div className="space-y-6 xl:sticky xl:top-20 xl:max-h-[calc(100vh-6rem)] xl:self-start xl:overflow-y-auto xl:pr-1">
             <PoolAnalysisCard
               currentPool={currentPool}
               stats={stats}
@@ -1378,7 +1382,7 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
         )}
 
         {/* 右列：详细数据与图表（聚合模式下全宽） */}
-        <div className={`${isGroupMode ? 'md:col-span-3' : 'md:col-span-2'} space-y-6`}>
+        <div className="flex min-w-0 flex-col gap-6">
           {splitOverviewStats ? (
             <>
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -1567,175 +1571,74 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <AveragePullStatsPanel
-                  stats={splitOverviewStats.character}
-                  poolType="limited"
-                  isAllPoolsOverview={true}
-                />
-                <AveragePullStatsPanel stats={splitOverviewStats.weapon} poolType="weapon" isAllPoolsOverview={true} />
-              </div>
-
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                <ResourceSummaryPanel
-                  title={t('dashboard.resources.groupTitle', { name: characterPoolLabel })}
-                  resources={splitOverviewStats.character.resourceSummary}
-                  variant="character"
-                  layout="fixed3"
-                  className="bg-white dark:bg-zinc-900 shadow-sm"
-                />
-                <ResourceSummaryPanel
-                  title={t('dashboard.resources.groupTitle', { name: weaponPoolLabel })}
-                  resources={splitOverviewStats.weapon.resourceSummary}
-                  variant="weapon"
-                  layout="fixed3"
-                  className="bg-white dark:bg-zinc-900 shadow-sm"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                {[
-                  {
-                    key: 'character',
-                    title: characterPoolLabel,
-                    stats: splitOverviewStats.character,
-                    primaryLabel: t('dashboard.overview.targetSixStar'),
-                  },
-                  {
-                    key: 'weapon',
-                    title: weaponPoolLabel,
-                    stats: splitOverviewStats.weapon,
-                    primaryLabel: t('dashboard.overview.upSixStar'),
-                  },
-                ].map((group) => (
-                  <div
-                    key={`pie-${group.key}`}
-                    className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm"
-                  >
-                    <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2">
-                        <PieChartIcon size={16} />
-                        {t('dashboard.chart.distributionGroup', { name: group.title })}
-                      </h3>
-                    </div>
-                    <div className="h-64 w-full">
-                      {group.stats.total === 0 ? (
-                        <div className="h-full flex items-center justify-center text-slate-300 dark:text-zinc-700 text-sm">
-                          {t('dashboard.empty.noChartData')}
-                        </div>
-                      ) : (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <RainbowGradientDefs />
-                            <Pie
-                              data={localizeChartData(
-                                group.stats.chartData,
-                                group.primaryLabel,
-                                t('dashboard.overview.offrateSixStar')
-                              )}
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={44}
-                              outerRadius={82}
-                              paddingAngle={2}
-                              dataKey="displayValue"
-                              isAnimationActive={false}
-                              labelLine={false}
-                              label={renderPiePercentLabel(isDark)}
-                            >
-                              {localizeChartData(
-                                group.stats.chartData,
-                                group.primaryLabel,
-                                t('dashboard.overview.offrateSixStar')
-                              ).map((entry, index) => (
-                                <Cell key={`cell-${group.key}-${index}`} fill={entry.color} stroke="none" />
-                              ))}
-                            </Pie>
-                            <RechartsTooltip
-                              formatter={(value, name, props) => [
-                                `${props.payload.value} (${((props.payload.value / group.stats.total) * 100).toFixed(1)}%)`,
-                                name,
-                              ]}
-                              contentStyle={tooltipStyle}
-                              itemStyle={{ color: isDark ? '#e4e4e7' : '#27272a' }}
-                            />
-                            <Legend
-                              verticalAlign="bottom"
-                              iconSize={8}
-                              formatter={(value) => (
-                                <span className="text-xs text-slate-500 dark:text-zinc-400 ml-1">{value}</span>
-                              )}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                {[
-                  { key: 'character', title: characterPoolLabel, stats: splitOverviewStats.character },
-                  { key: 'weapon', title: weaponPoolLabel, stats: splitOverviewStats.weapon },
-                ].map((group) => (
-                  <div
-                    key={`bar-${group.key}`}
-                    className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm"
-                  >
-                    <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2">
-                        <TrendingUp size={16} />
-                        {t('dashboard.chart.trendGroup', { name: group.title })}
-                      </h3>
-                    </div>
-                    <div className="h-64 w-full">
-                      {group.stats.pityStats.history.length === 0 ? (
-                        <div className="h-full flex items-center justify-center text-slate-300 dark:text-zinc-700 text-sm">
-                          {t('dashboard.empty.noSixStarHistory')}
-                        </div>
-                      ) : (
-                        <DistributionAreaChart
-                          data={group.stats.pityStats.distribution}
-                          isDark={isDark}
-                          tooltipStyle={tooltipStyle}
-                          variant={group.key === 'weapon' ? 'weapon' : 'character'}
-                        />
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <section className="order-20 space-y-6" aria-labelledby="overview-resource-analysis-title">
+                <div className="flex items-center gap-3 border-b border-zinc-200 pb-2 dark:border-zinc-800">
+                  <h3 id="overview-resource-analysis-title" className="text-sm font-bold uppercase tracking-[0.16em] text-slate-700 dark:text-zinc-200">
+                    {t('dashboard.chart.deepAnalysis', {}, '资源、平均与趋势')}
+                  </h3>
+                  <span className="h-px flex-1 bg-zinc-100 dark:bg-zinc-800" />
+                </div>
+                <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                  <AveragePullStatsPanel
+                    stats={splitOverviewStats.character}
+                    poolType="limited"
+                    isAllPoolsOverview={true}
+                  />
+                  <AveragePullStatsPanel stats={splitOverviewStats.weapon} poolType="weapon" isAllPoolsOverview={true} />
+                </div>
+                <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
+                  <ResourceSummaryPanel
+                    title={t('dashboard.resources.groupTitle', { name: characterPoolLabel })}
+                    resources={splitOverviewStats.character.resourceSummary}
+                    variant="character"
+                    layout="fixed3"
+                    className="bg-white dark:bg-zinc-900 shadow-sm"
+                  />
+                  <ResourceSummaryPanel
+                    title={t('dashboard.resources.groupTitle', { name: weaponPoolLabel })}
+                    resources={splitOverviewStats.weapon.resourceSummary}
+                    variant="weapon"
+                    layout="fixed3"
+                    className="bg-white dark:bg-zinc-900 shadow-sm"
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                  <React.Suspense fallback={<div className="p-6 text-center text-sm text-zinc-500">{t('common.loading')}</div>}>
+                    <DashboardCharts groups={dashboardChartGroups} isDark={isDark} tooltipStyle={tooltipStyle} />
+                  </React.Suspense>
+                </div>
+              </section>
             </>
           ) : (
             <>
-              {/* 总投入 Banner */}
-              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 flex items-center justify-between shadow-sm relative overflow-hidden group">
-                <div className="absolute right-0 top-0 h-full w-32 bg-gradient-to-l from-zinc-50 dark:from-zinc-800 to-transparent"></div>
-                <div className="relative z-10">
-                  <h3 className="text-xs text-slate-500 dark:text-zinc-500 font-bold uppercase tracking-wider mb-1">
-                    {totalPullBannerTitle}
-                  </h3>
-                  <div className="text-4xl font-black font-mono text-slate-800 dark:text-zinc-100 flex items-baseline gap-2">
-                    {formatNumber(stats.total)}
-                    <span className="text-lg font-medium text-slate-400 dark:text-zinc-600">{pullUnitLabel}</span>
+              {/* 总投入与核心数量合并为同一行 */}
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(13rem,0.8fr)_minmax(0,2.2fr)]">
+                <div className="group relative flex min-w-0 flex-col justify-between gap-3 overflow-hidden border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+                  <div className="absolute right-0 top-0 h-full w-24 bg-gradient-to-l from-zinc-50 to-transparent dark:from-zinc-800"></div>
+                  <div className="relative z-10">
+                    <h3 className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-500">
+                      {totalPullBannerTitle}
+                    </h3>
+                    <div className="flex items-baseline gap-2 font-mono text-3xl font-black text-slate-800 dark:text-zinc-100">
+                      {formatNumber(stats.total)}
+                      <span className="text-base font-medium text-slate-400 dark:text-zinc-600">{pullUnitLabel}</span>
+                    </div>
                   </div>
+                  {(normalizedPoolType === 'limited' || normalizedPoolType === 'extra') && (
+                    <div className="relative z-10 w-full">
+                      <FreePullStatsToggle
+                        enabled={includeFreePullsInStats}
+                        onToggle={() => setIncludeFreePullsInStats((value) => !value)}
+                        t={t}
+                      />
+                    </div>
+                  )}
                 </div>
-                {(normalizedPoolType === 'limited' || normalizedPoolType === 'extra') && (
-                  <div className="relative z-10 w-full max-w-[18rem]">
-                    <FreePullStatsToggle
-                      enabled={includeFreePullsInStats}
-                      onToggle={() => setIncludeFreePullsInStats((value) => !value)}
-                      t={t}
-                    />
-                  </div>
-                )}
-              </div>
 
-              {/* 核心数据网格 */}
-              <div
-                className={`grid grid-cols-2 ${normalizedPoolType !== 'standard' ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4`}
-              >
+                {/* 核心数据网格 */}
+                <div
+                  className={`grid grid-cols-2 ${normalizedPoolType !== 'standard' ? 'xl:grid-cols-4' : 'xl:grid-cols-3'} gap-4`}
+                >
                 {normalizedPoolType !== 'standard' && (
                   <StatBox
                     title={primarySixStarLabel}
@@ -1801,6 +1704,7 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                   colorClass="text-purple-600 dark:text-purple-400"
                   icon={Star}
                 />
+                </div>
               </div>
 
               {isGroupMode && (
@@ -1835,97 +1739,31 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
                 />
               )}
 
-              <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              <section className="order-20 space-y-6" aria-labelledby="resource-analysis-title">
+                <div className="flex items-center gap-3 border-b border-zinc-200 pb-2 dark:border-zinc-800">
+                  <h3 id="resource-analysis-title" className="text-sm font-bold uppercase tracking-[0.16em] text-slate-700 dark:text-zinc-200">
+                    {t('dashboard.chart.deepAnalysis', {}, '资源、分布与趋势')}
+                  </h3>
+                  <span className="h-px flex-1 bg-zinc-100 dark:bg-zinc-800" />
+                </div>
                 <ResourceSummaryPanel
                   title={resourceSummaryTitle}
                   resources={dashboardResourceSummary}
                   variant={resourceSummaryVariant}
-                  stacked={true}
+                  layout="grouped"
                   className="bg-white dark:bg-zinc-900 shadow-sm"
                 />
-                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2">
-                      <PieChartIcon size={16} />
-                      {t('dashboard.chart.distribution')}
-                    </h3>
-                  </div>
-                  <div className="h-64 w-full">
-                    {stats.total === 0 ? (
-                      <div className="h-full flex items-center justify-center text-slate-300 dark:text-zinc-700 text-sm">
-                        {t('dashboard.empty.noChartData')}
-                      </div>
-                    ) : (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <RainbowGradientDefs />
-                          <Pie
-                            data={localizeChartData(stats.chartData, primarySixStarLabel, secondarySixStarLabel)}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={44}
-                            outerRadius={82}
-                            paddingAngle={2}
-                            dataKey="displayValue"
-                            isAnimationActive={false}
-                            labelLine={false}
-                            label={renderPiePercentLabel(isDark)}
-                          >
-                            {localizeChartData(stats.chartData, primarySixStarLabel, secondarySixStarLabel).map(
-                              (entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
-                              )
-                            )}
-                          </Pie>
-                          <RechartsTooltip
-                            formatter={(value, name, props) => [
-                              `${props.payload.value} (${((props.payload.value / stats.total) * 100).toFixed(1)}%)`,
-                              name,
-                            ]}
-                            contentStyle={tooltipStyle}
-                            itemStyle={{ color: isDark ? '#e4e4e7' : '#27272a' }}
-                          />
-                          <Legend
-                            verticalAlign="bottom"
-                            iconSize={8}
-                            formatter={(value) => (
-                              <span className="text-xs text-slate-500 dark:text-zinc-400 ml-1">{value}</span>
-                            )}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    )}
-                  </div>
+                <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                  <React.Suspense fallback={<div className="p-6 text-center text-sm text-zinc-500">{t('common.loading')}</div>}>
+                    <DashboardCharts groups={dashboardChartGroups} isDark={isDark} tooltipStyle={tooltipStyle} />
+                  </React.Suspense>
                 </div>
-
-                <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-sm font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-2">
-                      <TrendingUp size={16} />
-                      {t('dashboard.chart.trend')}
-                    </h3>
-                  </div>
-                  <div className="h-64 w-full">
-                    {stats.pityStats.history.length === 0 ? (
-                      <div className="h-full flex items-center justify-center text-slate-300 dark:text-zinc-700 text-sm">
-                        {t('dashboard.empty.noSixStarHistory')}
-                      </div>
-                    ) : (
-                      <DistributionAreaChart
-                        data={stats.pityStats.distribution}
-                        isDark={isDark}
-                        tooltipStyle={tooltipStyle}
-                        variant={getDistributionVariant(normalizedPoolType)}
-                      />
-                    )}
-                  </div>
-                </div>
-              </div>
+              </section>
             </>
           )}
 
           {/* 角色出货列表 (Updated Style) */}
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm">
+          <div className="order-10 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 shadow-sm">
             <div className="flex items-center gap-2 mb-4 border-b border-zinc-100 dark:border-zinc-800 pb-2">
               <User size={18} className="text-slate-400 dark:text-zinc-500" />
               <h3 className="text-sm font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">
@@ -2284,7 +2122,16 @@ const DashboardView = ({ showToast, onOpenImportWizard, onOpenExportOptions }) =
               </div>
             </div>
 
-            {charViewMode === 'waterfall' ? (
+            {charViewMode === 'waterfall'
+              && isAnalysisBacked
+              && !hasCompleteRawHistory
+              && !Array.isArray(snapshotTimelineSections) ? (
+              <div className="border border-zinc-200 bg-zinc-50 px-4 py-8 text-center text-sm text-slate-500 dark:border-zinc-800 dark:bg-zinc-950/50 dark:text-zinc-400">
+                {isEnglish
+                  ? 'The complete timeline is available after all detailed record pages are loaded.'
+                  : '完整时间线将在详细记录全部分页加载后显示。'}
+              </div>
+            ) : charViewMode === 'waterfall' ? (
               <PoolTimelinePanel
                 sections={timelineSections}
                 currentPool={currentPool}

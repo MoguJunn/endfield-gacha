@@ -6,7 +6,7 @@ import { localizeEntityName } from '../../utils/gameDataI18n.js';
 import { bindHorizontalWheelScroll } from '../../utils/horizontalScroll.js';
 import { getPoolFeaturedLabel, getPoolSelectorFeaturedCharacters } from '../../utils/poolSelectorDisplay.js';
 
-const VERSION_CALENDAR_URL = 'https://ef-cal.mogujun.icu/';
+export const VERSION_CALENDAR_URL = 'https://ef-cal.mogujun.icu/';
 
 function getFeaturedTextFontClass(featuredText = '') {
   if (featuredText.length > 42) {
@@ -294,12 +294,12 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
             href={VERSION_CALENDAR_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex shrink-0 items-center gap-1.5 border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11px] font-bold text-amber-700 transition-colors hover:border-amber-400 hover:bg-amber-100 hover:text-amber-800 dark:border-endfield-yellow/35 dark:bg-endfield-yellow/10 dark:text-endfield-yellow dark:hover:border-endfield-yellow/60 dark:hover:bg-endfield-yellow/15"
+            className="inline-flex shrink-0 items-center gap-2 border-2 border-amber-400 bg-amber-400 px-4 py-2.5 text-xs font-black text-zinc-950 shadow-[4px_4px_0_rgba(24,24,27,0.18)] transition-all hover:-translate-y-0.5 hover:bg-amber-300 dark:border-endfield-yellow dark:bg-endfield-yellow dark:shadow-[4px_4px_0_rgba(255,250,0,0.16)] dark:hover:bg-yellow-300"
             aria-label={tt('home.rotation.openCalendar', 'Open Version Calendar')}
           >
-            <CalendarDays size={13} />
+            <CalendarDays size={16} />
             <span>{tt('home.rotation.calendar', 'Version Calendar')}</span>
-            <ExternalLink size={11} />
+            <ExternalLink size={13} />
           </a>
         </div>
         <div 

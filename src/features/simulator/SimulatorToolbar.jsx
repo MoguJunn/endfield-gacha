@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Copy, Download, Loader2, Plus, RefreshCw, Share2, User } from 'lucide-react';
-import { useHistoryStore } from '../../stores';
+import { usePersonalGameAccounts } from '../../hooks/app/usePersonalGameAccounts.js';
 import { getLocalizedResourceLabel, RESOURCE_ICON_URLS } from '../../utils/resourceEconomy';
 import PoolGroupCardRail from '../../components/pool/PoolGroupCardRail';
 import ShareActionStatus from '../../components/share/ShareActionStatus';
@@ -300,8 +300,7 @@ const SimulatorToolbar = ({
   const [showInheritAccountDropdown, setShowInheritAccountDropdown] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
   const shareMenuRef = useRef(null);
-  useHistoryStore((state) => state.history);
-  const getGameAccountsFromHistory = useHistoryStore((state) => state.getGameAccountsFromHistory);
+  const gameAccounts = usePersonalGameAccounts();
   const isEnglishLocale = locale?.toLowerCase().startsWith('en');
   const cnOriginiteDoubleBonusEnabled = Boolean(resourceSettings?.cnOriginiteDoubleBonusEnabled);
   const infiniteResourcesEnabled = Boolean(resourceSettings?.infiniteResources);
@@ -377,8 +376,6 @@ const SimulatorToolbar = ({
       }),
     [locale, poolPullCounts, simulatorPools]
   );
-  const gameAccounts = getGameAccountsFromHistory();
-
   const openEditor = (resourceKey, mode, value) => {
     setActiveEditor({
       resourceKey,
@@ -517,7 +514,7 @@ const SimulatorToolbar = ({
                 <div className="absolute right-0 sm:left-0 top-full mt-1 w-60 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-lg z-50 rounded-md overflow-hidden">
                   {gameAccounts.map((account) => (
                     <button
-                      key={account.gameUid}
+                      key={account.accountKey || account.account_key || account.gameUid}
                       type="button"
                       onClick={() => {
                         onInheritRealState(account);

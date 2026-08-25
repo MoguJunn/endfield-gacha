@@ -26,3 +26,8 @@ export {
   getHomeCollapseState,
   setHomeCollapseState
 } from './storageUtils.js';
+export {
+  buildHistoryIndex,
+  getCachedHistoryIndex,
+  clearHistoryIndexCache
+} from './historyIndex.js';

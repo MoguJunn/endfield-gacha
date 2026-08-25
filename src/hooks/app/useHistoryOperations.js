@@ -1,8 +1,7 @@
 import { useCallback } from 'react';
-import { useHistoryStore, useUIStore, useAuthStore } from '../../stores';
+import { useHistoryPageStore, useHistoryStore, useUIStore, useAuthStore } from '../../stores';
 import {
   deleteAccountGachaRecord,
-  loadAccountGachaData,
   updateAccountGachaRecord,
 } from '../../services/accountGachaDataService.js';
 
@@ -23,7 +22,7 @@ export function useHistoryOperations({
   const setModalState = useUIStore(state => state.setModalState);
   const closeModal = useUIStore(state => state.closeModal);
 
-  const { saveHistoryToCloud } = cloudSync;
+  const { refreshPersonalData, saveHistoryToCloud } = cloudSync;
 
   const buildRecordLocator = useCallback((item) => ({
     recordId: item?.id ?? item?.record_id,
@@ -34,9 +33,19 @@ export function useHistoryOperations({
   }), []);
 
   const reloadHistory = useCallback(async () => {
-    const result = await loadAccountGachaData();
-    setHistory(Array.isArray(result?.history) ? result.history : []);
+    const result = await refreshPersonalData?.(user, {
+      kind: 'mutation',
+      reason: 'history_record_mutation',
+    });
+    if (!result?.ok) {
+      throw result?.error || new Error('个人抽卡数据刷新失败');
+    }
     return result;
+  }, [refreshPersonalData, user]);
+
+  const invalidateLoadedHistory = useCallback(() => {
+    useHistoryPageStore.getState().invalidate('history_mutation');
+    setHistory([]);
   }, [setHistory]);
 
   // 关闭弹窗并清理编辑状态的辅助函数
@@ -62,6 +71,7 @@ export function useHistoryOperations({
           changes: newConfig,
           reason,
         });
+        invalidateLoadedHistory();
         await reloadHistory();
         clearEditItemState?.();
         showToast('记录已更新，保底与批次已重新计算', 'success');
@@ -76,7 +86,7 @@ export function useHistoryOperations({
     setHistory(prev => prev.map(item => item.id === itemToUpdate.id ? updatedItem : item));
     clearEditItemState?.();
     return true;
-  }, [buildRecordLocator, clearEditItemState, history, reloadHistory, saveHistoryToCloud, setHistory, showToast, user]);
+  }, [buildRecordLocator, clearEditItemState, history, invalidateLoadedHistory, reloadHistory, saveHistoryToCloud, setHistory, showToast, user]);
 
   // 删除单条记录 (触发弹窗)
   const handleDeleteItem = useCallback((itemOrId) => {
@@ -100,6 +110,7 @@ export function useHistoryOperations({
           ...buildRecordLocator(itemToDelete),
           reason: '用户确认该记录异常或不属于自己',
         });
+        invalidateLoadedHistory();
         await reloadHistory();
         clearEditItemState?.();
         setModalState({ type: null, data: null });
@@ -113,7 +124,7 @@ export function useHistoryOperations({
     setHistory(prev => prev.filter(item => item.id !== itemToDelete.id));
     clearEditItemState?.();
     setModalState({ type: null, data: null });
-  }, [buildRecordLocator, clearEditItemState, history, modalState.data, reloadHistory, setHistory, setModalState, showToast, user]);
+  }, [buildRecordLocator, clearEditItemState, history, invalidateLoadedHistory, modalState.data, reloadHistory, setHistory, setModalState, showToast, user]);
 
   // 删除整组记录 (触发弹窗)
   const handleDeleteGroup = useCallback((items) => {
@@ -132,20 +143,26 @@ export function useHistoryOperations({
           reason: '用户删除所选批次记录',
         })
       )));
-      await reloadHistory();
-      setModalState({ type: null, data: null });
       const failed = results.filter((result) => result.status === 'rejected').length;
+      const succeeded = results.length - failed;
+      if (succeeded > 0) {
+        invalidateLoadedHistory();
+        await reloadHistory();
+        setModalState({ type: null, data: null });
+      }
       if (failed === 0) {
         showToast(`已删除 ${itemsToDelete.length} 条记录并同步到云端`, 'success');
+      } else if (succeeded === 0) {
+        showToast(`${failed} 条记录删除失败`, 'error', '删除失败');
       } else {
-        showToast(`${itemsToDelete.length - failed} 条已删除，${failed} 条删除失败，列表已刷新`, 'warning');
+        showToast(`${succeeded} 条已删除，${failed} 条删除失败，列表已刷新`, 'warning');
       }
       return;
     }
 
     setHistory(prev => prev.filter(item => !idsToDelete.has(item.id)));
     setModalState({ type: null, data: null });
-  }, [buildRecordLocator, modalState.data, reloadHistory, setHistory, setModalState, showToast, user]);
+  }, [buildRecordLocator, invalidateLoadedHistory, modalState.data, reloadHistory, setHistory, setModalState, showToast, user]);
 
   return {
     closeModalAndClear,

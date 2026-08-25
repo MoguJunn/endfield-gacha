@@ -54,6 +54,14 @@ const SEVERITY_STYLES = {
   },
 };
 
+const SEVERITY_IMPORTANCE = {
+  info: 1,
+  success: 2,
+  maintenance: 3,
+  warning: 4,
+  critical: 5,
+};
+
 export function normalizeAnnouncementType(value) {
   const normalized = String(value || '').trim().toLowerCase();
   return normalized === 'temporary' ? 'temporary' : 'update';
@@ -78,6 +86,22 @@ export function getAnnouncementSeverityMeta(value, locale = 'zh-CN') {
     value: severity,
     displayLabel: String(locale || '').toLowerCase().startsWith('en') ? meta.labelEn : meta.label,
   };
+}
+
+export function getMostImportantAnnouncement(announcements = []) {
+  return [...(Array.isArray(announcements) ? announcements : [])].sort((left, right) => {
+    const severityDiff = (
+      SEVERITY_IMPORTANCE[normalizeAnnouncementSeverity(right?.severity)]
+      - SEVERITY_IMPORTANCE[normalizeAnnouncementSeverity(left?.severity)]
+    );
+    if (severityDiff !== 0) return severityDiff;
+
+    const priorityDiff = Number(right?.priority || 0) - Number(left?.priority || 0);
+    if (priorityDiff !== 0) return priorityDiff;
+
+    return new Date(right?.updated_at || right?.created_at || 0)
+      - new Date(left?.updated_at || left?.created_at || 0);
+  })[0] || null;
 }
 
 export function splitSiteAnnouncements(announcements = []) {

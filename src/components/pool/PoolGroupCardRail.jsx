@@ -360,13 +360,24 @@ const PoolGroupCardRail = ({
   }, []);
 
   void tick;
-  const effectiveGroups = groups.map((group) => ({
-    ...group,
-    pools: group.pools.map((pool) => ({
+  const effectiveGroups = groups.map((group) => {
+    const pools = group.pools.map((pool) => ({
       ...pool,
       selectorTiming: getPoolTimingMeta(pool, new Date(), locale)
-    }))
-  }));
+    }));
+    const poolsById = new Map(pools.map((pool) => [pool.id, pool]));
+    return {
+      ...group,
+      pools,
+      versionFold: group.versionFold
+        ? {
+            ...group.versionFold,
+            directPools: group.versionFold.directPools.map((pool) => poolsById.get(pool.id) || pool),
+            foldedPools: group.versionFold.foldedPools.map((pool) => poolsById.get(pool.id) || pool),
+          }
+        : null,
+    };
+  });
 
   if (effectiveGroups.length === 0) {
     return null;
@@ -391,7 +402,9 @@ const PoolGroupCardRail = ({
         ) : null}
 
         {effectiveGroups.map((group) => {
-          const allowCollapse = collapsibleTypes.includes(group.type) && !group.disableCollapse;
+          const versionFoldEnabled = group.versionFold?.enabled === true && !group.disableCollapse;
+          const allowCollapse = versionFoldEnabled
+            || (collapsibleTypes.includes(group.type) && !group.disableCollapse);
           const expanded = expandedGroups.has(group.type);
           const hasSelectedPool = group.pools.some((pool) => pool.id === currentSelectionId);
           const isGroupCollapsed = collapsedGroupTypes.has(group.type);
@@ -408,7 +421,13 @@ const PoolGroupCardRail = ({
             visiblePools,
             hiddenPools,
             autoExpanded
-          } = allowCollapse
+          } = versionFoldEnabled
+            ? {
+                visiblePools: group.versionFold.directPools,
+                hiddenPools: group.versionFold.foldedPools,
+                autoExpanded: group.versionFold.foldedPools.some((pool) => pool.id === currentSelectionId),
+              }
+            : allowCollapse
             ? getSelectorVisiblePools({
                 pools: group.pools,
                 currentPoolId: currentSelectionId,

@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronDown, HelpCircle, Menu, Moon, Radio, Sun, User } from 'lucide-react';
 import { useI18n } from '../../i18n/index.js';
 import { useTheme } from '../../contexts/ThemeContext';
-import { usePoolStore, useHistoryStore } from '../../stores';
+import { usePoolStore } from '../../stores';
+import { usePersonalGameAccounts } from '../../hooks/app/usePersonalGameAccounts.js';
 import LocaleSwitcher from '../../components/common/LocaleSwitcher.jsx';
 import { getMobilePathForTab } from '../../constants/appRoutes.js';
 import { formatFreshnessRelative, getFreshnessTone } from '../../utils/dataFreshness.js';
@@ -41,13 +42,7 @@ export default function MobileHeader({ onMenuClick, activeTab }) {
 
   const currentGameUid = usePoolStore((state) => state.currentGameUid);
   const switchGameAccount = usePoolStore((state) => state.switchGameAccount);
-  const history = useHistoryStore((state) => state.history);
-  const getGameAccountsFromHistory = useHistoryStore((state) => state.getGameAccountsFromHistory);
-
-  const gameAccounts = useMemo(() => {
-    void history;
-    return getGameAccountsFromHistory();
-  }, [getGameAccountsFromHistory, history]);
+  const gameAccounts = usePersonalGameAccounts();
 
   const effectiveGameUid = useMemo(() => {
     const matchedAccount = gameAccounts.find((account) => isGameAccountSelectionMatch(account, currentGameUid));

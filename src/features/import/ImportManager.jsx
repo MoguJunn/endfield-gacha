@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Save, RefreshCw, HelpCircle, X, AlertCircle, CheckCircle, User, Cloud, CloudOff, Layers, Clock } from 'lucide-react';
-import { useAuthStore, useHistoryStore, usePoolStore } from '../../stores';
+import { useAuthStore, usePoolStore } from '../../stores';
 import {
   buildGameAccountKey,
   buildImportedGameAccountMetadataEntries,
@@ -10,7 +10,6 @@ import {
   isGameAccountSelectionMatch,
   saveGameAccountMetadata
 } from '../../utils/gameAccountMetadata.js';
-import { applyCloudDataToStores } from '../../utils/cloudDataSync.js';
 import { useCloudSync } from '../../hooks';
 import {
   loadAccountGachaSeqKeys,
@@ -225,11 +224,9 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
   const user = useAuthStore(state => state.user);
   const pools = usePoolStore(state => state.pools);
   const currentPoolId = usePoolStore(state => state.currentPoolId);
-  const setPools = usePoolStore(state => state.setPools);
   const switchPool = usePoolStore(state => state.switchPool);
   const switchGameAccount = usePoolStore(state => state.switchGameAccount);
-  const setHistory = useHistoryStore(state => state.setHistory);
-  const { loadCloudData } = useCloudSync({ showToast: () => {} });
+  const { refreshPersonalData } = useCloudSync({ showToast: () => {} });
   const accountSecurityState = accountSecuritySnapshot?.userId === user?.id
     ? accountSecuritySnapshot.state
     : null;
@@ -391,17 +388,19 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
 
       let cloudRefreshError = null;
       try {
-        const refreshedCloudData = await loadCloudData(user);
+        const refreshResult = await refreshPersonalData(user, {
+          kind: 'mutation',
+          reason: 'official_api_backend_import',
+          preferredPoolId: anomalyPoolIds[0] || currentPoolId,
+          preferredGameUid: importedAccountKey || importedGameUid,
+        });
+        if (!refreshResult.ok) {
+          throw refreshResult.error || new Error('导入后个人数据刷新失败');
+        }
+        const refreshedCloudData = refreshResult.data;
         if (isCompletionStale()) {
           return;
         }
-        applyCloudDataToStores(refreshedCloudData, {
-          setPools,
-          switchPool,
-          setHistory,
-          preferredPoolId: anomalyPoolIds[0] || currentPoolId,
-          preferredGameUid: importedAccountKey || importedGameUid
-        });
 
         if (importedAccountKey || importedGameUid) {
           switchGameAccount(importedAccountKey || importedGameUid);
@@ -554,14 +553,15 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
         userInfo: result.userInfo
       };
 
-      const refreshedCloudData = await loadCloudData(user);
-      applyCloudDataToStores(refreshedCloudData, {
-        setPools,
-        switchPool,
-        setHistory,
+      const refreshResult = await refreshPersonalData(user, {
+        kind: 'mutation',
+        reason: 'official_api_import',
         preferredPoolId: currentPoolId,
-        preferredGameUid: currentAccountKey || currentGameUid
+        preferredGameUid: currentAccountKey || currentGameUid,
       });
+      if (!refreshResult.ok) {
+        throw refreshResult.error || new Error('导入后个人数据刷新失败');
+      }
 
       if (currentAccountKey || currentGameUid) {
         switchGameAccount(currentAccountKey || currentGameUid);
@@ -586,7 +586,7 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
       setImportStatus(ImportStatus.ERROR);
       setErrorMessage(error.message || t('import.errorTitle'));
     }
-  }, [currentPoolId, getExistingSeqIds, loadCloudData, notifyBotImportUpdated, onClose, onImportComplete, persistImportedAccountMetadata, pools, saveHistoryToServer, savePoolsToServer, setHistory, setPools, switchGameAccount, switchPool, t, user]);
+  }, [currentPoolId, getExistingSeqIds, notifyBotImportUpdated, onClose, onImportComplete, persistImportedAccountMetadata, pools, refreshPersonalData, saveHistoryToServer, savePoolsToServer, switchGameAccount, t, user]);
 
   const handleReset = useCallback(() => {
     completionGenerationRef.current += 1;

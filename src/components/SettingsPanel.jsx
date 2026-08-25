@@ -11,6 +11,7 @@ import OAuthEmailMergeFlow from './settings/OAuthEmailMergeFlow.jsx';
 import UsernameEditDialog from './settings/UsernameEditDialog.jsx';
 import { useTheme } from '../contexts/ThemeContext';
 import { useCloudSync } from '../hooks/app';
+import { usePersonalGameAccounts } from '../hooks/app/usePersonalGameAccounts.js';
 import {
   AuthRateLimitError,
   isOAuthAccountCompletionRequired,
@@ -49,6 +50,7 @@ import {
   getGameAccountSelectionValue,
   isGameAccountSelectionMatch,
   localizeGameAccountServerTag,
+  resolveGameAccountServerTag,
 } from '../utils/gameAccountMetadata.js';
 import {
   ACCOUNT_SERVER_LABEL_OPTIONS,
@@ -148,10 +150,9 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
   const switchPool = usePoolStore(state => state.switchPool);
   const switchGameAccount = usePoolStore(state => state.switchGameAccount);
   const history = useHistoryStore(state => state.history);
-  const getGameAccountsFromHistory = useHistoryStore(state => state.getGameAccountsFromHistory);
   const setHistory = useHistoryStore(state => state.setHistory);
   const { themeMode, setThemeMode } = useTheme();
-  const { loadPublicPools } = useCloudSync({ showToast: () => {} });
+  const { loadPublicPools, refreshPersonalData } = useCloudSync({ showToast: () => {} });
   const [showUsernameModal, setShowUsernameModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showEmailModal, setShowEmailModal] = useState(false);
@@ -201,10 +202,7 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
 
   const userPoolCount = myPools.length;
   const userHistoryCount = myHistory.length;
-  const gameAccounts = useMemo(() => {
-    void history;
-    return getGameAccountsFromHistory();
-  }, [getGameAccountsFromHistory, history]);
+  const gameAccounts = usePersonalGameAccounts();
   const duplicateGameUidServerGroups = useMemo(
     () => buildDuplicateGameUidServerGroups(gameAccounts),
     [gameAccounts]
@@ -323,7 +321,7 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
   const handleAccountServerLabelChange = async (account, nextServerId) => {
     const accountValue = getGameAccountSelectionValue(account) || account?.gameUid || account?.game_uid;
     const nextOption = ACCOUNT_SERVER_LABEL_OPTIONS.find(option => option.serverId === nextServerId);
-    const currentLabel = localizeGameAccountServerTag(account, locale) || accountValue || '';
+    const currentLabel = localizeGameAccountServerTag(resolveGameAccountServerTag(account), locale) || accountValue || '';
     const nextLabel = nextOption ? t(nextOption.labelKey) : nextServerId;
 
     if (!window.confirm(t('settings.serverLabelConfirm', { current: currentLabel, next: nextLabel }))) {
@@ -333,13 +331,18 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
     setServerLabelError('');
     setServerLabelUpdatingAccount(accountValue);
     try {
-      await updateAccountServerLabel({
+      const result = await updateAccountServerLabel({
         account,
         nextServerId,
         history,
         setHistory,
         currentGameUid,
         switchGameAccount,
+      });
+      await refreshPersonalData(user, {
+        kind: 'mutation',
+        reason: 'server_label_update',
+        preferredGameUid: result.nextAccountValue,
       });
     } catch (error) {
       const message = error?.message === 'server_label_update_no_records'
@@ -370,7 +373,7 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
     setServerLabelError('');
     setServerLabelUpdatingAccount(loadingKey);
     try {
-      await updateAccountServerLabel({
+      const result = await updateAccountServerLabel({
         account: anchorAccount,
         nextServerId,
         history,
@@ -379,6 +382,11 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
         switchGameAccount,
         mergeGameUid: true,
         mergeAccounts: group.accounts,
+      });
+      await refreshPersonalData(user, {
+        kind: 'mutation',
+        reason: 'server_label_merge',
+        preferredGameUid: result.nextAccountValue,
       });
       setServerMergeSelections((prev) => {
         const next = { ...prev };
@@ -1103,7 +1111,7 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
                   </div>
                   <div className="mt-3 space-y-2">
                     {duplicateGameUidServerGroups.map((group) => {
-                      const selectedServerId = serverMergeSelections[group.gameUid] || group.defaultServerId || '';
+                      const selectedServerId = serverMergeSelections[group.gameUid] || '';
                       const loadingKey = `merge:${group.gameUid}`;
                       const isMerging = serverLabelUpdatingAccount === loadingKey;
 
@@ -1128,6 +1136,7 @@ const SettingsPanel = React.memo(({ onDeleteAllData }) => {
                               }))}
                               className="rounded-sm border border-amber-200 bg-white px-2 py-1 text-[10px] font-bold text-amber-900 outline-none disabled:opacity-60 dark:border-amber-500/30 dark:bg-zinc-900 dark:text-amber-100"
                             >
+                              <option value="" disabled>{t('settings.serverMergeSelectTarget')}</option>
                               {ACCOUNT_SERVER_LABEL_OPTIONS.map((option) => (
                                 <option key={option.serverId} value={option.serverId}>{t(option.labelKey)}</option>
                               ))}

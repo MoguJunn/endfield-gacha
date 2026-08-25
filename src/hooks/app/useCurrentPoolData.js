@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { DEFAULT_POOL_ID } from '../../constants';
 import { useAuthStore, useHistoryStore, usePoolStore } from '../../stores';
 import {
@@ -7,19 +7,15 @@ import {
   isPoolGroupId
 } from '../../stores/usePoolStore';
 import {
-  annotateInfoBookPulls,
   isFreeHistoryPull,
   isGiftHistoryPull
 } from '../../utils/historyInfoBook';
 import { normalizeIsStandard } from '../../utils';
 import { getPreferredPool } from '../../utils/poolSelectionUtils';
 import { buildPoolSelectorGroups, getPoolTypeLabel } from '../../utils/poolSelectorDisplay';
-import { compareHistoryTimelineAsc } from '../../utils/historyTimelineSort.js';
-import { fetchPoolRosterRecordsBatch, resolvePoolRosterBuckets } from '../../utils/poolRoster.js';
-import { filterHistoryForEffectiveGameUid, resolveEffectiveGameUid } from '../../utils/accountScopeUtils.js';
+import { getCachedHistoryIndex } from '../../utils/historyIndex.js';
 import { useI18n } from '../../i18n/index.js';
-
-const LIMITED_POOL_TYPES = new Set(['limited', 'limited_character']);
+import { usePoolRoster } from './usePoolRoster.js';
 
 function getPoolId(pool) {
   return pool?.id || pool?.pool_id || null;
@@ -34,53 +30,34 @@ function getHistoryRecordKey(item) {
   return value == null ? null : String(value);
 }
 
-function getHistorySeqId(item) {
-  return parseInt(item.seqId || item.seq_id || '0', 10) || 0;
+function normalizePoolId(value) {
+  if (value == null) {
+    return '';
+  }
+
+  return String(value).trim();
 }
 
-function sortByTimeline(a, b) {
-  const timelineDiff = compareHistoryTimelineAsc(a, b);
-  if (timelineDiff !== 0) {
-    return timelineDiff;
+export function selectPoolsForRosterScope({ pools = [], currentPoolId = null, locale } = {}) {
+  const poolsArray = Array.isArray(pools) ? pools : [];
+  const groupMode = isPoolGroupId(currentPoolId);
+  const selectedGroupType = groupMode ? getPoolGroupType(currentPoolId) : null;
+
+  if (groupMode) {
+    const orderedGroups = buildPoolSelectorGroups({ pools: poolsArray, locale });
+    if (selectedGroupType === 'all') {
+      return orderedGroups.flatMap((group) => group.pools);
+    }
+
+    return orderedGroups.find((group) => group.type === selectedGroupType)?.pools
+      || getPoolsForGroupType(poolsArray, selectedGroupType);
   }
 
-  return getHistorySeqId(a) - getHistorySeqId(b);
-}
-
-function normalizePoolType(type) {
-  if (type === 'extra') {
-    return 'extra';
-  }
-
-  if (type === 'limited_character') {
-    return 'limited';
-  }
-
-  if (type === 'limited_weapon') {
-    return 'weapon';
-  }
-
-  if (type === 'beginner') {
-    return 'standard';
-  }
-
-  return type;
-}
-
-function getRosterExpectedType(poolType) {
-  return poolType === 'weapon' ? 'weapon' : 'character';
-}
-
-function getRosterPoolType(poolType) {
-  if (poolType === 'weapon') {
-    return 'weapon';
-  }
-
-  if (poolType === 'limited' || poolType === 'extra') {
-    return 'limited';
-  }
-
-  return 'standard';
+  const preferredPool = getPreferredPool(poolsArray, {
+    preferredPoolId: currentPoolId,
+    includeDefaultPool: true,
+  });
+  return preferredPool ? [preferredPool] : [];
 }
 
 export function useCurrentPoolData() {
@@ -92,120 +69,44 @@ export function useCurrentPoolData() {
   const history = useHistoryStore(state => state.history);
 
   const rawPoolsArray = useMemo(() => (Array.isArray(pools) ? pools : []), [pools]);
-  const [poolRosterById, setPoolRosterById] = useState(() => new Map());
-  const historyArray = useMemo(() => (Array.isArray(history) ? history : []), [history]);
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadPoolRosters = async () => {
-      const rosterCandidates = rawPoolsArray.filter((pool) => getPoolId(pool));
-      if (rosterCandidates.length === 0) {
-        if (!cancelled) {
-          setPoolRosterById(new Map());
-        }
-        return;
-      }
-
-      const poolIds = rosterCandidates.map((pool) => getPoolId(pool)).filter(Boolean);
-      const recordsByPoolId = await fetchPoolRosterRecordsBatch(poolIds).catch(() => null);
-      const hasBatchRecords = recordsByPoolId instanceof Map;
-
-      const rosterEntries = await Promise.all(rosterCandidates.map(async (pool) => {
-        const poolId = getPoolId(pool);
-        const normalizedPoolType = normalizePoolType(pool?.type);
-        const currentUpName = pool?.up_character || pool?.upCharacter || null;
-        const roster = await resolvePoolRosterBuckets({
-          poolId,
-          expectedType: getRosterExpectedType(normalizedPoolType),
-          currentUpName,
-          poolType: getRosterPoolType(normalizedPoolType),
-          poolInfo: pool,
-          mergeStrategy: normalizedPoolType === 'limited' ? 'fill-missing' : 'append',
-          explicitRecords: hasBatchRecords ? (recordsByPoolId.get(poolId) || []) : null,
-          skipExplicitFetch: hasBatchRecords,
-        }).catch(() => null);
-
-        const featuredCharacters = Array.isArray(roster?.sixStar) ? roster.sixStar.filter(Boolean) : [];
-        return [
-          poolId,
-          featuredCharacters.length > 0
-            ? {
-                roster,
-              }
-            : null,
-        ];
-      }));
-
-      if (cancelled) {
-        return;
-      }
-
-      setPoolRosterById(new Map(rosterEntries.filter(([, value]) => Boolean(value))));
-    };
-
-    loadPoolRosters();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [rawPoolsArray]);
-
-  const poolsArray = useMemo(() => rawPoolsArray.map((pool) => {
-    const poolId = getPoolId(pool);
-    const rosterMeta = poolId ? poolRosterById.get(poolId) : null;
-    if (!rosterMeta) {
-      return pool;
-    }
-
-    return {
-      ...pool,
-      resolved_roster: rosterMeta.roster,
-    };
-  }), [poolRosterById, rawPoolsArray]);
-
-  const ownedHistoryArray = useMemo(() => {
-    if (!user?.id) {
-      return [];
-    }
-
-    return historyArray.filter((item) => item.user_id === user.id);
-  }, [historyArray, user?.id]);
-  const effectiveGameUid = useMemo(() => resolveEffectiveGameUid({
+  const historyIndex = useMemo(() => getCachedHistoryIndex({
+    history,
+    pools: rawPoolsArray,
+    userId: user?.id || null,
     currentGameUid,
-    historyRecords: ownedHistoryArray,
-  }), [currentGameUid, ownedHistoryArray]);
+  }), [currentGameUid, history, rawPoolsArray, user?.id]);
+  const {
+    historyArray,
+    annotatedAccountHistoryArray,
+    sortedAccountHistoryArray,
+    historyByPoolId,
+    poolById,
+    allLimitedHistory,
+  } = historyIndex;
   const hasMergedAccountView = false;
-  const accountHistoryArray = useMemo(() => {
-    if (!user?.id) {
-      return [];
-    }
-
-    return filterHistoryForEffectiveGameUid(ownedHistoryArray, effectiveGameUid);
-  }, [effectiveGameUid, ownedHistoryArray, user?.id]);
-  const annotatedAccountHistoryArray = useMemo(
-    () => annotateInfoBookPulls(accountHistoryArray, poolsArray),
-    [accountHistoryArray, poolsArray]
-  );
-
   const isGroupMode = isPoolGroupId(currentPoolId);
   const groupType = isGroupMode ? getPoolGroupType(currentPoolId) : null;
-  const selectedPools = useMemo(() => {
-    if (isGroupMode) {
-      const orderedGroups = buildPoolSelectorGroups({ pools: poolsArray, locale });
-
-      if (groupType === 'all') {
-        return orderedGroups.flatMap((group) => group.pools);
-      }
-
-      return orderedGroups.find((group) => group.type === groupType)?.pools || getPoolsForGroupType(poolsArray, groupType);
-    }
-
-    const preferredPool = getPreferredPool(poolsArray, {
-      preferredPoolId: currentPoolId,
-      includeDefaultPool: true
-    });
-    return preferredPool ? [preferredPool] : [];
-  }, [currentPoolId, groupType, isGroupMode, locale, poolsArray]);
+  const selectedScopePools = useMemo(() => selectPoolsForRosterScope({
+    pools: rawPoolsArray,
+    currentPoolId,
+    locale,
+  }), [currentPoolId, locale, rawPoolsArray]);
+  const poolRosterById = usePoolRoster({
+    pools: selectedScopePools,
+    enabled: selectedScopePools.length > 0,
+  });
+  const selectedPools = useMemo(() => selectedScopePools.map((pool) => {
+    const rosterMeta = poolRosterById.get(normalizePoolId(getPoolId(pool)));
+    return rosterMeta
+      ? { ...pool, resolved_roster: rosterMeta.roster }
+      : pool;
+  }), [poolRosterById, selectedScopePools]);
+  const poolsArray = useMemo(() => rawPoolsArray.map((pool) => {
+    const rosterMeta = poolRosterById.get(normalizePoolId(getPoolId(pool)));
+    return rosterMeta
+      ? { ...pool, resolved_roster: rosterMeta.roster }
+      : pool;
+  }), [poolRosterById, rawPoolsArray]);
 
   const currentPool = useMemo(() => {
     if (isGroupMode) {
@@ -240,10 +141,7 @@ export function useCurrentPoolData() {
       };
     }
 
-    const preferredPool = getPreferredPool(poolsArray, {
-      preferredPoolId: currentPoolId,
-      includeDefaultPool: true
-    });
+    const preferredPool = selectedPools[0];
     if (preferredPool) {
       return preferredPool;
     }
@@ -254,7 +152,7 @@ export function useCurrentPoolData() {
       type: 'limited',
       locked: false
     };
-  }, [currentPoolId, groupType, isGroupMode, locale, poolsArray, t]);
+  }, [currentPoolId, groupType, isGroupMode, locale, selectedPools, t]);
 
   const currentPoolHistory = useMemo(() => {
     if (!user?.id) {
@@ -268,9 +166,7 @@ export function useCurrentPoolData() {
           .filter(Boolean)
       );
 
-      return annotatedAccountHistoryArray
-        .filter(item => groupPoolIds.has(getHistoryPoolId(item)))
-        .sort(sortByTimeline);
+      return sortedAccountHistoryArray.filter(item => groupPoolIds.has(getHistoryPoolId(item)));
     }
 
     const activePoolId = currentPool?.id || currentPoolId;
@@ -278,21 +174,13 @@ export function useCurrentPoolData() {
       return [];
     }
 
-    return annotatedAccountHistoryArray
-      .filter(item => getHistoryPoolId(item) === activePoolId)
-      .sort(sortByTimeline);
-  }, [annotatedAccountHistoryArray, currentPool?.id, currentPoolId, isGroupMode, selectedPools, user?.id]);
+    return historyByPoolId.get(activePoolId) || [];
+  }, [currentPool?.id, currentPoolId, historyByPoolId, isGroupMode, selectedPools, sortedAccountHistoryArray, user?.id]);
 
   const normalizedCurrentPoolHistory = useMemo(() => {
     if (isGroupMode) {
-      const poolMap = new Map(
-        poolsArray
-          .map(pool => [getPoolId(pool), pool])
-          .filter(([poolId]) => Boolean(poolId))
-      );
-
       return currentPoolHistory.map(item => {
-        const pool = poolMap.get(getHistoryPoolId(item));
+        const pool = poolById.get(getHistoryPoolId(item));
         return {
           ...item,
           isStandard: normalizeIsStandard(item, pool?.type, pool?.up_character)
@@ -304,24 +192,7 @@ export function useCurrentPoolData() {
       ...item,
       isStandard: normalizeIsStandard(item, currentPool?.type, currentPool?.up_character)
     }));
-  }, [currentPool?.type, currentPool?.up_character, currentPoolHistory, isGroupMode, poolsArray]);
-
-  const allLimitedHistory = useMemo(() => {
-    if (!user?.id) {
-      return [];
-    }
-
-    const limitedPoolIds = new Set(
-      poolsArray
-        .filter(pool => LIMITED_POOL_TYPES.has(pool.type))
-        .map(pool => getPoolId(pool))
-        .filter(Boolean)
-    );
-
-    return annotatedAccountHistoryArray
-      .filter(item => limitedPoolIds.has(getHistoryPoolId(item)))
-      .sort(sortByTimeline);
-  }, [annotatedAccountHistoryArray, poolsArray, user?.id]);
+  }, [currentPool?.type, currentPool?.up_character, currentPoolHistory, isGroupMode, poolById]);
 
   const crossPoolPityMap = useMemo(() => {
     if (allLimitedHistory.length === 0) {

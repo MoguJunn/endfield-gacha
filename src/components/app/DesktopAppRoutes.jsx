@@ -1,9 +1,10 @@
 import React, { Suspense, lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import DesktopDashboardWorkspace from './DesktopDashboardWorkspace';
 import { useI18n } from '../../i18n/index.js';
+import PersonalDataBoundary from './PersonalDataBoundary.jsx';
 
 const HomePage = lazy(() => import('../home/HomePage'));
+const DesktopDashboardWorkspace = lazy(() => import('./DesktopDashboardWorkspace'));
 const GachaSimulator = lazy(() => import('../../features/simulator/GachaSimulator'));
 const SummaryView = lazy(() => import('../SummaryView'));
 const AdminPanel = lazy(() => import('../AdminPanel'));
@@ -29,6 +30,7 @@ export default function DesktopAppRoutes({
   userRole,
   authResolved,
   showToast,
+  onRetryPersonalData,
   isSuperAdmin,
   currentPool,
   canEdit,
@@ -68,34 +70,39 @@ export default function DesktopAppRoutes({
         path="summary"
         element={
           <Suspense fallback={<TabPanelFallback label={tt('正在加载统计...', 'Loading summary...')} />}>
-            <SummaryView />
+            <PersonalDataBoundary user={user} onRetry={onRetryPersonalData}>
+              <SummaryView />
+            </PersonalDataBoundary>
           </Suspense>
         }
       />
       <Route
         path="dashboard"
         element={
-          <DesktopDashboardWorkspace
-            user={user}
-            showToast={showToast}
-            canEdit={canEdit}
-            canEditCurrentPool={canEditCurrentPool}
-            currentPool={currentPool}
-            editItemState={editItemState}
-            setEditItemState={setEditItemState}
-            handleUpdateItem={handleUpdateItem}
-            handleDeleteItem={handleDeleteItem}
-            handleDeleteGroup={handleDeleteGroup}
-            openImportWizard={openImportWizard}
-            handleExportJSON={handleExportJSON}
-            handleExportCSV={handleExportCSV}
-            handleExportEndfieldGachaUserDataZip={handleExportEndfieldGachaUserDataZip}
-            handleExportEndfieldGachaHelperJSON={handleExportEndfieldGachaHelperJSON}
-            handleExportEndfieldGachaHelperCSV={handleExportEndfieldGachaHelperCSV}
-            handleExportEndfieldGachaHelperUserDataZip={handleExportEndfieldGachaHelperUserDataZip}
-            handleExportEndgachaKwerTopPlainJSON={handleExportEndgachaKwerTopPlainJSON}
-            handleExportEndgachaKwerTopPlainTXT={handleExportEndgachaKwerTopPlainTXT}
-          />
+          <Suspense fallback={<TabPanelFallback label={tt('正在加载卡池工作台...', 'Loading gacha workspace...')} />}>
+            <DesktopDashboardWorkspace
+              user={user}
+              showToast={showToast}
+              onRetryPersonalData={onRetryPersonalData}
+              canEdit={canEdit}
+              canEditCurrentPool={canEditCurrentPool}
+              currentPool={currentPool}
+              editItemState={editItemState}
+              setEditItemState={setEditItemState}
+              handleUpdateItem={handleUpdateItem}
+              handleDeleteItem={handleDeleteItem}
+              handleDeleteGroup={handleDeleteGroup}
+              openImportWizard={openImportWizard}
+              handleExportJSON={handleExportJSON}
+              handleExportCSV={handleExportCSV}
+              handleExportEndfieldGachaUserDataZip={handleExportEndfieldGachaUserDataZip}
+              handleExportEndfieldGachaHelperJSON={handleExportEndfieldGachaHelperJSON}
+              handleExportEndfieldGachaHelperCSV={handleExportEndfieldGachaHelperCSV}
+              handleExportEndfieldGachaHelperUserDataZip={handleExportEndfieldGachaHelperUserDataZip}
+              handleExportEndgachaKwerTopPlainJSON={handleExportEndgachaKwerTopPlainJSON}
+              handleExportEndgachaKwerTopPlainTXT={handleExportEndgachaKwerTopPlainTXT}
+            />
+          </Suspense>
         }
       />
       <Route

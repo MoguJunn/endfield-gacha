@@ -12,7 +12,8 @@ const DIGEST_MAX_DAYS = 15;
 const DIGEST_MIN_RECORDS = 5;
 const DIGEST_MAX_RECORDS = 18;
 const DIGEST_INPUT_TEXT_MAX_LENGTH = 320;
-const DIGEST_OUTPUT_MAX_TOKENS = 360;
+const DIGEST_OUTPUT_MAX_TOKENS = 720;
+const DIGEST_OUTPUT_RETRY_MAX_TOKENS = 8192;
 const DIGEST_FORBIDDEN_FALLBACK_HINT = '近7天游戏公告不足';
 
 function normalizeText(value) {
@@ -267,18 +268,7 @@ async function summarizeDigestWithLlm(records, {
     throw new Error('Announcement LLM API key is not configured');
   }
 
-  const response = await fetchImpl(config.url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.model,
-      temperature: 0.2,
-      max_tokens: DIGEST_OUTPUT_MAX_TOKENS,
-      stream: false,
-      messages: [
+  const messages = [
         {
           role: 'system',
           content: [
@@ -309,25 +299,50 @@ async function summarizeDigestWithLlm(records, {
             '请直接输出一行纯 JSON，绝不要包含 ```json、Markdown 或任何多余字符。',
           ].join('\n'),
         },
-      ],
-    }),
-  });
+      ];
 
-  if (!response.ok) {
-    const errorText = typeof response.text === 'function'
-      ? truncateText(await response.text().catch(() => ''), 240)
-      : '';
-    throw new Error(`Announcement digest LLM returned ${response.status}${errorText ? `: ${errorText}` : ''}`);
+  const requestDigest = async (maxTokens) => {
+    const response = await fetchImpl(config.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: config.model,
+        temperature: 0.2,
+        max_tokens: maxTokens,
+        response_format: { type: 'json_object' },
+        stream: false,
+        messages,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = typeof response.text === 'function'
+        ? truncateText(await response.text().catch(() => ''), 240)
+        : '';
+      throw new Error(`Announcement digest LLM returned ${response.status}${errorText ? `: ${errorText}` : ''}`);
+    }
+
+    const payload = await response.json();
+    const choice = payload?.choices?.[0];
+    const finishReason = normalizeText(choice?.finish_reason || choice?.finishReason).toLowerCase();
+    return {
+      content: choice?.message?.content,
+      truncated: finishReason.includes('length') || finishReason.includes('max_token'),
+    };
+  };
+
+  const initialResult = await requestDigest(DIGEST_OUTPUT_MAX_TOKENS);
+  const result = initialResult.truncated
+    ? await requestDigest(DIGEST_OUTPUT_RETRY_MAX_TOKENS)
+    : initialResult;
+  if (result.truncated) {
+    throw new Error('Announcement digest LLM response was truncated after retry');
   }
 
-  const payload = await response.json();
-  const choice = payload?.choices?.[0];
-  const finishReason = normalizeText(choice?.finish_reason || choice?.finishReason).toLowerCase();
-  if (finishReason.includes('length') || finishReason.includes('max_token')) {
-    throw new Error('Announcement digest LLM response was truncated');
-  }
-
-  return parseDigestJson(choice?.message?.content);
+  return parseDigestJson(result.content);
 }
 
 function normalizeStoredDigestValue(value) {

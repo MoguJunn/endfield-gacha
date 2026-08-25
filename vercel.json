@@ -90,6 +90,10 @@
       "schedule": "20 2 * * *"
     },
     {
+      "path": "/api/personal-analysis-worker",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/summer-lottery-contact-retention",
       "schedule": "35 3 * * *"
     }

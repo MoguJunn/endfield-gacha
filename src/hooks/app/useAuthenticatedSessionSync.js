@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useRef } from 'react';
-import { useAuthStore, useHistoryStore, usePoolStore } from '../../stores';
-import { applyCloudDataToStores } from '../../utils/cloudDataSync';
+import { useCallback } from 'react';
+import {
+  useAuthStore,
+  useHistoryStore,
+  usePersonalAnalysisStore,
+  usePersonalDataStore,
+  usePoolStore,
+} from '../../stores';
+import { classifyAuthEvent } from '../../utils/authEventClassifier.js';
 import appLogger from '../../utils/appLogger.js';
 
 export function canUsePrivateCloudDataFromSiteSession(siteSession, fallbackUser = null) {
@@ -11,71 +17,91 @@ export function canUsePrivateCloudDataFromSiteSession(siteSession, fallbackUser 
   return Boolean(fallbackUser);
 }
 
-export function useAuthenticatedSessionSync({ loadCloudData }) {
+function createSkippedResult(classification) {
+  return {
+    ok: true,
+    data: null,
+    error: null,
+    stale: false,
+    applied: false,
+    skipped: true,
+    classification,
+  };
+}
+
+export function useAuthenticatedSessionSync({
+  refreshPersonalData,
+  onUpdateLastSeen,
+} = {}) {
   const setUser = useAuthStore(state => state.setUser);
   const setAuthResolved = useAuthStore(state => state.setAuthResolved);
   const setPools = usePoolStore(state => state.setPools);
-  const switchPool = usePoolStore(state => state.switchPool);
+  const restoreOwnerSelection = usePoolStore(state => state.restoreOwnerSelection);
+  const switchGameAccount = usePoolStore(state => state.switchGameAccount);
   const setHistory = useHistoryStore(state => state.setHistory);
 
-  const currentPoolIdRef = useRef(usePoolStore.getState().currentPoolId);
-  const currentGameUidRef = useRef(usePoolStore.getState().currentGameUid);
-
-  useEffect(() => {
-    const unsubscribe = usePoolStore.subscribe(
-      (state, previousState) => {
-        if (state.currentPoolId !== previousState?.currentPoolId) {
-          currentPoolIdRef.current = state.currentPoolId;
-        }
-      }
-    );
-    return unsubscribe;
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = usePoolStore.subscribe(
-      (state, previousState) => {
-        if (state.currentGameUid !== previousState?.currentGameUid) {
-          currentGameUidRef.current = state.currentGameUid;
-        }
-      }
-    );
-    return unsubscribe;
-  }, []);
-
   const applyAuthenticatedSession = useCallback(async (targetUser, {
+    event = 'SIGNED_IN',
     canLoadPrivateCloudData = true,
     source = 'auth',
+    refreshKind = null,
     isMountedRef = { current: true },
   } = {}) => {
     if (!targetUser?.id || !isMountedRef.current) {
       return null;
     }
 
+    const previousPersonalState = usePersonalDataStore.getState();
+    const classification = classifyAuthEvent({
+      event,
+      source,
+      currentOwnerId: previousPersonalState.ownerId,
+      nextUser: targetUser,
+      hasSnapshot: previousPersonalState.hasSnapshot,
+      refreshKind,
+    });
+
+    if (classification.ownerChanged || classification.isFirstOwner) {
+      previousPersonalState.switchOwner(targetUser.id);
+      setHistory([]);
+      usePersonalAnalysisStore.getState().clearAnalysis('owner_changed');
+      setPools(usePersonalDataStore.getState().publicPools);
+      restoreOwnerSelection(targetUser.id);
+    }
+
     setUser(targetUser);
     setAuthResolved(true);
 
-    if (!canLoadPrivateCloudData || typeof loadCloudData !== 'function') {
-      return null;
+    if (classification.shouldUpdateLastSeen && typeof onUpdateLastSeen === 'function') {
+      void onUpdateLastSeen(targetUser, classification);
     }
 
-    const cloudData = await loadCloudData(targetUser).catch((error) => {
-      appLogger.warn?.(`[useAuthenticatedSessionSync] ${source} 云端数据加载失败:`, error);
-      return null;
-    });
-    if (!isMountedRef.current) {
-      return cloudData;
+    if (
+      !canLoadPrivateCloudData
+      || !classification.shouldRefreshPersonalData
+      || typeof refreshPersonalData !== 'function'
+    ) {
+      return createSkippedResult(classification);
     }
 
-    applyCloudDataToStores(cloudData, {
-      setPools,
-      switchPool,
-      setHistory,
-      preferredPoolId: currentPoolIdRef.current,
-      preferredGameUid: currentGameUidRef.current
+    const poolState = usePoolStore.getState();
+    const result = await refreshPersonalData(targetUser, {
+      kind: classification.refreshKind,
+      reason: `${source}:${classification.classification}`,
+      preferredPoolId: poolState.currentPoolId,
+      preferredGameUid: poolState.currentGameUid,
     });
-    return cloudData;
-  }, [loadCloudData, setAuthResolved, setHistory, setPools, setUser, switchPool]);
+    if (!result?.ok && !result?.stale) {
+      appLogger.warn?.(
+        `[useAuthenticatedSessionSync] ${source} 个人数据加载失败:`,
+        result?.error
+      );
+    }
+    return {
+      ...result,
+      classification,
+    };
+  }, [onUpdateLastSeen, refreshPersonalData, restoreOwnerSelection, setAuthResolved, setHistory, setPools, setUser]);
 
   const applySiteSession = useCallback(async (siteSession, {
     source = 'site_session',
@@ -86,15 +112,37 @@ export function useAuthenticatedSessionSync({ loadCloudData }) {
     }
 
     return applyAuthenticatedSession(siteSession.user, {
+      event: 'SITE_SESSION_SYNC',
       canLoadPrivateCloudData: canUsePrivateCloudDataFromSiteSession(siteSession, siteSession.user),
       source,
       isMountedRef,
     });
   }, [applyAuthenticatedSession]);
 
+  const applySignedOut = useCallback(({ source = 'auth', event = 'SIGNED_OUT' } = {}) => {
+    const previousPersonalState = usePersonalDataStore.getState();
+    const classification = classifyAuthEvent({
+      event,
+      source,
+      currentOwnerId: previousPersonalState.ownerId,
+      nextOwnerId: null,
+      hasSnapshot: previousPersonalState.hasSnapshot,
+    });
+
+    previousPersonalState.clearOwner(`${source}:${classification.classification}`);
+    usePersonalAnalysisStore.getState().clearAnalysis(`${source}:${classification.classification}`);
+    setUser(null);
+    setAuthResolved(true);
+    setHistory([]);
+    setPools(usePersonalDataStore.getState().publicPools);
+    switchGameAccount(null);
+    return classification;
+  }, [setAuthResolved, setHistory, setPools, setUser, switchGameAccount]);
+
   return {
     applyAuthenticatedSession,
     applySiteSession,
+    applySignedOut,
   };
 }
 

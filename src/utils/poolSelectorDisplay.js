@@ -222,12 +222,112 @@ function sortPoolsForDisplay(pools, referenceDate, locale = getAppLocale()) {
     }));
 }
 
+function getPoolVersionStartTime(pool) {
+  return normalizeDateInput(
+    pool?.start_time
+    || pool?.startTime
+    || pool?.startDate
+  )?.getTime() || NaN;
+}
+
+function getVersionTime(version, key) {
+  const value = key === 'start'
+    ? (version?.startsAt || version?.starts_at)
+    : (version?.endsAt || version?.ends_at);
+  return normalizeDateInput(value)?.getTime() || NaN;
+}
+
+export function resolvePoolSelectorVersionId(pool, versionTimeline = []) {
+  const versions = Array.isArray(versionTimeline) ? versionTimeline : [];
+  const poolId = String(pool?.id || pool?.pool_id || '').trim();
+  if (!poolId || versions.length === 0) {
+    return null;
+  }
+
+  const explicitMatches = versions.filter((version) => (
+    Array.isArray(version?.poolIds || version?.pool_ids)
+    && (version.poolIds || version.pool_ids).map(String).includes(poolId)
+  ));
+  if (explicitMatches.length === 1) {
+    return explicitMatches[0].id || null;
+  }
+  if (explicitMatches.length > 1) {
+    return null;
+  }
+
+  const poolStartTime = getPoolVersionStartTime(pool);
+  if (!Number.isFinite(poolStartTime)) {
+    return null;
+  }
+
+  const timeMatches = versions.filter((version, index) => {
+    const startsAt = getVersionTime(version, 'start');
+    const explicitEndAt = getVersionTime(version, 'end');
+    const nextStartsAt = getVersionTime(versions[index + 1], 'start');
+    const endsAt = Number.isFinite(explicitEndAt) ? explicitEndAt : nextStartsAt;
+    return Number.isFinite(startsAt)
+      && poolStartTime >= startsAt
+      && (!Number.isFinite(endsAt) || poolStartTime < endsAt);
+  });
+
+  return timeMatches.length === 1 ? timeMatches[0].id || null : null;
+}
+
+export function buildPoolSelectorVersionFold({
+  pools = [],
+  groupType = '',
+  versionTimeline = [],
+  latestVersionLimit = 2,
+  disabled = false,
+} = {}) {
+  const poolList = Array.isArray(pools) ? pools : [];
+  const versions = Array.isArray(versionTimeline) ? versionTimeline : [];
+  const supportsVersionFold = groupType === 'limited' || groupType === 'weapon_limited';
+  if (disabled || !supportsVersionFold || versions.length === 0 || latestVersionLimit < 1) {
+    return {
+      enabled: false,
+      directPools: poolList,
+      foldedPools: [],
+      recentVersionIds: [],
+    };
+  }
+
+  const versionRank = new Map(versions.map((version, index) => [version.id, index]));
+  const assignments = poolList.map((pool) => ({
+    pool,
+    versionId: resolvePoolSelectorVersionId(pool, versions),
+  }));
+  const recentVersionIds = [...new Set(assignments.map(({ versionId }) => versionId).filter(Boolean))]
+    .sort((left, right) => (versionRank.get(right) ?? -1) - (versionRank.get(left) ?? -1))
+    .slice(0, latestVersionLimit);
+  const recentVersions = new Set(recentVersionIds);
+  const directPools = [];
+  const foldedPools = [];
+
+  assignments.forEach(({ pool, versionId }) => {
+    if (!versionId || recentVersions.has(versionId)) {
+      directPools.push(pool);
+    } else {
+      foldedPools.push(pool);
+    }
+  });
+
+  return {
+    enabled: foldedPools.length > 0,
+    directPools,
+    foldedPools,
+    recentVersionIds,
+  };
+}
+
 export function buildPoolSelectorGroups({
   pools,
   poolPullCounts = {},
   searchQuery = '',
   referenceDate = new Date(),
-  locale = getAppLocale()
+  locale = getAppLocale(),
+  versionTimeline = [],
+  latestVersionLimit = 2,
 }) {
   const filteredPools = (Array.isArray(pools) ? pools : []).filter((pool) => matchesQuery(pool, searchQuery, locale));
   const grouped = {
@@ -258,13 +358,21 @@ export function buildPoolSelectorGroups({
         return null;
       }
 
+      const disableCollapse = Boolean(searchQuery?.trim());
       return {
         type: groupType,
         label: getPoolTypeLabel(groupType, locale),
         groupId: getPoolGroupId(groupType),
         totalPulls: orderedPools.reduce((sum, pool) => sum + (pool.pullCount || 0), 0),
-        disableCollapse: Boolean(searchQuery?.trim()),
-        pools: orderedPools
+        disableCollapse,
+        pools: orderedPools,
+        versionFold: buildPoolSelectorVersionFold({
+          pools: orderedPools,
+          groupType,
+          versionTimeline,
+          latestVersionLimit,
+          disabled: disableCollapse,
+        }),
       };
     })
     .filter(Boolean);

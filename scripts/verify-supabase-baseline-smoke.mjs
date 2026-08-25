@@ -226,6 +226,712 @@ SELECT 'weapon_avg_target=' || COALESCE(((public.get_global_stats())::jsonb -> '
 `.trim();
 }
 
+function buildPersonalAnalysisScopeRevisionFixtureSql() {
+  return `
+DO $fixture$
+DECLARE
+  v_user_id UUID := '00000000-0000-0000-0000-000000000001';
+  v_cascade_user_id UUID := '00000000-0000-0000-0000-000000000002';
+  v_revision BIGINT;
+  v_revision_before BIGINT;
+BEGIN
+  INSERT INTO public.history (
+    user_id,
+    record_id,
+    pool_id,
+    rarity,
+    is_standard,
+    item_name,
+    timestamp,
+    game_uid,
+    seq_id,
+    server_id,
+    region,
+    pity,
+    batch_id
+  ) VALUES
+    (
+      v_user_id,
+      'revision-record-1',
+      'revision-pool',
+      4,
+      FALSE,
+      'Revision fixture 1',
+      '2026-08-04T12:00:00.000Z',
+      'revision-game',
+      '1',
+      '1',
+      'cn',
+      1,
+      'revision-batch-1'
+    ),
+    (
+      v_user_id,
+      'revision-record-2',
+      'revision-pool',
+      4,
+      FALSE,
+      'Revision fixture 2',
+      '2026-08-04T12:01:00.000Z',
+      'revision-game',
+      '2',
+      '1',
+      'cn',
+      2,
+      'revision-batch-1'
+    );
+
+  SELECT history_revision
+  INTO v_revision
+  FROM public.personal_analysis_scope_state
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'revision-game'
+    AND server_scope = '1';
+
+  IF v_revision <> 1 THEN
+    RAISE EXCEPTION 'analysis_scope_insert_revision_expected_1_got_%', v_revision;
+  END IF;
+
+  UPDATE public.history
+  SET
+    batch_id = 'revision-derived-only'
+  WHERE user_id = v_user_id
+    AND game_uid = 'revision-game'
+    AND server_scope = '1';
+
+  SELECT history_revision
+  INTO v_revision
+  FROM public.personal_analysis_scope_state
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'revision-game'
+    AND server_scope = '1';
+
+  IF v_revision <> 1 THEN
+    RAISE EXCEPTION 'analysis_scope_derived_update_changed_revision_%', v_revision;
+  END IF;
+
+  UPDATE public.history
+  SET pity = pity + 1
+  WHERE user_id = v_user_id
+    AND game_uid = 'revision-game'
+    AND server_scope = '1';
+
+  SELECT history_revision
+  INTO v_revision
+  FROM public.personal_analysis_scope_state
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'revision-game'
+    AND server_scope = '1';
+
+  IF v_revision <> 2 THEN
+    RAISE EXCEPTION 'analysis_scope_pity_update_revision_expected_2_got_%', v_revision;
+  END IF;
+
+  UPDATE public.history
+  SET rarity = 5
+  WHERE user_id = v_user_id
+    AND record_id = 'revision-record-1';
+
+  SELECT history_revision
+  INTO v_revision
+  FROM public.personal_analysis_scope_state
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'revision-game'
+    AND server_scope = '1';
+
+  IF v_revision <> 3 THEN
+    RAISE EXCEPTION 'analysis_scope_input_update_revision_expected_3_got_%', v_revision;
+  END IF;
+
+  UPDATE public.history
+  SET
+    server_id = '2',
+    region = 'intl'
+  WHERE user_id = v_user_id
+    AND record_id = 'revision-record-1';
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.personal_analysis_scope_state
+    WHERE user_id = v_user_id
+      AND scope_game_uid = 'revision-game'
+      AND server_scope = '1'
+      AND history_revision = 4
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM public.personal_analysis_scope_state
+    WHERE user_id = v_user_id
+      AND scope_game_uid = 'revision-game'
+      AND server_scope = '2'
+      AND history_revision = 1
+  ) THEN
+    RAISE EXCEPTION 'analysis_scope_move_did_not_invalidate_old_and_new_scopes';
+  END IF;
+
+  DELETE FROM public.history
+  WHERE user_id = v_user_id
+    AND record_id = 'revision-record-1';
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.personal_analysis_scope_state
+    WHERE user_id = v_user_id
+      AND scope_game_uid = 'revision-game'
+      AND server_scope = '2'
+      AND history_revision = 2
+  ) THEN
+    RAISE EXCEPTION 'analysis_scope_delete_revision_not_incremented';
+  END IF;
+
+  SELECT history_revision
+  INTO v_revision_before
+  FROM public.personal_analysis_scope_state
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'revision-game'
+    AND server_scope = '1';
+
+  INSERT INTO public.history (
+    user_id,
+    record_id,
+    pool_id,
+    rarity,
+    is_standard,
+    item_name,
+    timestamp,
+    game_uid,
+    seq_id,
+    server_id,
+    region
+  ) VALUES
+    (
+      v_user_id,
+      'revision-record-2',
+      'revision-pool',
+      5,
+      FALSE,
+      'Revision fixture 2 updated',
+      '2026-08-04T12:01:00.000Z',
+      'revision-game',
+      '2',
+      '1',
+      'cn'
+    ),
+    (
+      v_user_id,
+      'revision-record-3',
+      'revision-pool',
+      4,
+      FALSE,
+      'Revision fixture 3',
+      '2026-08-04T12:02:00.000Z',
+      'revision-game',
+      '3',
+      '1',
+      'cn'
+    )
+  ON CONFLICT ON CONSTRAINT history_user_game_server_scope_pool_seq_unique
+  DO UPDATE SET
+    rarity = EXCLUDED.rarity,
+    item_name = EXCLUDED.item_name;
+
+  SELECT history_revision
+  INTO v_revision
+  FROM public.personal_analysis_scope_state
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'revision-game'
+    AND server_scope = '1';
+
+  IF v_revision <= v_revision_before THEN
+    RAISE EXCEPTION 'analysis_scope_mixed_upsert_did_not_advance_revision';
+  END IF;
+
+  INSERT INTO auth.users (id, email)
+  VALUES (v_cascade_user_id, 'scope-cascade@example.com');
+
+  INSERT INTO public.history (
+    user_id,
+    record_id,
+    pool_id,
+    rarity,
+    game_uid,
+    seq_id,
+    server_id
+  ) VALUES (
+    v_cascade_user_id,
+    'cascade-record-1',
+    'cascade-pool',
+    4,
+    'cascade-game',
+    '1',
+    '1'
+  );
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.personal_analysis_scope_state
+    WHERE user_id = v_cascade_user_id
+      AND scope_game_uid = 'cascade-game'
+      AND server_scope = '1'
+  ) THEN
+    RAISE EXCEPTION 'analysis_scope_cascade_fixture_state_missing';
+  END IF;
+
+  DELETE FROM auth.users
+  WHERE id = v_cascade_user_id;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.profiles
+    WHERE id = v_cascade_user_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM public.history
+    WHERE user_id = v_cascade_user_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM public.personal_analysis_scope_state
+    WHERE user_id = v_cascade_user_id
+  ) OR EXISTS (
+    SELECT 1
+    FROM public.personal_analysis_owner_state
+    WHERE user_id = v_cascade_user_id
+  ) THEN
+    RAISE EXCEPTION 'analysis_scope_cascade_delete_left_rows';
+  END IF;
+
+  IF NOT has_table_privilege(
+    'authenticated',
+    'public.personal_analysis_scope_state',
+    'SELECT'
+  ) OR has_table_privilege(
+    'authenticated',
+    'public.personal_analysis_scope_state',
+    'INSERT'
+  ) OR has_table_privilege(
+    'anon',
+    'public.personal_analysis_scope_state',
+    'SELECT'
+  ) OR NOT has_table_privilege(
+    'service_role',
+    'public.personal_analysis_scope_state',
+    'UPDATE'
+  ) THEN
+    RAISE EXCEPTION 'analysis_scope_state_privileges_invalid';
+  END IF;
+END;
+$fixture$;
+
+SELECT 'personal_analysis_scope_revisions=ok';
+`.trim();
+}
+
+function buildPersonalAnalysisSnapshotQueueFixtureSql() {
+  return `
+DO $fixture$
+DECLARE
+  v_user_id UUID := '00000000-0000-0000-0000-000000000001';
+  v_lease_id UUID := '00000000-0000-0000-0000-000000000174';
+  v_backfill JSONB;
+  v_claimed JSONB;
+  v_owner_revision BIGINT;
+  v_scope_revision BIGINT;
+  v_published BOOLEAN;
+  v_failed BOOLEAN;
+  v_retry_state JSONB;
+BEGIN
+  DELETE FROM public.personal_analysis_owner_state
+  WHERE user_id = v_user_id;
+
+  DELETE FROM public.personal_analysis_scope_state
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'revision-game'
+    AND server_scope = '1';
+
+  SELECT public.enqueue_personal_analysis_backfill(NULL, 100)
+  INTO v_backfill;
+
+  IF (v_backfill ->> 'processedUsers')::INTEGER < 1
+    OR NOT EXISTS (
+      SELECT 1
+      FROM public.personal_analysis_owner_state
+      WHERE user_id = v_user_id
+        AND history_revision = 1
+        AND snapshot_revision = -1
+    )
+    OR NOT EXISTS (
+      SELECT 1
+      FROM public.personal_analysis_scope_state
+      WHERE user_id = v_user_id
+        AND scope_game_uid = 'revision-game'
+        AND server_scope = '1'
+        AND history_revision = 1
+        AND snapshot_revision = -1
+    )
+  THEN
+    RAISE EXCEPTION 'personal_analysis_backfill_failed: %', v_backfill;
+  END IF;
+
+  SELECT public.claim_personal_analysis_jobs(v_lease_id, 50, 180)
+  INTO v_claimed;
+
+  IF jsonb_array_length(v_claimed -> 'ownerJobs') < 1
+    OR jsonb_array_length(v_claimed -> 'scopeJobs') < 1
+  THEN
+    RAISE EXCEPTION 'personal_analysis_claim_failed: %', v_claimed;
+  END IF;
+
+  SELECT history_revision
+  INTO v_owner_revision
+  FROM public.personal_analysis_owner_state
+  WHERE user_id = v_user_id;
+
+  SELECT public.publish_personal_analysis_owner_snapshot(
+    v_user_id,
+    v_owner_revision,
+    1,
+    jsonb_build_object(
+      'defaultAccountKey', 'revision-game::server:1',
+      'accounts', jsonb_build_array(jsonb_build_object(
+        'accountKey', 'revision-game::server:1'
+      )),
+      'summary', jsonb_build_object('total', 3)
+    ),
+    v_lease_id
+  )
+  INTO v_published;
+
+  IF v_published IS NOT TRUE THEN
+    RAISE EXCEPTION 'personal_analysis_owner_publish_failed';
+  END IF;
+
+  SELECT history_revision
+  INTO v_scope_revision
+  FROM public.personal_analysis_scope_state
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'revision-game'
+    AND server_scope = '1';
+
+  SELECT public.publish_personal_analysis_scope_snapshots(
+    v_user_id,
+    'revision-game',
+    '1',
+    v_scope_revision,
+    1,
+    jsonb_build_array(jsonb_build_object(
+      'scopeKey', 'revision-game::server:1',
+      'payload', jsonb_build_object(
+        'account', jsonb_build_object('accountKey', 'revision-game::server:1'),
+        'selector', jsonb_build_object('totalPulls', 3),
+        'dashboard', jsonb_build_object('views', '{}'::JSONB)
+      )
+    )),
+    v_lease_id
+  )
+  INTO v_published;
+
+  IF v_published IS NOT TRUE
+    OR NOT EXISTS (
+      SELECT 1
+      FROM public.personal_analysis_snapshots
+      WHERE user_id = v_user_id
+        AND scope_kind = 'owner'
+        AND scope_key = 'owner'
+        AND input_revision = v_owner_revision
+    )
+    OR NOT EXISTS (
+      SELECT 1
+      FROM public.personal_analysis_snapshots
+      WHERE user_id = v_user_id
+        AND scope_kind = 'account'
+        AND scope_key = 'revision-game::server:1'
+        AND source_game_uid = 'revision-game'
+        AND source_server_scope = '1'
+        AND input_revision = v_scope_revision
+    )
+  THEN
+    RAISE EXCEPTION 'personal_analysis_revision_safe_publish_failed';
+  END IF;
+
+  SELECT history_revision
+  INTO v_scope_revision
+  FROM public.personal_analysis_scope_state
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'revision-game'
+    AND server_scope = '2';
+
+  INSERT INTO public.history (
+    user_id,
+    record_id,
+    pool_id,
+    rarity,
+    game_uid,
+    seq_id,
+    server_id,
+    region
+  ) VALUES (
+    v_user_id,
+    'revision-stale-publish',
+    'revision-pool',
+    4,
+    'revision-game',
+    '99',
+    '2',
+    'intl'
+  );
+
+  SELECT public.publish_personal_analysis_scope_snapshots(
+    v_user_id,
+    'revision-game',
+    '2',
+    v_scope_revision,
+    1,
+    jsonb_build_array(jsonb_build_object(
+      'scopeKey', 'revision-game::server:2',
+      'payload', jsonb_build_object('selector', jsonb_build_object('totalPulls', 1))
+    )),
+    v_lease_id
+  )
+  INTO v_published;
+
+  IF v_published IS NOT FALSE
+    OR EXISTS (
+      SELECT 1
+      FROM public.personal_analysis_snapshots
+      WHERE user_id = v_user_id
+        AND scope_kind = 'account'
+        AND scope_key = 'revision-game::server:2'
+    )
+  THEN
+    RAISE EXCEPTION 'personal_analysis_stale_publish_was_not_rejected';
+  END IF;
+
+  UPDATE public.personal_analysis_scope_state
+  SET
+    lease_id = v_lease_id,
+    lease_expires_at = statement_timestamp() + INTERVAL '50 seconds'
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'revision-game'
+    AND server_scope = '2';
+
+  SELECT public.fail_personal_analysis_job(
+    'scope',
+    v_user_id,
+    'revision-game',
+    '2',
+    v_lease_id,
+    'fixture_failure'
+  ) INTO v_failed;
+
+  SELECT to_jsonb(state_row)
+  INTO v_retry_state
+  FROM public.personal_analysis_scope_state AS state_row
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'revision-game'
+    AND server_scope = '2';
+
+  IF v_failed IS NOT TRUE OR NOT (
+    SELECT
+      attempt_count = 1
+      AND next_attempt_at > statement_timestamp()
+      AND lease_id IS NULL
+    FROM public.personal_analysis_scope_state
+    WHERE user_id = v_user_id
+      AND scope_game_uid = 'revision-game'
+      AND server_scope = '2'
+  ) THEN
+    RAISE EXCEPTION 'personal_analysis_failure_backoff_not_recorded: failed=%, state=%',
+      v_failed,
+      v_retry_state;
+  END IF;
+
+  UPDATE public.personal_analysis_scope_state
+  SET history_revision = history_revision + 1
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'revision-game'
+    AND server_scope = '2';
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.personal_analysis_scope_state
+    WHERE user_id = v_user_id
+      AND scope_game_uid = 'revision-game'
+      AND server_scope = '2'
+      AND attempt_count = 0
+      AND next_attempt_at IS NULL
+  ) THEN
+    RAISE EXCEPTION 'personal_analysis_new_revision_did_not_reset_backoff';
+  END IF;
+
+  IF NOT has_table_privilege(
+    'authenticated',
+    'public.personal_analysis_snapshots',
+    'SELECT'
+  ) OR has_table_privilege(
+    'authenticated',
+    'public.personal_analysis_snapshots',
+    'INSERT'
+  ) OR has_table_privilege(
+    'anon',
+    'public.personal_analysis_snapshots',
+    'SELECT'
+  ) OR has_function_privilege(
+    'authenticated',
+    'public.claim_personal_analysis_jobs(uuid,integer,integer)',
+    'EXECUTE'
+  ) OR NOT has_function_privilege(
+    'service_role',
+    'public.claim_personal_analysis_jobs(uuid,integer,integer)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'personal_analysis_snapshot_privileges_invalid';
+  END IF;
+
+  -- Keep this fixture isolated from the legacy global-stat assertions that
+  -- run after it. Snapshot/state rows may remain; only raw history affects
+  -- those aggregate expectations.
+  DELETE FROM public.history
+  WHERE user_id = v_user_id
+    AND pool_id = 'revision-pool';
+END;
+$fixture$;
+
+SELECT 'personal_analysis_snapshot_queue=ok';
+`.trim();
+}
+
+function buildPersonalAnalysisCatalogInvalidationFixtureSql() {
+  return `
+DO $fixture$
+DECLARE
+  v_user_id UUID := '00000000-0000-0000-0000-000000000001';
+  v_scope_before BIGINT;
+  v_owner_before BIGINT;
+  v_scope_after BIGINT;
+  v_owner_after BIGINT;
+BEGIN
+  SELECT history_revision
+  INTO v_scope_before
+  FROM public.personal_analysis_scope_state
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'legacy'
+    AND server_scope = 'legacy';
+
+  SELECT history_revision
+  INTO v_owner_before
+  FROM public.personal_analysis_owner_state
+  WHERE user_id = v_user_id;
+
+  UPDATE public.pools
+  SET up_character = '目录失效测试目标'
+  WHERE pool_id = 'limited_pool';
+
+  SELECT history_revision
+  INTO v_scope_after
+  FROM public.personal_analysis_scope_state
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'legacy'
+    AND server_scope = 'legacy';
+
+  SELECT history_revision
+  INTO v_owner_after
+  FROM public.personal_analysis_owner_state
+  WHERE user_id = v_user_id;
+
+  IF v_scope_after <> v_scope_before + 1
+    OR v_owner_after <> v_owner_before + 1
+  THEN
+    RAISE EXCEPTION 'personal_analysis_pool_catalog_invalidation_failed';
+  END IF;
+
+  UPDATE public.pools
+  SET up_character = '目标A'
+  WHERE pool_id = 'limited_pool';
+
+  INSERT INTO public.characters (
+    id,
+    name,
+    rarity,
+    type,
+    aliases,
+    is_limited
+  ) VALUES (
+    'catalog-invalidation-character',
+    '目录失效测试角色',
+    4,
+    'character',
+    ARRAY[]::TEXT[],
+    FALSE
+  );
+
+  UPDATE public.history
+  SET
+    character_id = 'catalog-invalidation-character',
+    character_name = '目录失效测试角色'
+  WHERE user_id = v_user_id
+    AND record_id = 'limited-001';
+
+  SELECT history_revision
+  INTO v_scope_before
+  FROM public.personal_analysis_scope_state
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'legacy'
+    AND server_scope = 'legacy';
+
+  SELECT history_revision
+  INTO v_owner_before
+  FROM public.personal_analysis_owner_state
+  WHERE user_id = v_user_id;
+
+  UPDATE public.characters
+  SET is_limited = TRUE
+  WHERE id = 'catalog-invalidation-character';
+
+  SELECT history_revision
+  INTO v_scope_after
+  FROM public.personal_analysis_scope_state
+  WHERE user_id = v_user_id
+    AND scope_game_uid = 'legacy'
+    AND server_scope = 'legacy';
+
+  SELECT history_revision
+  INTO v_owner_after
+  FROM public.personal_analysis_owner_state
+  WHERE user_id = v_user_id;
+
+  IF v_scope_after <> v_scope_before + 1
+    OR v_owner_after <> v_owner_before + 1
+  THEN
+    RAISE EXCEPTION 'personal_analysis_character_catalog_invalidation_failed';
+  END IF;
+
+  UPDATE public.history
+  SET
+    character_id = NULL,
+    character_name = NULL
+  WHERE user_id = v_user_id
+    AND record_id = 'limited-001';
+
+  DELETE FROM public.characters
+  WHERE id = 'catalog-invalidation-character';
+
+  IF has_function_privilege(
+    'authenticated',
+    'public.invalidate_personal_analysis_dependencies(text[],text[],text[])',
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'anon',
+    'public.invalidate_personal_analysis_dependencies(text[],text[],text[])',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'personal_analysis_catalog_invalidation_privileges_invalid';
+  END IF;
+END;
+$fixture$;
+
+SELECT 'personal_analysis_catalog_invalidation=ok';
+`.trim();
+}
+
 function buildOfficialImportCommitFixtureSql() {
   return `
 DO $fixture$
@@ -469,6 +1175,42 @@ async function main() {
       ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName],
       { input: `${buildTargetIntervalFixtureSql()}\n` }
     );
+
+    const personalAnalysisScopeVerification = await run(
+      'docker',
+      ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName, '-At'],
+      { input: `${buildPersonalAnalysisScopeRevisionFixtureSql()}\n` }
+    );
+
+    if (!personalAnalysisScopeVerification.stdout.includes('personal_analysis_scope_revisions=ok')) {
+      throw new Error(
+        `Personal analysis scope verification returned incomplete output:\n${personalAnalysisScopeVerification.stdout}`
+      );
+    }
+
+    const personalAnalysisSnapshotQueueVerification = await run(
+      'docker',
+      ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName, '-At'],
+      { input: `${buildPersonalAnalysisSnapshotQueueFixtureSql()}\n` }
+    );
+
+    if (!personalAnalysisSnapshotQueueVerification.stdout.includes('personal_analysis_snapshot_queue=ok')) {
+      throw new Error(
+        `Personal analysis snapshot queue verification returned incomplete output:\n${personalAnalysisSnapshotQueueVerification.stdout}`
+      );
+    }
+
+    const personalAnalysisCatalogInvalidationVerification = await run(
+      'docker',
+      ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName, '-At'],
+      { input: `${buildPersonalAnalysisCatalogInvalidationFixtureSql()}\n` }
+    );
+
+    if (!personalAnalysisCatalogInvalidationVerification.stdout.includes('personal_analysis_catalog_invalidation=ok')) {
+      throw new Error(
+        `Personal analysis catalog invalidation verification returned incomplete output:\n${personalAnalysisCatalogInvalidationVerification.stdout}`
+      );
+    }
 
     const officialImportVerification = await run(
       'docker',

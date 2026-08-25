@@ -17,6 +17,8 @@ import { APP_BUILD_INFO, APP_VERSION_LABEL } from '../../constants/appMeta';
 import { useI18n } from '../../i18n/index.js';
 import { resolveSiteLegalConfig } from '../../utils/siteLegalConfig.js';
 import { MobileSectionTitle, MobileStickyHeader } from '../components/ux/MobilePrimitives.jsx';
+import AiCollaboratorGrid from '../../components/about/AiCollaboratorGrid.jsx';
+import { FEATURED_SUPPORTER } from '../../constants/donations.js';
 
 function MobileAboutSection({ title, icon, children }) {
   return (
@@ -108,8 +110,8 @@ function MobileAboutView() {
           <div className="relative">
             <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-[1rem] border border-zinc-300 bg-zinc-200 dark:border-zinc-600 dark:bg-zinc-700">
               <img
-                src="/neptune.jpg"
-                alt="Neptune"
+                src={FEATURED_SUPPORTER.avatarUrl}
+                alt={FEATURED_SUPPORTER.name}
                 className="h-full w-full object-cover"
                 loading="lazy"
               />
@@ -117,8 +119,8 @@ function MobileAboutView() {
             <div className="absolute -bottom-1 -right-1 h-3 w-3 border border-white bg-green-500 dark:border-zinc-900" />
           </div>
           <div className="min-w-0 flex-1">
-            <h4 className="text-sm font-bold uppercase text-slate-900 dark:text-zinc-100">Neptune</h4>
-            <p className="mt-1 font-mono text-[10px] uppercase text-slate-500 dark:text-zinc-400">{t('about.neptuneRole')}</p>
+            <h4 className="text-sm font-bold uppercase text-slate-900 dark:text-zinc-100">{FEATURED_SUPPORTER.name}</h4>
+            <p className="mt-1 font-mono text-[10px] uppercase text-slate-500 dark:text-zinc-400">{t(FEATURED_SUPPORTER.roleKey)}</p>
           </div>
         </div>
 
@@ -127,56 +129,7 @@ function MobileAboutView() {
             <Bot size={12} />
             {t('about.aiSection')}
           </p>
-          <div className="space-y-3">
-            <div className="rounded-[1.05rem] border border-zinc-200 bg-zinc-50/75 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-              <div className="flex items-start gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.9rem] border border-[#D97757] bg-[#D97757] text-white">
-                  <span className="font-serif text-xs font-bold italic">Cl</span>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h5 className="text-xs font-bold uppercase text-slate-800 dark:text-zinc-200">Claude</h5>
-                    <span className="bg-orange-900/30 px-1.5 py-0.5 font-mono text-[9px] font-bold text-orange-400">OPUS</span>
-                  </div>
-                  <p className="mt-1 text-[9px] uppercase tracking-wide text-slate-500 dark:text-zinc-400">{t('about.ai.claudeFocus')}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-[1.05rem] border border-zinc-200 bg-zinc-50/75 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-              <div className="flex items-start gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.9rem] border border-[#1A73E8] bg-[#1A73E8] text-white">
-                  <span className="font-sans text-xs font-bold">Ge</span>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h5 className="text-xs font-bold uppercase text-slate-800 dark:text-zinc-200">Gemini</h5>
-                    <span className="bg-blue-900/30 px-1.5 py-0.5 font-mono text-[9px] font-bold text-blue-400">1.5 PRO</span>
-                  </div>
-                  <p className="mt-1 text-[9px] uppercase tracking-wide text-slate-500 dark:text-zinc-400">{t('about.ai.geminiFocus')}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-[1.05rem] border border-zinc-200 bg-zinc-50/75 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-              <div className="flex items-start gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.9rem] border border-zinc-200 bg-white text-black dark:border-zinc-800 dark:bg-black dark:text-white">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M7.5 8.5 4.5 12l3 3.5" />
-                    <path d="M16.5 8.5 19.5 12l-3 3.5" />
-                    <path d="M13.5 6 10.5 18" />
-                  </svg>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h5 className="text-xs font-bold uppercase text-slate-800 dark:text-zinc-200">Codex</h5>
-                    <span className="bg-zinc-700 px-1.5 py-0.5 font-mono text-[9px] font-bold text-zinc-200">GPT-5</span>
-                  </div>
-                  <p className="mt-1 text-[9px] uppercase tracking-wide text-slate-500 dark:text-zinc-400">{t('about.ai.codexFocus')}</p>
-                </div>
-              </div>
-            </div>
-          </div>
+          <AiCollaboratorGrid mobile />
         </div>
       </MobileAboutSection>
 

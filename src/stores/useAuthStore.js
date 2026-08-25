@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { supabase } from '../supabaseClient.js';
 import { logoutSiteSession } from '../services/siteSessionService.js';
+import { clearPrivateFeatureCaches } from '../services/privateFeatureCacheRegistry.js';
+import usePersonalAnalysisStore from './usePersonalAnalysisStore.js';
+import usePersonalDataStore from './usePersonalDataStore.js';
 
 /**
  * 认证状态管理
@@ -12,18 +15,36 @@ const useAuthStore = create((set) => ({
   userRole: null, // 'user' | 'admin' | 'super_admin'
   authResolved: false,
 
-  setUser: (user) => set((state) => ({
-    user,
-    lastSyncAt: user ? state.lastSyncAt : null
-  })),
+  setUser: (user) => set((state) => {
+    if (state.user?.id && state.user.id !== user?.id) {
+      clearPrivateFeatureCaches();
+    }
+    return {
+      user,
+      lastSyncAt: user ? state.lastSyncAt : null
+    };
+  }),
   setUserRole: (role) => set({ userRole: role }),
   setAuthResolved: (value) => set({ authResolved: Boolean(value) }),
 
-  login: (user, role) => set({ user, userRole: role, authResolved: true }),
-  logout: () => set({ user: null, userRole: null, authResolved: true, syncing: false, syncError: null, lastSyncAt: null }),
+  login: (user, role) => set((state) => {
+    if (state.user?.id && state.user.id !== user?.id) {
+      clearPrivateFeatureCaches();
+    }
+    return { user, userRole: role, authResolved: true };
+  }),
+  logout: () => {
+    clearPrivateFeatureCaches();
+    usePersonalDataStore.getState().clearOwner('auth_store_logout');
+    usePersonalAnalysisStore.getState().clearAnalysis('auth_store_logout');
+    set({ user: null, userRole: null, authResolved: true, syncing: false, syncError: null, lastSyncAt: null });
+  },
 
   /** 完整登出：清除 Supabase 会话 + Zustand 状态 */
   signOut: async () => {
+    clearPrivateFeatureCaches();
+    usePersonalDataStore.getState().clearOwner('auth_store_sign_out');
+    usePersonalAnalysisStore.getState().clearAnalysis('auth_store_sign_out');
     await logoutSiteSession();
     if (supabase) {
       await supabase.auth.signOut();

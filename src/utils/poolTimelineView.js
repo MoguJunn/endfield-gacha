@@ -130,20 +130,28 @@ function formatPrimaryDropLabel(item, fallback = null, locale = getAppLocale()) 
   return label || fallback || (isEnglishLocale(locale) ? 'Unknown target' : '未知目标');
 }
 
-function getAvatarUrl(name) {
+function resolveTimelineCharacterFromCache(name) {
+  return name ? characterCache.searchByName(name, false) : null;
+}
+
+function getAvatarUrl(name, resolveCharacter = resolveTimelineCharacterFromCache) {
   if (!name) {
     return null;
   }
 
-  return characterCache.searchByName(name, false)?.avatar_url || null;
+  return resolveCharacter(name, { fuzzy: false })?.avatar_url || null;
 }
 
-function isActuallyLimited(item) {
+function isActuallyLimited(item, resolveCharacter = resolveTimelineCharacterFromCache) {
   const characterName = item?.item_name || item?.character_name || item?.characterName || item?.name || '';
-  return Boolean(characterCache.searchByName(characterName, false)?.is_limited);
+  return Boolean(resolveCharacter(characterName, { fuzzy: false })?.is_limited);
 }
 
-function createDropBadges(items, locale = getAppLocale()) {
+function createDropBadges(
+  items,
+  locale = getAppLocale(),
+  resolveCharacter = resolveTimelineCharacterFromCache
+) {
   const badgeMap = new Map();
 
   items.forEach((item) => {
@@ -159,7 +167,10 @@ function createDropBadges(items, locale = getAppLocale()) {
       label,
       rarity: Number(item?.rarity) || 0,
       count: 1,
-      avatarUrl: getAvatarUrl(item?.item_name || item?.character_name || item?.characterName || item?.name),
+      avatarUrl: getAvatarUrl(
+        item?.item_name || item?.character_name || item?.characterName || item?.name,
+        resolveCharacter
+      ),
     });
   });
 
@@ -178,7 +189,12 @@ function createDropBadges(items, locale = getAppLocale()) {
     .slice(0, 4);
 }
 
-function createLeadBadge(item, fallbackLabel = '?', locale = getAppLocale()) {
+function createLeadBadge(
+  item,
+  fallbackLabel = '?',
+  locale = getAppLocale(),
+  resolveCharacter = resolveTimelineCharacterFromCache
+) {
   if (!item) {
     return {
       label: fallbackLabel,
@@ -193,7 +209,10 @@ function createLeadBadge(item, fallbackLabel = '?', locale = getAppLocale()) {
     label,
     rarity: Number(item?.rarity) || 0,
     count: 1,
-    avatarUrl: getAvatarUrl(item?.item_name || item?.character_name || item?.characterName || item?.name),
+    avatarUrl: getAvatarUrl(
+      item?.item_name || item?.character_name || item?.characterName || item?.name,
+      resolveCharacter
+    ),
   };
 }
 
@@ -236,14 +255,19 @@ function formatBadgeSummary(badges = [], locale = getAppLocale()) {
     .join(' / ');
 }
 
-function formatSecondarySixStarNames(items = [], locale = getAppLocale()) {
+function formatSecondarySixStarNames(
+  items = [],
+  locale = getAppLocale(),
+  resolveCharacter = resolveTimelineCharacterFromCache
+) {
   if (!Array.isArray(items) || items.length === 0) {
     return '';
   }
 
   const badges = createDropBadges(
     items.filter((item) => Number(item?.rarity) >= 6),
-    locale
+    locale,
+    resolveCharacter
   );
   if (badges.length === 0) {
     return '';
@@ -263,12 +287,17 @@ function formatSecondarySixStarNames(items = [], locale = getAppLocale()) {
   return `${labels.slice(0, 2).join(' / ')}${formatRepeatedCount(items.length, locale)}`;
 }
 
-function formatSecondarySegment(prefix, items = [], locale = getAppLocale()) {
+function formatSecondarySegment(
+  prefix,
+  items = [],
+  locale = getAppLocale(),
+  resolveCharacter = resolveTimelineCharacterFromCache
+) {
   if (!Array.isArray(items) || items.length === 0) {
     return null;
   }
 
-  const names = formatSecondarySixStarNames(items, locale);
+  const names = formatSecondarySixStarNames(items, locale, resolveCharacter);
   if (!names) {
     return `${prefix}${items.length}`;
   }
@@ -276,7 +305,7 @@ function formatSecondarySegment(prefix, items = [], locale = getAppLocale()) {
   return `${prefix}${names}`;
 }
 
-function classifySixStarStageKind(item) {
+function classifySixStarStageKind(item, resolveCharacter = resolveTimelineCharacterFromCache) {
   if (!item || Number(item?.rarity) < 6) {
     return 'generic';
   }
@@ -285,7 +314,7 @@ function classifySixStarStageKind(item) {
     return 'up';
   }
 
-  return isActuallyLimited(item) ? 'offLimited' : 'offStandard';
+  return isActuallyLimited(item, resolveCharacter) ? 'offLimited' : 'offStandard';
 }
 
 function mergeBadgeItems(...groups) {
@@ -422,7 +451,11 @@ function calculateTimelineMetrics(history = [], { poolType = 'standard', crossPo
   };
 }
 
-function summarizeGroup(group = []) {
+function summarizeGroup(
+  group = [],
+  locale = getAppLocale(),
+  resolveCharacter = resolveTimelineCharacterFromCache
+) {
   const sixStars = group.filter((item) => Number(item?.rarity) >= 6);
   const fiveStars = group.filter((item) => Number(item?.rarity) === 5);
   const highRarityItems = group.filter((item) => Number(item?.rarity) >= 5);
@@ -432,8 +465,12 @@ function summarizeGroup(group = []) {
   const hasGiftPulls = group.some((item) => isGiftHistoryPull(item));
   const hasInfoBook = group.some((item) => isInfoBookHistoryPull(item));
   const upSixStars = sixStars.filter((item) => item?.isStandard !== true);
-  const offLimitedSixStars = sixStars.filter((item) => item?.isStandard === true && isActuallyLimited(item));
-  const offStandardSixStars = sixStars.filter((item) => item?.isStandard === true && !isActuallyLimited(item));
+  const offLimitedSixStars = sixStars.filter((item) => (
+    item?.isStandard === true && isActuallyLimited(item, resolveCharacter)
+  ));
+  const offStandardSixStars = sixStars.filter((item) => (
+    item?.isStandard === true && !isActuallyLimited(item, resolveCharacter)
+  ));
   const primarySixStar = sixStars.length > 0 ? sixStars[sixStars.length - 1] : null;
   const primaryHighRarity = highRarityItems.length > 0 ? highRarityItems[highRarityItems.length - 1] : null;
   const timestampSource = primarySixStar || primaryHighRarity || group[group.length - 1] || group[0] || null;
@@ -455,7 +492,7 @@ function summarizeGroup(group = []) {
     primarySixStar,
     primaryHighRarity,
     highRarityItems,
-    dropBadges: createDropBadges(highRarityItems),
+    dropBadges: createDropBadges(highRarityItems, locale, resolveCharacter),
     groupSize: group.length,
     timestamp: timestampSource?.timestamp || timestampSource?.gacha_time || null,
     primaryBatchKey: getHistoryBatchKey(primarySixStar || primaryHighRarity),
@@ -479,7 +516,12 @@ function resolveGiftHighlightStageKind(summary) {
   return 'gift';
 }
 
-function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
+function buildMilestoneSummary(
+  summary,
+  poolType,
+  locale = getAppLocale(),
+  resolveCharacter = resolveTimelineCharacterFromCache
+) {
   const english = isEnglishLocale(locale);
   if (summary.hasGift) {
     const stageLabel = summary.hasFreePulls
@@ -493,8 +535,8 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
       : english
         ? 'Gift Node'
         : '赠送节点';
-    const allBadges = createDropBadges(summary.highRarityItems, locale);
-    const sixStarBadges = createDropBadges(summary.sixStars, locale);
+    const allBadges = createDropBadges(summary.highRarityItems, locale, resolveCharacter);
+    const sixStarBadges = createDropBadges(summary.sixStars, locale, resolveCharacter);
     const highlightStageKind = resolveGiftHighlightStageKind(summary);
     return {
       stageLabel,
@@ -505,12 +547,12 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
       highlightStageKind,
       highestRarity: Number(summary.primaryHighRarity?.rarity) || 0,
       leadBadge: summary.hasSixStar
-        ? createLeadBadge(summary.primarySixStar, '?', locale)
-        : createLeadBadge(summary.primaryHighRarity, '?', locale),
+        ? createLeadBadge(summary.primarySixStar, '?', locale, resolveCharacter)
+        : createLeadBadge(summary.primaryHighRarity, '?', locale, resolveCharacter),
     };
   }
 
-  const primaryStageKind = classifySixStarStageKind(summary.primarySixStar);
+  const primaryStageKind = classifySixStarStageKind(summary.primarySixStar, resolveCharacter);
   const primaryLabel = formatPrimaryDropLabel(
     summary.primarySixStar,
     formatPrimaryDropLabel(summary.primaryHighRarity, null, locale),
@@ -527,22 +569,32 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
       tags: [],
       stageKind: primaryStageKind === 'offLimited' ? 'offLimited' : 'offStandard',
       highestRarity: 6,
-      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale),
+      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale, resolveCharacter),
     };
   }
 
   const secondarySegments = [];
   if (summary.upSixStars.length > 0 && primaryStageKind !== 'up') {
-    secondarySegments.push(formatSecondarySegment('UP ', summary.upSixStars, locale));
+    secondarySegments.push(formatSecondarySegment('UP ', summary.upSixStars, locale, resolveCharacter));
   }
   if (summary.offLimitedSixStars.length > 0 && primaryStageKind !== 'offLimited') {
     secondarySegments.push(
-      formatSecondarySegment(english ? 'Off Limited ' : '歪限定', summary.offLimitedSixStars, locale)
+      formatSecondarySegment(
+        english ? 'Off Limited ' : '歪限定',
+        summary.offLimitedSixStars,
+        locale,
+        resolveCharacter
+      )
     );
   }
   if (summary.offStandardSixStars.length > 0 && primaryStageKind !== 'offStandard') {
     secondarySegments.push(
-      formatSecondarySegment(english ? 'Off Standard ' : '歪常驻', summary.offStandardSixStars, locale)
+      formatSecondarySegment(
+        english ? 'Off Standard ' : '歪常驻',
+        summary.offStandardSixStars,
+        locale,
+        resolveCharacter
+      )
     );
   }
   const secondarySummary =
@@ -561,7 +613,7 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
       tags: ['UP'],
       stageKind: 'up',
       highestRarity: 6,
-      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale),
+      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale, resolveCharacter),
     };
   }
 
@@ -574,7 +626,7 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
       tags: [english ? 'Off-rate' : '偏移'],
       stageKind: 'offLimited',
       highestRarity: 6,
-      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale),
+      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale, resolveCharacter),
     };
   }
 
@@ -587,7 +639,7 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
       tags: [english ? 'Off-rate' : '歪'],
       stageKind: 'offStandard',
       highestRarity: 6,
-      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale),
+      leadBadge: createLeadBadge(summary.primarySixStar, '?', locale, resolveCharacter),
     };
   }
 
@@ -598,7 +650,7 @@ function buildMilestoneSummary(summary, poolType, locale = getAppLocale()) {
     tags: [],
     stageKind: 'generic',
     highestRarity: Number(summary.primaryHighRarity?.rarity) || 0,
-    leadBadge: createLeadBadge(summary.primaryHighRarity, '?', locale),
+    leadBadge: createLeadBadge(summary.primaryHighRarity, '?', locale, resolveCharacter),
   };
 }
 
@@ -616,7 +668,8 @@ function buildCurrentStageEntry(
   currentPityValue,
   supportItems = [],
   currentTargetPullsOverride,
-  locale = getAppLocale()
+  locale = getAppLocale(),
+  resolveCharacter = resolveTimelineCharacterFromCache
 ) {
   const english = isEnglishLocale(locale);
   const targetLabel = english ? '6★ milestone' : '6★ 节点';
@@ -624,7 +677,8 @@ function buildCurrentStageEntry(
   const normalizedType = normalizePoolType(pool?.type);
   const supportBadges = createDropBadges(
     supportItems.filter((item) => Number(item?.rarity) === 5),
-    locale
+    locale,
+    resolveCharacter
   );
 
   return {
@@ -659,7 +713,8 @@ function buildCurrentStageEntry(
       null,
       localizePoolFeaturedName(pool, { locale }) ||
         localizeEntityName(pool?.up_character || pool?.upCharacter || '?', { locale }),
-      locale
+      locale,
+      resolveCharacter
     ),
     dropBadges: supportBadges,
     highestRarity: supportBadges.some((badge) => Number(badge?.rarity) >= 5) ? 5 : 0,
@@ -675,6 +730,7 @@ function buildStageEntries({
   crossPoolPityMap,
   showCurrentStage = true,
   locale = getAppLocale(),
+  resolveCharacter = resolveTimelineCharacterFromCache,
 }) {
   const ascendingGroups = buildOrderedTimelineGroups(history);
   const stages = [];
@@ -682,12 +738,12 @@ function buildStageEntries({
   let pendingSupportItems = [];
 
   ascendingGroups.forEach((group) => {
-    const summary = summarizeGroup(group);
+    const summary = summarizeGroup(group, locale, resolveCharacter);
     pendingPaidCount += summary.paidCount;
     const normalizedType = normalizePoolType(pool?.type);
 
     if (summary.hasGift) {
-      const milestone = buildMilestoneSummary(summary, normalizedType, locale);
+      const milestone = buildMilestoneSummary(summary, normalizedType, locale, resolveCharacter);
       stages.push({
         id: `${pool?.id || 'pool'}-stage-${stages.length + 1}`,
         stageKind: milestone.stageKind,
@@ -705,9 +761,10 @@ function buildStageEntries({
             summary.primaryHighRarity,
             localizePoolFeaturedName(pool, { locale }) ||
               localizeEntityName(pool?.up_character || pool?.upCharacter || '?', { locale }),
-            locale
+            locale,
+            resolveCharacter
           ),
-        dropBadges: createDropBadges(summary.highRarityItems, locale),
+        dropBadges: createDropBadges(summary.highRarityItems, locale, resolveCharacter),
         highlightStageKind: milestone.highlightStageKind || milestone.stageKind,
         highestRarity: milestone.highestRarity || Number(summary.primaryHighRarity?.rarity) || 0,
         sourceRecordKeys: getSourceRecordKeys(group),
@@ -725,7 +782,7 @@ function buildStageEntries({
       return;
     }
 
-    const milestone = buildMilestoneSummary(summary, normalizedType, locale);
+    const milestone = buildMilestoneSummary(summary, normalizedType, locale, resolveCharacter);
     const mergedSupportItems = mergeBadgeItems(pendingSupportItems, summary.fiveStars);
     const inheritedPulls =
       normalizedType === 'limited' ? getInheritedLimitedPityForItem(summary.primarySixStar, crossPoolPityMap) : null;
@@ -746,9 +803,10 @@ function buildStageEntries({
           summary.primaryHighRarity,
           localizePoolFeaturedName(pool, { locale }) ||
             localizeEntityName(pool?.up_character || pool?.upCharacter || '?', { locale }),
-          locale
+          locale,
+          resolveCharacter
         ),
-      dropBadges: createDropBadges(mergedSupportItems, locale),
+      dropBadges: createDropBadges(mergedSupportItems, locale, resolveCharacter),
       highestRarity: milestone.highestRarity || 6,
       sourceRecordKeys: getSourceRecordKeys(mergeBadgeItems(pendingSupportItems, group)),
       sourceBatchKeys: summary.sourceBatchKeys,
@@ -768,7 +826,8 @@ function buildStageEntries({
         currentPityOverride,
         pendingSupportItems,
         currentTargetPullsOverride,
-        locale
+        locale,
+        resolveCharacter
       )
     );
   }
@@ -785,6 +844,7 @@ function buildTimelineSection({
   crossPoolPityMap,
   disablePityState = false,
   locale = getAppLocale(),
+  resolveCharacter = resolveTimelineCharacterFromCache,
 }) {
   const normalizedType = normalizePoolType(pool?.type);
   const metrics = calculateTimelineMetrics(history, {
@@ -803,6 +863,7 @@ function buildTimelineSection({
     crossPoolPityMap,
     showCurrentStage,
     locale,
+    resolveCharacter,
   });
   const maxEntryPulls = entries.reduce((maxValue, entry) => Math.max(maxValue, entry.pulls || 0), 0);
   const minimumScale = normalizedType === 'weapon' ? 40 : 60;
@@ -848,6 +909,7 @@ export function buildSinglePoolTimelineSection({
   crossPoolPityMap = null,
   disablePityState = false,
   locale = getAppLocale(),
+  resolveCharacter = resolveTimelineCharacterFromCache,
 }) {
   if (!pool) {
     return null;
@@ -862,6 +924,7 @@ export function buildSinglePoolTimelineSection({
     crossPoolPityMap,
     disablePityState,
     locale,
+    resolveCharacter,
   });
 }
 
@@ -872,6 +935,7 @@ export function buildOverviewTimelineSections({
   crossPoolPityMap = null,
   disablePityState = false,
   locale = getAppLocale(),
+  resolveCharacter = resolveTimelineCharacterFromCache,
 }) {
   const historyByPoolId = new Map();
 
@@ -906,6 +970,7 @@ export function buildOverviewTimelineSections({
         crossPoolPityMap,
         disablePityState,
         locale,
+        resolveCharacter,
       });
     })
     .filter(Boolean);

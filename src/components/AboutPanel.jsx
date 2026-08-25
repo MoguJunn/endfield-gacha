@@ -16,6 +16,8 @@ import {
 import { APP_BUILD_INFO, APP_VERSION_LABEL } from '../constants/appMeta';
 import useSiteConfigStore, { useJsonConfig } from '../stores/useSiteConfigStore';
 import { useI18n } from '../i18n/index.js';
+import AiCollaboratorGrid from './about/AiCollaboratorGrid.jsx';
+import { FEATURED_SUPPORTER } from '../constants/donations.js';
 
 const ICON_MAP = { Star, Calculator, BarChart3, Cloud, Download, Shield, Globe };
 
@@ -126,8 +128,8 @@ const AboutPanel = React.memo(() => {
             <div className="relative">
               <div className="w-16 h-16 bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center overflow-hidden border border-zinc-300 dark:border-zinc-600">
                 <img
-                  src="/neptune.jpg"
-                  alt="Neptune"
+                  src={FEATURED_SUPPORTER.avatarUrl}
+                  alt={FEATURED_SUPPORTER.name}
                   className="w-full h-full object-cover"
                   loading="lazy"
                 />
@@ -135,8 +137,8 @@ const AboutPanel = React.memo(() => {
               <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 border-2 border-white dark:border-zinc-900"></div>
             </div>
             <div className="flex-1">
-              <h4 className="text-lg font-bold text-zinc-800 dark:text-zinc-100">Neptune</h4>
-              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400 font-mono">{t('about.neptuneRole')}</p>
+              <h4 className="text-lg font-bold text-zinc-800 dark:text-zinc-100">{FEATURED_SUPPORTER.name}</h4>
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400 font-mono">{t(FEATURED_SUPPORTER.roleKey)}</p>
             </div>
           </div>
 
@@ -146,72 +148,7 @@ const AboutPanel = React.memo(() => {
               <Bot size={14} />
               {t('about.aiSection')}
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {/* Claude */}
-              <div className="p-4 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-orange-300 dark:hover:border-orange-800 transition-colors">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 bg-[#D97757] flex items-center justify-center text-white shrink-0">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" fillRule="evenodd">
-                      <path d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"/>
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h5 className="font-bold text-zinc-800 dark:text-zinc-200">Claude</h5>
-                      <span className="text-[10px] bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-1.5 py-0.5 font-mono">OPUS 4</span>
-                    </div>
-                    <p className="text-xs text-zinc-500 mt-1 font-mono">ANTHROPIC</p>
-                    <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
-                      {t('about.ai.claudeSummary')}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Gemini */}
-              <div className="p-4 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-blue-300 dark:hover:border-blue-800 transition-colors">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 bg-[#1A73E8] flex items-center justify-center text-white shrink-0">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" fillRule="evenodd">
-                      <path d="M20.616 10.835a14.147 14.147 0 01-4.45-3.001 14.111 14.111 0 01-3.678-6.452.503.503 0 00-.975 0 14.134 14.134 0 01-3.679 6.452 14.155 14.155 0 01-4.45 3.001c-.65.28-1.318.505-2.002.678a.502.502 0 000 .975c.684.172 1.35.397 2.002.677a14.147 14.147 0 014.45 3.001 14.112 14.112 0 013.679 6.453.502.502 0 00.975 0c.172-.685.397-1.351.677-2.003a14.145 14.145 0 013.001-4.45 14.113 14.113 0 016.453-3.678.503.503 0 000-.975 13.245 13.245 0 01-2.003-.678z"/>
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h5 className="font-bold text-zinc-800 dark:text-zinc-200">Gemini</h5>
-                      <span className="text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-1.5 py-0.5 font-mono">3 PRO</span>
-                    </div>
-                    <p className="text-xs text-zinc-500 mt-1 font-mono">GOOGLE</p>
-                    <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
-                      {t('about.ai.geminiSummary')}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Codex */}
-              <div className="p-4 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600 transition-colors">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 bg-black dark:bg-white flex items-center justify-center text-white dark:text-black shrink-0 border border-zinc-800 dark:border-zinc-200">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M7.5 8.5 4.5 12l3 3.5" />
-                      <path d="M16.5 8.5 19.5 12l-3 3.5" />
-                      <path d="M13.5 6 10.5 18" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h5 className="font-bold text-zinc-800 dark:text-zinc-200">Codex</h5>
-                      <span className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-1.5 py-0.5 font-mono">GPT-5</span>
-                    </div>
-                    <p className="text-xs text-zinc-500 mt-1 font-mono">OPENAI</p>
-                    <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
-                      {t('about.ai.codexSummary')}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <AiCollaboratorGrid />
           </div>
         </div>
       </div>

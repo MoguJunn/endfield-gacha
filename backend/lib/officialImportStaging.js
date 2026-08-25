@@ -1,5 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { hasWriteBlockingImportIssues } from '../../shared/officialImportRecordNormalizer.js';
+import {
+  isSupabaseConnectionPoolTimeout,
+  retrySupabaseConnectionPoolOperation,
+} from '../../shared/supabaseConnectionRetry.js';
 
 const STAGED_RECORD_BATCH_SIZE = 500;
 const DEFAULT_REVIEW_TTL_MS = 30 * 60 * 1000;
@@ -111,21 +115,50 @@ function normalizeStagedRecord(record = {}, ordinal, poolById) {
 
 async function deleteTaskQuietly(supabase, taskId) {
   try {
-    await supabase.from('official_import_tasks').delete().eq('id', taskId);
+    await retrySupabaseConnectionPoolOperation(
+      () => supabase.from('official_import_tasks').delete().eq('id', taskId),
+      { label: '清理导入审阅任务' }
+    );
   } catch {
     // The task has ON DELETE CASCADE; a failed cleanup is safe and can expire normally.
   }
 }
 
-async function loadTaskRow(supabase, { taskId, userId }) {
-  const { data, error } = await supabase
-    .from('official_import_tasks')
-    .select('*')
-    .eq('id', taskId)
-    .eq('user_id', userId)
-    .maybeSingle();
+function createDatabaseBusyError(message, error, operation) {
+  return createReviewError(
+    'REVIEW_DATABASE_BUSY',
+    message,
+    503,
+    {
+      operation,
+      retryable: true,
+      sourceCode: error?.code || null,
+    }
+  );
+}
+
+async function loadTaskRow(supabase, { taskId, userId, connectionRetryOptions = {} }) {
+  const { data, error } = await retrySupabaseConnectionPoolOperation(
+    () => supabase
+      .from('official_import_tasks')
+      .select('*')
+      .eq('id', taskId)
+      .eq('user_id', userId)
+      .maybeSingle(),
+    {
+      ...connectionRetryOptions,
+      label: connectionRetryOptions.label || '读取导入审阅任务',
+    }
+  );
 
   if (error) {
+    if (isSupabaseConnectionPoolTimeout(error)) {
+      throw createDatabaseBusyError(
+        '数据库连接繁忙，暂时无法读取导入审阅任务，请稍后重试。',
+        error,
+        'load-task'
+      );
+    }
     throw createReviewError('REVIEW_TASK_LOAD_FAILED', `读取导入审阅任务失败：${error.message}`, 500);
   }
   if (!data) {
@@ -134,17 +167,33 @@ async function loadTaskRow(supabase, { taskId, userId }) {
   return data;
 }
 
-async function expireTaskIfNeeded(supabase, task) {
+async function expireTaskIfNeeded(supabase, task, connectionRetryOptions = {}) {
   const expiresAt = Date.parse(task.expires_at || '');
   if (!ACTIVE_STATUSES.has(task.status) || !Number.isFinite(expiresAt) || expiresAt > Date.now()) {
     return task;
   }
 
-  await supabase
-    .from('official_import_tasks')
-    .update({ status: 'expired', updated_at: new Date().toISOString() })
-    .eq('id', task.id)
-    .in('status', Array.from(ACTIVE_STATUSES));
+  const { error } = await retrySupabaseConnectionPoolOperation(
+    () => supabase
+      .from('official_import_tasks')
+      .update({ status: 'expired', updated_at: new Date().toISOString() })
+      .eq('id', task.id)
+      .in('status', Array.from(ACTIVE_STATUSES)),
+    {
+      ...connectionRetryOptions,
+      label: connectionRetryOptions.label || '标记过期导入审阅任务',
+    }
+  );
+  if (error) {
+    if (isSupabaseConnectionPoolTimeout(error)) {
+      throw createDatabaseBusyError(
+        '数据库连接繁忙，暂时无法更新导入审阅任务，请稍后重试。',
+        error,
+        'expire-task'
+      );
+    }
+    throw createReviewError('REVIEW_TASK_EXPIRE_FAILED', `更新导入审阅任务失败：${error.message}`, 500);
+  }
 
   return { ...task, status: 'expired' };
 }
@@ -155,14 +204,27 @@ function assertTaskAccess(task, accessKey) {
   }
 }
 
-async function loadStagedRows(supabase, taskId) {
-  const { data, error } = await supabase
-    .from('official_import_staged_records')
-    .select('*')
-    .eq('task_id', taskId)
-    .order('ordinal', { ascending: true });
+async function loadStagedRows(supabase, taskId, connectionRetryOptions = {}) {
+  const { data, error } = await retrySupabaseConnectionPoolOperation(
+    () => supabase
+      .from('official_import_staged_records')
+      .select('*')
+      .eq('task_id', taskId)
+      .order('ordinal', { ascending: true }),
+    {
+      ...connectionRetryOptions,
+      label: connectionRetryOptions.label || '读取导入暂存记录',
+    }
+  );
 
   if (error) {
+    if (isSupabaseConnectionPoolTimeout(error)) {
+      throw createDatabaseBusyError(
+        '数据库连接繁忙，暂时无法读取导入暂存记录，请稍后重试。',
+        error,
+        'load-staged-records'
+      );
+    }
     throw createReviewError('STAGED_RECORDS_LOAD_FAILED', `读取暂存记录失败：${error.message}`, 500);
   }
   return Array.isArray(data) ? data : [];
@@ -179,6 +241,7 @@ export async function stageOfficialImportTask({
   reviewSummary = {},
   importSummary = {},
   expiresAt,
+  connectionRetryOptions = {},
 }) {
   if (!supabase || !userId || !account?.gameUid) {
     throw createReviewError('INVALID_STAGING_CONTEXT', '缺少导入暂存所需的用户或游戏账号信息。');
@@ -193,25 +256,38 @@ export async function stageOfficialImportTask({
     review: withoutIssueList(reviewSummary),
   };
 
-  const { data: task, error: taskError } = await supabase
-    .from('official_import_tasks')
-    .insert({
-      user_id: userId,
-      source,
-      import_mode: importMode,
-      game_uid: String(account.gameUid),
-      server_id: account.serverId ? String(account.serverId) : null,
-      region: account.region || null,
-      status: 'processing',
-      access_key_hash: accessKeyHash,
-      summary: taskSummary,
-      issues: issueList,
-      expires_at: resolvedExpiresAt,
-    })
-    .select('*')
-    .single();
+  const { data: task, error: taskError } = await retrySupabaseConnectionPoolOperation(
+    () => supabase
+      .from('official_import_tasks')
+      .insert({
+        user_id: userId,
+        source,
+        import_mode: importMode,
+        game_uid: String(account.gameUid),
+        server_id: account.serverId ? String(account.serverId) : null,
+        region: account.region || null,
+        status: 'processing',
+        access_key_hash: accessKeyHash,
+        summary: taskSummary,
+        issues: issueList,
+        expires_at: resolvedExpiresAt,
+      })
+      .select('*')
+      .single(),
+    {
+      ...connectionRetryOptions,
+      label: connectionRetryOptions.label || '创建导入审阅任务',
+    }
+  );
 
   if (taskError || !task?.id) {
+    if (isSupabaseConnectionPoolTimeout(taskError)) {
+      throw createDatabaseBusyError(
+        '数据库连接繁忙，暂时无法创建导入审阅任务，请稍后重试。',
+        taskError,
+        'create-task'
+      );
+    }
     throw createReviewError(
       'REVIEW_TASK_CREATE_FAILED',
       `创建导入审阅任务失败：${taskError?.message || '数据库没有返回任务 ID'}`,
@@ -227,24 +303,36 @@ export async function stageOfficialImportTask({
 
   try {
     for (let index = 0; index < rows.length; index += STAGED_RECORD_BATCH_SIZE) {
-      const { error } = await supabase
-        .from('official_import_staged_records')
-        .insert(rows.slice(index, index + STAGED_RECORD_BATCH_SIZE));
+      const { error } = await retrySupabaseConnectionPoolOperation(
+        () => supabase
+          .from('official_import_staged_records')
+          .insert(rows.slice(index, index + STAGED_RECORD_BATCH_SIZE)),
+        {
+          ...connectionRetryOptions,
+          label: connectionRetryOptions.label || '保存导入暂存记录',
+        }
+      );
       if (error) {
         throw error;
       }
     }
 
-    const { data: readyTask, error: readyError } = await supabase
-      .from('official_import_tasks')
-      .update({
-        status: 'awaiting_confirmation',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', task.id)
-      .eq('status', 'processing')
-      .select('*')
-      .single();
+    const { data: readyTask, error: readyError } = await retrySupabaseConnectionPoolOperation(
+      () => supabase
+        .from('official_import_tasks')
+        .update({
+          status: 'awaiting_confirmation',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', task.id)
+        .eq('status', 'processing')
+        .select('*')
+        .single(),
+      {
+        ...connectionRetryOptions,
+        label: connectionRetryOptions.label || '准备导入审阅任务',
+      }
+    );
 
     if (readyError || !readyTask) {
       throw readyError || new Error('任务状态未能切换为等待确认');
@@ -268,20 +356,36 @@ export async function stageOfficialImportTask({
     };
   } catch (error) {
     await deleteTaskQuietly(supabase, task.id);
+    if (error instanceof OfficialImportReviewError) {
+      throw error;
+    }
+    if (isSupabaseConnectionPoolTimeout(error)) {
+      throw createDatabaseBusyError(
+        '数据库连接繁忙，暂时无法保存导入审阅任务，请稍后重试。',
+        error,
+        'stage-task'
+      );
+    }
     throw createReviewError('STAGING_RECORDS_SAVE_FAILED', `暂存导入记录失败：${error.message}`, 500);
   }
 }
 
-export async function getOfficialImportReview({ supabase, taskId, userId, accessKey }) {
-  let task = await loadTaskRow(supabase, { taskId, userId });
+export async function getOfficialImportReview({
+  supabase,
+  taskId,
+  userId,
+  accessKey,
+  connectionRetryOptions = {},
+}) {
+  let task = await loadTaskRow(supabase, { taskId, userId, connectionRetryOptions });
   assertTaskAccess(task, accessKey);
-  task = await expireTaskIfNeeded(supabase, task);
+  task = await expireTaskIfNeeded(supabase, task, connectionRetryOptions);
 
   if (task.status === 'expired') {
     throw createReviewError('REVIEW_TASK_EXPIRED', '这次导入审阅已过期，请重新导入。', 410);
   }
 
-  const rows = await loadStagedRows(supabase, task.id);
+  const rows = await loadStagedRows(supabase, task.id, connectionRetryOptions);
   return {
     task: publicTask(task),
     records: rows.map((row) => ({
@@ -312,10 +416,18 @@ function normalizeDecisions(decisions) {
   return decisionMap;
 }
 
-export async function confirmOfficialImportTask({ supabase, taskId, userId, accessKey, decisions = [], commit }) {
-  let task = await loadTaskRow(supabase, { taskId, userId });
+export async function confirmOfficialImportTask({
+  supabase,
+  taskId,
+  userId,
+  accessKey,
+  decisions = [],
+  commit,
+  connectionRetryOptions = {},
+}) {
+  let task = await loadTaskRow(supabase, { taskId, userId, connectionRetryOptions });
   assertTaskAccess(task, accessKey);
-  task = await expireTaskIfNeeded(supabase, task);
+  task = await expireTaskIfNeeded(supabase, task, connectionRetryOptions);
 
   if (task.status === 'committed') {
     return { task: publicTask(task), result: task.summary?.commitResult || {}, idempotent: true };
@@ -329,7 +441,7 @@ export async function confirmOfficialImportTask({ supabase, taskId, userId, acce
     });
   }
 
-  const rows = await loadStagedRows(supabase, task.id);
+  const rows = await loadStagedRows(supabase, task.id, connectionRetryOptions);
   const decisionMap = normalizeDecisions(decisions);
   const selectedRows = rows.map((row) => ({
     ...row,
@@ -350,33 +462,77 @@ export async function confirmOfficialImportTask({ supabase, taskId, userId, acce
 
   if (decisionMap.size > 0) {
     for (const [ordinal, selectedAction] of decisionMap) {
-      const { error: decisionError } = await supabase
-        .from('official_import_staged_records')
-        .update({ selected_action: selectedAction })
-        .eq('task_id', task.id)
-        .eq('ordinal', ordinal);
+      const { error: decisionError } = await retrySupabaseConnectionPoolOperation(
+        () => supabase
+          .from('official_import_staged_records')
+          .update({ selected_action: selectedAction })
+          .eq('task_id', task.id)
+          .eq('ordinal', ordinal),
+        {
+          ...connectionRetryOptions,
+          label: connectionRetryOptions.label || '保存导入审阅选项',
+        }
+      );
       if (decisionError) {
+        if (isSupabaseConnectionPoolTimeout(decisionError)) {
+          throw createDatabaseBusyError(
+            '数据库连接繁忙，暂时无法保存导入审阅选项，请稍后重试。',
+            decisionError,
+            'save-review-decisions'
+          );
+        }
         throw createReviewError('REVIEW_DECISIONS_SAVE_FAILED', `保存审阅选项失败：${decisionError.message}`, 500);
       }
     }
   }
 
   const now = new Date().toISOString();
-  const { data: lockedTask, error: lockError } = await supabase
-    .from('official_import_tasks')
-    .update({ status: 'confirming', confirmed_at: now, updated_at: now })
-    .eq('id', task.id)
-    .eq('user_id', userId)
-    .eq('status', 'awaiting_confirmation')
-    .select('*')
-    .maybeSingle();
+  const { data: lockedTask, error: lockError } = await retrySupabaseConnectionPoolOperation(
+    () => supabase
+      .from('official_import_tasks')
+      .update({ status: 'confirming', confirmed_at: now, updated_at: now })
+      .eq('id', task.id)
+      .eq('user_id', userId)
+      .eq('status', 'awaiting_confirmation')
+      .select('*')
+      .maybeSingle(),
+    {
+      ...connectionRetryOptions,
+      label: connectionRetryOptions.label || '锁定导入审阅任务',
+    }
+  );
 
-  if (lockError || !lockedTask) {
-    const latestTask = await loadTaskRow(supabase, { taskId, userId });
+  if (lockError) {
+    if (isSupabaseConnectionPoolTimeout(lockError)) {
+      throw createDatabaseBusyError(
+        '数据库连接繁忙，暂时无法确认导入，请稍后重试。',
+        lockError,
+        'lock-review-task'
+      );
+    }
+    throw createReviewError(
+      'REVIEW_TASK_LOCK_FAILED',
+      `锁定导入审阅任务失败：${lockError.message || lockError}`,
+      500,
+      { sourceCode: lockError.code || null }
+    );
+  }
+
+  if (!lockedTask) {
+    const latestTask = await loadTaskRow(supabase, {
+      taskId,
+      userId,
+      connectionRetryOptions,
+    });
     if (latestTask.status === 'committed') {
       return { task: publicTask(latestTask), result: latestTask.summary?.commitResult || {}, idempotent: true };
     }
-    throw createReviewError('REVIEW_TASK_LOCKED', '这次导入正在由另一个请求确认，请稍后刷新。', 409);
+    throw createReviewError(
+      'REVIEW_TASK_LOCKED',
+      '这次导入正在由另一个请求确认，请稍后刷新。',
+      409,
+      { status: latestTask.status }
+    );
   }
 
   try {
@@ -391,14 +547,23 @@ export async function confirmOfficialImportTask({ supabase, taskId, userId, acce
       commitResult: result || {},
     };
     if (taskCommittedAtomically) {
-      const { data: refreshedTask } = await supabase
-        .from('official_import_tasks')
-        .update({ summary: nextSummary, updated_at: committedAt })
-        .eq('id', task.id)
-        .eq('user_id', userId)
-        .eq('status', 'committed')
-        .select('*')
-        .maybeSingle();
+      const { data: refreshedTask, error: refreshError } = await retrySupabaseConnectionPoolOperation(
+        () => supabase
+          .from('official_import_tasks')
+          .update({ summary: nextSummary, updated_at: committedAt })
+          .eq('id', task.id)
+          .eq('user_id', userId)
+          .eq('status', 'committed')
+          .select('*')
+          .maybeSingle(),
+        {
+          ...connectionRetryOptions,
+          label: connectionRetryOptions.label || '保存导入提交结果',
+        }
+      );
+      if (refreshError && !isSupabaseConnectionPoolTimeout(refreshError)) {
+        throw refreshError;
+      }
       return {
         task: publicTask(
           refreshedTask || {
@@ -413,18 +578,24 @@ export async function confirmOfficialImportTask({ supabase, taskId, userId, acce
         idempotent: false,
       };
     }
-    const { data: committedTask, error: commitStateError } = await supabase
-      .from('official_import_tasks')
-      .update({
-        status: 'committed',
-        summary: nextSummary,
-        committed_at: committedAt,
-        updated_at: committedAt,
-      })
-      .eq('id', task.id)
-      .eq('status', 'confirming')
-      .select('*')
-      .single();
+    const { data: committedTask, error: commitStateError } = await retrySupabaseConnectionPoolOperation(
+      () => supabase
+        .from('official_import_tasks')
+        .update({
+          status: 'committed',
+          summary: nextSummary,
+          committed_at: committedAt,
+          updated_at: committedAt,
+        })
+        .eq('id', task.id)
+        .eq('status', 'confirming')
+        .select('*')
+        .single(),
+      {
+        ...connectionRetryOptions,
+        label: connectionRetryOptions.label || '标记导入任务完成',
+      }
+    );
 
     if (commitStateError || !committedTask) {
       throw commitStateError || new Error('正式写入已完成，但任务状态更新失败');
@@ -432,18 +603,58 @@ export async function confirmOfficialImportTask({ supabase, taskId, userId, acce
 
     return { task: publicTask(committedTask), result: result || {}, idempotent: false };
   } catch (error) {
-    await supabase
-      .from('official_import_tasks')
-      .update({
-        status: 'awaiting_confirmation',
-        summary: {
-          ...(lockedTask.summary || {}),
-          lastCommitError: String(error?.message || error).slice(0, 500),
-        },
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', task.id)
-      .eq('status', 'confirming');
+    let latestTask = null;
+    try {
+      latestTask = await loadTaskRow(supabase, {
+        taskId,
+        userId,
+        connectionRetryOptions,
+      });
+    } catch (stateError) {
+      if (!isSupabaseConnectionPoolTimeout(stateError)) {
+        console.warn('[OfficialImportStaging] 提交失败后读取任务状态失败:', stateError.message);
+      }
+    }
+
+    if (latestTask?.status === 'committed') {
+      return {
+        task: publicTask(latestTask),
+        result: latestTask.summary?.commitResult || {},
+        idempotent: true,
+      };
+    }
+
+    const recoverySummary = {
+      ...(lockedTask.summary || {}),
+      lastCommitError: String(error?.message || error).slice(0, 500),
+    };
+    const { error: recoveryError } = await retrySupabaseConnectionPoolOperation(
+      () => supabase
+        .from('official_import_tasks')
+        .update({
+          status: 'awaiting_confirmation',
+          summary: recoverySummary,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', task.id)
+        .eq('status', 'confirming'),
+      {
+        ...connectionRetryOptions,
+        label: connectionRetryOptions.label || '恢复导入审阅任务状态',
+      }
+    );
+    if (recoveryError) {
+      throw createReviewError(
+        'REVIEW_TASK_RECOVERY_FAILED',
+        `导入提交失败，且任务状态恢复失败：${recoveryError.message || recoveryError}`,
+        isSupabaseConnectionPoolTimeout(recoveryError) ? 503 : 500,
+        {
+          retryable: isSupabaseConnectionPoolTimeout(recoveryError),
+          originalCode: error?.code || null,
+          recoveryCode: recoveryError.code || null,
+        }
+      );
+    }
     throw error;
   }
 }

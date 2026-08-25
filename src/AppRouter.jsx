@@ -13,6 +13,7 @@ const TermsOfService = lazy(() => import('./components/legal/TermsOfService'));
 const ResetPasswordPage = lazy(() => import('./components/auth/ResetPasswordPage'));
 const AuthCallbackPage = lazy(() => import('./components/auth/AuthCallbackPage.jsx'));
 const SiteStatusPage = lazy(() => import('./components/status/SiteStatusPage.jsx'));
+const DonationThanksPage = lazy(() => import('./components/donations/DonationThanksPage.jsx'));
 
 /**
  * 应用路由配置
@@ -66,6 +67,14 @@ function AppRouter() {
           element={
             <Suspense fallback={<MobileLoadingFallback />}>
               <TermsOfService />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/donations"
+          element={
+            <Suspense fallback={<MobileLoadingFallback />}>
+              <DonationThanksPage />
             </Suspense>
           }
         />

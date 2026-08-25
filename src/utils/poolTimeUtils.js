@@ -54,6 +54,67 @@ function getPoolEndDate(pool) {
   return normalizePoolDateValue(pool?.end_time || pool?.endDate);
 }
 
+function splitCountdownDuration(durationMs) {
+  const totalMinutes = Math.max(0, Math.ceil(Number(durationMs || 0) / (60 * 1000)));
+  return {
+    days: Math.floor(totalMinutes / (24 * 60)),
+    hours: Math.floor((totalMinutes % (24 * 60)) / 60),
+    minutes: totalMinutes % 60,
+  };
+}
+
+export function getPoolActivityTiming(pool, referenceDate = new Date()) {
+  const start = getPoolStartDate(pool);
+  const end = getPoolEndDate(pool);
+  const now = normalizeReferenceDate(referenceDate);
+
+  if (!isValidDate(start) || !isValidDate(end)) {
+    return {
+      status: 'untimed',
+      isTimed: false,
+      isActive: false,
+      isUpcoming: false,
+      isExpired: false,
+      days: 0,
+      hours: 0,
+      minutes: 0,
+    };
+  }
+
+  if (now < start) {
+    return {
+      status: 'upcoming',
+      isTimed: true,
+      isActive: false,
+      isUpcoming: true,
+      isExpired: false,
+      ...splitCountdownDuration(start.getTime() - now.getTime()),
+    };
+  }
+
+  if (now >= end) {
+    return {
+      status: 'expired',
+      isTimed: true,
+      isActive: false,
+      isUpcoming: false,
+      isExpired: true,
+      days: 0,
+      hours: 0,
+      minutes: 0,
+    };
+  }
+
+  return {
+    status: 'active',
+    isTimed: true,
+    isActive: true,
+    isUpcoming: false,
+    isExpired: false,
+    ...splitCountdownDuration(end.getTime() - now.getTime()),
+  };
+}
+
 function getPoolCharacterName(pool) {
   return getPoolFeaturedLead(pool) || pool?.name || null;
 }
