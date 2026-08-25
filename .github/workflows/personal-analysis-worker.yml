@@ -1,0 +1,99 @@
+name: Personal Analysis Worker
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-analysis-worker-production
+  cancel-in-progress: false
+
+jobs:
+  run-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      WORKER_URL: ${{ vars.PERSONAL_ANALYSIS_WORKER_URL || 'https://ef-gacha.mogujun.icu/api/personal-analysis-worker' }}
+      WORKER_SECRET: ${{ secrets.PERSONAL_ANALYSIS_WORKER_SECRET }}
+
+    steps:
+      - name: Validate worker configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${WORKER_SECRET}" ]]; then
+            echo "::error::Repository secret PERSONAL_ANALYSIS_WORKER_SECRET is not configured."
+            exit 1
+          fi
+          if [[ ! "${WORKER_URL}" =~ ^https:// ]]; then
+            echo "::error::PERSONAL_ANALYSIS_WORKER_URL must use HTTPS."
+            exit 1
+          fi
+
+      - name: Run personal analysis worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          response_file="$(mktemp)"
+          trap 'rm -f "${response_file}"' EXIT
+
+          for attempt in 1 2 3; do
+            http_code="$(
+              curl \
+                --silent \
+                --show-error \
+                --request POST \
+                --connect-timeout 15 \
+                --max-time 75 \
+                --output "${response_file}" \
+                --write-out '%{http_code}' \
+                --header "Authorization: Bearer ${WORKER_SECRET}" \
+                --header 'Content-Type: application/json' \
+                "${WORKER_URL}" \
+                || true
+            )"
+
+            if [[ "${http_code}" =~ ^2[0-9][0-9]$ ]]; then
+              if node --input-type=module - "${response_file}" <<'NODE'
+          import { readFile } from 'node:fs/promises';
+
+          const responsePath = process.argv[2];
+          const payload = JSON.parse(await readFile(responsePath, 'utf8'));
+          const result = payload?.result || {};
+          if (
+            payload?.success !== true
+            || payload?.partial === true
+            || result?.ok === false
+            || result?.skipped === true
+          ) {
+            process.exit(1);
+          }
+
+          const stats = result?.stats || {};
+          console.log(JSON.stringify({
+            code: result?.code || null,
+            claimedOwner: Number(stats.claimedOwner || 0),
+            claimedScope: Number(stats.claimedScope || 0),
+            succeeded: Number(stats.succeeded || 0),
+            stale: Number(stats.stale || 0),
+            failed: Number(stats.failed || 0),
+            backfillHasMore: Boolean(result?.backfill?.hasMore),
+          }));
+          NODE
+              then
+                exit 0
+              fi
+            fi
+
+            echo "::warning::Worker attempt ${attempt}/3 failed with HTTP ${http_code:-transport-error}."
+            if [[ "${attempt}" -lt 3 ]]; then
+              sleep "$((attempt * 10))"
+            fi
+          done
+
+          echo "::error::Personal analysis worker failed after 3 attempts."
+          exit 1
