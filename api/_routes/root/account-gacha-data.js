@@ -606,6 +606,10 @@ function buildProjectedAccountPayload(data, viewKey, locale) {
   };
 }
 
+function isSafePostgrestJsonPathSegment(value) {
+  return /^[A-Za-z0-9_-]+$/.test(String(value || ''));
+}
+
 async function loadProjectedPersonalAnalysisAccountSnapshot(
   dbClient,
   userId,
@@ -614,6 +618,23 @@ async function loadProjectedPersonalAnalysisAccountSnapshot(
 ) {
   if (!viewKey) {
     return loadPersonalAnalysisSnapshot(dbClient, userId, 'account', scopeKey);
+  }
+
+  if (
+    !isSafePostgrestJsonPathSegment(viewKey)
+    || !isSafePostgrestJsonPathSegment(locale)
+  ) {
+    const snapshot = await loadPersonalAnalysisSnapshot(
+      dbClient,
+      userId,
+      'account',
+      scopeKey
+    );
+    if (!snapshot) return null;
+    return {
+      ...snapshot,
+      payload: projectTransientScopePayload(snapshot.payload, viewKey, locale),
+    };
   }
 
   const selection = [
@@ -2268,6 +2289,7 @@ export const __internal = {
   loadProjectedPersonalAnalysisAccountSnapshot,
   loadPersonalAnalysisSnapshot,
   loadPersonalAnalysisScopeState,
+  isSafePostgrestJsonPathSegment,
   prioritizePersonalAnalysisJobs,
   requestImmediatePersonalAnalysisDispatch,
   readHistoryPageScope,

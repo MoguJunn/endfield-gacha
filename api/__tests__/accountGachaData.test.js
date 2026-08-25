@@ -518,6 +518,50 @@ describe('/api/account-gacha-data', () => {
     expect(JSON.stringify(res.body.scope)).not.toContain('pool-other');
   });
 
+  it('projects reserved-character view keys in memory without breaking PostgREST select syntax', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.accountSnapshots['game-1::server:2'].payload.dashboard = {
+      views: {
+        '__group_extra:reconstruction': { total: 56 },
+        'pool-other': { total: 34 },
+      },
+      timelineViews: {
+        'zh-CN': {
+          '__group_extra:reconstruction': [{ id: 'reconstruction-zh' }],
+          'pool-other': [{ id: 'other-zh' }],
+        },
+      },
+    };
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2&viewKey=__group_extra%3Areconstruction&locale=zh-CN',
+    }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.scope.dashboard).toEqual({
+      views: { '__group_extra:reconstruction': { total: 56 } },
+      timelineViews: {
+        'zh-CN': {
+          '__group_extra:reconstruction': [{ id: 'reconstruction-zh' }],
+        },
+      },
+    });
+    const snapshotReads = adminClient.__state.selectCalls.filter((call) => (
+      call.table === 'personal_analysis_snapshots'
+      && call.filters.some((filter) => (
+        filter.column === 'scope_kind' && filter.value === 'account'
+      ))
+    ));
+    expect(snapshotReads).toHaveLength(1);
+    expect(snapshotReads[0].selection).toContain('payload');
+    expect(snapshotReads[0].selection).not.toContain(
+      'views->__group_extra:reconstruction'
+    );
+    expect(JSON.stringify(res.body.scope)).not.toContain('pool-other');
+  });
+
   it('returns building instead of falling back to a full history read when no snapshot exists', async () => {
     const adminClient = createAdminClient();
     adminClient.__state.ownerSnapshot = null;
