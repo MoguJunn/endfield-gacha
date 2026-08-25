@@ -3,7 +3,7 @@ import { hasWriteBlockingImportIssues } from '../../shared/officialImportRecordN
 import {
   isSupabaseConnectionPoolTimeout,
   retrySupabaseConnectionPoolOperation,
-} from './supabaseConnectionRetry.js';
+} from '../../shared/supabaseConnectionRetry.js';
 
 const STAGED_RECORD_BATCH_SIZE = 500;
 const DEFAULT_REVIEW_TTL_MS = 30 * 60 * 1000;

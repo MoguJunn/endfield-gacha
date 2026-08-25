@@ -29,6 +29,10 @@ import {
 import { classifyCharacterIdSource } from './lib/canonicalEntityUtils.js';
 import { buildOfficialImportRecordKey } from './lib/officialImportIncremental.js';
 import {
+  isSupabaseConnectionPoolTimeout,
+  retrySupabaseConnectionPoolOperation,
+} from '../shared/supabaseConnectionRetry.js';
+import {
   filterOfficialImportPullRecords,
   hasActionableImportIdentityIssues,
   hasWriteBlockingImportIssues,
@@ -47,59 +51,6 @@ import {
 // Supabase Admin 客户端（需要 SUPABASE_SECRET_KEY；旧 service_role_key 仍兼容）
 let supabaseAdmin = null;
 const HISTORY_PAGE_SIZE = 1000;
-const SUPABASE_CONNECTION_MAX_ATTEMPTS = 3;
-const SUPABASE_CONNECTION_BASE_DELAY_MS = 1000;
-const SUPABASE_CONNECTION_MAX_DELAY_MS = 4000;
-
-function isSupabaseConnectionPoolTimeout(error) {
-  const code = String(error?.code || '');
-  return code
-    ? code === 'PGRST003'
-    : String(error?.message || error || '').includes(
-      'Timed out acquiring connection from connection pool'
-    );
-}
-
-async function retrySupabaseConnectionPoolOperation(operation, {
-  label = 'Supabase operation',
-  maxAttempts = SUPABASE_CONNECTION_MAX_ATTEMPTS,
-  baseDelayMs = SUPABASE_CONNECTION_BASE_DELAY_MS,
-  maxDelayMs = SUPABASE_CONNECTION_MAX_DELAY_MS,
-} = {}) {
-  const attempts = Math.max(1, Number(maxAttempts) || SUPABASE_CONNECTION_MAX_ATTEMPTS);
-  let lastResult = null;
-  let lastThrownError = null;
-
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    lastThrownError = null;
-    try {
-      lastResult = await operation();
-    } catch (error) {
-      if (!isSupabaseConnectionPoolTimeout(error) || attempt >= attempts) {
-        throw error;
-      }
-      lastThrownError = error;
-    }
-
-    const operationError = lastThrownError || lastResult?.error;
-    if (!isSupabaseConnectionPoolTimeout(operationError) || attempt >= attempts) {
-      if (lastThrownError) throw lastThrownError;
-      return lastResult;
-    }
-
-    const delayMs = Math.min(
-      baseDelayMs * (2 ** Math.max(0, attempt - 1)),
-      maxDelayMs
-    );
-    console.warn(
-      `[FullImportService] ${label} 遇到连接池繁忙（PGRST003），将在 ${delayMs}ms 后重试 ${attempt + 1}/${attempts}`
-    );
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-  }
-
-  if (lastThrownError) throw lastThrownError;
-  return lastResult;
-}
 
 export class AuthTokenVerificationError extends Error {
   constructor(code, message = 'Invalid or expired session', details = {}) {
