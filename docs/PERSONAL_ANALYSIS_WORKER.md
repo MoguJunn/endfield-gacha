@@ -23,10 +23,15 @@ GitHub 的 Scheduled Workflow 只从默认分支读取。Workflow 合并到 `mai
 ```text
 PERSONAL_ANALYSIS_WORKER_ENABLED=true
 PERSONAL_ANALYSIS_WORKER_SECRET=<随机高强度密钥>
+PERSONAL_ANALYSIS_WORKER_BACKFILL_ENABLED=false
 ```
 
 `SUPABASE_SECRET_KEY`（或兼容的 service role key）也必须可用。单次任务默认只
 领取一个队列作业，以避免超过 Vercel 函数执行时限。
+
+常规计划任务必须保持 `PERSONAL_ANALYSIS_WORKER_BACKFILL_ENABLED=false`，避免
+每 5 分钟重复扫描全量历史。新写入会由数据库触发器自动创建或标脏队列状态。
+历史数据的一次性全量回填应在维护窗口临时开启该变量，完成后立即关闭。
 
 ### GitHub Repository Actions Secret
 

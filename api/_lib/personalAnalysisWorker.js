@@ -82,6 +82,10 @@ function parseInteger(value, defaultValue, { min = 1, max = Number.MAX_SAFE_INTE
 export function getPersonalAnalysisWorkerConfigFromEnv(env = readEnvironment()) {
   return {
     enabled: parseBoolean(env.PERSONAL_ANALYSIS_WORKER_ENABLED, false),
+    backfillEnabled: parseBoolean(
+      env.PERSONAL_ANALYSIS_WORKER_BACKFILL_ENABLED,
+      false
+    ),
     batchSize: parseInteger(env.PERSONAL_ANALYSIS_WORKER_BATCH_SIZE, 1, { min: 1, max: 5 }),
     backfillBatchSize: parseInteger(
       env.PERSONAL_ANALYSIS_WORKER_BACKFILL_BATCH_SIZE,
@@ -117,6 +121,9 @@ function normalizeConfig(config) {
 
   return {
     enabled: typeof config.enabled === 'boolean' ? config.enabled : defaults.enabled,
+    backfillEnabled: typeof config.backfillEnabled === 'boolean'
+      ? config.backfillEnabled
+      : defaults.backfillEnabled,
     batchSize: parseInteger(config.batchSize, defaults.batchSize, { min: 1, max: 5 }),
     backfillBatchSize: parseInteger(
       config.backfillBatchSize,
@@ -432,10 +439,12 @@ export async function runPersonalAnalysisWorker({
     };
   }
 
-  const backfill = await callRpc(adminClient, 'enqueue_personal_analysis_backfill', {
-    p_after_user_id: null,
-    p_limit: workerConfig.backfillBatchSize,
-  });
+  const backfill = workerConfig.backfillEnabled
+    ? await callRpc(adminClient, 'enqueue_personal_analysis_backfill', {
+      p_after_user_id: null,
+      p_limit: workerConfig.backfillBatchSize,
+    })
+    : null;
   const activeLeaseId = leaseId || createLeaseId();
   const claimed = await callRpc(adminClient, 'claim_personal_analysis_jobs', {
     p_lease_id: activeLeaseId,
