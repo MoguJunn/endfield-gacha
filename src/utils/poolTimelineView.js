@@ -2,7 +2,7 @@ import { characterCache } from './characterUtils.js';
 import { isFreeHistoryPull, isGiftHistoryPull, isInfoBookHistoryPull } from './historyInfoBook.js';
 import { getPoolTimingMeta, normalizePoolGroupType } from './poolSelectorDisplay.js';
 import { compareHistoryTimelineAsc, getHistoryTimelineTimestampMs } from './historyTimelineSort.js';
-import { EXTRA_POOL_RULES, LIMITED_POOL_RULES, STANDARD_POOL_RULES, WEAPON_POOL_RULES } from '../constants/index.js';
+import { resolvePoolCapabilities } from './poolCapabilities.js';
 import { getAppLocale, isEnglishLocale } from '../i18n/index.js';
 import {
   localizeEntityName,
@@ -19,20 +19,8 @@ function normalizePoolType(type) {
   return type || 'standard';
 }
 
-function getPoolSixStarPity(poolType) {
-  if (poolType === 'weapon') {
-    return WEAPON_POOL_RULES.sixStarPity;
-  }
-
-  if (poolType === 'limited') {
-    return LIMITED_POOL_RULES.sixStarPity;
-  }
-
-  if (poolType === 'extra') {
-    return EXTRA_POOL_RULES.sixStarPity;
-  }
-
-  return STANDARD_POOL_RULES.sixStarPity;
+function getPoolSixStarPity(pool) {
+  return Number(resolvePoolCapabilities(pool).rules.sixStarPity || 80);
 }
 
 function getHistoryPoolId(item) {
@@ -654,12 +642,12 @@ function buildMilestoneSummary(
   };
 }
 
-function getStageTargetPulls(poolType, stageKind, stageSize = 0) {
+function getStageTargetPulls(pool, stageKind, stageSize = 0) {
   if (stageKind === 'gift') {
     return Math.max(stageSize || 10, 10);
   }
 
-  return getPoolSixStarPity(poolType);
+  return getPoolSixStarPity(pool);
 }
 
 function buildCurrentStageEntry(
@@ -674,7 +662,6 @@ function buildCurrentStageEntry(
   const english = isEnglishLocale(locale);
   const targetLabel = english ? '6★ milestone' : '6★ 节点';
   const displayPulls = Number.isFinite(currentPityValue) ? currentPityValue : pendingPaidCount;
-  const normalizedType = normalizePoolType(pool?.type);
   const supportBadges = createDropBadges(
     supportItems.filter((item) => Number(item?.rarity) === 5),
     locale,
@@ -690,7 +677,7 @@ function buildCurrentStageEntry(
     pulls: displayPulls,
     targetPulls: Number.isFinite(currentTargetPullsOverride)
       ? currentTargetPullsOverride
-      : getStageTargetPulls(normalizedType, 'current'),
+      : getStageTargetPulls(pool, 'current'),
     resultSummary:
       displayPulls > 0
         ? english
@@ -740,7 +727,7 @@ function buildStageEntries({
   ascendingGroups.forEach((group) => {
     const summary = summarizeGroup(group, locale, resolveCharacter);
     pendingPaidCount += summary.paidCount;
-    const normalizedType = normalizePoolType(pool?.type);
+    const normalizedType = resolvePoolCapabilities(pool).basePoolType;
 
     if (summary.hasGift) {
       const milestone = buildMilestoneSummary(summary, normalizedType, locale, resolveCharacter);
@@ -750,7 +737,7 @@ function buildStageEntries({
         dateLabel: formatDateLabel(summary.timestamp),
         stageLabel: milestone.stageLabel,
         pulls: Math.max(group.length, summary.paidCount),
-        targetPulls: getStageTargetPulls(normalizedType, milestone.stageKind, summary.groupSize),
+        targetPulls: getStageTargetPulls(pool, milestone.stageKind, summary.groupSize),
         resultSummary: milestone.resultSummary,
         resultSummaryWithoutFiveStar: milestone.resultSummaryWithoutFiveStar || milestone.resultSummary,
         metaSummary: null,
@@ -792,7 +779,7 @@ function buildStageEntries({
       dateLabel: formatDateLabel(summary.timestamp),
       stageLabel: milestone.stageLabel,
       pulls: inheritedPulls ?? pendingPaidCount,
-      targetPulls: getStageTargetPulls(normalizedType, milestone.stageKind, summary.groupSize),
+      targetPulls: getStageTargetPulls(pool, milestone.stageKind, summary.groupSize),
       resultSummary: milestone.resultSummary,
       resultSummaryWithoutFiveStar: milestone.resultSummaryWithoutFiveStar || milestone.resultSummary,
       metaSummary: null,
@@ -816,7 +803,7 @@ function buildStageEntries({
     pendingSupportItems = [];
   });
 
-  const shouldAlwaysShowCurrentStage = normalizePoolType(pool?.type) === 'weapon';
+  const shouldAlwaysShowCurrentStage = resolvePoolCapabilities(pool).basePoolType === 'weapon';
 
   if (showCurrentStage && (pendingPaidCount > 0 || stages.length === 0 || shouldAlwaysShowCurrentStage)) {
     stages.push(
@@ -846,7 +833,7 @@ function buildTimelineSection({
   locale = getAppLocale(),
   resolveCharacter = resolveTimelineCharacterFromCache,
 }) {
-  const normalizedType = normalizePoolType(pool?.type);
+  const normalizedType = resolvePoolCapabilities(pool).basePoolType;
   const metrics = calculateTimelineMetrics(history, {
     poolType: normalizedType,
     crossPoolPityMap,

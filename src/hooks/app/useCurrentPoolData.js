@@ -1,19 +1,14 @@
 import { useMemo } from 'react';
 import { DEFAULT_POOL_ID } from '../../constants';
 import { useAuthStore, useHistoryStore, usePoolStore } from '../../stores';
-import {
-  getPoolGroupType,
-  getPoolsForGroupType,
-  isPoolGroupId
-} from '../../stores/usePoolStore';
-import {
-  isFreeHistoryPull,
-  isGiftHistoryPull
-} from '../../utils/historyInfoBook';
-import { normalizeIsStandard } from '../../utils';
+import { getPoolsForGroupType, isPoolGroupId, parsePoolGroupId } from '../../stores/usePoolStore';
+import { isFreeHistoryPull } from '../../utils/historyInfoBook';
+import { normalizeIsStandard } from '../../utils/poolUtils.js';
 import { getPreferredPool } from '../../utils/poolSelectionUtils';
 import { buildPoolSelectorGroups, getPoolTypeLabel } from '../../utils/poolSelectorDisplay';
 import { getCachedHistoryIndex } from '../../utils/historyIndex.js';
+import { resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
+import { buildPaidTimelinePityMap, buildScopedPaidHistoryTimeline } from '../../utils/poolScopedHistory.js';
 import { useI18n } from '../../i18n/index.js';
 import { usePoolRoster } from './usePoolRoster.js';
 
@@ -41,16 +36,23 @@ function normalizePoolId(value) {
 export function selectPoolsForRosterScope({ pools = [], currentPoolId = null, locale } = {}) {
   const poolsArray = Array.isArray(pools) ? pools : [];
   const groupMode = isPoolGroupId(currentPoolId);
-  const selectedGroupType = groupMode ? getPoolGroupType(currentPoolId) : null;
+  const groupScope = groupMode ? parsePoolGroupId(currentPoolId) : null;
 
   if (groupMode) {
     const orderedGroups = buildPoolSelectorGroups({ pools: poolsArray, locale });
-    if (selectedGroupType === 'all') {
+    if (groupScope?.type === 'all') {
       return orderedGroups.flatMap((group) => group.pools);
     }
 
-    return orderedGroups.find((group) => group.type === selectedGroupType)?.pools
-      || getPoolsForGroupType(poolsArray, selectedGroupType);
+    const targetGroup = orderedGroups.find((group) => group.type === groupScope?.type);
+    if (groupScope?.subtype) {
+      return (
+        targetGroup?.subgroups?.find((subgroup) => subgroup.subtype === groupScope.subtype)?.pools ||
+        getPoolsForGroupType(poolsArray, groupScope.type, groupScope.subtype)
+      );
+    }
+
+    return targetGroup?.pools || getPoolsForGroupType(poolsArray, groupScope?.type);
   }
 
   const preferredPool = getPreferredPool(poolsArray, {
@@ -60,53 +62,100 @@ export function selectPoolsForRosterScope({ pools = [], currentPoolId = null, lo
   return preferredPool ? [preferredPool] : [];
 }
 
+function normalizeHistoryStandardForPool(item, pool) {
+  const capabilities = resolvePoolCapabilities(pool);
+  if (Number(item?.rarity) !== 6) {
+    return false;
+  }
+  if (capabilities.targetMode === 'four-target-equal') {
+    return false;
+  }
+  if (!capabilities.isResolved || capabilities.targetMode === 'none') {
+    return true;
+  }
+  return normalizeIsStandard(item, capabilities.basePoolType, pool?.up_character || pool?.upCharacter);
+}
+
+function getCommonCapabilityValue(pools, key) {
+  const values = new Set(pools.map((pool) => resolvePoolCapabilities(pool)?.[key]).filter(Boolean));
+  return values.size === 1 ? Array.from(values)[0] : null;
+}
+
 export function useCurrentPoolData() {
   const { locale, t } = useI18n();
-  const user = useAuthStore(state => state.user);
-  const pools = usePoolStore(state => state.pools);
-  const currentPoolId = usePoolStore(state => state.currentPoolId);
-  const currentGameUid = usePoolStore(state => state.currentGameUid);
-  const history = useHistoryStore(state => state.history);
+  const user = useAuthStore((state) => state.user);
+  const pools = usePoolStore((state) => state.pools);
+  const currentPoolId = usePoolStore((state) => state.currentPoolId);
+  const currentGameUid = usePoolStore((state) => state.currentGameUid);
+  const history = useHistoryStore((state) => state.history);
 
   const rawPoolsArray = useMemo(() => (Array.isArray(pools) ? pools : []), [pools]);
-  const historyIndex = useMemo(() => getCachedHistoryIndex({
-    history,
-    pools: rawPoolsArray,
-    userId: user?.id || null,
-    currentGameUid,
-  }), [currentGameUid, history, rawPoolsArray, user?.id]);
-  const {
-    historyArray,
-    annotatedAccountHistoryArray,
-    sortedAccountHistoryArray,
-    historyByPoolId,
-    poolById,
-    allLimitedHistory,
-  } = historyIndex;
+  const historyIndex = useMemo(
+    () =>
+      getCachedHistoryIndex({
+        history,
+        pools: rawPoolsArray,
+        userId: user?.id || null,
+        currentGameUid,
+      }),
+    [currentGameUid, history, rawPoolsArray, user?.id]
+  );
+  const { historyArray, annotatedAccountHistoryArray, sortedAccountHistoryArray, historyByPoolId } = historyIndex;
   const hasMergedAccountView = false;
+
   const isGroupMode = isPoolGroupId(currentPoolId);
-  const groupType = isGroupMode ? getPoolGroupType(currentPoolId) : null;
-  const selectedScopePools = useMemo(() => selectPoolsForRosterScope({
-    pools: rawPoolsArray,
-    currentPoolId,
-    locale,
-  }), [currentPoolId, locale, rawPoolsArray]);
+  const groupScope = isGroupMode ? parsePoolGroupId(currentPoolId) : null;
+  const groupType = groupScope?.type || null;
+  const groupSubtype = groupScope?.subtype || null;
+  const selectedScopePools = useMemo(
+    () =>
+      selectPoolsForRosterScope({
+        pools: rawPoolsArray,
+        currentPoolId,
+        locale,
+      }),
+    [currentPoolId, locale, rawPoolsArray]
+  );
+  const rosterScopePools = useMemo(
+    () =>
+      selectedScopePools.flatMap((pool) => {
+        const capabilities = resolvePoolCapabilities(pool);
+        if (!capabilities.isResolved || capabilities.entityType === 'unknown') {
+          return [];
+        }
+        return [
+          {
+            ...pool,
+            type: capabilities.basePoolType,
+          },
+        ];
+      }),
+    [selectedScopePools]
+  );
   const poolRosterById = usePoolRoster({
-    pools: selectedScopePools,
-    enabled: selectedScopePools.length > 0,
+    pools: rosterScopePools,
+    enabled: rosterScopePools.length > 0,
   });
-  const selectedPools = useMemo(() => selectedScopePools.map((pool) => {
-    const rosterMeta = poolRosterById.get(normalizePoolId(getPoolId(pool)));
-    return rosterMeta
-      ? { ...pool, resolved_roster: rosterMeta.roster }
-      : pool;
-  }), [poolRosterById, selectedScopePools]);
-  const poolsArray = useMemo(() => rawPoolsArray.map((pool) => {
-    const rosterMeta = poolRosterById.get(normalizePoolId(getPoolId(pool)));
-    return rosterMeta
-      ? { ...pool, resolved_roster: rosterMeta.roster }
-      : pool;
-  }), [poolRosterById, rawPoolsArray]);
+  const selectedPools = useMemo(
+    () =>
+      selectedScopePools.map((pool) => {
+        const rosterMeta = poolRosterById.get(normalizePoolId(getPoolId(pool)));
+        return rosterMeta ? { ...pool, resolved_roster: rosterMeta.roster } : pool;
+      }),
+    [poolRosterById, selectedScopePools]
+  );
+  const poolsArray = useMemo(
+    () =>
+      rawPoolsArray.map((pool) => {
+        const rosterMeta = poolRosterById.get(normalizePoolId(getPoolId(pool)));
+        return rosterMeta ? { ...pool, resolved_roster: rosterMeta.roster } : pool;
+      }),
+    [poolRosterById, rawPoolsArray]
+  );
+  const poolById = useMemo(
+    () => new Map(poolsArray.map((pool) => [getPoolId(pool), pool]).filter(([poolId]) => Boolean(poolId))),
+    [poolsArray]
+  );
 
   const currentPool = useMemo(() => {
     if (isGroupMode) {
@@ -118,26 +167,25 @@ export function useCurrentPoolData() {
           isGroupMode: true,
           isAllPoolsOverview: true,
           up_character: null,
-          locked: true
+          locked: true,
         };
       }
 
-      const baseType = groupType === 'weapon_limited' || groupType === 'weapon_standard'
-        ? 'weapon'
-        : groupType === 'extra'
-          ? 'extra'
-        : groupType === 'limited'
-          ? 'limited'
-          : groupType;
+      const baseType = groupType === 'weapon_limited' || groupType === 'weapon_standard' ? 'weapon' : groupType;
+      const ruleProfile = getCommonCapabilityValue(selectedPools, 'ruleProfile');
+      const seriesKey = getCommonCapabilityValue(selectedPools, 'seriesKey');
 
       return {
         id: currentPoolId,
-        name: t('pool.card.allGroupTitle', { label: getPoolTypeLabel(groupType, locale) }),
+        name: t('pool.card.allGroupTitle', { label: getPoolTypeLabel(groupType, locale, groupSubtype) }),
         type: baseType,
+        subtype: groupSubtype,
+        extra_rule_profile: ruleProfile,
+        extra_series_key: seriesKey,
         isGroupMode: true,
         isAllPoolsOverview: false,
         up_character: null,
-        locked: true
+        locked: true,
       };
     }
 
@@ -150,9 +198,9 @@ export function useCurrentPoolData() {
       id: DEFAULT_POOL_ID,
       name: t('simulator.defaultPoolName'),
       type: 'limited',
-      locked: false
+      locked: false,
     };
-  }, [currentPoolId, groupType, isGroupMode, locale, selectedPools, t]);
+  }, [currentPoolId, groupSubtype, groupType, isGroupMode, locale, selectedPools, t]);
 
   const currentPoolHistory = useMemo(() => {
     if (!user?.id) {
@@ -160,13 +208,9 @@ export function useCurrentPoolData() {
     }
 
     if (isGroupMode) {
-      const groupPoolIds = new Set(
-        selectedPools
-          .map(pool => getPoolId(pool))
-          .filter(Boolean)
-      );
+      const groupPoolIds = new Set(selectedPools.map((pool) => getPoolId(pool)).filter(Boolean));
 
-      return sortedAccountHistoryArray.filter(item => groupPoolIds.has(getHistoryPoolId(item)));
+      return sortedAccountHistoryArray.filter((item) => groupPoolIds.has(getHistoryPoolId(item)));
     }
 
     const activePoolId = currentPool?.id || currentPoolId;
@@ -175,64 +219,75 @@ export function useCurrentPoolData() {
     }
 
     return historyByPoolId.get(activePoolId) || [];
-  }, [currentPool?.id, currentPoolId, historyByPoolId, isGroupMode, selectedPools, sortedAccountHistoryArray, user?.id]);
+  }, [
+    currentPool?.id,
+    currentPoolId,
+    historyByPoolId,
+    isGroupMode,
+    selectedPools,
+    sortedAccountHistoryArray,
+    user?.id,
+  ]);
 
-  const normalizedCurrentPoolHistory = useMemo(() => {
-    if (isGroupMode) {
-      return currentPoolHistory.map(item => {
-        const pool = poolById.get(getHistoryPoolId(item));
+  const normalizedCurrentPoolHistory = useMemo(
+    () =>
+      currentPoolHistory.map((item) => {
+        const sourcePool = isGroupMode ? poolById.get(getHistoryPoolId(item)) : currentPool;
         return {
           ...item,
-          isStandard: normalizeIsStandard(item, pool?.type, pool?.up_character)
+          isStandard: normalizeHistoryStandardForPool(item, sourcePool),
         };
-      });
-    }
+      }),
+    [currentPool, currentPoolHistory, isGroupMode, poolById]
+  );
 
-    return currentPoolHistory.map(item => ({
-      ...item,
-      isStandard: normalizeIsStandard(item, currentPool?.type, currentPool?.up_character)
-    }));
-  }, [currentPool?.type, currentPool?.up_character, currentPoolHistory, isGroupMode, poolById]);
+  const allLimitedHistory = useMemo(
+    () =>
+      sortedAccountHistoryArray.filter((item) => {
+        const sourcePool = poolById.get(getHistoryPoolId(item));
+        const capabilities = resolvePoolCapabilities(sourcePool);
+        return capabilities.entityType === 'character' && capabilities.basePoolType === 'limited';
+      }),
+    [poolById, sortedAccountHistoryArray]
+  );
 
   const crossPoolPityMap = useMemo(() => {
-    if (allLimitedHistory.length === 0) {
-      return null;
-    }
-
     const map = new Map();
-    let sixPity = 0;
-    let fivePity = 0;
+    const inheritedPools = selectedPools.filter((pool) => {
+      const capabilities = resolvePoolCapabilities(pool);
+      return capabilities.pityScope === 'shared' || capabilities.pityScope === 'series';
+    });
 
-    allLimitedHistory
-      .filter(item => !isGiftHistoryPull(item))
-      .forEach(item => {
-        const isFree = isFreeHistoryPull(item);
-        const recordKey = getHistoryRecordKey(item);
-
-        if (!isFree) {
-          sixPity++;
-          fivePity++;
-        }
-
-        if (item.rarity >= 5 && recordKey) {
-          map.set(recordKey, {
-            sixStarPity: isFree ? 'free' : (item.rarity === 6 ? sixPity : null),
-            fiveStarPity: isFree ? 'free' : fivePity
-          });
-        }
-
-        if (!isFree) {
-          if (item.rarity === 6) {
-            sixPity = 0;
-          }
-          if (item.rarity >= 5) {
-            fivePity = 0;
-          }
-        }
+    inheritedPools.forEach((pool) => {
+      const timeline = buildScopedPaidHistoryTimeline({
+        history: annotatedAccountHistoryArray,
+        pools: poolsArray,
+        pool,
+        scopeType: 'pity',
       });
+      buildPaidTimelinePityMap(timeline).forEach((value, key) => {
+        map.set(key, value);
+      });
+    });
 
-    return map;
-  }, [allLimitedHistory]);
+    const inheritedPoolIds = new Set(inheritedPools.map((pool) => getPoolId(pool)).filter(Boolean));
+    annotatedAccountHistoryArray.forEach((item) => {
+      const recordKey = getHistoryRecordKey(item);
+      if (
+        recordKey &&
+        inheritedPoolIds.has(getHistoryPoolId(item)) &&
+        Number(item?.rarity) >= 5 &&
+        isFreeHistoryPull(item)
+      ) {
+        map.set(recordKey, {
+          sixStarPity: 'free',
+          fiveStarPity: 'free',
+        });
+      }
+    });
+
+    return map.size > 0 ? map : null;
+  }, [annotatedAccountHistoryArray, poolsArray, selectedPools]);
 
   return {
     poolsArray,
@@ -247,7 +302,8 @@ export function useCurrentPoolData() {
     crossPoolPityMap,
     hasMergedAccountView,
     isGroupMode,
-    groupType
+    groupType,
+    groupSubtype,
   };
 }
 

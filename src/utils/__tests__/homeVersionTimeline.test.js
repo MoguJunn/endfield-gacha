@@ -141,7 +141,94 @@ describe('homeVersionTimeline', () => {
     });
     expect(sections[0].pools.map((pool) => pool.id)).toEqual(['limited_zhuang']);
     expect(sections[0].pools[0].foldedExtraPools.map((pool) => pool.id)).toEqual(['extra_festival']);
+    expect(sections[0].pools[0].foldedExtraPools[0].mergeKind).toBeUndefined();
     expect(sections[1].pools.map((pool) => pool.id)).toEqual(['limited_camille']);
+  });
+
+  it('folds an open-ended reconstruction character only when the next version first limited pool starts', () => {
+    const versionPlan = resolveHomeVersionPlan({
+      timelineConfig: [
+        {
+          id: 'rerun-version',
+          name: '复刻所属版本',
+          starts_at: '2026-06-01T12:00:00+08:00',
+          ends_at: '2026-06-20T12:00:00+08:00',
+          pool_ids: ['rerun_yvonne'],
+        },
+        {
+          id: 'next-version',
+          name: '后续版本',
+          starts_at: '2026-06-26T12:00:00+08:00',
+          pool_ids: ['next_extra', 'limited_first', 'limited_second'],
+        },
+      ],
+      now: new Date('2026-06-27T12:00:00+08:00'),
+    });
+    const poolSchedule = [
+      {
+        id: 'rerun_yvonne',
+        name: '绚丽异彩',
+        homeNodeKind: 'reconstruction-character',
+        homeCharacterName: '伊冯',
+        poolType: 'extra',
+        startDate: '2026-06-05T12:00:00+08:00',
+        endDate: null,
+        poolData: {
+          type: 'extra',
+          extra_rule_profile: 'reconstruction_character_v1',
+        },
+      },
+      {
+        id: 'next_extra',
+        name: '后续附加池',
+        poolType: 'extra',
+        startDate: '2026-06-26T12:00:00+08:00',
+        endDate: '2026-07-10T12:00:00+08:00',
+      },
+      {
+        id: 'limited_first',
+        name: '首个普通限定',
+        poolType: 'limited',
+        startDate: '2026-06-27T12:00:00+08:00',
+        endDate: '2026-07-18T12:00:00+08:00',
+      },
+      {
+        id: 'limited_second',
+        name: '第二个普通限定',
+        poolType: 'limited',
+        startDate: '2026-07-18T12:00:00+08:00',
+        endDate: '2026-08-08T12:00:00+08:00',
+      },
+    ];
+
+    const beforeTargetStarts = buildHomeRotationVersionSections({
+      versionPlan,
+      poolSchedule,
+      now: new Date('2026-06-27T11:59:59+08:00'),
+    });
+    expect(beforeTargetStarts.find((section) => section.id === 'rerun-version').pools)
+      .toEqual([expect.objectContaining({ id: 'rerun_yvonne' })]);
+    expect(beforeTargetStarts.find((section) => section.id === 'next-version').pools
+      .find((pool) => pool.id === 'limited_first').foldedExtraPools).toEqual([]);
+
+    const atTargetStart = buildHomeRotationVersionSections({
+      versionPlan,
+      poolSchedule,
+      now: new Date('2026-06-27T12:00:00+08:00'),
+    });
+    expect(atTargetStart.some((section) => section.id === 'rerun-version')).toBe(false);
+    const nextSection = atTargetStart.find((section) => section.id === 'next-version');
+    const firstLimited = nextSection.pools.find((pool) => pool.id === 'limited_first');
+    const secondLimited = nextSection.pools.find((pool) => pool.id === 'limited_second');
+
+    expect(firstLimited.foldedExtraPools).toEqual([
+      expect.objectContaining({
+        id: 'rerun_yvonne',
+        mergeKind: 'current-rerun',
+        characterName: '伊冯',
+      }),
+    ]);
+    expect(secondLimited.foldedExtraPools).toEqual([]);
   });
 
   it('folds an expired extra pool into the overlapping limited pool of the same version', () => {

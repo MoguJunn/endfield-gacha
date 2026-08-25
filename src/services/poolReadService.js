@@ -5,6 +5,7 @@ import {
   fetchPublicApiJson,
   shouldAllowPublicSupabaseFallback,
 } from './publicResourceClient';
+import { getCanonicalExtraPoolSubtype } from '../../shared/extraPoolSubtype.js';
 
 const PUBLIC_STATS_API_TIMEOUT_MS = 25000;
 const PUBLIC_DATA_CACHE_TTL = 60 * 1000;
@@ -116,7 +117,7 @@ async function loadPoolRowsByIds(poolIds) {
   const { data: poolRows, error } = await executeSupabaseRead(
     () => supabase
       .from('pools')
-      .select('pool_id, name, name_en, type, locked, is_limited_weapon, created_at, updated_at, user_id, up_character, description, banner_url, start_time, end_time, featured_characters')
+      .select('pool_id, name, name_en, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase, locked, is_limited_weapon, created_at, updated_at, user_id, up_character, description, banner_url, start_time, end_time, featured_characters')
       .in('pool_id', normalizedIds),
     {
       label: 'loadPoolRowsByIds',
@@ -139,7 +140,7 @@ async function loadAllPoolRows() {
   const { data: poolRows, error } = await executeSupabaseRead(
     () => supabase
       .from('pools')
-      .select('pool_id, name, name_en, type, locked, is_limited_weapon, created_at, updated_at, user_id, up_character, description, banner_url, start_time, end_time, featured_characters'),
+      .select('pool_id, name, name_en, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase, locked, is_limited_weapon, created_at, updated_at, user_id, up_character, description, banner_url, start_time, end_time, featured_characters'),
     {
       label: 'loadAllPoolRows',
       retries: 1
@@ -189,6 +190,10 @@ export function formatVisiblePoolRecord(record) {
     name: record.name,
     name_en: record.name_en || null,
     type: normalizeRemotePoolType(record.type, limitedWeaponFlag),
+    extra_subtype: getCanonicalExtraPoolSubtype(record),
+    extra_rule_profile: record.extra_rule_profile || record.extraRuleProfile || null,
+    extra_series_key: record.extra_series_key || record.extraSeriesKey || null,
+    extra_series_phase: record.extra_series_phase ?? record.extraSeriesPhase ?? null,
     locked: record.locked || false,
     isLimitedWeapon: limitedWeaponFlag !== false,
     created_at: record.created_at || null,

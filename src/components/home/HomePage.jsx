@@ -123,7 +123,7 @@ const HomePage = React.memo(() => {
     }
 
     const activeHomeCountdownPools = getActiveHomeCountdownPools(poolsArray, now);
-    const secondaryPools = activeHomeCountdownPools.filter((pool) => {
+    const secondaryPools = activeHomeCountdownPools.filter((pool) => pool.targetDate).filter((pool) => {
       if (!main || pool.poolType !== 'limited') {
         return true;
       }

@@ -13,12 +13,13 @@ import { buildSummaryStats } from '../../utils/summaryStats.js';
  */
 export function useSummaryStats(history, pools, user) {
   return useMemo(
-    () => buildSummaryStats({
-      history,
-      pools,
-      user,
-      characters: characterCache.getAll()
-    }),
+    () =>
+      buildSummaryStats({
+        history,
+        pools,
+        user,
+        characters: characterCache.getAll(),
+      }),
     [history, pools, user]
   );
 }

@@ -11,6 +11,7 @@ import SimulatorHistoryPanel from './SimulatorHistoryPanel';
 import { normalizeSimulatorPoolType } from './simulatorInheritance';
 import { useGachaSimulatorController } from './useGachaSimulatorController';
 import { useI18n } from '../../i18n/index.js';
+import { EXTRA_RULE_PROFILES, resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
 
 const GachaSimulator = () => {
   const { t } = useI18n();
@@ -81,15 +82,33 @@ const GachaSimulator = () => {
     isWeaponPool,
   } = useGachaSimulatorController();
   const normalizedSimulatorPoolType = normalizeSimulatorPoolType(simulator.poolType);
+  const currentPoolCapabilities = resolvePoolCapabilities(currentPoolObj);
+  const isReconstructionCharacter = currentPoolCapabilities.ruleProfile === EXTRA_RULE_PROFILES.RECONSTRUCTION_CHARACTER;
+  const isReconstructionWeapon = currentPoolCapabilities.ruleProfile === EXTRA_RULE_PROFILES.RECONSTRUCTION_WEAPON;
   const shareCardRef = useRef(null);
   const resolvedCurrentType = normalizeSimulatorPoolType(currentSimPool?.type);
-  const currentTypeName = resolvedCurrentType === 'extra'
-    ? t('dashboard.pool.type.extra')
+  const currentTypeName = isReconstructionCharacter
+    ? t('simulator.poolTypeName.reconstructionCharacter')
+    : isReconstructionWeapon
+      ? t('simulator.poolTypeName.reconstructionWeapon')
+      : resolvedCurrentType === 'extra'
+        ? t('dashboard.pool.type.extra')
     : resolvedCurrentType === 'limited'
       ? t('dashboard.pool.type.limited')
       : resolvedCurrentType === 'weapon'
         ? t('dashboard.pool.type.weapon')
         : t('dashboard.pool.type.standard');
+  const heroTitle = isReconstructionCharacter
+    ? t('simulator.hero.reconstructionCharacter')
+    : isReconstructionWeapon
+      ? t('simulator.hero.reconstructionWeapon')
+      : currentPoolCapabilities.rawPoolType === 'extra'
+        ? t('simulator.poolTypeName.extra')
+        : normalizedSimulatorPoolType === 'limited'
+          ? t('simulator.hero.limited')
+          : normalizedSimulatorPoolType === 'weapon'
+            ? t('simulator.hero.weapon')
+            : t('simulator.hero.standard');
 
   return (
     <div className="flex flex-col h-full text-slate-800 dark:text-zinc-100 font-sans max-w-7xl mx-auto w-full">
@@ -175,13 +194,13 @@ const GachaSimulator = () => {
               !isAnimating && (
                 <div className="relative z-10 text-center transform transition-all duration-500 animate-fade-in">
                   <div className="w-24 h-24 mx-auto mb-6 border-2 border-endfield-yellow rotate-45 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    {normalizedSimulatorPoolType === 'limited' && (
+                    {currentPoolCapabilities.entityType === 'character' && currentPoolCapabilities.rawPoolType !== 'extra' && normalizedSimulatorPoolType === 'limited' && (
                       <Star size={40} className="text-endfield-yellow -rotate-45" />
                     )}
-                    {normalizedSimulatorPoolType === 'extra' && (
+                    {currentPoolCapabilities.rawPoolType === 'extra' && currentPoolCapabilities.entityType !== 'weapon' && (
                       <Star size={40} className="text-cyan-400 -rotate-45" />
                     )}
-                    {normalizedSimulatorPoolType === 'weapon' && (
+                    {currentPoolCapabilities.entityType === 'weapon' && (
                       <Search size={40} className="text-endfield-yellow -rotate-45" />
                     )}
                     {normalizedSimulatorPoolType === 'standard' && (
@@ -190,13 +209,7 @@ const GachaSimulator = () => {
                   </div>
 
                   <h1 className="text-3xl font-black text-slate-800 dark:text-white uppercase tracking-tighter mb-2">
-                    {normalizedSimulatorPoolType === 'extra'
-                      ? t('simulator.poolTypeName.extra')
-                      : normalizedSimulatorPoolType === 'limited'
-                      ? t('simulator.hero.limited')
-                      : normalizedSimulatorPoolType === 'weapon'
-                        ? t('simulator.hero.weapon')
-                        : t('simulator.hero.standard')}
+                    {heroTitle}
                   </h1>
                   <p className="text-sm font-mono text-endfield-yellow tracking-[0.2em] uppercase opacity-80 bg-black/80 px-2 py-1 rounded inline-block">
                     {t('simulator.hero.subtitle')}

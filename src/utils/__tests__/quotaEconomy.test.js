@@ -68,7 +68,12 @@ describe('quotaEconomy', () => {
   it('maps history pool_id to pool metadata and adds extra-pool per pull or expedited pull Bond quota', () => {
     const ledger = buildCharacterCatalogRows({
       pools: [
-        { id: 'db-extra', pool_id: 'official-extra', type: 'extra' },
+        {
+          id: 'db-extra',
+          pool_id: 'official-extra',
+          type: 'extra',
+          extra_rule_profile: 'brilliance_festival_v1',
+        },
         { id: 'db-weapon', pool_id: 'official-weapon', type: 'weapon' },
       ],
       characters: [
@@ -117,6 +122,7 @@ describe('quotaEconomy', () => {
       {
         poolId: 'sim_extra',
         poolType: 'extra',
+        extraRuleProfile: 'brilliance_festival_v1',
         pullHistory: [
           { id: 'extra-paid-1', characterName: 'Alpha', rarity: 4 },
           { id: 'extra-paid-2', characterName: 'Beta', rarity: 5 },
@@ -143,6 +149,7 @@ describe('quotaEconomy', () => {
       {
         poolId: 'sim_extra',
         poolType: 'extra',
+        extraRuleProfile: 'brilliance_festival_v1',
         pullHistory: [
           ...Array.from({ length: 80 }).map((_, index) => ({
             id: `extra-paid-${index + 1}`,
@@ -164,6 +171,41 @@ describe('quotaEconomy', () => {
       characterPulls: 80,
       jadeSpent: 40000,
       bondQuotaDirect: 90,
+    });
+  });
+
+  it('uses character or weapon economy for reconstruction profiles without per-pull Bond quota', () => {
+    const states = [
+      {
+        poolId: 'sim_reconstruction_character',
+        poolType: 'extra',
+        extraRuleProfile: 'reconstruction_character_v1',
+        pullHistory: [
+          { id: 'char-copy', characterName: 'Alpha', rarity: 6 },
+        ],
+      },
+      {
+        poolId: 'sim_reconstruction_weapon',
+        poolType: 'extra',
+        extraRuleProfile: 'reconstruction_weapon_v1',
+        pullHistory: [
+          { id: 'weapon-copy', characterName: 'Blade', rarity: 6 },
+        ],
+      },
+    ];
+    const ledger = buildQuotaLedgerFromSimulatorStates(states);
+
+    expect(ledger.characterQuota).toMatchObject({
+      aicQuotaDirect: 30,
+      bondQuotaDirect: 0,
+    });
+    expect(ledger.weaponQuota).toMatchObject({
+      aicQuotaDirect: 50,
+      bondQuotaDirect: 0,
+    });
+    expect(buildSimulatorResourceLedger(states)).toMatchObject({
+      characterPulls: 1,
+      weaponPulls: 1,
     });
   });
 

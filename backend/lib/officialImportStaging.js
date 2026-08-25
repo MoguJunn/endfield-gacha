@@ -4,6 +4,7 @@ import {
   isSupabaseConnectionPoolTimeout,
   retrySupabaseConnectionPoolOperation,
 } from '../../shared/supabaseConnectionRetry.js';
+import { getCanonicalExtraPoolMetadata } from '../../shared/extraPoolSubtype.js';
 
 const STAGED_RECORD_BATCH_SIZE = 500;
 const DEFAULT_REVIEW_TTL_MS = 30 * 60 * 1000;
@@ -43,6 +44,32 @@ function accessKeysMatch(accessKey, expectedHash) {
 function withoutIssueList(summary = {}) {
   const { issues: _issues, ...safeSummary } = summary || {};
   return safeSummary;
+}
+
+function normalizePoolForStaging(pool = {}) {
+  const poolId = normalizeText(pool.pool_id || pool.id || pool.poolId, 200);
+  if (!poolId) return null;
+  const type = normalizeText(pool.type || pool.pool_type || pool.poolType, 80) || 'standard';
+  const extraMetadata = type === 'extra'
+    ? getCanonicalExtraPoolMetadata(pool)
+    : {
+        extra_subtype: null,
+        extra_rule_profile: null,
+        extra_series_key: null,
+        extra_series_phase: null,
+      };
+
+  return {
+    pool_id: poolId,
+    name: normalizeText(pool.name || pool.pool_name || pool.poolName, 300) || poolId,
+    type,
+    ...extraMetadata,
+    start_time: pool.start_time || pool.startTime || null,
+    end_time: pool.end_time || pool.endTime || null,
+    up_character: normalizeText(pool.up_character || pool.upCharacter, 300) || null,
+    featured_characters: Array.isArray(pool.featured_characters) ? pool.featured_characters : null,
+    created_at: pool.created_at || null,
+  };
 }
 
 function publicTask(task = {}) {
@@ -295,7 +322,12 @@ export async function stageOfficialImportTask({
     );
   }
 
-  const poolById = new Map((Array.isArray(pools) ? pools : []).map((pool) => [String(pool?.pool_id || ''), pool]));
+  const poolById = new Map(
+    (Array.isArray(pools) ? pools : [])
+      .map(normalizePoolForStaging)
+      .filter(Boolean)
+      .map((pool) => [pool.pool_id, pool])
+  );
   const rows = (Array.isArray(stagedRecords) ? stagedRecords : []).map((record, ordinal) => ({
     task_id: task.id,
     ...normalizeStagedRecord(record, ordinal, poolById),

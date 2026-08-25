@@ -54,8 +54,25 @@ export function processHistoryGroups(history) {
 
 export function buildDashboardStats(stats, pityInfo, simulator, locale = getAppLocale()) {
   const normalizedPoolType = normalizeSimulatorPoolType(simulator.poolType);
-  const probabilityInfo = calculateCurrentProbability(pityInfo.sixStar.current, normalizedPoolType);
+  const capabilities = simulator.capabilities;
+  const probabilityInfo = capabilities?.isResolved
+    ? calculateCurrentProbability(pityInfo.sixStar.current, simulator.poolInfo || normalizedPoolType)
+    : null;
   const simulatorState = simulator?.getState?.() || {};
+  const rewardPaidTotal = capabilities?.rewardScope === 'series'
+    ? Number(simulatorState.seriesRewardPulls ?? stats.totalPulls ?? 0)
+    : Number(stats.totalPulls || 0);
+  const guaranteeState = simulator?.getPityInfo?.()?.guaranteedUp || null;
+  const rawFreeTenPullCount = Number(stats.freeTenPulls?.count || 0);
+  const freeTenPullCount = Math.max(
+    Number.isFinite(rawFreeTenPullCount) ? Math.trunc(rawFreeTenPullCount) : 0,
+    0
+  );
+  const rawFreeTenPullsReceived = Number(simulatorState.freeTenPullsReceived || 0);
+  const freeTenPullsReceived = Math.min(
+    3,
+    Math.max(Number.isFinite(rawFreeTenPullsReceived) ? Math.trunc(rawFreeTenPullsReceived) : 0, 0)
+  );
   const targetProbabilityInfo = buildCurrentTargetProbabilityInfo({
     guaranteedLimitedPity: simulatorState.guaranteedLimitedPity,
     hasReceivedGuaranteedLimited: simulatorState.hasReceivedGuaranteedLimited,
@@ -66,6 +83,9 @@ export function buildDashboardStats(stats, pityInfo, simulator, locale = getAppL
 
   return {
     total: stats.totalPulls,
+    paidTotal: stats.totalPulls,
+    rewardPaidTotal,
+    seriesRewardPaidTotal: capabilities?.rewardScope === 'series' ? rewardPaidTotal : null,
     currentPity: pityInfo.sixStar.current,
     currentPity5: pityInfo.fiveStar.current,
     counts: {
@@ -147,79 +167,39 @@ export function buildDashboardStats(stats, pityInfo, simulator, locale = getAppL
     },
     probabilityInfo,
     targetProbabilityInfo,
+    guaranteeState,
     hasInfoBook: stats.hasReceivedInfoBook,
-    pullsUntilInfoBook: normalizedPoolType === 'limited' && !stats.hasReceivedInfoBook
-      ? Math.max(0, 60 - stats.totalPulls)
+    pullsUntilInfoBook: capabilities?.infoBookEnabled && !stats.hasReceivedInfoBook
+      ? Math.max(0, Number(capabilities.rules.infoBookThreshold || 0) - stats.totalPulls)
       : 0,
     freeTenPulls: {
       ...stats.freeTenPulls,
-      received: simulator.getState().freeTenPullsReceived
+      count: freeTenPullCount,
+      received: freeTenPullsReceived,
+      available: Math.max(freeTenPullCount - freeTenPullsReceived, 0)
     },
     gifts: stats.gifts
   };
 }
 
 export function buildPityInfoWithGuarantee(stats, simulator) {
-  const normalizedPoolType = normalizeSimulatorPoolType(simulator.poolType);
-
-  if (normalizedPoolType === 'extra') {
-    return {
-      guaranteedUp: {
-        current: Math.min(stats.totalPulls, 30),
-        hasReceived: (stats.freeTenPulls?.count || 0) > 0
-      }
-    };
+  void stats;
+  const threshold = Number(simulator?.capabilities?.rules?.guaranteedLimitedPity || 0);
+  if (threshold <= 0) {
+    return {};
   }
 
-  if (normalizedPoolType === 'limited') {
-    let cumulativePulls = 0;
-    let hasReceivedLimitedInFirst120 = false;
+  const guaranteedUp = simulator?.getPityInfo?.()?.guaranteedUp;
+  if (!guaranteedUp) {
+    return {};
+  }
 
-    for (const item of stats.sixStarHistory) {
-      if (item.isFreePull) {
-        continue;
-      }
-
-      cumulativePulls += item.pityWhenPulled || 1;
-      if (cumulativePulls <= 120 && item.isUp) {
-        hasReceivedLimitedInFirst120 = true;
-        break;
-      }
-      if (cumulativePulls > 120) {
-        break;
-      }
+  return {
+    guaranteedUp: {
+      ...guaranteedUp,
+      current: Math.min(Number(guaranteedUp.current || 0), threshold),
+      max: threshold,
+      hasReceived: Boolean(guaranteedUp.hasReceived),
     }
-
-    return {
-      guaranteedUp: {
-        current: Math.min(stats.totalPulls, 120),
-        hasReceived: hasReceivedLimitedInFirst120
-      }
-    };
-  }
-
-  if (normalizedPoolType === 'weapon') {
-    let cumulativePulls = 0;
-    let hasReceivedLimitedInFirst80 = false;
-
-    for (const item of stats.sixStarHistory) {
-      cumulativePulls += item.pityWhenPulled || 1;
-      if (cumulativePulls <= 80 && item.isUp) {
-        hasReceivedLimitedInFirst80 = true;
-        break;
-      }
-      if (cumulativePulls > 80) {
-        break;
-      }
-    }
-
-    return {
-      guaranteedUp: {
-        current: Math.min(stats.totalPulls, 80),
-        hasReceived: hasReceivedLimitedInFirst80
-      }
-    };
-  }
-
-  return {};
+  };
 }

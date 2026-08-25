@@ -199,7 +199,14 @@ export const removeCharacterFromPool = async (poolId, characterId) => {
   }
 };
 
-export const createUpCharacter = async (characterName, poolType, poolStartTime, rotationBaseCount = 0) => {
+export const createUpCharacter = async (
+  characterName,
+  poolType,
+  poolStartTime,
+  rotationBaseCount = 0,
+  itemType = null,
+  extraRuleProfile = null
+) => {
   const result = await requestAdminPools({
     method: 'POST',
     body: {
@@ -208,6 +215,8 @@ export const createUpCharacter = async (characterName, poolType, poolStartTime, 
       poolType,
       poolStartTime,
       rotationBaseCount,
+      ...(itemType ? { itemType } : {}),
+      ...(extraRuleProfile ? { extraRuleProfile } : {}),
     },
     label: 'admin-pool-create-up-character',
   });

@@ -1,7 +1,10 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
-import { reconcileOfficialCharacterIds } from '../../backend/lib/officialIdReconciliation.js';
+import {
+  reconcileOfficialCharacterIds,
+  reconcileOfficialPoolIds,
+} from '../../backend/lib/officialIdReconciliation.js';
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : String(value || '').trim();
@@ -16,6 +19,39 @@ function tableRows(state, tableName) {
 
 function createQueryClient(state) {
   return {
+    async rpc(functionName, args) {
+      if (!Array.isArray(state.rpcCalls)) {
+        state.rpcCalls = [];
+      }
+      state.rpcCalls.push({ functionName, args });
+
+      if (state.rpcError) {
+        return { data: null, error: state.rpcError };
+      }
+
+      if (functionName === 'promote_manual_pool_to_official_id') {
+        const manualPool = tableRows(state, 'pools').find(
+          (pool) => pool.pool_id === args.p_manual_pool_id
+        );
+        state.pools = tableRows(state, 'pools').filter(
+          (pool) => pool.pool_id !== args.p_manual_pool_id
+            && pool.pool_id !== args.p_official_pool.pool_id
+        );
+        state.pools.push({ ...manualPool, ...args.p_official_pool });
+        state.history = tableRows(state, 'history').map((row) => (
+          row.pool_id === args.p_manual_pool_id
+            ? { ...row, pool_id: args.p_official_pool.pool_id }
+            : row
+        ));
+        state.pool_characters = tableRows(state, 'pool_characters').map((row) => (
+          row.pool_id === args.p_manual_pool_id
+            ? { ...row, pool_id: args.p_official_pool.pool_id }
+            : row
+        ));
+      }
+
+      return { data: { promoted: true }, error: null };
+    },
     from(tableName) {
       return {
         select() {
@@ -84,6 +120,172 @@ function createQueryClient(state) {
     },
   };
 }
+
+describe('reconcileOfficialPoolIds', () => {
+  it('keeps unknown ID prefixes blocked outside the trusted official import path', async () => {
+    const state = {
+      pools: [],
+      history: [],
+      pool_characters: [],
+      pool_id_aliases: [],
+    };
+
+    const result = await reconcileOfficialPoolIds(createQueryClient(state), [{
+      pool_id: 'reconstruction_9_0_1',
+      name: '绚丽异彩',
+      type: 'limited',
+      up_character: '伊冯',
+    }]);
+
+    expect(result).toEqual({ created: 0, migrated: 0, skipped: 0, operations: [] });
+    expect(state.pools).toEqual([]);
+  });
+
+  it('promotes official IDs without assuming reconstruction pool prefixes', async () => {
+    const characterManualId = 'joint_manual_extra_reconstruction_yvonne_p1';
+    const weaponManualId = 'joint_manual_extra_reconstruction_arttyrant_p1';
+    const state = {
+      pools: [
+        {
+          pool_id: characterManualId,
+          name: '绚丽异彩',
+          type: 'extra',
+          extra_subtype: 'reconstruction',
+          extra_rule_profile: 'reconstruction_character_v1',
+          extra_series_key: 'reconstruction-xuesong-youmeng',
+          extra_series_phase: 1,
+          start_time: '2026-09-24T12:00:00+08:00',
+          end_time: null,
+          up_character: '伊冯',
+          featured_characters: ['chr_0017_yvonne'],
+          description: '版本更新维护前结束',
+          banner_url: '/banners/yvonne.webp',
+          locked: true,
+          user_id: null,
+        },
+        {
+          pool_id: weaponManualId,
+          name: '点绘申领',
+          type: 'extra',
+          extra_subtype: 'reconstruction',
+          extra_rule_profile: 'reconstruction_weapon_v1',
+          extra_series_key: 'reconstruction-xuesong-youmeng',
+          extra_series_phase: 1,
+          start_time: '2026-09-24T12:00:00+08:00',
+          end_time: null,
+          up_character: '艺术暴君',
+          featured_characters: ['wpn_pistol_0010'],
+          description: '版本更新维护前结束',
+          banner_url: '/banners/arttyrant.webp',
+          locked: true,
+          user_id: null,
+        },
+      ],
+      history: [
+        { record_id: 'character-history', pool_id: characterManualId },
+        { record_id: 'weapon-history', pool_id: weaponManualId },
+      ],
+      pool_characters: [
+        { pool_id: characterManualId, character_id: 'chr_0017_yvonne', is_up: true },
+        { pool_id: weaponManualId, character_id: 'wpn_pistol_0010', is_up: true },
+      ],
+      pool_id_aliases: [],
+      rpcCalls: [],
+    };
+
+    const result = await reconcileOfficialPoolIds(createQueryClient(state), [
+      {
+        pool_id: 'reconstruction_9_0_1',
+        name: '绚丽异彩',
+        type: 'limited',
+        start_time: '2026-09-24T12:00:00+08:00',
+        up_character: '伊冯',
+      },
+      {
+        pool_id: 'reclaim_9_0_2',
+        name: '点绘申领',
+        type: 'extra',
+        start_time: '2026-09-24T12:00:00+08:00',
+        up_character: '艺术暴君',
+      },
+    ], { allowUnknownOfficialIds: true });
+
+    expect(result).toMatchObject({ migrated: 2, skipped: 0 });
+    expect(state.rpcCalls).toHaveLength(2);
+    expect(state.rpcCalls.map((call) => call.functionName)).toEqual([
+      'promote_manual_pool_to_official_id',
+      'promote_manual_pool_to_official_id',
+    ]);
+
+    const characterPayload = state.rpcCalls[0].args.p_official_pool;
+    expect(characterPayload).toMatchObject({
+      pool_id: 'reconstruction_9_0_1',
+      type: 'extra',
+      extra_subtype: 'reconstruction',
+      extra_rule_profile: 'reconstruction_character_v1',
+      extra_series_key: 'reconstruction-xuesong-youmeng',
+      extra_series_phase: 1,
+      description: '版本更新维护前结束',
+      banner_url: '/banners/yvonne.webp',
+      locked: true,
+      user_id: null,
+    });
+
+    const weaponPayload = state.rpcCalls[1].args.p_official_pool;
+    expect(weaponPayload).toMatchObject({
+      pool_id: 'reclaim_9_0_2',
+      type: 'extra',
+      extra_subtype: 'reconstruction_claim',
+      extra_rule_profile: 'reconstruction_weapon_v1',
+      extra_series_key: 'reconstruction-xuesong-youmeng',
+      extra_series_phase: 1,
+      description: '版本更新维护前结束',
+      banner_url: '/banners/arttyrant.webp',
+      locked: true,
+      user_id: null,
+    });
+    expect(state.pools.map((pool) => pool.pool_id)).toEqual(
+      expect.arrayContaining(['reconstruction_9_0_1', 'reclaim_9_0_2'])
+    );
+    expect(state.pools.some((pool) => pool.pool_id === characterManualId)).toBe(false);
+    expect(state.pools.some((pool) => pool.pool_id === weaponManualId)).toBe(false);
+  });
+
+  it('uses the compatibility migration only when PostgREST reports PGRST202', async () => {
+    const manualId = 'joint_manual_extra_reconstruction_yvonne_p1';
+    const state = {
+      pools: [{
+        pool_id: manualId,
+        name: '绚丽异彩',
+        type: 'extra',
+        extra_subtype: 'reconstruction',
+        extra_rule_profile: 'reconstruction_character_v1',
+        extra_series_key: 'reconstruction-xuesong-youmeng',
+        extra_series_phase: 1,
+        start_time: '2026-09-24T12:00:00+08:00',
+        up_character: '伊冯',
+        locked: true,
+      }],
+      history: [{ pool_id: manualId }],
+      pool_characters: [],
+      pool_id_aliases: [],
+      rpcError: { code: 'PGRST202', message: 'function not found in schema cache' },
+    };
+
+    const result = await reconcileOfficialPoolIds(createQueryClient(state), [{
+      pool_id: 'joint_9_0_1',
+      name: '绚丽异彩',
+      type: 'extra',
+      start_time: '2026-09-24T12:00:00+08:00',
+      up_character: '伊冯',
+    }]);
+
+    expect(result).toMatchObject({ migrated: 1 });
+    expect(result.operations[0]).toMatchObject({ promotionMode: 'compatibility' });
+    expect(state.history[0].pool_id).toBe('joint_9_0_1');
+    expect(state.pools.some((pool) => pool.pool_id === manualId)).toBe(false);
+  });
+});
 
 describe('reconcileOfficialCharacterIds', () => {
   it('preserves managed character settings and pool roster while migrating manual placeholders', async () => {

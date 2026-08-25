@@ -5,6 +5,7 @@
 
 import { LIMITED_POOL_SCHEDULE } from '../constants/index.js';
 import { characterCache, getCharacterAvatarUrl } from './characterUtils.js';
+import { resolvePoolCapabilities } from './poolCapabilities.js';
 import { getPoolFeaturedLead, getPoolFeaturedNames } from './poolFeaturedResolver.js';
 
 function normalizeRotationLimit(value) {
@@ -115,6 +116,14 @@ export function getPoolActivityTiming(pool, referenceDate = new Date()) {
   };
 }
 
+function getPoolEndValue(pool) {
+  return pool?.end_time || pool?.endDate || null;
+}
+
+function getPoolEndLabel(pool, hasEndDate = Boolean(getPoolEndValue(pool))) {
+  return pool?.end_label || pool?.endLabel || (hasEndDate ? null : '版本更新维护前');
+}
+
 function getPoolCharacterName(pool) {
   return getPoolFeaturedLead(pool) || pool?.name || null;
 }
@@ -161,7 +170,12 @@ function isTimedLimitedPool(pool) {
 }
 
 function isTimedExtraPool(pool) {
-  return pool?.type === 'extra' && isValidDate(getPoolStartDate(pool)) && isValidDate(getPoolEndDate(pool));
+  if (pool?.type !== 'extra' || !isValidDate(getPoolStartDate(pool))) {
+    return false;
+  }
+
+  const endValue = getPoolEndValue(pool);
+  return !endValue || isValidDate(getPoolEndDate(pool));
 }
 
 function getPoolRecordId(pool) {
@@ -435,24 +449,43 @@ export const getHomeRotationPoolSchedule = (pools) => {
   }));
 
   const extraSchedule = (Array.isArray(pools) ? pools : [])
-    .filter(isTimedExtraPool)
-    .map((pool, index) => ({
-      id: getPoolRecordId(pool) || `extra-${index}`,
-      name: pool.name || getPoolCharacterName(pool) || '附加寻访',
-      displayName: pool.name || '附加寻访',
-      featuredNames: getPoolFeaturedNames(pool),
-      startDate: pool.start_time || pool.startDate,
-      endDate: pool.end_time || pool.endDate,
-      rotationPosition: limitedSchedule.length + index,
-      backgroundImage: getPoolBackgroundImage(pool),
-      poolType: 'extra',
-      rotationGroup: 'extra',
-      isIndependentNode: true,
-      poolData: pool,
-    }));
+    .filter((pool) => (
+      isTimedExtraPool(pool)
+      && resolvePoolCapabilities(pool).extraSubtype !== 'reconstruction_claim'
+    ))
+    .map((pool, index) => {
+      const endDate = getPoolEndValue(pool);
+      const explicitEndLabel = pool.end_label || pool.endLabel || null;
+      const capabilities = resolvePoolCapabilities(pool);
+      const isReconstructionCharacter = capabilities.ruleProfile === 'reconstruction_character_v1';
+      const homeCharacterName = isReconstructionCharacter
+        ? (pool.up_character || pool.upCharacter || getPoolFeaturedLead(pool))
+        : null;
+
+      return {
+        id: getPoolRecordId(pool) || `extra-${index}`,
+        name: pool.name || getPoolCharacterName(pool) || '附加寻访',
+        displayName: pool.name || '附加寻访',
+        featuredNames: getPoolFeaturedNames(pool),
+        startDate: pool.start_time || pool.startDate,
+        endDate,
+        endLabel: getPoolEndLabel(pool, Boolean(endDate)),
+        hasDefaultEndLabel: !endDate && !explicitEndLabel,
+        rotationPosition: limitedSchedule.length + index,
+        backgroundImage: getPoolBackgroundImage(pool),
+        poolType: 'extra',
+        rotationGroup: 'extra',
+        isIndependentNode: true,
+        ...(isReconstructionCharacter ? {
+          homeNodeKind: 'reconstruction-character',
+          homeCharacterName,
+        } : {}),
+        poolData: pool,
+      };
+    });
 
   return [...limitedSchedule, ...extraSchedule]
-    .filter((pool) => isValidDate(normalizePoolDateValue(pool.startDate)) && isValidDate(normalizePoolDateValue(pool.endDate)))
+    .filter((pool) => isValidDate(normalizePoolDateValue(pool.startDate)))
     .sort((left, right) => normalizePoolDateValue(left.startDate).getTime() - normalizePoolDateValue(right.startDate).getTime());
 };
 
@@ -465,10 +498,26 @@ export const getActiveHomeCountdownPools = (pools, referenceDate = new Date()) =
       }
 
       const start = normalizePoolDateValue(pool.startDate);
-      const end = normalizePoolDateValue(pool.endDate);
-      return now >= start && now < end;
+      const end = pool.endDate ? normalizePoolDateValue(pool.endDate) : null;
+      return now >= start && (!end || now < end);
     })
     .map((pool) => {
+      if (!pool.endDate) {
+        return {
+          ...pool,
+          active: true,
+          isActive: true,
+          targetDate: null,
+          scheduleDate: pool.startDate,
+          days: null,
+          hours: null,
+          minutes: null,
+          seconds: null,
+          hasOpenEndedSchedule: true,
+          endLabel: pool.endLabel || '版本更新维护前',
+        };
+      }
+
       const end = normalizePoolDateValue(pool.endDate);
       const diff = Math.max(0, end.getTime() - now.getTime());
       return {
@@ -481,6 +530,7 @@ export const getActiveHomeCountdownPools = (pools, referenceDate = new Date()) =
         hours: Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
         minutes: Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)),
         seconds: Math.floor((diff % (1000 * 60)) / 1000),
+        hasOpenEndedSchedule: false,
       };
     });
 };

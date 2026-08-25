@@ -300,7 +300,34 @@ const PoolEditDialog = ({
 
   const handlePoolTypeChange = (nextType) => {
     resetCandidateControls();
-    setPoolForm((prev) => ({ ...prev, type: nextType }));
+    setPoolForm((prev) => ({
+      ...prev,
+      type: nextType,
+      extra_subtype: '',
+      extra_rule_profile: '',
+      extra_series_key: '',
+      extra_series_phase: '',
+      featured_characters_text: '',
+    }));
+  };
+
+  const handleExtraTemplateChange = (profile) => {
+    resetCandidateControls();
+    setPoolForm((prev) => ({
+      ...prev,
+      extra_subtype: profile === 'brilliance_festival_v1'
+        ? 'special'
+        : profile === 'reconstruction_weapon_v1'
+          ? 'reconstruction_claim'
+          : profile === 'reconstruction_character_v1'
+            ? 'reconstruction'
+            : '',
+      extra_rule_profile: profile,
+      extra_series_key: profile === 'brilliance_festival_v1' ? '' : prev.extra_series_key,
+      extra_series_phase: profile === 'brilliance_festival_v1' ? '' : prev.extra_series_phase,
+      up_character: '',
+      featured_characters_text: '',
+    }));
   };
 
   if (!show) return null;
@@ -312,15 +339,26 @@ const PoolEditDialog = ({
         ? 'weapon'
         : poolForm.type;
   const isExtraPool = poolType === 'extra';
-  const expectedCharacterType = poolType === 'weapon' ? 'weapon' : 'character';
+  const extraRuleProfile = poolForm.extra_rule_profile || '';
+  const isBrillianceFestival = isExtraPool && extraRuleProfile === 'brilliance_festival_v1';
+  const isReconstruction = isExtraPool
+    && ['reconstruction_character_v1', 'reconstruction_weapon_v1'].includes(extraRuleProfile);
+  const expectedCharacterType = poolType === 'weapon' || extraRuleProfile === 'reconstruction_weapon_v1'
+    ? 'weapon'
+    : 'character';
   const allChars = characters
-    .filter((c) => c.type === (poolType === 'weapon' ? 'weapon' : 'character'))
+    .filter((c) => c.type === expectedCharacterType)
     .sort(sortByAddedDateThenName);
   const featuredCharacters = parseFeaturedCharactersInput(poolForm.featured_characters_text);
+  const resolvedExtraFeaturedCharacters = isBrillianceFestival
+    ? featuredCharacters
+    : isReconstruction && poolForm.up_character.trim()
+      ? [poolForm.up_character.trim()]
+      : [];
   const featuredCharacterSet = new Set(getPoolFeaturedNames({
     type: poolForm.type,
     up_character: poolForm.up_character,
-    featured_characters: isExtraPool ? featuredCharacters : []
+    featured_characters: isExtraPool ? resolvedExtraFeaturedCharacters : []
   }, { entities: allChars }));
   const normalizedCandidateQuery = candidateQuery.trim().toLowerCase();
   const isInPool = (char) => editingPoolCharacters.some((pc) => pc.character_id === char.id);
@@ -462,6 +500,52 @@ const PoolEditDialog = ({
                   </select>
                 </div>
 
+                {isExtraPool && (
+                  <div>
+                    <label className={FIELD_LABEL_CLASS}>附加寻访模板 *</label>
+                    <select
+                      value={extraRuleProfile}
+                      onChange={(e) => handleExtraTemplateChange(e.target.value)}
+                      className={`${FIELD_INPUT_CLASS} ${FIELD_BORDER_CLASS}`}
+                    >
+                      <option value="">请选择模板</option>
+                      <option value="reconstruction_character_v1">重构角色</option>
+                      <option value="reconstruction_weapon_v1">重构申领</option>
+                      <option value="brilliance_festival_v1">辉光庆典</option>
+                    </select>
+                    <div className="mt-1 text-[11px] text-slate-400 dark:text-zinc-500">
+                      重构角色使用角色候选；重构申领使用武器候选；辉光庆典固定为四名 6★角色全 UP。
+                    </div>
+                  </div>
+                )}
+
+                {isReconstruction && (
+                  <div className="grid grid-cols-[1fr_7rem] gap-3">
+                    <div>
+                      <label className={FIELD_LABEL_CLASS}>重构系列 key *</label>
+                      <input
+                        type="text"
+                        value={poolForm.extra_series_key || ''}
+                        onChange={(e) => setPoolForm((prev) => ({ ...prev, extra_series_key: e.target.value }))}
+                        placeholder="例如：reconstruction-laevatain"
+                        className={`${FIELD_INPUT_CLASS} ${FIELD_BORDER_CLASS}`}
+                      />
+                    </div>
+                    <div>
+                      <label className={FIELD_LABEL_CLASS}>阶段 *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={poolForm.extra_series_phase ?? ''}
+                        onChange={(e) => setPoolForm((prev) => ({ ...prev, extra_series_phase: e.target.value }))}
+                        placeholder="1"
+                        className={`${FIELD_INPUT_CLASS} ${FIELD_BORDER_CLASS}`}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {/* 武器池特殊选项 */}
                 {(poolForm.type === 'weapon' || poolForm.type === 'limited_weapon') && (
                   <div>
@@ -477,9 +561,9 @@ const PoolEditDialog = ({
                   </div>
                 )}
 
-                {isExtraPool ? (
+                {isBrillianceFestival ? (
                   <div>
-                    <label className={FIELD_LABEL_CLASS}>附加寻访 6★ 名单 *</label>
+                    <label className={FIELD_LABEL_CLASS}>辉光庆典 6★角色名单 *</label>
                     <textarea
                       value={poolForm.featured_characters_text || ''}
                       onChange={(e) => setPoolForm((prev) => ({ ...prev, featured_characters_text: e.target.value }))}
@@ -488,7 +572,7 @@ const PoolEditDialog = ({
                       className={`${FIELD_INPUT_CLASS} ${FIELD_BORDER_CLASS} resize-none`}
                     />
                     <div className="mt-2 text-[11px] text-slate-500 dark:text-zinc-500">
-                      需填写 4 个不重复的 6★ 角色；保存时会自动将这 4 位标记为本池 UP。
+                      需填写 4 个不重复的 6★角色；保存时会自动将这 4 位标记为本池 UP。
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
                       <span className="text-[11px] text-slate-400 dark:text-zinc-500">
@@ -508,14 +592,16 @@ const PoolEditDialog = ({
                       ))}
                     </div>
                   </div>
-                ) : (
+                ) : !isExtraPool || isReconstruction ? (
                   <div>
-                    <label className={FIELD_LABEL_CLASS}>UP 角色/武器名称</label>
+                    <label className={FIELD_LABEL_CLASS}>
+                      {isReconstruction ? '单 UP 角色/武器名称 *' : 'UP 角色/武器名称'}
+                    </label>
                     <input
                       type="text"
                       value={poolForm.up_character}
                       onChange={(e) => setPoolForm((prev) => ({ ...prev, up_character: e.target.value }))}
-                      placeholder="例如：莱万汀"
+                      placeholder={expectedCharacterType === 'weapon' ? '例如：重构申领目标武器' : '例如：莱万汀'}
                       className={`${FIELD_INPUT_CLASS} ${
                         poolForm.up_character.trim() &&
                         !checkUpCharacterExists(poolForm.up_character, expectedCharacterType)
@@ -547,6 +633,10 @@ const PoolEditDialog = ({
                           {expectedCharacterType === 'weapon' ? '武器已存在' : '角色已存在'}
                         </div>
                       )}
+                  </div>
+                ) : (
+                  <div className="border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+                    请选择附加寻访模板后再配置 UP 项与候选名单。
                   </div>
                 )}
 

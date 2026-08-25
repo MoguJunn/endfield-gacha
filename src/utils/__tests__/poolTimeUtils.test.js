@@ -59,6 +59,16 @@ describe('poolTimeUtils homepage pool schedule', () => {
       start_time: '2026-05-14T04:00:00.000Z',
       end_time: '2026-05-28T04:00:00.000Z',
     },
+    {
+      id: 'extra_reconstruction_claim',
+      type: 'extra',
+      name: '点绘申领',
+      up_character: '艺术暴君',
+      extra_subtype: 'reconstruction',
+      extra_rule_profile: 'reconstruction_weapon_v1',
+      start_time: '2026-05-14T04:00:00.000Z',
+      end_time: '2026-05-28T04:00:00.000Z',
+    },
   ];
 
   it('keeps the legacy limited schedule scoped to limited character pools', () => {
@@ -71,7 +81,7 @@ describe('poolTimeUtils homepage pool schedule', () => {
     });
   });
 
-  it('adds extra pools to the homepage rotation schedule without adding weapon pools', () => {
+  it('adds extra pools without adding ordinary weapons or reconstruction claims', () => {
     const schedule = getHomeRotationPoolSchedule(pools);
 
     expect(schedule.map((pool) => pool.id)).toEqual(['limited_1', 'extra_1', 'limited_2', 'limited_3']);
@@ -101,6 +111,52 @@ describe('poolTimeUtils homepage pool schedule', () => {
       poolType: 'extra',
       scheduleDate: '2026-05-14T04:00:00.000Z',
     });
+  });
+
+  it('keeps an open-ended extra pool in the schedule without creating an invalid countdown', () => {
+    const openEndedPool = {
+      id: 'extra_reconstruction_character',
+      type: 'extra',
+      name: '重构寻访·伊冯',
+      up_character: '伊冯',
+      extra_rule_profile: 'reconstruction_character_v1',
+      start_time: '2026-05-10T04:00:00.000Z',
+      end_time: null,
+    };
+    const schedule = getHomeRotationPoolSchedule([...pools, openEndedPool]);
+    const openEndedSchedule = schedule.find((pool) => pool.id === openEndedPool.id);
+
+    expect(openEndedSchedule).toMatchObject({
+      endDate: null,
+      endLabel: '版本更新维护前',
+      hasDefaultEndLabel: true,
+      poolType: 'extra',
+      homeNodeKind: 'reconstruction-character',
+      homeCharacterName: '伊冯',
+      poolData: expect.objectContaining({
+        type: 'extra',
+        extra_rule_profile: 'reconstruction_character_v1',
+      }),
+    });
+    expect(schedule.some((pool) => pool.id === 'extra_reconstruction_claim')).toBe(false);
+
+    const activePools = getActiveHomeCountdownPools(
+      [...pools, openEndedPool],
+      new Date('2026-08-01T04:00:00.000Z')
+    );
+    const openEndedCountdown = activePools.find((pool) => pool.id === openEndedPool.id);
+
+    expect(openEndedCountdown).toMatchObject({
+      isActive: true,
+      hasOpenEndedSchedule: true,
+      targetDate: null,
+      days: null,
+      hours: null,
+      minutes: null,
+      seconds: null,
+      endLabel: '版本更新维护前',
+    });
+    expect(Object.values(openEndedCountdown).some((value) => Number.isNaN(value))).toBe(false);
   });
 
   it('derives the next limited pool name from the limited-only timeline', () => {

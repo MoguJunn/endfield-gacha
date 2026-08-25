@@ -1,43 +1,48 @@
-import { RARITY_CONFIG, LIMITED_POOL_RULES, WEAPON_POOL_RULES } from '../constants/index.js';
+import { RARITY_CONFIG } from '../constants/index.js';
 import { isInfoBookHistoryPull } from './historyInfoBook.js';
 import { buildResourceSummaryFromAggregates } from './resourceEconomy.js';
 import { buildQuotaLedgerFromHistory } from './quotaEconomy.js';
 import { resolveCharacterRecordByName } from './characterUtils.js';
+import { resolvePoolCapabilities } from './poolCapabilities.js';
+import {
+  buildPaidTimelinePityMap,
+  buildScopedPaidHistoryTimeline,
+  getHistoryRecordKey,
+  isTargetSixStarHistoryRecord,
+} from './poolScopedHistory.js';
 
-const CHAR_PITY_LIMIT = LIMITED_POOL_RULES.sixStarPity;
-const WEAPON_PITY_LIMIT = WEAPON_POOL_RULES.sixStarPity;
-
-function normalizePoolType(type) {
-  if (type === 'limited_character') return 'limited';
-  if (type === 'limited_weapon') return 'weapon';
-  if (type === 'beginner') return 'standard';
-  return type || 'standard';
-}
-
-function getBucketFromPoolType(type) {
-  return normalizePoolType(type) === 'weapon' ? 'weapon' : 'character';
-}
-
-function isTargetCapablePool(type) {
-  const normalizedType = normalizePoolType(type);
-  return normalizedType === 'limited' || normalizedType === 'extra' || normalizedType === 'weapon';
-}
-
-function isLimitedCharacterPool(type) {
-  const normalizedType = normalizePoolType(type);
-  return normalizedType === 'limited' || normalizedType === 'extra';
-}
-
-function isTargetSixStarPull(item, poolType) {
-  return isTargetCapablePool(poolType) && (normalizePoolType(poolType) === 'extra' || !item?.isStandard);
+function getBucketFromCapabilities(capabilities) {
+  if (capabilities.entityType === 'weapon') return 'weapon';
+  if (capabilities.entityType === 'character') return 'character';
+  return null;
 }
 
 function isGuaranteedPull(item) {
   return item?.specialType === 'guaranteed' || item?.special_type === 'guaranteed';
 }
 
-function shouldExcludeFromWinRate(item, poolType) {
-  return normalizePoolType(poolType) === 'limited' && isGuaranteedPull(item);
+function shouldExcludeFromWinRate(item, capabilities) {
+  return capabilities.basePoolType === 'limited' && isGuaranteedPull(item);
+}
+
+function buildPoolFromHistoryRecord(poolId, record) {
+  return {
+    id: poolId,
+    type: record?.poolType || record?.pool_type || record?.type,
+    up_character: record?.up_character ?? record?.upCharacter,
+    extra_subtype: record?.extra_subtype ?? record?.extraSubtype,
+    extra_rule_profile: record?.extra_rule_profile ?? record?.extraRuleProfile,
+    extra_series_key: record?.extra_series_key ?? record?.extraSeriesKey,
+    extra_series_phase: record?.extra_series_phase ?? record?.extraSeriesPhase,
+  };
+}
+
+function isTargetScope(capabilities) {
+  return capabilities.isResolved && capabilities.targetMode !== 'none';
+}
+
+function isLimitedCharacterScope(capabilities) {
+  return capabilities.entityType === 'character' && isTargetScope(capabilities);
 }
 
 function readExplicitLimitedFlag(item) {
@@ -151,9 +156,9 @@ export function buildDashboardOverviewSplitStats({
   selectedPools = [],
   includeFreePullsInStats = false
 } = {}) {
-  const poolTypeById = new Map(
+  const poolById = new Map(
     selectedPools.flatMap((pool) => (
-      [pool?.id, pool?.pool_id].map((poolId) => [poolId, normalizePoolType(pool?.type)])
+      [pool?.id, pool?.pool_id].map((poolId) => [poolId, pool])
     )).filter(([poolId]) => Boolean(poolId))
   );
 
@@ -174,6 +179,7 @@ export function buildDashboardOverviewSplitStats({
       _arsenalGainCounts: { 6: 0, '6_std': 0, 5: 0, 4: 0 },
       _winRateTargetCount: 0,
       _winRateTotalCount: 0,
+      _pityLimits: new Set(),
       _quotaHistory: []
     },
     weapon: {
@@ -192,6 +198,7 @@ export function buildDashboardOverviewSplitStats({
       _arsenalGainCounts: { 6: 0, '6_std': 0, 5: 0, 4: 0 },
       _winRateTargetCount: 0,
       _winRateTotalCount: 0,
+      _pityLimits: new Set(),
       _quotaHistory: []
     }
   };
@@ -208,10 +215,23 @@ export function buildDashboardOverviewSplitStats({
   for (const [poolId, pulls] of Object.entries(pullsByPool)) {
     const sortedPulls = pulls.sort((a, b) => (a?.id ?? 0) - (b?.id ?? 0));
     const firstItem = sortedPulls[0];
-    const poolType = poolTypeById.get(poolId)
-      || normalizePoolType(firstItem?.poolType || firstItem?.pool_type);
-    const bucketKey = getBucketFromPoolType(poolType);
+    const sourcePool = poolById.get(poolId) || buildPoolFromHistoryRecord(poolId, firstItem);
+    const capabilities = resolvePoolCapabilities(sourcePool);
+    const bucketKey = getBucketFromCapabilities(capabilities);
+    if (!bucketKey) {
+      continue;
+    }
     const bucket = buckets[bucketKey];
+    const scopedPityMap = buildPaidTimelinePityMap(buildScopedPaidHistoryTimeline({
+      history,
+      pools: selectedPools,
+      pool: sourcePool,
+      scopeType: 'pity',
+    }));
+    const pityLimit = Number(capabilities.rules?.sixStarPity);
+    if (Number.isFinite(pityLimit) && pityLimit > 0) {
+      bucket._pityLimits.add(pityLimit);
+    }
 
     let tempCounter = 0;
 
@@ -227,17 +247,17 @@ export function buildDashboardOverviewSplitStats({
       if (!isFree) {
         tempCounter += 1;
       }
-      if (isTargetCapablePool(poolType)) {
+      if (isTargetScope(capabilities)) {
         bucket._targetScopePulls += 1;
       }
-      if (isLimitedCharacterPool(poolType)) {
+      if (isLimitedCharacterScope(capabilities)) {
         bucket._limitedScopePulls += 1;
       }
 
-      if (bucketKey === 'weapon') {
+      if (capabilities.entityType === 'weapon') {
         bucket._weaponPulls += 1;
         if (!isFree && !isInfoBookHistoryPull(item)) bucket._chargedWeaponPulls += 1;
-      } else {
+      } else if (capabilities.entityType === 'character') {
         bucket._characterPulls += 1;
         if (!isFree && !isInfoBookHistoryPull(item)) bucket._chargedCharacterPulls += 1;
       }
@@ -245,8 +265,8 @@ export function buildDashboardOverviewSplitStats({
       const rarity = Number(item?.rarity) || 0;
 
       if (rarity >= 6) {
-        const isTargetSixStar = isTargetSixStarPull(item, poolType);
-        const isLimitedSixStar = isLimitedCharacterPool(poolType)
+        const isTargetSixStar = isTargetSixStarHistoryRecord(item, sourcePool);
+        const isLimitedSixStar = isLimitedCharacterScope(capabilities)
           && (isTargetSixStar || isLimitedCharacterOffrate(item));
 
         if (isTargetSixStar) {
@@ -255,11 +275,11 @@ export function buildDashboardOverviewSplitStats({
           bucket.counts['6_std'] += 1;
         }
 
-        if (bucketKey === 'character') {
+        if (capabilities.entityType === 'character') {
           bucket._arsenalGainCounts[isTargetSixStar ? 6 : '6_std'] += 1;
         }
 
-        if (!shouldExcludeFromWinRate(item, poolType)) {
+        if (!shouldExcludeFromWinRate(item, capabilities)) {
           bucket._winRateTotalCount += 1;
           if (isTargetSixStar) {
             bucket._winRateTargetCount += 1;
@@ -267,7 +287,9 @@ export function buildDashboardOverviewSplitStats({
         }
 
         bucket._allSixStarPulls.push({
-          count: isFree ? 30 : tempCounter,
+          count: isFree
+            ? 30
+            : scopedPityMap.get(getHistoryRecordKey(item))?.sixStarPity || tempCounter,
           isStandard: !isTargetSixStar
         });
 
@@ -282,7 +304,7 @@ export function buildDashboardOverviewSplitStats({
 
       const normalizedRarity = rarity === 5 ? 5 : 4;
       bucket.counts[normalizedRarity] += 1;
-      if (bucketKey === 'character') {
+      if (capabilities.entityType === 'character') {
         bucket._arsenalGainCounts[normalizedRarity] += 1;
       }
     });
@@ -290,7 +312,11 @@ export function buildDashboardOverviewSplitStats({
 
   // 汇总每个 bucket
   Object.entries(buckets).forEach(([key, bucket]) => {
-    const pityLimit = key === 'weapon' ? WEAPON_PITY_LIMIT : CHAR_PITY_LIMIT;
+    const fallbackCapabilities = resolvePoolCapabilities(key === 'weapon' ? 'weapon' : 'limited');
+    const pityLimit = Math.max(
+      Number(fallbackCapabilities.rules.sixStarPity),
+      ...bucket._pityLimits
+    );
 
     bucket.totalSixStar = bucket.counts[6] + bucket.counts['6_std'];
     bucket.winRate = bucket._winRateTotalCount > 0
@@ -349,6 +375,7 @@ export function buildDashboardOverviewSplitStats({
     delete bucket._arsenalGainCounts;
     delete bucket._winRateTargetCount;
     delete bucket._winRateTotalCount;
+    delete bucket._pityLimits;
     delete bucket._quotaHistory;
   });
 

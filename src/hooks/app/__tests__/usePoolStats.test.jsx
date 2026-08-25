@@ -7,10 +7,11 @@ import { buildPoolStats } from '../../../utils/poolStats.js';
 import { buildPoolResourceSummary } from '../../../utils/resourceEconomy.js';
 
 vi.mock('../../../stores/useHistoryStore.js', () => ({
-  default: (selector) => selector({
-    manualPityLimit: null,
-    historyFilter: 'all',
-  }),
+  default: (selector) =>
+    selector({
+      manualPityLimit: null,
+      historyFilter: 'all',
+    }),
 }));
 
 vi.mock('../useCurrentPoolGroupedHistory.js', () => ({
@@ -24,6 +25,14 @@ vi.mock('../../../utils/resourceEconomy.js', () => ({
   buildPoolResourceSummary: vi.fn(({ totalPulls, chargedPulls }) => ({
     totalPulls,
     chargedPulls,
+  })),
+  buildCapabilityAwarePoolResourceSummary: vi.fn(({ history, includeFreePulls }) => ({
+    totalPulls: history.filter(
+      (item) =>
+        item?.specialType !== 'gift' &&
+        item?.special_type !== 'gift' &&
+        (includeFreePulls || (!item?.isFree && !item?.is_free))
+    ).length,
   })),
 }));
 
@@ -80,16 +89,18 @@ describe('usePoolStats', () => {
       },
     ];
 
-    const { result } = renderHook(() => usePoolStats({
-      normalizedCurrentPoolHistory,
-      currentPool: {
-        id: 'pool_current',
-        type: 'limited',
-        isGroupMode: false,
-      },
-      allLimitedHistory: normalizedCurrentPoolHistory,
-      currentPoolId: 'pool_current',
-    }));
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory,
+        currentPool: {
+          id: 'pool_current',
+          type: 'limited',
+          isGroupMode: false,
+        },
+        allLimitedHistory: normalizedCurrentPoolHistory,
+        currentPoolId: 'pool_current',
+      })
+    );
 
     expect(result.current.stats.total).toBe(3);
     expect(result.current.stats.counts).toMatchObject({
@@ -142,29 +153,32 @@ describe('usePoolStats', () => {
       },
     ];
 
-    renderHook(() => usePoolStats({
-      normalizedCurrentPoolHistory,
-      currentPool: {
-        id: 'pool_extra',
-        type: 'extra',
-        isGroupMode: false,
-      },
-      selectedPools: [
-        { id: 'pool_extra', type: 'extra' },
-      ],
-    }));
+    renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory,
+        currentPool: {
+          id: 'pool_extra',
+          type: 'extra',
+          extra_rule_profile: 'brilliance_festival_v1',
+          isGroupMode: false,
+        },
+        selectedPools: [{ id: 'pool_extra', type: 'extra', extra_rule_profile: 'brilliance_festival_v1' }],
+      })
+    );
 
-    expect(buildPoolResourceSummary).toHaveBeenCalledWith(expect.objectContaining({
-      poolType: 'extra',
-      totalPulls: 2,
-      chargedPulls: 2,
-      quotaLedger: expect.objectContaining({
-        quota: expect.objectContaining({
-          aicQuotaDirect: 90,
-          bondQuotaDirect: 3,
+    expect(buildPoolResourceSummary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        poolType: 'extra',
+        totalPulls: 2,
+        chargedPulls: 2,
+        quotaLedger: expect.objectContaining({
+          quota: expect.objectContaining({
+            aicQuotaDirect: 90,
+            bondQuotaDirect: 3,
+          }),
         }),
-      }),
-    }));
+      })
+    );
   });
 
   it('counts extra banner six stars as target hits even when legacy records are marked standard', () => {
@@ -187,17 +201,18 @@ describe('usePoolStats', () => {
       },
     ];
 
-    const { result } = renderHook(() => usePoolStats({
-      normalizedCurrentPoolHistory,
-      currentPool: {
-        id: 'pool_extra',
-        type: 'extra',
-        isGroupMode: false,
-      },
-      selectedPools: [
-        { id: 'pool_extra', type: 'extra' },
-      ],
-    }));
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory,
+        currentPool: {
+          id: 'pool_extra',
+          type: 'extra',
+          extra_rule_profile: 'brilliance_festival_v1',
+          isGroupMode: false,
+        },
+        selectedPools: [{ id: 'pool_extra', type: 'extra', extra_rule_profile: 'brilliance_festival_v1' }],
+      })
+    );
 
     expect(result.current.stats.counts).toMatchObject({
       6: 1,
@@ -208,6 +223,84 @@ describe('usePoolStats', () => {
     expect(result.current.stats.stdSixStarCount).toBe(0);
     expect(result.current.stats.avgPullCost[6]).toBe('2.00');
     expect(result.current.stats.avgPullCost['6_limited']).toBe('2.00');
+  });
+
+  it('uses single-UP classification and limited rules for reconstruction characters', () => {
+    const normalizedCurrentPoolHistory = [
+      { id: 'r1', rarity: 4, poolId: 'pool_recon', seqId: '1' },
+      { id: 'r2', rarity: 6, isStandard: true, poolId: 'pool_recon', seqId: '2' },
+    ];
+    const pool = {
+      id: 'pool_recon',
+      type: 'extra',
+      extra_rule_profile: 'reconstruction_character_v1',
+      extra_series_key: 'recon-s1',
+      isGroupMode: false,
+    };
+
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory,
+        currentPool: pool,
+        selectedPools: [pool],
+        allLimitedHistory: normalizedCurrentPoolHistory,
+      })
+    );
+
+    expect(result.current.stats.counts).toMatchObject({
+      6: 0,
+      '6_std': 1,
+    });
+    expect(result.current.stats.pityStats.distribution).toHaveLength(8);
+    expect(result.current.stats.resourceSummary).toEqual({
+      totalPulls: 2,
+      chargedPulls: 2,
+    });
+  });
+
+  it('uses weapon pity and economy for reconstruction weapons', () => {
+    const pool = {
+      id: 'pool_recon_weapon',
+      type: 'extra',
+      extra_rule_profile: 'reconstruction_weapon_v1',
+      extra_series_key: 'recon-w1',
+      isGroupMode: false,
+    };
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory: [
+          { id: 'w1', rarity: 4, poolId: pool.id, seqId: '1' },
+          { id: 'w2', rarity: 6, isStandard: false, poolId: pool.id, seqId: '2' },
+        ],
+        currentPool: pool,
+        selectedPools: [pool],
+      })
+    );
+
+    expect(result.current.stats.counts[6]).toBe(1);
+    expect(result.current.stats.pityStats.distribution).toHaveLength(4);
+    expect(buildPoolResourceSummary).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        poolType: 'weapon',
+      })
+    );
+  });
+
+  it('keeps unknown extra profiles conservative instead of treating all six stars as targets', () => {
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory: [{ id: 'u1', rarity: 6, isStandard: false, poolId: 'joint_unknown' }],
+        currentPool: {
+          id: 'joint_unknown',
+          type: 'extra',
+          extra_rule_profile: 'future_profile_v2',
+          isGroupMode: false,
+        },
+      })
+    );
+
+    expect(result.current.stats.counts).toMatchObject({ 6: 0, '6_std': 1 });
+    expect(result.current.stats.probabilityInfo).toBeNull();
   });
 
   it('uses cross-pool limited history when inherited pity should carry over', () => {
@@ -236,16 +329,18 @@ describe('usePoolStats', () => {
       },
     ];
 
-    const { result } = renderHook(() => usePoolStats({
-      normalizedCurrentPoolHistory: [],
-      currentPool: {
-        id: 'pool_new',
-        type: 'limited',
-        isGroupMode: false,
-      },
-      allLimitedHistory,
-      currentPoolId: 'pool_new',
-    }));
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory: [],
+        currentPool: {
+          id: 'pool_new',
+          type: 'limited',
+          isGroupMode: false,
+        },
+        allLimitedHistory,
+        currentPoolId: 'pool_new',
+      })
+    );
 
     expect(result.current.inheritedPityInfo).toEqual({
       inheritedPity: 2,
@@ -293,18 +388,20 @@ describe('usePoolStats', () => {
       },
     ];
 
-    const { result } = renderHook(() => usePoolStats({
-      normalizedCurrentPoolHistory,
-      currentPool: {
-        id: '__group_all',
-        type: 'all',
-        isGroupMode: true,
-      },
-      selectedPools: [
-        { id: 'pool_limited', type: 'limited' },
-        { id: 'pool_standard', type: 'standard' },
-      ],
-    }));
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory,
+        currentPool: {
+          id: '__group_all',
+          type: 'all',
+          isGroupMode: true,
+        },
+        selectedPools: [
+          { id: 'pool_limited', type: 'limited' },
+          { id: 'pool_standard', type: 'standard' },
+        ],
+      })
+    );
 
     expect(result.current.stats.counts).toMatchObject({
       6: 1,
@@ -353,17 +450,17 @@ describe('usePoolStats', () => {
       },
     ];
 
-    const { result } = renderHook(() => usePoolStats({
-      normalizedCurrentPoolHistory,
-      currentPool: {
-        id: 'pool_limited',
-        type: 'limited',
-        isGroupMode: false,
-      },
-      selectedPools: [
-        { id: 'pool_limited', type: 'limited' },
-      ],
-    }));
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory,
+        currentPool: {
+          id: 'pool_limited',
+          type: 'limited',
+          isGroupMode: false,
+        },
+        selectedPools: [{ id: 'pool_limited', type: 'limited' }],
+      })
+    );
 
     expect(result.current.stats.counts).toMatchObject({
       6: 1,
@@ -405,17 +502,17 @@ describe('usePoolStats', () => {
       },
     ];
 
-    const { result } = renderHook(() => usePoolStats({
-      normalizedCurrentPoolHistory,
-      currentPool: {
-        id: 'pool_limited',
-        type: 'limited',
-        isGroupMode: false,
-      },
-      selectedPools: [
-        { id: 'pool_limited', type: 'limited' },
-      ],
-    }));
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory,
+        currentPool: {
+          id: 'pool_limited',
+          type: 'limited',
+          isGroupMode: false,
+        },
+        selectedPools: [{ id: 'pool_limited', type: 'limited' }],
+      })
+    );
 
     expect(result.current.stats.counts).toMatchObject({
       6: 2,
@@ -458,19 +555,19 @@ describe('usePoolStats', () => {
       character_name: '伊冯',
     };
 
-    const { result } = renderHook(() => usePoolStats({
-      normalizedCurrentPoolHistory,
-      currentPool: {
-        id: 'special_1_0_2',
-        type: 'limited',
-        up_character: '伊冯',
-        isGroupMode: false,
-      },
-      currentPoolId: 'special_1_0_2',
-      selectedPools: [
-        { id: 'special_1_0_2', type: 'limited', up_character: '伊冯' },
-      ],
-    }));
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory,
+        currentPool: {
+          id: 'special_1_0_2',
+          type: 'limited',
+          up_character: '伊冯',
+          isGroupMode: false,
+        },
+        currentPoolId: 'special_1_0_2',
+        selectedPools: [{ id: 'special_1_0_2', type: 'limited', up_character: '伊冯' }],
+      })
+    );
 
     expect(result.current.stats.counts).toMatchObject({
       6: 1,
@@ -535,10 +632,12 @@ describe('usePoolStats', () => {
     };
 
     const excluded = renderHook(() => usePoolStats(baseProps));
-    const included = renderHook(() => usePoolStats({
-      ...baseProps,
-      includeFreePullsInStats: true,
-    }));
+    const included = renderHook(() =>
+      usePoolStats({
+        ...baseProps,
+        includeFreePullsInStats: true,
+      })
+    );
 
     expect(excluded.result.current.stats).toMatchObject({
       total: 3,
@@ -627,10 +726,12 @@ describe('usePoolStats', () => {
     };
 
     const excluded = renderHook(() => usePoolStats(props));
-    const included = renderHook(() => usePoolStats({
-      ...props,
-      includeFreePullsInStats: true,
-    }));
+    const included = renderHook(() =>
+      usePoolStats({
+        ...props,
+        includeFreePullsInStats: true,
+      })
+    );
 
     expect(excluded.result.current.stats.total).toBe(2);
     expect(excluded.result.current.stats.counts).toMatchObject({
@@ -656,15 +757,17 @@ describe('usePoolStats', () => {
       seqId: String(index + 1),
     }));
 
-    const { result } = renderHook(() => usePoolStats({
-      normalizedCurrentPoolHistory,
-      currentPool: {
-        id: 'pool_limited',
-        type: 'limited',
-        isGroupMode: false,
-      },
-      currentPoolId: 'pool_limited',
-    }));
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory,
+        currentPool: {
+          id: 'pool_limited',
+          type: 'limited',
+          isGroupMode: false,
+        },
+        currentPoolId: 'pool_limited',
+      })
+    );
 
     expect(result.current.stats.counts[6]).toBe(0);
     expect(result.current.stats.counts['6_std']).toBe(0);
@@ -674,7 +777,6 @@ describe('usePoolStats', () => {
       standardCount: 0,
     });
   });
-
   it('keeps pure and hook outputs identical for inherited, free, gift, and guarantee rules', () => {
     const paidFourStars = Array.from({ length: 238 }, (_, index) => ({
       id: `paid-${index + 1}`,
@@ -748,9 +850,7 @@ describe('usePoolStats', () => {
         },
       ],
       currentPoolId: 'pool_new',
-      selectedPools: [
-        { id: 'pool_new', type: 'limited' },
-      ],
+      selectedPools: [{ id: 'pool_new', type: 'limited' }],
       includeFreePullsInStats: true,
     };
 
@@ -785,10 +885,9 @@ describe('usePoolStats', () => {
         standardCount: 0,
       },
     });
-    expect(pureResult.stats.pityStats.history).toEqual(expect.arrayContaining([
-      expect.objectContaining({ count: 30 }),
-      expect.objectContaining({ isGuaranteed: true }),
-    ]));
+    expect(pureResult.stats.pityStats.history).toEqual(
+      expect.arrayContaining([expect.objectContaining({ count: 30 }), expect.objectContaining({ isGuaranteed: true })])
+    );
   });
 
   it('uses an explicitly injected character resolver', () => {
@@ -799,13 +898,15 @@ describe('usePoolStats', () => {
     }));
 
     const result = buildPoolStats({
-      normalizedCurrentPoolHistory: [{
-        id: 'offrate-six',
-        rarity: 6,
-        isStandard: true,
-        character_name: 'Worker 角色',
-        poolId: 'pool_limited',
-      }],
+      normalizedCurrentPoolHistory: [
+        {
+          id: 'offrate-six',
+          rarity: 6,
+          isStandard: true,
+          character_name: 'Worker 角色',
+          poolId: 'pool_limited',
+        },
+      ],
       currentPool: {
         id: 'pool_limited',
         type: 'limited',
@@ -816,5 +917,113 @@ describe('usePoolStats', () => {
 
     expect(resolveCharacter).toHaveBeenCalledWith('Worker 角色', { fuzzy: true });
     expect(result.stats.offLimitedCount).toBe(1);
+  });
+  it('marks a reconstruction series 120th target across stages as spark and excludes win-rate', () => {
+    const stageA = {
+      id: 'recon-a',
+      type: 'extra',
+      extra_rule_profile: 'reconstruction_character_v1',
+      extra_series_key: 'recon-series',
+      up_character: '角色A',
+    };
+    const stageB = {
+      ...stageA,
+      id: 'recon-b',
+      up_character: '角色B',
+      isGroupMode: false,
+    };
+    const accountHistory = [
+      ...Array.from({ length: 70 }, (_, index) => ({
+        id: `a-${index + 1}`,
+        poolId: stageA.id,
+        rarity: 4,
+        timestamp: index,
+      })),
+      ...Array.from({ length: 50 }, (_, index) => ({
+        id: `b-${index + 1}`,
+        poolId: stageB.id,
+        rarity: 4,
+        timestamp: index + 70,
+      })),
+    ];
+    accountHistory[119] = {
+      ...accountHistory[119],
+      rarity: 6,
+      isStandard: false,
+      character_name: '角色B',
+    };
+    const normalizedCurrentPoolHistory = accountHistory.slice(70);
+
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory,
+        currentPool: stageB,
+        accountHistory,
+        poolCatalog: [stageA, stageB],
+        selectedPools: [stageB],
+        currentPoolId: stageB.id,
+      })
+    );
+
+    expect(result.current.stats).toMatchObject({
+      sparkCount: 1,
+      winRate: 0,
+      sixStarCount: 0,
+      upSixStarCount: 0,
+    });
+    expect(result.current.stats.pityStats.history).toEqual([expect.objectContaining({ count: 120, isSpark: true })]);
+    expect(result.current.effectivePity.pity6).toBe(0);
+  });
+
+  it('counts free records in the same reconstruction reward series scope', () => {
+    const stageA = {
+      id: 'recon-free-a',
+      type: 'extra',
+      extra_rule_profile: 'reconstruction_character_v1',
+      extra_series_key: 'recon-free-series',
+    };
+    const stageB = {
+      ...stageA,
+      id: 'recon-free-b',
+      isGroupMode: false,
+    };
+    const stageAPaid = Array.from({ length: 60 }, (_, index) => ({
+      id: `paid-a-${index}`,
+      poolId: stageA.id,
+      rarity: 4,
+      timestamp: index,
+    }));
+    const stageAFree = Array.from({ length: 20 }, (_, index) => ({
+      id: `free-a-${index}`,
+      poolId: stageA.id,
+      rarity: 4,
+      isFree: true,
+      timestamp: 100 + index,
+    }));
+    const currentHistory = Array.from({ length: 5 }, (_, index) => ({
+      id: `paid-b-${index}`,
+      poolId: stageB.id,
+      rarity: 4,
+      timestamp: 200 + index,
+    }));
+    const accountHistory = [...stageAPaid, ...stageAFree, ...currentHistory];
+
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory: currentHistory,
+        currentPool: stageB,
+        accountHistory,
+        poolCatalog: [stageA, stageB],
+        selectedPools: [stageB],
+        currentPoolId: stageB.id,
+      })
+    );
+
+    expect(result.current.stats).toMatchObject({
+      paidTotal: 5,
+      rewardPaidTotal: 65,
+      freePullCount: 0,
+      rewardFreePullCount: 20,
+    });
   });
 });

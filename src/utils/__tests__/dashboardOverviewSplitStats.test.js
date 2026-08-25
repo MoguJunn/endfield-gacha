@@ -36,10 +36,10 @@ describe('buildDashboardOverviewSplitStats', () => {
     expect(stats.weapon.avgPullCost['6_limited']).toBe('0');
   });
 
-  it('counts extra banner six stars as character target hits even when legacy records are marked standard', () => {
+  it('counts explicit brilliance six stars as character targets even when legacy records are marked standard', () => {
     const stats = buildDashboardOverviewSplitStats({
       selectedPools: [
-        { id: 'pool_extra', type: 'extra' },
+        { id: 'pool_extra', type: 'extra', extra_rule_profile: 'brilliance_festival_v1' },
       ],
       history: [
         { id: 1, poolId: 'pool_extra', rarity: 4 },
@@ -59,6 +59,90 @@ describe('buildDashboardOverviewSplitStats', () => {
       limited: 1,
       standard: 0,
     });
+  });
+
+  it('splits extra pools and target results from each source pool capabilities', () => {
+    const stats = buildDashboardOverviewSplitStats({
+      selectedPools: [
+        {
+          id: 'recon_character',
+          type: 'extra',
+          up_character: '重构角色UP',
+          extra_rule_profile: 'reconstruction_character_v1',
+          extra_series_key: 'recon-character-series',
+        },
+        {
+          id: 'recon_weapon',
+          type: 'extra',
+          up_character: '重构武器UP',
+          extra_rule_profile: 'reconstruction_weapon_v1',
+          extra_series_key: 'recon-weapon-series',
+        },
+        {
+          id: 'brilliance',
+          type: 'extra',
+          extra_rule_profile: 'brilliance_festival_v1',
+        },
+        {
+          id: 'unknown_extra',
+          type: 'extra',
+          extra_rule_profile: 'future_joint_profile',
+        },
+      ],
+      history: [
+        { id: 1, poolId: 'recon_character', rarity: 6, character_name: '重构角色UP', isStandard: true },
+        { id: 2, poolId: 'recon_character', rarity: 6, character_name: '角色歪出', isStandard: false, isUp: true },
+        { id: 3, poolId: 'recon_weapon', rarity: 4 },
+        { id: 4, poolId: 'recon_weapon', rarity: 6, item_name: '重构武器UP', isStandard: true },
+        { id: 5, poolId: 'brilliance', rarity: 6, character_name: '辉光目标', isStandard: true },
+        { id: 6, poolId: 'unknown_extra', rarity: 6, character_name: '未知目标', isStandard: false },
+      ],
+    });
+
+    expect(stats.character.total).toBe(3);
+    expect(stats.character.counts).toMatchObject({ 6: 2, '6_std': 1 });
+    expect(stats.character.resourceSummary).toMatchObject({
+      characterPulls: 3,
+      weaponPulls: 0,
+    });
+    expect(stats.weapon.total).toBe(2);
+    expect(stats.weapon.counts).toMatchObject({ 6: 1, '6_std': 0, 4: 1 });
+    expect(stats.weapon.resourceSummary).toMatchObject({
+      characterPulls: 0,
+      weaponPulls: 2,
+    });
+    expect(stats.weapon.pityStats.distribution).toHaveLength(4);
+  });
+
+  it('uses the source pool pity scope across reconstruction series phases', () => {
+    const selectedPools = [
+      {
+        id: 'recon_phase_1',
+        type: 'extra',
+        up_character: '阶段一目标',
+        extra_rule_profile: 'reconstruction_character_v1',
+        extra_series_key: 'shared-reconstruction-series',
+      },
+      {
+        id: 'recon_phase_2',
+        type: 'extra',
+        up_character: '阶段二目标',
+        extra_rule_profile: 'reconstruction_character_v1',
+        extra_series_key: 'shared-reconstruction-series',
+      },
+    ];
+    const stats = buildDashboardOverviewSplitStats({
+      selectedPools,
+      history: [
+        { id: 1, poolId: 'recon_phase_1', rarity: 4, timestamp: '2026-01-01T00:00:00.000Z' },
+        { id: 2, poolId: 'recon_phase_2', rarity: 4, timestamp: '2026-01-01T00:01:00.000Z' },
+        { id: 3, poolId: 'recon_phase_2', rarity: 6, character_name: '阶段二目标', timestamp: '2026-01-01T00:02:00.000Z' },
+      ],
+    });
+
+    expect(stats.character.pityStats.history).toEqual([
+      { count: 3, isStandard: false },
+    ]);
   });
 
   it('includes free ten-pull results in split stats without advancing paid pity counters', () => {

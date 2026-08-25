@@ -17,6 +17,7 @@ import {
 
 const STORAGE_KEY = 'gacha_simulator_state';
 const SHARED_PITY_KEY = 'gacha_simulator_shared_pity'; // 限定池共享保底
+const SERIES_STATE_KEY = 'gacha_simulator_series_state'; // profile + seriesKey 隔离的系列状态
 const INFO_BOOK_KEY = 'gacha_simulator_info_book'; // 情报书状态（全局）
 const RESOURCE_SETTINGS_KEY = 'gacha_simulator_resource_settings';
 const CURRENT_POOL_KEY = 'simulator_currentPoolId';
@@ -516,6 +517,71 @@ export function clearSharedPityState(scope = null) {
     return true;
   } catch (error) {
     appLogger.error('清除共享保底状态失败:', error);
+    return false;
+  }
+}
+
+export function getSimulatorSeriesStateStorageKey(seriesStateKey, scope = null) {
+  if (!seriesStateKey) {
+    return null;
+  }
+  return getScopedStorageKey(`${SERIES_STATE_KEY}_${seriesStateKey}`, scope);
+}
+
+export function saveSimulatorSeriesState(seriesStateKey, seriesState, scope = null) {
+  const storageKey = getSimulatorSeriesStateStorageKey(seriesStateKey, scope);
+  if (!storageKey || !seriesState) {
+    return false;
+  }
+
+  try {
+    localStorage.setItem(storageKey, JSON.stringify({
+      version: STORAGE_VERSION,
+      timestamp: Date.now(),
+      seriesState,
+    }));
+    return true;
+  } catch (error) {
+    appLogger.error('保存系列模拟状态失败:', error);
+    return false;
+  }
+}
+
+export function loadSimulatorSeriesState(seriesStateKey, scope = null) {
+  const storageKey = getSimulatorSeriesStateStorageKey(seriesStateKey, scope);
+  if (!storageKey) {
+    return null;
+  }
+
+  try {
+    const data = localStorage.getItem(storageKey);
+    if (!data) {
+      return null;
+    }
+
+    const storageData = JSON.parse(data);
+    if (storageData.version !== STORAGE_VERSION) {
+      clearSimulatorSeriesState(seriesStateKey, scope);
+      return null;
+    }
+    return storageData.seriesState || null;
+  } catch (error) {
+    appLogger.error('加载系列模拟状态失败:', error);
+    return null;
+  }
+}
+
+export function clearSimulatorSeriesState(seriesStateKey, scope = null) {
+  const storageKey = getSimulatorSeriesStateStorageKey(seriesStateKey, scope);
+  if (!storageKey) {
+    return false;
+  }
+
+  try {
+    localStorage.removeItem(storageKey);
+    return true;
+  } catch (error) {
+    appLogger.error('清除系列模拟状态失败:', error);
     return false;
   }
 }

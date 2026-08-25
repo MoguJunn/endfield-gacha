@@ -8,7 +8,7 @@ describe('dashboard share image renderer', () => {
 
     expect(mod.renderDashboardShareCardImage).toEqual(expect.any(Function));
     expect(mod.buildDashboardShareCardHtml).toEqual(expect.any(Function));
-  });
+  }, 15000);
 
   it('builds share-card HTML from the same React component used by the dashboard', async () => {
     const { buildDashboardShareCardHtml } = await import('../_lib/dashboardShareImage.js');

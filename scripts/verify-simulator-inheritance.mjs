@@ -4,7 +4,7 @@ import {
   buildInheritedSimulatorState
 } from '../src/features/simulator/simulatorInheritance.js';
 import { simulateSinglePull } from '../src/utils/probabilityEngine.js';
-import { LIMITED_POOL_RULES } from '../src/constants/index.js';
+import { LIMITED_POOL_RULES, WEAPON_POOL_RULES } from '../src/constants/index.js';
 import {
   buildSimulatorResourceLedger,
   DEFAULT_SIMULATOR_RESOURCE_SETTINGS,
@@ -64,6 +64,12 @@ const pools = [
   { id: 'limited_b', type: 'limited', up_character: 'B' },
   { id: 'weapon_a', type: 'weapon', up_character: 'WA', isLimitedWeapon: true },
   { id: 'weapon_b', type: 'weapon', up_character: 'WB', isLimitedWeapon: true },
+  { id: 'recon_char_a', type: 'extra', up_character: 'RC-A', extra_rule_profile: 'reconstruction_character_v1', extra_series_key: 'recon-char-s1' },
+  { id: 'recon_char_b', type: 'extra', up_character: 'RC-B', extra_rule_profile: 'reconstruction_character_v1', extra_series_key: 'recon-char-s1' },
+  { id: 'recon_weapon_a', type: 'extra', up_character: 'RW-A', extra_rule_profile: 'reconstruction_weapon_v1', extra_series_key: 'recon-weapon-s1' },
+  { id: 'recon_weapon_b', type: 'extra', up_character: 'RW-B', extra_rule_profile: 'reconstruction_weapon_v1', extra_series_key: 'recon-weapon-s1' },
+  { id: 'brilliance', type: 'extra', extra_rule_profile: 'brilliance_festival_v1' },
+  { id: 'joint_unknown', type: 'extra', extra_rule_profile: 'future_profile_v2' },
   { id: 'standard', type: 'standard' }
 ];
 
@@ -112,6 +118,85 @@ assert.equal(inheritedWeapon.sixStarPity, 12, 'weapon pool should not inherit cr
 assert.equal(inheritedWeapon.guaranteedLimitedPity, 12, 'weapon pool hard pity counter should stay on current pool');
 assert.equal(inheritedWeapon.hasReceivedGuaranteedLimited, false, 'weapon pool should preserve whether hard pity has been consumed');
 assert.equal(inheritedWeapon.pullHistory.length, 12, 'weapon pool history should exclude free pulls');
+
+const reconstructionHistory = [
+  ...Array.from({ length: 220 }, (_, index) => makePull('recon_char_a', 1000 + index + 1, index === 199
+    ? { rarity: 6, isLimited: true, character_name: 'RC-A' }
+    : {})),
+  ...Array.from({ length: 20 }, (_, index) => makePull('recon_char_b', 1300 + index + 1)),
+  ...Array.from({ length: 160 }, (_, index) => makePull('recon_weapon_a', 1400 + index + 1)),
+  ...Array.from({ length: 20 }, (_, index) => makePull('recon_weapon_b', 1600 + index + 1)),
+  makePull('brilliance', 1701, { rarity: 6, character_name: 'Festival Target' }),
+  makePull('joint_unknown', 1702, { rarity: 6, character_name: 'Unknown Target', isLimited: true })
+];
+
+const reconstructionSnapshot = buildInheritedSimulatorSnapshot({
+  history: reconstructionHistory,
+  realPools: pools,
+  currentGameUid: 'uid-1',
+  currentUserId: 'user-1',
+  currentSimPoolId: 'sim_recon_char_b'
+});
+
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_recon_char_b.poolType, 'limited', 'reconstruction character should inherit limited base rules');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_recon_char_b.sixStarPity, 40, 'reconstruction character pity should derive from matching series history');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_recon_char_b.guaranteedLimitedPity, 120, 'reconstruction character target guarantee should derive from matching series history');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_recon_char_b.hasReceivedGuaranteedLimited, true, 'reconstruction character target guarantee should not be issued twice after a prior-stage target');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_recon_char_b.seriesRewardPulls, 240, 'reconstruction character reward progress should derive from matching series history');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_recon_char_b.giftsReceived, 1, 'reconstruction character rewards should derive from matching series history');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_recon_char_a.freeTenPullsReceived, 3, 'reconstruction character should recognize 30/60/90 free ten milestones');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_recon_char_b.hasReceivedInfoBook, false, 'reconstruction character should not invent a limited info book');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_recon_weapon_b.poolType, 'weapon', 'reconstruction weapon should inherit weapon base rules');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_recon_weapon_b.sixStarPity, 20, 'reconstruction weapon six-star pity should remain pool-local');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_recon_weapon_b.guaranteedLimitedPity, 80, 'reconstruction weapon target guarantee should share eight claims across the series');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_recon_weapon_b.seriesRewardPulls, 180, 'reconstruction weapon reward progress should derive from matching series history');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_recon_weapon_b.giftsReceived, 2, 'reconstruction weapon rewards should derive from matching series history');
+assert.equal(reconstructionSnapshot.seriesStates['reconstruction_character_v1::recon-char-s1'].sixStarPity, 40, 'snapshot should expose profile-and-series keyed character state');
+assert.equal(reconstructionSnapshot.seriesStates['reconstruction_weapon_v1::recon-weapon-s1'].guaranteedLimitedPity, 80, 'snapshot should expose profile-and-series keyed weapon target state');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_brilliance.pullHistory[0].isUp, true, 'brilliance six stars should remain festival targets');
+assert.equal(reconstructionSnapshot.statesByPoolId.sim_joint_unknown.pullHistory[0].isUp, false, 'unknown extra profiles should not masquerade as brilliance targets');
+
+const conflictingFlagHistory = [
+  ...Array.from({ length: 120 }, (_, index) => makePull('recon_char_a', 1800 + index, index === 119
+    ? { rarity: 6, character_name: 'RC-A', isStandard: true, isUp: false, isLimited: false }
+    : {})),
+  makePull('recon_char_b', 2000, {
+    rarity: 6,
+    character_name: '角色歪出',
+    isStandard: false,
+    isUp: true,
+    isLimited: true,
+  }),
+  ...Array.from({ length: 80 }, (_, index) => makePull('recon_weapon_a', 2100 + index, index === 79
+    ? { rarity: 6, item_name: 'RW-A', isStandard: true, isUp: false, isLimited: false }
+    : {})),
+  makePull('recon_weapon_b', 2300, {
+    rarity: 6,
+    item_name: '武器歪出',
+    isStandard: false,
+    isUp: true,
+    isLimited: true,
+  }),
+];
+const conflictingFlagSnapshot = buildInheritedSimulatorSnapshot({
+  history: conflictingFlagHistory,
+  realPools: pools,
+  currentGameUid: 'uid-1',
+  currentUserId: 'user-1',
+});
+
+assert.equal(conflictingFlagSnapshot.statesByPoolId.sim_recon_char_a.guaranteedLimitedPity, 120, '重构角色系列应在第120抽继承目标保障状态');
+assert.equal(conflictingFlagSnapshot.statesByPoolId.sim_recon_char_a.hasReceivedGuaranteedLimited, true, '重构角色目标名应覆盖陈旧常驻标记');
+assert.equal(conflictingFlagSnapshot.statesByPoolId.sim_recon_char_a.pullHistory.at(-1).isUp, true, '重构角色目标名明确时应按名称认定正向目标');
+assert.equal(conflictingFlagSnapshot.statesByPoolId.sim_recon_char_b.pullHistory[0].isUp, false, '重构角色名称不匹配时应覆盖陈旧目标标记');
+assert.equal(
+  conflictingFlagSnapshot.statesByPoolId.sim_recon_weapon_a.guaranteedLimitedPity / WEAPON_POOL_RULES.claimSize,
+  8,
+  '重构武器系列应继承第8次申领的目标保障状态'
+);
+assert.equal(conflictingFlagSnapshot.statesByPoolId.sim_recon_weapon_a.hasReceivedGuaranteedLimited, true, '重构武器目标名应覆盖陈旧常驻标记');
+assert.equal(conflictingFlagSnapshot.statesByPoolId.sim_recon_weapon_a.pullHistory.at(-1).isUp, true, '重构武器目标名明确时应按名称认定正向目标');
+assert.equal(conflictingFlagSnapshot.statesByPoolId.sim_recon_weapon_b.pullHistory[0].isUp, false, '重构武器名称不匹配时应覆盖陈旧目标标记');
 
 const inheritedWeaponTargetProbability = buildCurrentTargetProbabilityInfo({
   guaranteedLimitedPity: inheritedWeapon.guaranteedLimitedPity,

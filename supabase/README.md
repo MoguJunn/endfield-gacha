@@ -30,7 +30,7 @@
 
 2026-08-01 的真实本地 Supabase/PostgreSQL 17 空库导入已补齐两项此前静态检查未覆盖的边界：`archive/004_tickets_system.sql` 必须在表不存在时也能执行清理；Phase A/B 必须显式授予 `service_role` 访问 `profiles` 与私有 Session 撤销状态所需的 DML 权限，同时保持 `anon/authenticated` 对私有撤销状态的拒绝。`test:supabase-baseline:smoke` 与 `test:auth-hardening-phase-a` 已加入对应回归断言。
 
-当前 baseline 覆盖到 `active/180_prioritize_immediate_personal_analysis_dispatch.sql`。不要再把已包含在 baseline 中的标准迁移重复叠加到同版本新环境。迁移 173–177 提供个人分析 owner/scope revision、安全租约、快照持久化、目录失效与活跃用户优先队列；迁移 178 在支持相应扩展的自建 Supabase 中通过 Vault、`pg_net` 与 `pg_cron` 每分钟触发一次 Worker；迁移 179/180 增加受节流保护的活跃用户即时派发，并避免入队前的 cron 调度错误阻塞新用户。GitHub `workflow_dispatch` 仅作为人工应急入口。
+当前 baseline 覆盖到 `active/183_split_reconstruction_claim_subtype.sql`。不要再把已包含在 baseline 中的标准迁移重复叠加到同版本新环境。迁移 173–177 提供个人分析 owner/scope revision、安全租约、快照持久化、目录失效与活跃用户优先队列；迁移 178 在支持相应扩展的自建 Supabase 中通过 Vault、`pg_net` 与 `pg_cron` 每分钟触发一次 Worker；迁移 179/180 增加受节流保护的活跃用户即时派发，并避免入队前的 cron 调度错误阻塞新用户；迁移 181–183 增加附加寻访分类、首组重构寻访与重构申领数据，以及独立的重构申领产品子类。GitHub `workflow_dispatch` 仅作为人工应急入口。
 
 ### migration 编号说明
 

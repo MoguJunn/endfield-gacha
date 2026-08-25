@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createSimulator } from '../../utils/gachaSimulator';
-import { EXTRA_POOL_RULES, WEAPON_POOL_RULES } from '../../constants';
+import { WEAPON_POOL_RULES } from '../../constants';
 import { useAuthStore, useHistoryStore, usePoolStore } from '../../stores';
 import { usePersonalGameAccounts } from '../../hooks/app/usePersonalGameAccounts.js';
 import { loadAllAccountGachaHistoryForAccounts } from '../../services/accountGachaDataService.js';
@@ -16,6 +16,7 @@ import {
   clearSimulatorSkipAnimationPreference,
   clearSharedPityState,
   clearSimulatorState,
+  clearSimulatorSeriesState,
   copyToClipboard,
   downloadAnalysisReport,
   downloadSimulatorData,
@@ -26,6 +27,7 @@ import {
   loadSimulatorSkipAnimationPreference,
   loadSharedPityState,
   loadSimulatorState,
+  loadSimulatorSeriesState,
   saveSimulatorCurrentPoolId,
   saveSimulatorOriginitePromptSuppressDate,
   saveSimulatorResourceSettings,
@@ -33,6 +35,7 @@ import {
   saveSimulatorSkipAnimationPreference,
   saveSharedPityState,
   saveSimulatorState,
+  saveSimulatorSeriesState,
 } from '../../utils/simulatorStorage';
 import {
   DEFAULT_SIMULATOR_RESOURCE_SETTINGS,
@@ -65,6 +68,9 @@ import useShareActionFeedback from '../../hooks/useShareActionFeedback';
 import { useI18n } from '../../i18n/index.js';
 import { POOL_GROUP_PREFIX } from '../../utils/poolGroupUtils.js';
 import { getPoolFeaturedLead } from '../../utils/poolFeaturedResolver.js';
+import { resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
+import { getPoolSeriesStateKey } from '../../utils/poolScopedHistory.js';
+import { applySimulatorSeriesState, buildSimulatorSeriesState } from './simulatorSeriesState.js';
 import {
   getGameAccountSelectionValue,
   isGameAccountSelectionMatch,
@@ -178,16 +184,12 @@ const getWeaponPoolRules = (pool) =>
       };
 
 const getCustomRulesForPool = (pool) => {
-  const normalizedType = normalizeSimulatorPoolType(pool?.type);
-  if (normalizedType === 'weapon') {
+  const capabilities = resolvePoolCapabilities(pool);
+  if (capabilities.basePoolType === 'weapon' && capabilities.rawPoolType !== 'extra') {
     return getWeaponPoolRules(pool);
   }
 
-  if (normalizedType === 'extra') {
-    return EXTRA_POOL_RULES;
-  }
-
-  return null;
+  return capabilities.rules;
 };
 
 function getTodayPromptKey() {
@@ -202,16 +204,83 @@ function normalizeStoredPoolId(value) {
   return value;
 }
 
-function getRosterPoolTypeForSimulator(poolType) {
-  if (poolType === 'weapon') {
+function getRosterPoolTypeForSimulator(capabilities) {
+  if (capabilities.basePoolType === 'weapon') {
     return 'weapon';
   }
 
-  if (poolType === 'limited' || poolType === 'extra') {
+  if (capabilities.basePoolType === 'limited' || capabilities.basePoolType === 'extra') {
     return 'limited';
   }
 
   return 'standard';
+}
+
+export function buildSimulatorCurrentPoolView({
+  currentSimPool,
+  simulator,
+  resolvedRoster = null,
+  fallbackName = '',
+} = {}) {
+  const sourcePool = currentSimPool || {};
+  const capabilities = resolvePoolCapabilities(
+    currentSimPool || simulator?.poolInfo || { type: simulator?.rawPoolType || simulator?.poolType || 'limited' }
+  );
+  const effectivePoolType = normalizeSimulatorPoolType(
+    simulator?.poolType || capabilities.basePoolType
+  );
+
+  return {
+    ...sourcePool,
+    type: sourcePool.type || capabilities.rawPoolType,
+    source_pool_id: sourcePool.source_pool_id || sourcePool.sourcePoolId || sourcePool.id || null,
+    effectivePoolType,
+    effective_pool_type: effectivePoolType,
+    basePoolType: capabilities.basePoolType,
+    base_pool_type: capabilities.basePoolType,
+    extra_subtype: sourcePool.extra_subtype ?? sourcePool.extraSubtype ?? capabilities.extraSubtype,
+    extra_rule_profile: sourcePool.extra_rule_profile ?? sourcePool.extraRuleProfile ?? capabilities.ruleProfile,
+    extra_series_key: sourcePool.extra_series_key ?? sourcePool.extraSeriesKey ?? capabilities.seriesKey,
+    extra_series_phase: sourcePool.extra_series_phase ?? sourcePool.extraSeriesPhase ?? null,
+    isLimitedWeapon: sourcePool.isLimitedWeapon !== false,
+    name: sourcePool.original_name || sourcePool.name || fallbackName,
+    name_en: sourcePool.name_en || null,
+    up_character: sourcePool.up_character,
+    featured_characters: sourcePool.featured_characters || null,
+    resolved_roster: resolvedRoster || sourcePool.resolved_roster || null,
+  };
+}
+
+function hydrateSimulatorStateForPool(pool, savedState, storageScope) {
+  const seriesStateKey = getPoolSeriesStateKey(pool);
+  const seriesState = seriesStateKey
+    ? loadSimulatorSeriesState(seriesStateKey, storageScope)
+    : null;
+  return applySimulatorSeriesState(pool, savedState || {}, seriesState);
+}
+
+function persistSimulatorPoolState(pool, state, storageScope) {
+  if (!pool?.id || !state) {
+    return;
+  }
+
+  saveSimulatorState(pool.id, state, storageScope);
+  const seriesState = buildSimulatorSeriesState(pool, state);
+  if (seriesState?.seriesStateKey) {
+    saveSimulatorSeriesState(seriesState.seriesStateKey, seriesState, storageScope);
+  }
+}
+
+function clearSimulatorSeriesStatesForPools(pools, storageScope) {
+  const clearedKeys = new Set();
+  (Array.isArray(pools) ? pools : []).forEach((pool) => {
+    const seriesStateKey = getPoolSeriesStateKey(pool);
+    if (!seriesStateKey || clearedKeys.has(seriesStateKey)) {
+      return;
+    }
+    clearSimulatorSeriesState(seriesStateKey, storageScope);
+    clearedKeys.add(seriesStateKey);
+  });
 }
 
 export function useGachaSimulatorController() {
@@ -235,17 +304,17 @@ export function useGachaSimulatorController() {
   const fallbackLimitedPoolName = useMemo(() => getCurrentUpPoolName(realPools) || '莱万汀', [realPools]);
   const resolvePoolTargetName = useCallback(
     (pool, fallbackName = null) => {
-      const normalizedPoolType = normalizeSimulatorPoolType(pool?.type);
+      const capabilities = resolvePoolCapabilities(pool);
 
-      if (normalizedPoolType === 'limited') {
+      if (capabilities.targetMode === 'single-up' && capabilities.entityType === 'character') {
         return pool?.up_character || fallbackName || fallbackLimitedPoolName;
       }
 
-      if (normalizedPoolType === 'weapon') {
+      if (capabilities.targetMode === 'single-up' && capabilities.entityType === 'weapon') {
         return pool?.up_character || fallbackName || null;
       }
 
-      if (normalizedPoolType === 'extra') {
+      if (capabilities.targetMode === 'four-target-equal') {
         return getPoolFeaturedLead(pool) || fallbackName || null;
       }
 
@@ -334,6 +403,7 @@ export function useGachaSimulatorController() {
 
     return sortedPools.map((pool) => ({
       ...pool,
+      source_pool_id: pool.id,
       id: `sim_${pool.id}`,
       original_name: pool.name,
       name: `${pool.name} [模拟]`,
@@ -405,7 +475,11 @@ export function useGachaSimulatorController() {
     ),
     [currentSimPool, poolCharactersList]
   );
-  const currentPoolType = normalizeSimulatorPoolType(currentSimPool?.type || 'limited');
+  const currentPoolCapabilities = useMemo(
+    () => resolvePoolCapabilities(currentSimPool || { type: 'limited' }),
+    [currentSimPool]
+  );
+  const currentPoolType = currentPoolCapabilities.basePoolType;
   const getLocalizedSimulatorPoolTypeName = useCallback(
     (poolType) => {
       const normalizedType = normalizeSimulatorPoolType(poolType || 'limited');
@@ -433,7 +507,9 @@ export function useGachaSimulatorController() {
           return {
             ...state,
             poolId: pool.id,
-            poolType: pool.type,
+            poolType: resolvePoolCapabilities(pool).basePoolType,
+            extraRuleProfile: pool.extra_rule_profile || pool.extraRuleProfile || null,
+            extraSeriesKey: pool.extra_series_key || pool.extraSeriesKey || null,
           };
         }
 
@@ -441,7 +517,9 @@ export function useGachaSimulatorController() {
         return {
           ...savedState,
           poolId: pool.id,
-          poolType: pool.type,
+          poolType: resolvePoolCapabilities(pool).basePoolType,
+          extraRuleProfile: pool.extra_rule_profile || pool.extraRuleProfile || null,
+          extraSeriesKey: pool.extra_series_key || pool.extraSeriesKey || null,
           pullHistory: Array.isArray(savedState.pullHistory) ? savedState.pullHistory : [],
         };
       }),
@@ -529,13 +607,18 @@ export function useGachaSimulatorController() {
     let cancelled = false;
 
     const loadPoolCharacters = async () => {
-      const expectedType = currentPoolType === 'weapon' ? 'weapon' : 'character';
+      if (!currentPoolCapabilities.isResolved || currentPoolCapabilities.entityType === 'unknown') {
+        setPoolCharactersList(null);
+        return;
+      }
+
+      const expectedType = currentPoolCapabilities.entityType;
       const realPoolId = currentSimPoolIdValue.replace(/^sim_/, '');
       const roster = await resolvePoolRosterBuckets({
         poolId: realPoolId,
         expectedType,
         currentUpName: currentSimPoolFeaturedLead,
-        poolType: getRosterPoolTypeForSimulator(currentPoolType),
+        poolType: getRosterPoolTypeForSimulator(currentPoolCapabilities),
         poolInfo: currentSimPool || null,
         mergeStrategy: currentPoolType === 'limited' || currentPoolType === 'extra' ? 'fill-missing' : 'append',
       });
@@ -567,6 +650,7 @@ export function useGachaSimulatorController() {
     };
   }, [
     currentSimPool,
+    currentPoolCapabilities,
     currentPoolType,
     currentSimPoolFeaturedLead,
     currentSimPoolIdValue
@@ -630,15 +714,17 @@ export function useGachaSimulatorController() {
       const savedState = loadSimulatorState(targetPoolId, simulatorStorageScope);
       const upCharacter = resolvePoolTargetName(targetPool);
       const nextSimulator = createSimulator(
-        targetPool.type,
+        targetPool,
         getCustomRulesForPool(targetPool),
         upCharacter,
         poolCharactersList
       );
 
-      if (savedState) {
-        nextSimulator.importState(savedState);
-      }
+      nextSimulator.importState(hydrateSimulatorStateForPool(
+        targetPool,
+        savedState,
+        simulatorStorageScope
+      ));
       if (poolCharactersList) {
         nextSimulator.setPoolCharactersList(poolCharactersList);
       }
@@ -649,7 +735,7 @@ export function useGachaSimulatorController() {
         setCurrentSimulatorState(nextSimulator.getState());
         setStats(nextSimulator.getStatistics());
         setPityInfo(nextSimulator.getPityInfo());
-        if (normalizeSimulatorPoolType(targetPool.type) === 'limited') {
+        if (resolvePoolCapabilities(targetPool).basePoolType === 'limited') {
           setSelectedLimitedPool(upCharacter || fallbackLimitedPoolName);
         }
       });
@@ -676,18 +762,18 @@ export function useGachaSimulatorController() {
       setPityInfo(simulator.getPityInfo());
       setPullHistory(state.pullHistory || []);
 
-      const normalizedSimulatorPoolType = normalizeSimulatorPoolType(simulator.poolType);
+      const simulatorCapabilities = simulator.capabilities;
 
-      if (normalizedSimulatorPoolType === 'limited' || normalizedSimulatorPoolType === 'extra') {
+      if (simulatorCapabilities.freeTenPullLimit > 0 || simulatorCapabilities.infoBookEnabled) {
         const nextStats = simulator.getStatistics();
         const earnedFreePulls = nextStats.freeTenPulls?.count || 0;
         const usedFreePulls = state.freeTenPullsReceived || 0;
         setAvailableFreePulls(Math.max(0, earnedFreePulls - usedFreePulls));
 
-        if (normalizedSimulatorPoolType !== 'limited') {
+        if (!simulatorCapabilities.infoBookEnabled) {
           setInfoBookTenPullAvailable(false);
-          if (currentSimPoolId) {
-            saveSimulatorState(currentSimPoolId, simulator.exportState(), simulatorStorageScope);
+          if (currentSimPool) {
+            persistSimulatorPoolState(currentSimPool, simulator.exportState(), simulatorStorageScope);
           }
           return;
         }
@@ -734,27 +820,29 @@ export function useGachaSimulatorController() {
           });
         }
 
-        saveSharedPityState(
-          {
-            sixStarPity: state.sixStarPity,
-            fiveStarPity: state.fiveStarPity,
-          },
-          simulatorStorageScope
-        );
+        if (simulatorCapabilities.pityScope === 'shared') {
+          saveSharedPityState(
+            {
+              sixStarPity: state.sixStarPity,
+              fiveStarPity: state.fiveStarPity,
+            },
+            simulatorStorageScope
+          );
+        }
       } else {
         setAvailableFreePulls(0);
         setInfoBookTenPullAvailable(false);
       }
 
-      if (currentSimPoolId) {
-        saveSimulatorState(currentSimPoolId, simulator.exportState(), simulatorStorageScope);
+      if (currentSimPool) {
+        persistSimulatorPoolState(currentSimPool, simulator.exportState(), simulatorStorageScope);
       }
     };
 
     simulator.addListener(updateUI);
     updateUI();
     return () => simulator.removeListener(updateUI);
-  }, [currentSimPoolId, simulator, simulatorPools, simulatorStorageScope]);
+  }, [currentSimPool, currentSimPoolId, simulator, simulatorPools, simulatorStorageScope]);
 
   const showToastMessage = useCallback((message) => {
     setToastMessage(message);
@@ -1083,9 +1171,13 @@ export function useGachaSimulatorController() {
       simulatorPools.forEach((pool) => {
         clearSimulatorState(pool.id, targetStorageScope);
       });
+      clearSimulatorSeriesStatesForPools(simulatorPools, targetStorageScope);
 
       Object.entries(inheritedSnapshot.statesByPoolId).forEach(([poolId, state]) => {
         saveSimulatorState(poolId, state, targetStorageScope);
+      });
+      Object.entries(inheritedSnapshot.seriesStates || {}).forEach(([seriesStateKey, state]) => {
+        saveSimulatorSeriesState(seriesStateKey, state, targetStorageScope);
       });
 
       clearSharedPityState(targetStorageScope);
@@ -1131,7 +1223,7 @@ export function useGachaSimulatorController() {
       const inheritedState = inheritedSnapshot.statesByPoolId[currentSimPoolId];
       const upCharacter = resolvePoolTargetName(currentSimPool);
       const nextSimulator = createSimulator(
-        currentSimPool.type,
+        currentSimPool,
         getCustomRulesForPool(currentSimPool),
         upCharacter,
         poolCharactersList
@@ -1188,16 +1280,18 @@ export function useGachaSimulatorController() {
       simulatorPools.forEach((pool) => {
         clearSimulatorState(pool.id, simulatorStorageScope);
       });
+      clearSimulatorSeriesStatesForPools(simulatorPools, simulatorStorageScope);
       clearSharedPityState(simulatorStorageScope);
       clearInfoBookState(simulatorStorageScope);
       resetMessage = t('simulator.toast.resetAllSuccess');
     } else {
       const type = normalizeSimulatorPoolType(currentSimPool?.type || 'limited');
-      simulatorPools
-        .filter((pool) => normalizeSimulatorPoolType(pool.type) === type)
-        .forEach((pool) => {
+      const resetPools = simulatorPools
+        .filter((pool) => normalizeSimulatorPoolType(pool.type) === type);
+      resetPools.forEach((pool) => {
           clearSimulatorState(pool.id, simulatorStorageScope);
         });
+      clearSimulatorSeriesStatesForPools(resetPools, simulatorStorageScope);
 
       if (type === 'limited') {
         clearSharedPityState(simulatorStorageScope);
@@ -1266,9 +1360,11 @@ export function useGachaSimulatorController() {
         return;
       }
 
-      saveSimulatorState(currentSimPoolId, simulator.exportState(), simulatorStorageScope);
+      if (currentSimPool) {
+        persistSimulatorPoolState(currentSimPool, simulator.exportState(), simulatorStorageScope);
+      }
 
-      if (normalizeSimulatorPoolType(simulator.poolType) === 'limited') {
+      if (simulator.capabilities.pityScope === 'shared') {
         const state = simulator.getState();
         saveSharedPityState(
           {
@@ -1283,16 +1379,19 @@ export function useGachaSimulatorController() {
 
       const savedState = loadSimulatorState(poolId, simulatorStorageScope);
       const upCharacter = resolvePoolTargetName(targetPool, selectedLimitedPool);
-      const nextSimulator = createSimulator(targetPool.type, getCustomRulesForPool(targetPool), upCharacter, null);
+      const targetCapabilities = resolvePoolCapabilities(targetPool);
+      const nextSimulator = createSimulator(targetPool, getCustomRulesForPool(targetPool), upCharacter, null);
 
-      if (savedState) {
-        nextSimulator.importState(savedState);
-        if (upCharacter) {
-          nextSimulator.setCurrentUpCharacter(upCharacter);
-        }
+      nextSimulator.importState(hydrateSimulatorStateForPool(
+        targetPool,
+        savedState,
+        simulatorStorageScope
+      ));
+      if (upCharacter) {
+        nextSimulator.setCurrentUpCharacter(upCharacter);
       }
 
-      if (normalizeSimulatorPoolType(targetPool.type) === 'limited') {
+      if (targetCapabilities.pityScope === 'shared') {
         const sharedPity = loadSharedPityState(simulatorStorageScope);
         if (sharedPity) {
           nextSimulator.updateState({
@@ -1336,7 +1435,7 @@ export function useGachaSimulatorController() {
         }
       }
 
-      if (normalizeSimulatorPoolType(targetPool.type) === 'limited' && upCharacter) {
+      if (targetCapabilities.basePoolType === 'limited' && upCharacter) {
         setSelectedLimitedPool(upCharacter);
       }
 
@@ -1350,6 +1449,7 @@ export function useGachaSimulatorController() {
     },
     [
       currentSimPoolId,
+      currentSimPool,
       resolvePoolTargetName,
       selectedLimitedPool,
       showToastMessage,
@@ -1369,25 +1469,16 @@ export function useGachaSimulatorController() {
   const currentSharePity6 = pityInfo?.sixStar?.current;
   const currentSharePity5 = pityInfo?.fiveStar?.current;
   const currentPoolObj = useMemo(
-    () => ({
-      type: normalizeSimulatorPoolType(simulator.poolType),
-      isLimitedWeapon: currentSimPool?.isLimitedWeapon !== false,
-      name: currentSimPool?.original_name || currentSimPool?.name || t('simulator.toast.noSelection'),
-      name_en: currentSimPool?.name_en || null,
-      up_character: currentSimPool?.up_character,
-      featured_characters: currentSimPool?.featured_characters || null,
-      resolved_roster: poolCharactersList || currentSimPool?.resolved_roster || null,
+    () => buildSimulatorCurrentPoolView({
+      currentSimPool,
+      simulator,
+      resolvedRoster: poolCharactersList,
+      fallbackName: t('simulator.toast.noSelection'),
     }),
     [
-      currentSimPool?.featured_characters,
-      currentSimPool?.isLimitedWeapon,
-      currentSimPool?.name,
-      currentSimPool?.name_en,
-      currentSimPool?.original_name,
-      currentSimPool?.resolved_roster,
-      currentSimPool?.up_character,
+      currentSimPool,
       poolCharactersList,
-      simulator.poolType,
+      simulator,
       t
     ]
   );
@@ -1410,6 +1501,11 @@ export function useGachaSimulatorController() {
         up_character: currentPoolObj?.up_character,
         featured_characters: currentPoolObj?.featured_characters,
         resolved_roster: currentPoolObj?.resolved_roster,
+        extra_subtype: currentPoolObj?.extra_subtype,
+        extra_rule_profile: currentPoolObj?.extra_rule_profile,
+        extra_series_key: currentPoolObj?.extra_series_key,
+        extra_series_phase: currentPoolObj?.extra_series_phase,
+        source_pool_id: currentPoolObj?.source_pool_id,
       },
       history: pullHistory,
       currentPityOverride: currentSharePity6,

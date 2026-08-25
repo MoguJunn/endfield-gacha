@@ -3,6 +3,7 @@ import {
   resolveSupabaseServerKey,
   resolveSupabaseUrl,
 } from './supabaseEnv.js';
+import { getCanonicalExtraPoolSubtype } from '../../shared/extraPoolSubtype.js';
 
 function getSupabaseClient() {
   const supabaseUrl = resolveSupabaseUrl();
@@ -172,6 +173,10 @@ export function toPublicPoolDto(pool, {
       en: pool?.name_en || null,
     },
     type,
+    extraSubtype: getCanonicalExtraPoolSubtype(pool),
+    extraRuleProfile: pool?.extra_rule_profile || pool?.extraRuleProfile || null,
+    extraSeriesKey: pool?.extra_series_key || pool?.extraSeriesKey || null,
+    extraSeriesPhase: pool?.extra_series_phase ?? pool?.extraSeriesPhase ?? null,
     status: getPoolStatus(pool, nowMs),
     startAt: pool?.start_time || null,
     endAt: pool?.end_time || null,
@@ -340,6 +345,10 @@ function formatVisiblePoolRecord(record) {
     name: record.name,
     name_en: record.name_en || null,
     type: normalizeRemotePoolType(record.type, record.is_limited_weapon),
+    extra_subtype: getCanonicalExtraPoolSubtype(record),
+    extra_rule_profile: record.extra_rule_profile || null,
+    extra_series_key: record.extra_series_key || null,
+    extra_series_phase: record.extra_series_phase ?? null,
     locked: record.locked || false,
     isLimitedWeapon: record.is_limited_weapon !== false,
     created_at: record.created_at || null,

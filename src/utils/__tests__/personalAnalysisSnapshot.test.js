@@ -259,6 +259,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
       expect.objectContaining({ name: '限定甲', count: 2, freeCount: 1, pities: ['free', 2] })
     ]));
     expect(limitedExclude.checkLimitedInFirstN).toEqual({
+      firstTargetIndex: 2,
       firstLimitedIndex120: 2,
       firstLimitedIndex80: 2,
       validPullCount: 3
