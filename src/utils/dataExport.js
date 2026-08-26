@@ -16,6 +16,7 @@ import {
   normalizeEntityNameForMatch
 } from './canonicalEntityUtils.js';
 import { getDataFormatById } from './dataFormatRegistry.js';
+import { getCanonicalExtraPoolSubtype } from '../../shared/extraPoolSubtype.js';
 
 export const EXPORT_SCHEMA_VERSION = '3.0.0';
 export const EXPORT_FORMAT_ID = 'internal_json_v3';
@@ -180,6 +181,10 @@ function serializeInternalJsonPool(pool) {
     name: pool?.name,
     name_en: pool?.name_en,
     type: pool?.type,
+    extra_subtype: getCanonicalExtraPoolSubtype(pool),
+    extra_rule_profile: pool?.extra_rule_profile ?? pool?.extraRuleProfile,
+    extra_series_key: pool?.extra_series_key ?? pool?.extraSeriesKey,
+    extra_series_phase: pool?.extra_series_phase ?? pool?.extraSeriesPhase,
     locked: pool?.locked === true,
     isLimitedWeapon: pool?.isLimitedWeapon ?? pool?.is_limited_weapon,
     up_character: pool?.up_character || pool?.upCharacter,

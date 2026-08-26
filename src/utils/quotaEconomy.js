@@ -1,3 +1,5 @@
+import { resolvePoolCapabilities } from './poolCapabilities.js';
+
 export const QUOTA_RESOURCE_KEYS = {
   aicQuota: 'aicQuota',
   bondQuota: 'bondQuota',
@@ -123,13 +125,13 @@ function resolveCharacterForRecord(record, lookup) {
   return lookup.byName.get(normalizeNameForMatch(name)) || null;
 }
 
-function buildPoolTypeLookup(pools = []) {
+function buildPoolCapabilitiesLookup(pools = []) {
   const lookup = new Map();
   (Array.isArray(pools) ? pools : []).forEach((pool) => {
-    const poolType = normalizePoolType(pool?.type);
+    const capabilities = resolvePoolCapabilities(pool);
     [pool?.id, pool?.pool_id].forEach((poolId) => {
       if (poolId) {
-        lookup.set(String(poolId), poolType);
+        lookup.set(String(poolId), capabilities);
       }
     });
   });
@@ -149,30 +151,35 @@ function buildPoolNameLookup(pools = []) {
   return lookup;
 }
 
-function resolvePoolType(record, poolTypeLookup) {
-  const explicitType = record?.poolType || record?.pool_type || null;
-  if (explicitType) {
-    return normalizePoolType(explicitType);
+function resolveRecordPoolCapabilities(record, poolCapabilitiesLookup) {
+  const poolId = getPoolId(record);
+  if (poolId && poolCapabilitiesLookup.has(String(poolId))) {
+    return poolCapabilitiesLookup.get(String(poolId));
   }
 
-  const poolId = getPoolId(record);
-  if (poolId && poolTypeLookup.has(String(poolId))) {
-    return poolTypeLookup.get(String(poolId));
+  const explicitType = record?.poolType || record?.pool_type || null;
+  if (explicitType) {
+    return resolvePoolCapabilities({
+      id: poolId,
+      type: explicitType,
+      extra_rule_profile: record?.extra_rule_profile ?? record?.extraRuleProfile,
+      extra_series_key: record?.extra_series_key ?? record?.extraSeriesKey,
+    });
   }
 
   if (String(poolId || '').startsWith('weapon') || String(poolId || '').startsWith('wepon')) {
-    return 'weapon';
+    return resolvePoolCapabilities({ id: poolId, type: 'weapon' });
   }
 
   if (String(poolId || '').startsWith('joint_') || String(poolId || '').startsWith('extra_')) {
-    return 'extra';
+    return resolvePoolCapabilities({ id: poolId, type: 'extra' });
   }
 
   if (String(poolId || '').startsWith('special_')) {
-    return 'limited';
+    return resolvePoolCapabilities({ id: poolId, type: 'limited' });
   }
 
-  return normalizePoolType(record?.type);
+  return resolvePoolCapabilities({ id: poolId, type: normalizePoolType(record?.type) });
 }
 
 function getPityScopeKey(record, poolType) {
@@ -372,7 +379,7 @@ export function buildQuotaLedgerFromHistory(history = [], {
   const characterQuota = createEmptyQuotaSummary();
   const characterEntries = new Map();
   const lookup = buildCharacterLookup(characters);
-  const poolTypeLookup = buildPoolTypeLookup(pools);
+  const poolCapabilitiesLookup = buildPoolCapabilitiesLookup(pools);
   const poolNameLookup = buildPoolNameLookup(pools);
   const acquisitionByRecordKey = acquisitionIndex instanceof Map
     ? acquisitionIndex
@@ -391,7 +398,8 @@ export function buildQuotaLedgerFromHistory(history = [], {
   });
 
   sortedHistory.forEach((record) => {
-    const poolType = resolvePoolType(record, poolTypeLookup);
+    const poolCapabilities = resolveRecordPoolCapabilities(record, poolCapabilitiesLookup);
+    const poolType = poolCapabilities.basePoolType;
     if (allowedPoolTypes && !allowedPoolTypes.has(poolType)) {
       return;
     }
@@ -407,7 +415,7 @@ export function buildQuotaLedgerFromHistory(history = [], {
       progressState.sixStarPity += 1;
     }
 
-    if (!giftRecord && poolType === 'extra' && !isInfoBookRewardRecord(record)) {
+    if (!giftRecord && poolCapabilities.bondQuotaPerPull && !isInfoBookRewardRecord(record)) {
       const extraPullQuota = calculateExtraPullQuota();
       addQuota(quota, extraPullQuota);
       addQuota(characterQuota, extraPullQuota);
@@ -420,7 +428,7 @@ export function buildQuotaLedgerFromHistory(history = [], {
     }
 
     const character = resolveCharacterForRecord(record, lookup);
-    const itemType = character?.type || (poolType === 'weapon' ? 'weapon' : 'character');
+    const itemType = character?.type || (poolCapabilities.entityType === 'weapon' ? 'weapon' : 'character');
 
     if (poolType === 'weapon' || itemType === 'weapon') {
       if (!giftRecord) {
@@ -497,7 +505,13 @@ export function buildQuotaLedgerFromSimulatorStates(states = []) {
   (Array.isArray(states) ? states : []).forEach((state, stateIndex) => {
     const poolId = state?.poolId || state?.id || `simulator-${stateIndex}`;
     const poolType = normalizePoolType(state?.poolType);
-    pools.push({ id: poolId, pool_id: poolId, type: poolType });
+    pools.push({
+      id: poolId,
+      pool_id: poolId,
+      type: poolType,
+      extra_rule_profile: state?.extraRuleProfile || state?.extra_rule_profile || null,
+      extra_series_key: state?.extraSeriesKey || state?.extra_series_key || null,
+    });
 
     (Array.isArray(state?.pullHistory) ? state.pullHistory : []).forEach((record, recordIndex) => {
       history.push({

@@ -1,14 +1,21 @@
 import { RARITY_CONFIG, EXTRA_POOL_RULES, LIMITED_POOL_RULES, WEAPON_POOL_RULES } from '../constants/index.js';
-import { buildResourceSummaryFromAggregates } from './resourceEconomy.js';
+import { buildCapabilityAwarePoolResourceSummary } from './resourceEconomy.js';
 import { buildQuotaLedgerFromHistory } from './quotaEconomy.js';
-import { annotateInfoBookPulls, isInfoBookHistoryPull } from './historyInfoBook.js';
+import { annotateInfoBookPulls } from './historyInfoBook.js';
 import { classifyGameAccountRegionBucket } from './gameAccountMetadata.js';
+import { resolvePoolCapabilities } from './poolCapabilities.js';
+import {
+  buildOneTimeTargetGuaranteeState,
+  buildScopedPaidHistoryTimeline,
+  getPoolSeriesStateKey,
+  isTargetSixStarHistoryRecord,
+} from './poolScopedHistory.js';
 
 const PITY_LIMITS = {
   extra: EXTRA_POOL_RULES.sixStarPity,
   limited: LIMITED_POOL_RULES.sixStarPity,
   standard: LIMITED_POOL_RULES.sixStarPity,
-  weapon: WEAPON_POOL_RULES.sixStarPity
+  weapon: WEAPON_POOL_RULES.sixStarPity,
 };
 
 function isGiftPull(pull) {
@@ -19,38 +26,23 @@ function isFreePull(pull) {
   return pull?.isFree === true || pull?.is_free === true;
 }
 
-function matchesPoolTarget(pull, poolMeta) {
-  const upCharacter = String(poolMeta?.upCharacter || '').trim();
-  if (!upCharacter || pull?.rarity !== 6) {
-    return false;
-  }
-
-  const target = upCharacter.toLowerCase();
-  const pullName = String(pull?.character_name || pull?.item_name || pull?.name || '').trim().toLowerCase();
-  if (!pullName) {
-    return false;
-  }
-
-  return pullName.includes(target) || target.includes(pullName);
-}
-
 function generatePieData(counts) {
   const rawData = [
     { name: '6星(限定)', value: counts[6], color: RARITY_CONFIG[6].color },
     { name: '6星(常驻)', value: counts['6_std'], color: RARITY_CONFIG['6_std'].color },
     { name: '5星', value: counts[5], color: RARITY_CONFIG[5].color },
     { name: '4星', value: counts[4], color: RARITY_CONFIG[4].color },
-  ].filter(item => item.value > 0);
+  ].filter((item) => item.value > 0);
 
   const totalValue = rawData.reduce((sum, d) => sum + d.value, 0);
-  return rawData.map(item => {
+  return rawData.map((item) => {
     const currentPercent = totalValue > 0 ? (item.value / totalValue) * 100 : 0;
     let minPercent = 0;
     if (item.name.includes('6星')) minPercent = 15;
     else if (item.name.includes('5星')) minPercent = 20;
 
     if (currentPercent < minPercent && totalValue > 0) {
-      return { ...item, displayValue: Math.ceil(totalValue * minPercent / 100) };
+      return { ...item, displayValue: Math.ceil((totalValue * minPercent) / 100) };
     }
     return { ...item, displayValue: item.value };
   });
@@ -98,7 +90,7 @@ function buildDistFromBuckets(buckets, hardPityLimit) {
       count: limited + standard,
       limited,
       standard,
-      ...(hasGuaranteed ? { guaranteed } : {})
+      ...(hasGuaranteed ? { guaranteed } : {}),
     });
   }
   return dist;
@@ -111,8 +103,30 @@ function normalizePoolType(type) {
   return 'standard';
 }
 
-function isTargetSixStarByPoolType(item, poolType) {
-  return poolType === 'extra' || !item?.isStandard;
+function getPoolRecordId(pool) {
+  return pool?.id || pool?.pool_id || null;
+}
+
+function getHistoryPoolId(record) {
+  return record?.poolId || record?.pool_id || null;
+}
+
+function getRuleScopeKey(pool, capabilities, scopeType) {
+  const scopeKind =
+    scopeType === 'reward'
+      ? capabilities.rewardScope
+      : scopeType === 'target'
+        ? capabilities.targetScope
+        : capabilities.pityScope;
+  if (scopeKind === 'series') {
+    const seriesStateKey = getPoolSeriesStateKey(capabilities);
+    return seriesStateKey ? `${scopeType}:series:${seriesStateKey}` : null;
+  }
+  if (scopeKind === 'shared') {
+    return `${scopeType}:shared:${capabilities.rulesKey}`;
+  }
+  const poolId = getPoolRecordId(pool);
+  return poolId ? `${scopeType}:pool:${poolId}` : null;
 }
 
 /**
@@ -127,49 +141,29 @@ function isTargetSixStarByPoolType(item, poolType) {
  */
 export function buildSummaryStats({ history, pools, user, characters = [] }) {
   const myPools = pools && user ? pools : [];
-  const myHistory = history && user
-    ? history.filter(h => h.user_id === user.id)
-    : [];
+  const myHistory = history && user ? history.filter((h) => h.user_id === user.id) : [];
   const annotatedMyHistory = annotateInfoBookPulls(myHistory, myPools);
 
   const poolMap = new Map();
-  myPools.forEach(p => {
+  myPools.forEach((p) => {
     [p.id, p.pool_id].forEach((poolId) => {
       if (poolId) {
-        poolMap.set(poolId, { type: p.type, upCharacter: p.up_character });
+        poolMap.set(String(poolId), p);
       }
     });
   });
 
-  const normalizedMyHistory = annotatedMyHistory.map(h => {
-    const pool = poolMap.get(h.poolId || h.pool_id);
+  const normalizedMyHistory = annotatedMyHistory.map((h) => {
+    const pool = poolMap.get(String(getHistoryPoolId(h) || ''));
     if (!pool) return h;
 
-    const poolType = pool.type;
-    const upCharacter = pool.upCharacter;
-    const characterName = h.character_name || h.item_name || h.name || '';
-    let isStd;
-
-    if (poolType === 'standard' || poolType === 'beginner') {
-      isStd = true;
-    } else if (poolType === 'extra') {
-      if (h.rarity === 6) {
-        isStd = false;
-      } else {
-        isStd = h.isStandard ?? false;
-      }
-    } else if (poolType === 'limited' || poolType === 'limited_character' || poolType === 'weapon' || poolType === 'limited_weapon') {
-      if (upCharacter && h.rarity === 6) {
-        isStd = !characterName.toLowerCase().includes(upCharacter.toLowerCase()) &&
-                !upCharacter.toLowerCase().includes(characterName.toLowerCase());
-      } else if (h.rarity === 6) {
-        isStd = false;
-      } else {
-        isStd = h.isStandard ?? false;
-      }
-    } else {
-      isStd = h.isStandard ?? false;
-    }
+    const capabilities = resolvePoolCapabilities(pool);
+    const isStd =
+      Number(h?.rarity) === 6
+        ? capabilities.targetMode === 'none'
+          ? capabilities.basePoolType === 'standard' || (h.isStandard ?? h.is_standard ?? false)
+          : !isTargetSixStarHistoryRecord(h, pool)
+        : (h.isStandard ?? h.is_standard ?? false);
 
     return { ...h, isStandard: isStd };
   });
@@ -180,34 +174,65 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
     fiveStar: 0,
     counts: { 6: 0, '6_std': 0, 5: 0, 4: 0 },
     byType: {
-      extra: { total: 0, six: 0, limitedSix: 0, avgPityUp: null, avgPityTarget: null, counts: { 6: 0, '6_std': 0, 5: 0, 4: 0 }, pityList: [] },
-      limited: { total: 0, six: 0, limitedSix: 0, avgPityUp: null, avgPityTarget: null, counts: { 6: 0, '6_std': 0, 5: 0, 4: 0 }, pityList: [] },
-      weapon: { total: 0, six: 0, limitedSix: 0, avgPityUp: null, avgPityTarget: null, counts: { 6: 0, '6_std': 0, 5: 0, 4: 0 }, pityList: [] },
-      standard: { total: 0, six: 0, avgPityUp: null, avgPityTarget: null, counts: { 6: 0, '6_std': 0, 5: 0, 4: 0 }, pityList: [] }
+      extra: {
+        total: 0,
+        six: 0,
+        limitedSix: 0,
+        avgPityUp: null,
+        avgPityTarget: null,
+        counts: { 6: 0, '6_std': 0, 5: 0, 4: 0 },
+        pityList: [],
+      },
+      limited: {
+        total: 0,
+        six: 0,
+        limitedSix: 0,
+        avgPityUp: null,
+        avgPityTarget: null,
+        counts: { 6: 0, '6_std': 0, 5: 0, 4: 0 },
+        pityList: [],
+      },
+      weapon: {
+        total: 0,
+        six: 0,
+        limitedSix: 0,
+        avgPityUp: null,
+        avgPityTarget: null,
+        counts: { 6: 0, '6_std': 0, 5: 0, 4: 0 },
+        pityList: [],
+      },
+      standard: {
+        total: 0,
+        six: 0,
+        avgPityUp: null,
+        avgPityTarget: null,
+        counts: { 6: 0, '6_std': 0, 5: 0, 4: 0 },
+        pityList: [],
+      },
     },
     contributorsByRegion: { cn: 0, intl: 0 },
     pityStats: { distribution: [] },
-    chartData: []
+    chartData: [],
   };
 
-  const poolTypeMap = new Map();
-  const poolMetaMap = new Map();
-  myPools.forEach(p => {
-    [p.id, p.pool_id].forEach((poolId) => {
-      if (poolId) {
-        poolTypeMap.set(poolId, p.type);
-        poolMetaMap.set(poolId, { type: p.type, upCharacter: p.upCharacter || p.up_character || null });
-      }
-    });
-  });
-
   const pullsByPool = {};
-  const chargedPullsByType = { extra: 0, limited: 0, weapon: 0, standard: 0 };
   const contributorBuckets = new Set();
+  const createEntityBucket = () => ({
+    total: 0,
+    targetScopeTotal: 0,
+    six: 0,
+    limitedSix: 0,
+    counts: { 6: 0, '6_std': 0, 5: 0, 4: 0 },
+    pityList: [],
+  });
+  const entityBuckets = {
+    character: createEntityBucket(),
+    weapon: createEntityBucket(),
+  };
 
   for (let i = 0; i < normalizedMyHistory.length; i++) {
     const item = normalizedMyHistory[i];
-    const poolId = item.poolId || item.pool_id;
+    const poolId = getHistoryPoolId(item);
 
     if (!pullsByPool[poolId]) pullsByPool[poolId] = [];
     pullsByPool[poolId].push(item);
@@ -217,31 +242,34 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
 
     if (isGift || isFree) continue;
 
-    const rawType = poolTypeMap.get(poolId) || 'standard';
+    const sourcePool = poolMap.get(String(poolId || ''));
+    const rawType = sourcePool?.type || item?.poolType || item?.pool_type || 'standard';
     const type = normalizePoolType(rawType);
     const typeData = data.byType[type];
     if (!typeData) continue;
+    const capabilities = resolvePoolCapabilities(sourcePool || { type: rawType });
+    const entityData = entityBuckets[capabilities.entityType];
 
     data.total++;
     typeData.total++;
-
-    if (type === 'limited' || type === 'extra') {
-      if (!isInfoBookHistoryPull(item)) chargedPullsByType[type]++;
-    } else if (type === 'weapon') {
-      chargedPullsByType.weapon++;
-    } else {
-      chargedPullsByType.standard++;
+    if (entityData) {
+      entityData.total++;
+      if (capabilities.targetMode !== 'none') {
+        entityData.targetScopeTotal++;
+      }
     }
 
     const bucket = classifyGameAccountRegionBucket({
       serverId: item.serverId || item.server_id,
-      region: item.region || item.serverRegion
+      region: item.region || item.serverRegion,
     });
     if (bucket) contributorBuckets.add(bucket);
 
     const r = item.rarity;
     if (r === 6) {
-      const isTargetSixStar = isTargetSixStarByPoolType(item, type);
+      const isTargetSixStar = sourcePool
+        ? isTargetSixStarHistoryRecord(item, sourcePool)
+        : capabilities.targetMode !== 'none' && !item?.isStandard;
       if (!isTargetSixStar) {
         data.counts['6_std']++;
         typeData.counts['6_std']++;
@@ -254,115 +282,118 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
       if (isTargetSixStar && typeData.limitedSix !== undefined) {
         typeData.limitedSix++;
       }
+      if (entityData) {
+        entityData.six++;
+        if (isTargetSixStar) {
+          entityData.counts[6]++;
+          entityData.limitedSix++;
+        } else {
+          entityData.counts['6_std']++;
+        }
+      }
     } else if (r === 5) {
       data.fiveStar++;
       data.counts[5]++;
       typeData.counts[5]++;
+      if (entityData) entityData.counts[5]++;
     } else {
       const nr = r < 4 ? 4 : r;
       data.counts[nr]++;
       typeData.counts[nr]++;
+      if (entityData && entityData.counts[nr] !== undefined) entityData.counts[nr]++;
     }
   }
-
-  const allQuotaLedger = buildQuotaLedgerFromHistory(normalizedMyHistory, {
-    pools: myPools,
-    characters
-  });
-  const characterQuotaLedger = buildQuotaLedgerFromHistory(normalizedMyHistory, {
-    pools: myPools,
-    characters,
-    includePoolTypes: ['extra', 'limited', 'standard']
-  });
-  const extraQuotaLedger = buildQuotaLedgerFromHistory(normalizedMyHistory, {
-    pools: myPools,
-    characters,
-    includePoolTypes: ['extra']
-  });
-  const limitedQuotaLedger = buildQuotaLedgerFromHistory(normalizedMyHistory, {
-    pools: myPools,
-    characters,
-    includePoolTypes: ['limited']
-  });
-  const standardQuotaLedger = buildQuotaLedgerFromHistory(normalizedMyHistory, {
-    pools: myPools,
-    characters,
-    includePoolTypes: ['standard']
-  });
-  const weaponQuotaLedger = buildQuotaLedgerFromHistory(normalizedMyHistory, {
-    pools: myPools,
-    characters,
-    includePoolTypes: ['weapon']
-  });
 
   const upCountByType = { extra: 0, limited: 0, weapon: 0 };
 
   const globalDistBuckets = {};
   const typeDistBuckets = { extra: {}, limited: {}, weapon: {}, standard: {} };
+  const typePityLimits = { extra: 0, limited: 0, weapon: 0, standard: 0 };
+  const entityDistBuckets = { character: {}, weapon: {} };
+  const entityPityLimits = { character: 0, weapon: 0 };
+  const entityPitySums = {
+    character: { sum: 0, count: 0 },
+    weapon: { sum: 0, count: 0 },
+  };
+  const entityUpCounts = { character: 0, weapon: 0 };
 
   const typePitySums = {
     extra: { sum: 0, count: 0 },
     limited: { sum: 0, count: 0 },
     weapon: { sum: 0, count: 0 },
-    standard: { sum: 0, count: 0 }
+    standard: { sum: 0, count: 0 },
   };
-  let limitedNonFreeNonSparkSum = 0, limitedNonFreeNonSparkCount = 0;
-  let limitedNonFreeSum = 0, limitedNonFreeCount = 0;
-  let allSixStarPitySum = 0, allSixStarPityCount = 0;
-  let allSixStarExclFreePitySum = 0, allSixStarExclFreePityCount = 0;
-  let globalMaxPity = 0;
+  let limitedNonFreeNonSparkSum = 0,
+    limitedNonFreeNonSparkCount = 0;
+  let limitedNonFreeSum = 0,
+    limitedNonFreeCount = 0;
+  let allSixStarPitySum = 0,
+    allSixStarPityCount = 0;
+  let allSixStarExclFreePitySum = 0,
+    allSixStarExclFreePityCount = 0;
+  let globalPityLimit = 0;
 
   let charGiftCount = 0;
   let weaponGiftLimitedCount = 0;
   let weaponGiftStandardCount = 0;
 
   const poolIds = Object.keys(pullsByPool);
+  const poolsWithHistory = myPools.filter((pool) => pullsByPool[getPoolRecordId(pool)]);
+  const processedPityScopes = new Set();
   for (let pi = 0; pi < poolIds.length; pi++) {
     const poolId = poolIds[pi];
-    const rawType = poolTypeMap.get(poolId) || 'standard';
-    const type = normalizePoolType(rawType);
-    const poolMeta = poolMetaMap.get(poolId);
-    const sortedPulls = pullsByPool[poolId].sort((a, b) => a.id - b.id);
+    const scopePool = poolMap.get(String(poolId || ''));
+    if (!scopePool) continue;
+    const scopeCapabilities = resolvePoolCapabilities(scopePool);
+    const pityScopeKey = getRuleScopeKey(scopePool, scopeCapabilities, 'pity');
+    if (!pityScopeKey || processedPityScopes.has(pityScopeKey)) continue;
+    processedPityScopes.add(pityScopeKey);
 
-    let poolTotal = 0;
-    for (let j = 0; j < sortedPulls.length; j++) {
-      if (!isGiftPull(sortedPulls[j]) && !isFreePull(sortedPulls[j])) poolTotal++;
-    }
-
-    if (type === 'limited') {
-      charGiftCount += Math.floor(poolTotal / 240);
-    } else if (type === 'weapon') {
-      if (poolTotal >= 100) weaponGiftStandardCount += 1 + Math.floor((poolTotal - 100) / 160);
-      if (poolTotal >= 180) weaponGiftLimitedCount += 1 + Math.floor((poolTotal - 180) / 160);
-    }
+    const sortedPulls = buildScopedPaidHistoryTimeline({
+      history: normalizedMyHistory,
+      pools: myPools,
+      pool: scopePool,
+      scopeType: 'pity',
+    });
+    const guaranteedRecordKeys = new Set();
+    poolsWithHistory
+      .filter(
+        (candidatePool) =>
+          getRuleScopeKey(candidatePool, resolvePoolCapabilities(candidatePool), 'pity') === pityScopeKey
+      )
+      .forEach((candidatePool) => {
+        buildOneTimeTargetGuaranteeState({
+          history: normalizedMyHistory,
+          pools: myPools,
+          pool: candidatePool,
+        }).guaranteedRecordKeys.forEach((recordKey) => guaranteedRecordKeys.add(recordKey));
+      });
 
     let tempCounter = 0;
-    let tempCounterExcludingFree = 0;
-    let cumulativePullCount = 0;
-    let hasGotUpBefore120 = false;
 
     for (let j = 0; j < sortedPulls.length; j++) {
       const pull = sortedPulls[j];
-      if (isGiftPull(pull) || isFreePull(pull)) continue;
-
-      const isFree = pull.isFree || pull.is_free;
+      const sourcePool = poolMap.get(String(getHistoryPoolId(pull) || '')) || scopePool;
+      const capabilities = resolvePoolCapabilities(sourcePool);
+      const pullType = normalizePoolType(sourcePool?.type || pull?.poolType || pull?.pool_type);
+      const entityType = capabilities.entityType;
+      const hardPityLimit = Number(capabilities.rules?.sixStarPity || 80);
+      typePityLimits[pullType] = Math.max(typePityLimits[pullType], hardPityLimit);
+      if (entityPityLimits[entityType] !== undefined) {
+        entityPityLimits[entityType] = Math.max(entityPityLimits[entityType], hardPityLimit);
+      }
+      globalPityLimit = Math.max(globalPityLimit, hardPityLimit);
       tempCounter++;
-      if (!isFree) tempCounterExcludingFree++;
-      cumulativePullCount++;
 
       if (pull.rarity === 6) {
-        const isUp = isTargetSixStarByPoolType(pull, type);
-        let isSpark = false;
-        if (type === 'limited' && isUp && cumulativePullCount === 120 && !hasGotUpBefore120) {
-          isSpark = true;
-        }
-        if (isUp && cumulativePullCount < 120) {
-          hasGotUpBefore120 = true;
-        }
+        const isUp = isTargetSixStarHistoryRecord(pull, sourcePool);
+        const recordKey = pull?.id || pull?.record_id;
+        const isSpark = recordKey != null && guaranteedRecordKeys.has(String(recordKey));
 
         allSixStarPitySum += tempCounter;
         allSixStarPityCount++;
-        if (tempCounter > globalMaxPity) globalMaxPity = tempCounter;
+        allSixStarExclFreePitySum += tempCounter;
+        allSixStarExclFreePityCount++;
 
         const bucketIdx = Math.floor((tempCounter - 1) / 10);
         if (!globalDistBuckets[bucketIdx]) {
@@ -372,53 +403,95 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
         else globalDistBuckets[bucketIdx].standard++;
         if (pull.specialType === 'guaranteed') globalDistBuckets[bucketIdx].guaranteed++;
 
-        if (!typeDistBuckets[type][bucketIdx]) {
-          typeDistBuckets[type][bucketIdx] = { limited: 0, standard: 0 };
+        if (!typeDistBuckets[pullType][bucketIdx]) {
+          typeDistBuckets[pullType][bucketIdx] = { limited: 0, standard: 0 };
         }
-        if (isUp) typeDistBuckets[type][bucketIdx].limited++;
-        else typeDistBuckets[type][bucketIdx].standard++;
+        if (isUp) typeDistBuckets[pullType][bucketIdx].limited++;
+        else typeDistBuckets[pullType][bucketIdx].standard++;
 
-        typePitySums[type].sum += tempCounter;
-        typePitySums[type].count++;
+        if (entityDistBuckets[entityType]) {
+          if (!entityDistBuckets[entityType][bucketIdx]) {
+            entityDistBuckets[entityType][bucketIdx] = { limited: 0, standard: 0 };
+          }
+          if (isUp) entityDistBuckets[entityType][bucketIdx].limited++;
+          else entityDistBuckets[entityType][bucketIdx].standard++;
+          entityPitySums[entityType].sum += tempCounter;
+          entityPitySums[entityType].count++;
+          entityBuckets[entityType].pityList.push({
+            count: tempCounter,
+            isStandard: !isUp,
+            isFree: false,
+            isSpark,
+            isTargetCapable: capabilities.targetMode !== 'none',
+          });
+          if (isUp) entityUpCounts[entityType]++;
+        }
 
-        if (type === 'limited') {
-          if (!isFree && !isSpark) {
+        typePitySums[pullType].sum += tempCounter;
+        typePitySums[pullType].count++;
+
+        if (pullType === 'limited') {
+          if (!isSpark) {
             limitedNonFreeNonSparkSum += tempCounter;
             limitedNonFreeNonSparkCount++;
           }
-          if (!isFree) {
-            limitedNonFreeSum += tempCounter;
-            limitedNonFreeCount++;
-          }
+          limitedNonFreeSum += tempCounter;
+          limitedNonFreeCount++;
         }
 
-        if (!isFree) {
-          allSixStarExclFreePitySum += tempCounterExcludingFree;
-          allSixStarExclFreePityCount++;
-          tempCounterExcludingFree = 0;
-        }
-
-        data.byType[type].pityList.push({
+        data.byType[pullType].pityList.push({
           count: tempCounter,
           isStandard: !isUp,
-          isFree: isFree,
-          isSpark
+          isFree: false,
+          isSpark,
         });
 
-        if (type === 'extra') {
-          upCountByType.extra++;
-        } else if ((type === 'limited' || type === 'weapon') && matchesPoolTarget(pull, poolMeta)) {
-          if (upCountByType[type] !== undefined) upCountByType[type]++;
+        if (isUp && upCountByType[pullType] !== undefined) {
+          upCountByType[pullType]++;
         }
         tempCounter = 0;
       }
     }
   }
 
+  const processedRewardScopes = new Set();
+  for (const scopePool of poolsWithHistory) {
+    const capabilities = resolvePoolCapabilities(scopePool);
+    const rewardScopeKey = getRuleScopeKey(scopePool, capabilities, 'reward');
+    if (!rewardScopeKey || processedRewardScopes.has(rewardScopeKey)) continue;
+    processedRewardScopes.add(rewardScopeKey);
+
+    const rewardPaidTotal = buildScopedPaidHistoryTimeline({
+      history: normalizedMyHistory,
+      pools: myPools,
+      pool: scopePool,
+      scopeType: 'reward',
+    }).length;
+    const giftInterval = Number(capabilities.rules?.giftInterval || 0);
+    if (capabilities.entityType === 'character' && giftInterval > 0) {
+      charGiftCount += Math.floor(rewardPaidTotal / giftInterval);
+      continue;
+    }
+    if (capabilities.entityType !== 'weapon') continue;
+
+    const firstStandardGift = Number(capabilities.rules?.firstStandardGift || 0);
+    const firstLimitedGift = Number(capabilities.rules?.firstLimitedGift || 0);
+    const alternateInterval = Number(capabilities.rules?.giftAlternateInterval || 0);
+    if (firstStandardGift > 0 && rewardPaidTotal >= firstStandardGift) weaponGiftStandardCount++;
+    if (firstLimitedGift > 0 && rewardPaidTotal >= firstLimitedGift) {
+      weaponGiftLimitedCount++;
+      if (alternateInterval > 0) {
+        const extraCycles = Math.floor((rewardPaidTotal - firstLimitedGift) / alternateInterval);
+        weaponGiftStandardCount += Math.ceil(extraCycles / 2);
+        weaponGiftLimitedCount += Math.floor(extraCycles / 2);
+      }
+    }
+  }
+
   data.chartData = generatePieData(data.counts);
 
-  ['extra', 'limited', 'weapon', 'standard'].forEach(t => {
-    data.byType[t].distribution = buildDistFromBuckets(typeDistBuckets[t], PITY_LIMITS[t]);
+  ['extra', 'limited', 'weapon', 'standard'].forEach((t) => {
+    data.byType[t].distribution = buildDistFromBuckets(typeDistBuckets[t], typePityLimits[t] || PITY_LIMITS[t]);
     data.byType[t].chartData = generatePieData(data.byType[t].counts);
     if (typePitySums[t].count > 0) {
       data.byType[t].avgPity = (typePitySums[t].sum / typePitySums[t].count).toFixed(1);
@@ -433,130 +506,114 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
     }
   });
 
-  data.byType.extra.avgPityUp = upCountByType.extra > 0
-    ? (data.byType.extra.total / upCountByType.extra).toFixed(1)
-    : null;
+  data.byType.extra.avgPityUp =
+    upCountByType.extra > 0 ? (data.byType.extra.total / upCountByType.extra).toFixed(1) : null;
   data.byType.extra.avgPityTarget = data.byType.extra.avgPityUp;
-  data.byType.limited.avgPityUp = upCountByType.limited > 0
-    ? (data.byType.limited.total / upCountByType.limited).toFixed(1)
-    : null;
+  data.byType.limited.avgPityUp =
+    upCountByType.limited > 0 ? (data.byType.limited.total / upCountByType.limited).toFixed(1) : null;
   data.byType.limited.avgPityTarget = data.byType.limited.avgPityUp;
-  data.byType.weapon.avgPityUp = upCountByType.weapon > 0
-    ? (data.byType.weapon.total / upCountByType.weapon).toFixed(1)
-    : null;
+  data.byType.weapon.avgPityUp =
+    upCountByType.weapon > 0 ? (data.byType.weapon.total / upCountByType.weapon).toFixed(1) : null;
   data.byType.weapon.avgPityTarget = data.byType.weapon.avgPityUp;
 
   if (allSixStarPityCount > 0) {
-    data.pityStats.distribution = buildDistFromBuckets(globalDistBuckets, PITY_LIMITS.limited);
+    data.pityStats.distribution = buildDistFromBuckets(globalDistBuckets, globalPityLimit || 80);
   }
 
-  const characterCounts = {
-    6: data.byType.extra.counts[6] + data.byType.limited.counts[6] + data.byType.standard.counts[6],
-    '6_std': data.byType.extra.counts['6_std'] + data.byType.limited.counts['6_std'] + data.byType.standard.counts['6_std'],
-    5: data.byType.extra.counts[5] + data.byType.limited.counts[5] + data.byType.standard.counts[5],
-    4: data.byType.extra.counts[4] + data.byType.limited.counts[4] + data.byType.standard.counts[4]
-  };
+  const characterCounts = entityBuckets.character.counts;
+  const characterPityList = entityBuckets.character.pityList;
+  const limitedPityListExcludingFree = characterPityList.filter((pull) => pull.isTargetCapable && !pull.isFree);
+  const characterPityListExcludingFree = characterPityList.filter((p) => !p.isFree && !p.isSpark);
 
-  const charDistBuckets = {};
-  for (const t of ['extra', 'limited', 'standard']) {
-    for (const idx in typeDistBuckets[t]) {
-      if (!charDistBuckets[idx]) charDistBuckets[idx] = { limited: 0, standard: 0 };
-      charDistBuckets[idx].limited += typeDistBuckets[t][idx].limited || 0;
-      charDistBuckets[idx].standard += typeDistBuckets[t][idx].standard || 0;
-    }
-  }
+  const charPitySum = entityPitySums.character.sum;
+  const charPityCount = entityPitySums.character.count;
 
-  const characterPityList = [...data.byType.extra.pityList, ...data.byType.limited.pityList, ...data.byType.standard.pityList];
-  const limitedPityListExcludingFree = [...data.byType.extra.pityList, ...data.byType.limited.pityList].filter(p => !p.isFree);
-  const characterPityListExcludingFree = characterPityList.filter(p => !p.isFree && !p.isSpark);
-
-  const charPitySum = typePitySums.extra.sum + typePitySums.limited.sum + typePitySums.standard.sum;
-  const charPityCount = typePitySums.extra.count + typePitySums.limited.count + typePitySums.standard.count;
-
-  let charExclFreePitySum = 0, charExclFreePityCount = 0;
+  let charExclFreePitySum = 0,
+    charExclFreePityCount = 0;
   for (let i = 0; i < characterPityListExcludingFree.length; i++) {
     charExclFreePitySum += characterPityListExcludingFree[i].count;
     charExclFreePityCount++;
   }
 
   data.byType.character = {
-    total: data.byType.extra.total + data.byType.limited.total + data.byType.standard.total,
-    six: data.byType.extra.six + data.byType.limited.six + data.byType.standard.six,
-    limitedSix: data.byType.extra.limitedSix + data.byType.limited.limitedSix,
+    total: entityBuckets.character.total,
+    six: entityBuckets.character.six,
+    limitedSix: entityBuckets.character.limitedSix,
     counts: characterCounts,
     pityList: characterPityList,
     pityListExcludingFree: characterPityListExcludingFree,
-    distribution: buildDistFromBuckets(charDistBuckets, PITY_LIMITS.limited),
+    distribution: buildDistFromBuckets(entityDistBuckets.character, entityPityLimits.character || PITY_LIMITS.limited),
     chartData: generatePieData(characterCounts),
-    avgPity: charPityCount > 0
-      ? (charPitySum / charPityCount).toFixed(1)
-      : '-',
+    avgPity: charPityCount > 0 ? (charPitySum / charPityCount).toFixed(1) : '-',
     avgPityUp: (() => {
-      const totalCharacterTargets = upCountByType.extra + upCountByType.limited;
-      return totalCharacterTargets > 0
-        ? ((data.byType.extra.total + data.byType.limited.total) / totalCharacterTargets).toFixed(1)
+      return entityUpCounts.character > 0
+        ? (entityBuckets.character.targetScopeTotal / entityUpCounts.character).toFixed(1)
         : null;
     })(),
     avgPityTarget: (() => {
-      const totalCharacterTargets = upCountByType.extra + upCountByType.limited;
-      return totalCharacterTargets > 0
-        ? ((data.byType.extra.total + data.byType.limited.total) / totalCharacterTargets).toFixed(1)
+      return entityUpCounts.character > 0
+        ? (entityBuckets.character.targetScopeTotal / entityUpCounts.character).toFixed(1)
         : null;
     })(),
-    avgPityExcludingFree: charExclFreePityCount > 0
-      ? (charExclFreePitySum / charExclFreePityCount).toFixed(1)
-      : null
+    avgPityExcludingFree: charExclFreePityCount > 0 ? (charExclFreePitySum / charExclFreePityCount).toFixed(1) : null,
   };
 
-  const limitedChargedPulls = chargedPullsByType.extra + chargedPullsByType.limited;
-  const standardChargedPulls = chargedPullsByType.standard;
-  const weaponChargedPulls = chargedPullsByType.weapon;
+  data.byType.weapon = {
+    ...data.byType.weapon,
+    total: entityBuckets.weapon.total,
+    six: entityBuckets.weapon.six,
+    limitedSix: entityBuckets.weapon.limitedSix,
+    counts: entityBuckets.weapon.counts,
+    pityList: entityBuckets.weapon.pityList,
+    distribution: buildDistFromBuckets(entityDistBuckets.weapon, entityPityLimits.weapon || PITY_LIMITS.weapon),
+    chartData: generatePieData(entityBuckets.weapon.counts),
+    avgPity:
+      entityPitySums.weapon.count > 0 ? (entityPitySums.weapon.sum / entityPitySums.weapon.count).toFixed(1) : null,
+    avgPityUp:
+      entityUpCounts.weapon > 0 ? (entityBuckets.weapon.targetScopeTotal / entityUpCounts.weapon).toFixed(1) : null,
+    avgPityTarget:
+      entityUpCounts.weapon > 0 ? (entityBuckets.weapon.targetScopeTotal / entityUpCounts.weapon).toFixed(1) : null,
+  };
 
-  data.byType.extra.resources = buildResourceSummaryFromAggregates({
-    characterPulls: data.byType.extra.total,
-    chargedCharacterPulls: chargedPullsByType.extra,
-    counts: data.byType.extra.counts,
-    arsenalGainCounts: data.byType.extra.counts,
-    quotaLedger: extraQuotaLedger
-  });
-  data.byType.limited.resources = buildResourceSummaryFromAggregates({
-    characterPulls: data.byType.limited.total,
-    chargedCharacterPulls: chargedPullsByType.limited,
-    counts: data.byType.limited.counts,
-    arsenalGainCounts: data.byType.limited.counts,
-    quotaLedger: limitedQuotaLedger
-  });
-  data.byType.standard.resources = buildResourceSummaryFromAggregates({
-    characterPulls: data.byType.standard.total,
-    chargedCharacterPulls: standardChargedPulls,
-    counts: data.byType.standard.counts,
-    arsenalGainCounts: data.byType.standard.counts,
-    quotaLedger: standardQuotaLedger
-  });
-  data.byType.weapon.resources = buildResourceSummaryFromAggregates({
-    weaponPulls: data.byType.weapon.total,
-    chargedWeaponPulls: weaponChargedPulls,
-    counts: data.byType.weapon.counts,
-    arsenalGainCounts: {},
-    quotaLedger: weaponQuotaLedger
-  });
-  data.byType.character.resources = buildResourceSummaryFromAggregates({
-    characterPulls: data.byType.character.total,
-    chargedCharacterPulls: limitedChargedPulls + standardChargedPulls,
-    counts: characterCounts,
-    arsenalGainCounts: characterCounts,
-    quotaLedger: characterQuotaLedger
-  });
+  const buildBucketResources = (predicate) => {
+    const bucketHistory = normalizedMyHistory.filter((record) => {
+      const sourcePool = poolMap.get(String(getHistoryPoolId(record) || ''));
+      const rawType = sourcePool?.type || record?.poolType || record?.pool_type || 'standard';
+      return predicate(sourcePool, rawType);
+    });
+    const quotaLedger = buildQuotaLedgerFromHistory(bucketHistory, {
+      pools: myPools,
+      characters,
+    });
+    return buildCapabilityAwarePoolResourceSummary({
+      history: bucketHistory,
+      pools: myPools,
+      quotaLedger,
+    });
+  };
+  const buildDisplayBucketResources = (displayTypes) => {
+    const allowedTypes = new Set(displayTypes);
+    return buildBucketResources((sourcePool, rawType) =>
+      allowedTypes.has(normalizePoolType(sourcePool?.type || rawType))
+    );
+  };
+  const buildEntityBucketResources = (entityType) =>
+    buildBucketResources(
+      (sourcePool, rawType) => resolvePoolCapabilities(sourcePool || { type: rawType }).entityType === entityType
+    );
+
+  data.byType.extra.resources = buildDisplayBucketResources(['extra']);
+  data.byType.limited.resources = buildDisplayBucketResources(['limited']);
+  data.byType.standard.resources = buildDisplayBucketResources(['standard']);
+  data.byType.weapon.resources = buildEntityBucketResources('weapon');
+  data.byType.character.resources = buildEntityBucketResources('character');
 
   data.byType.limited.pityListExcludingFree = limitedPityListExcludingFree;
 
-  data.avgPity = allSixStarPityCount > 0
-    ? (allSixStarPitySum / allSixStarPityCount).toFixed(1)
-    : '-';
+  data.avgPity = allSixStarPityCount > 0 ? (allSixStarPitySum / allSixStarPityCount).toFixed(1) : '-';
 
-  data.avgPityExcludingFree = allSixStarExclFreePityCount > 0
-    ? (allSixStarExclFreePitySum / allSixStarExclFreePityCount).toFixed(1)
-    : '-';
+  data.avgPityExcludingFree =
+    allSixStarExclFreePityCount > 0 ? (allSixStarExclFreePitySum / allSixStarExclFreePityCount).toFixed(1) : '-';
 
   data.charGift = charGiftCount;
   data.weaponGiftLimited = weaponGiftLimitedCount;
@@ -566,17 +623,9 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
   data.totalContributors = user ? 1 : 0;
   data.contributorsByRegion = {
     cn: contributorBuckets.has('cn') ? 1 : 0,
-    intl: contributorBuckets.has('intl') ? 1 : 0
+    intl: contributorBuckets.has('intl') ? 1 : 0,
   };
-  data.resources = buildResourceSummaryFromAggregates({
-    characterPulls: data.byType.character.total,
-    weaponPulls: data.byType.weapon.total,
-    chargedCharacterPulls: limitedChargedPulls + standardChargedPulls,
-    chargedWeaponPulls: weaponChargedPulls,
-    counts: data.counts,
-    arsenalGainCounts: characterCounts,
-    quotaLedger: allQuotaLedger
-  });
+  data.resources = buildDisplayBucketResources(['extra', 'limited', 'standard', 'weapon']);
 
   return data;
 }

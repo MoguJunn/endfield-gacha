@@ -1,8 +1,6 @@
 name: Personal Analysis Worker
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:

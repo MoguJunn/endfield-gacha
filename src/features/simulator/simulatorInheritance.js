@@ -1,10 +1,13 @@
-import {
-  EXTRA_POOL_RULES,
-  LIMITED_POOL_RULES,
-  STANDARD_POOL_RULES,
-  WEAPON_POOL_RULES
-} from '../../constants/index.js';
+import { LIMITED_POOL_RULES, STANDARD_POOL_RULES, WEAPON_POOL_RULES } from '../../constants/index.js';
 import { isGameAccountSelectionMatch } from '../../utils/gameAccountMetadata.js';
+import { resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
+import {
+  buildOneTimeTargetGuaranteeState,
+  buildScopedPaidHistoryTimeline,
+  calculatePaidTimelinePity,
+  isTargetSixStarHistoryRecord,
+} from '../../utils/poolScopedHistory.js';
+import { buildSimulatorSeriesState } from './simulatorSeriesState.js';
 
 function getHistoryPoolId(item) {
   return item?.poolId || item?.pool_id || null;
@@ -39,33 +42,11 @@ function normalizeRecordRarity(item) {
   return Number(item?.rarity) || 0;
 }
 
-function normalizeHistoryIsStandard(record, poolType, upCharacter) {
+function normalizeHistoryIsStandard(record, pool) {
   if (normalizeRecordRarity(record) !== 6) {
     return false;
   }
-
-  if (poolType === 'extra') {
-    return false;
-  }
-
-  if (poolType === 'standard' || poolType === 'beginner') {
-    return true;
-  }
-
-  if (poolType === 'limited' || poolType === 'limited_character' || poolType === 'weapon' || poolType === 'limited_weapon') {
-    if (upCharacter) {
-      const characterName = getHistoryName(record);
-      return !characterName.includes(upCharacter) && !upCharacter.includes(characterName);
-    }
-
-    if (record?.isLimited !== undefined) {
-      return !record.isLimited;
-    }
-
-    return false;
-  }
-
-  return false;
+  return !isTargetSixStarHistoryRecord(record, pool);
 }
 
 function calculatePityFromPaidHistory(records) {
@@ -164,40 +145,11 @@ function countPaidPullsByPool(records) {
   }, new Map());
 }
 
-function calculateGuaranteedLimitedState(records, rules) {
-  const threshold = Number(rules?.guaranteedLimitedPity || 0);
-  if (threshold <= 0 || records.length === 0) {
-    return {
-      pity: 0,
-      hasReceivedGuaranteedLimited: false
-    };
-  }
-
-  let pity = 0;
-  let hasReceivedGuaranteedLimited = false;
-
-  records.some((item) => {
-    pity = Math.min(pity + 1, threshold);
-
-    if (item.__simulatorIsUp) {
-      hasReceivedGuaranteedLimited = true;
-      return true;
-    }
-
-    return false;
-  });
-
-  return {
-    pity,
-    hasReceivedGuaranteedLimited
-  };
-}
-
 function toSimulatorPullHistory(records, pool) {
   return records.map((item, index) => {
     const rarity = normalizeRecordRarity(item);
     const isUp = rarity === 6
-      ? !normalizeHistoryIsStandard(item, pool?.type, pool?.up_character)
+      ? !normalizeHistoryIsStandard(item, pool)
       : false;
 
     return {
@@ -209,14 +161,6 @@ function toSimulatorPullHistory(records, pool) {
       timestamp: item?.timestamp || getHistoryTimestamp(item)
     };
   });
-}
-
-function buildReferenceTimeline(records, poolIds, currentPoolId, normalizedPoolType) {
-  if (normalizedPoolType === 'limited') {
-    return getPaidPulls(records.filter((item) => poolIds.has(getHistoryPoolId(item))));
-  }
-
-  return getPaidPulls(records.filter((item) => getHistoryPoolId(item) === currentPoolId));
 }
 
 function getRelevantHistory(history, currentGameUid, currentUserId) {
@@ -236,7 +180,6 @@ function buildInheritedStateForPool({
   currentPool,
   relevantHistory,
   poolMap,
-  limitedPoolIds,
   limitedPoolPullCounts,
   currentSimPoolId = null
 }) {
@@ -245,30 +188,38 @@ function buildInheritedStateForPool({
     return null;
   }
 
-  const normalizedPoolType = normalizeSimulatorPoolType(currentPool.type);
+  const capabilities = resolvePoolCapabilities(currentPool);
+  const normalizedPoolType = capabilities.basePoolType;
+  const poolsArray = Array.from(poolMap.values());
   const currentPoolPaidHistory = getPaidPulls(
     relevantHistory.filter((item) => getHistoryPoolId(item) === realPoolId)
   );
-  const currentPoolTimeline = currentPoolPaidHistory.map((item) => ({
-    ...item,
-    __simulatorIsUp: normalizeRecordRarity(item) === 6
-      ? !normalizeHistoryIsStandard(item, currentPool.type, currentPool.up_character)
-      : false
-  }));
+  const referenceTimeline = buildScopedPaidHistoryTimeline({
+    history: relevantHistory,
+    pools: poolsArray,
+    pool: currentPool,
+    scopeType: 'pity',
+  });
+  const rewardTimeline = buildScopedPaidHistoryTimeline({
+    history: relevantHistory,
+    pools: poolsArray,
+    pool: currentPool,
+    scopeType: 'reward',
+  });
+  const guaranteedLimitedState = buildOneTimeTargetGuaranteeState({
+    history: relevantHistory,
+    pools: poolsArray,
+    pool: currentPool,
+    isTargetPull: isTargetSixStarHistoryRecord,
+  });
+  const rewardPaidCount = rewardTimeline.length;
 
-  const referenceTimeline = buildReferenceTimeline(relevantHistory, limitedPoolIds, realPoolId, normalizedPoolType)
-    .map((item) => {
-      const sourcePool = poolMap.get(getHistoryPoolId(item)) || currentPool;
-
-      return {
-        ...item,
-        __simulatorIsUp: normalizeRecordRarity(item) === 6
-          ? !normalizeHistoryIsStandard(item, sourcePool.type, sourcePool.up_character)
-          : false
-      };
-    });
-
-  if (currentPoolPaidHistory.length === 0 && referenceTimeline.length === 0) {
+  if (
+    currentPoolPaidHistory.length === 0
+    && referenceTimeline.length === 0
+    && rewardTimeline.length === 0
+    && guaranteedLimitedState.timeline.length === 0
+  ) {
     return null;
   }
 
@@ -278,33 +229,33 @@ function buildInheritedStateForPool({
   const fiveStarCount = simulatorPullHistory.filter((item) => item.rarity === 5).length;
   const upSixStarCount = simulatorPullHistory.filter((item) => item.rarity === 6 && item.isUp).length;
   const currentSimPoolKey = getSimulatorPoolId(realPoolId);
-  const guaranteedLimitedState = normalizedPoolType === 'limited' || normalizedPoolType === 'weapon'
-    ? calculateGuaranteedLimitedState(currentPoolTimeline, normalizedPoolType === 'weapon' ? WEAPON_POOL_RULES : LIMITED_POOL_RULES)
-    : { pity: 0, hasReceivedGuaranteedLimited: false };
+  const inheritedPity = calculatePaidTimelinePity(referenceTimeline);
 
   const baseState = {
-    poolType: currentPool.type,
-    sixStarPity: calculatePityFromPaidHistory(referenceTimeline),
-    fiveStarPity: calculatePity5FromPaidHistory(referenceTimeline),
+    poolType: normalizedPoolType,
+    extraRuleProfile: capabilities.ruleProfile,
+    extraSeriesKey: capabilities.seriesKey,
+    sixStarPity: inheritedPity.sixStarPity,
+    fiveStarPity: inheritedPity.fiveStarPity,
     isGuaranteedUp: false,
     guaranteedLimitedPity: guaranteedLimitedState.pity,
     hasReceivedGuaranteedLimited: guaranteedLimitedState.hasReceivedGuaranteedLimited,
     totalPulls: currentPoolPaidCount,
+    seriesRewardPulls: capabilities.rewardScope === 'series' ? rewardPaidCount : 0,
     sixStarCount,
     fiveStarCount,
     upSixStarCount,
     giftsReceived: normalizedPoolType === 'limited'
-      ? Math.floor(currentPoolPaidCount / LIMITED_POOL_RULES.giftInterval)
+      ? Math.floor(rewardPaidCount / Number(capabilities.rules.giftInterval || Infinity))
       : normalizedPoolType === 'weapon'
-        ? getWeaponGiftCount(currentPoolPaidCount)
+        ? getWeaponGiftCount(rewardPaidCount)
         : 0,
-    freeTenPullsReceived: normalizedPoolType === 'limited'
-      ? Math.min(Math.floor(currentPoolPaidCount / LIMITED_POOL_RULES.freeTenPullInterval), 1)
-      : normalizedPoolType === 'extra'
-        ? Math.min(Math.floor(currentPoolPaidCount / EXTRA_POOL_RULES.freeTenPullInterval), 1)
-      : 0,
-    hasReceivedInfoBook: normalizedPoolType === 'limited'
-      ? (limitedPoolPullCounts.get(realPoolId) || 0) >= LIMITED_POOL_RULES.infoBookThreshold
+    freeTenPullsReceived: capabilities.freeTenPullMilestones
+      .filter((threshold) => (
+        capabilities.rewardScope === 'series' ? rewardPaidCount : currentPoolPaidCount
+      ) >= threshold).length,
+    hasReceivedInfoBook: capabilities.infoBookEnabled
+      ? (limitedPoolPullCounts.get(realPoolId) || 0) >= Number(capabilities.rules.infoBookThreshold || Infinity)
       : false,
     hasUnactivatedInfoBook: false,
     infoBookTenPullAvailable: false,
@@ -331,7 +282,7 @@ function buildInheritedInfoBookState({
   currentSimPoolId = null
 }) {
   const orderedLimitedPools = [...poolsArray]
-    .filter((pool) => normalizeSimulatorPoolType(pool.type) === 'limited')
+    .filter((pool) => resolvePoolCapabilities(pool).infoBookEnabled)
     .sort((left, right) => {
       const leftTime = left.start_time ? new Date(left.start_time).getTime() : 0;
       const rightTime = right.start_time ? new Date(right.start_time).getTime() : 0;
@@ -404,7 +355,6 @@ export function buildInheritedSimulatorSnapshot({
       currentPool: pool,
       relevantHistory,
       poolMap,
-      limitedPoolIds,
       limitedPoolPullCounts,
       currentSimPoolId
     });
@@ -416,11 +366,8 @@ export function buildInheritedSimulatorSnapshot({
     return accumulator;
   }, {});
 
-  const limitedReferenceTimeline = buildReferenceTimeline(
-    relevantHistory,
-    limitedPoolIds,
-    null,
-    'limited'
+  const limitedReferenceTimeline = getPaidPulls(
+    relevantHistory.filter((item) => limitedPoolIds.has(getHistoryPoolId(item)))
   );
 
   const sharedPityState = limitedReferenceTimeline.length > 0
@@ -435,6 +382,14 @@ export function buildInheritedSimulatorSnapshot({
     limitedPoolPullCounts,
     currentSimPoolId
   });
+  const seriesStates = poolsArray.reduce((accumulator, pool) => {
+    const inheritedState = statesByPoolId[getSimulatorPoolId(pool.id)];
+    const seriesState = inheritedState ? buildSimulatorSeriesState(pool, inheritedState) : null;
+    if (seriesState?.seriesStateKey) {
+      accumulator[seriesState.seriesStateKey] = seriesState;
+    }
+    return accumulator;
+  }, {});
 
   if (currentSimPoolId && Object.values(infoBooks).some((book) => book.targetPoolId === currentSimPoolId && book.activated)) {
     const currentState = statesByPoolId[currentSimPoolId];
@@ -449,6 +404,7 @@ export function buildInheritedSimulatorSnapshot({
   return {
     statesByPoolId,
     sharedPityState,
+    seriesStates,
     infoBooks,
     hasAnyData: Object.keys(statesByPoolId).length > 0
   };

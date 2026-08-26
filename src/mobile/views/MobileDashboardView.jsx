@@ -57,6 +57,7 @@ import {
   deleteAccountGachaRecord,
   updateAccountGachaRecord,
 } from '../../services/accountGachaDataService.js';
+import { EXTRA_RULE_PROFILES, resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
 
 const MobileDetailedLogList = React.lazy(() => import('../components/MobileDetailedLogList.jsx'));
 
@@ -210,7 +211,7 @@ function MobileDashboardView() {
     groupedHistory,
     characterStats,
     checkLimitedInFirstN,
-    hasReceivedFreeTen,
+    specialProgress,
     includeFreePullsInStats,
     setIncludeFreePullsInStats,
     weaponGifts,
@@ -223,6 +224,12 @@ function MobileDashboardView() {
     snapshotSplitOverviewStats,
     snapshotTimelineSections
   } = useDashboardViewState();
+  const currentPoolCapabilities = React.useMemo(
+    () => resolvePoolCapabilities(currentPool),
+    [currentPool]
+  );
+  const isReconstructionCharacter = currentPoolCapabilities.ruleProfile === EXTRA_RULE_PROFILES.RECONSTRUCTION_CHARACTER;
+  const isReconstructionWeapon = currentPoolCapabilities.ruleProfile === EXTRA_RULE_PROFILES.RECONSTRUCTION_WEAPON;
   React.useEffect(() => {
     const searchParams = new URLSearchParams(location.search);
     const requestedPoolId = String(searchParams.get('poolId') || '').trim();
@@ -261,28 +268,40 @@ function MobileDashboardView() {
   const localizedCurrentUpName = React.useMemo(() => {
     const localizedFeaturedList = localizePoolFeaturedList(currentPool, {
       locale,
-      type: normalizedPoolType === 'weapon' ? 'weapon' : 'character'
+      type: isWeapon ? 'weapon' : 'character'
     });
 
-    if (isExtra && localizedFeaturedList.length > 0) {
+    if (currentPoolCapabilities.targetMode === 'four-target-equal' && localizedFeaturedList.length > 0) {
       return localizedFeaturedList.join(' / ');
     }
 
     return localizePoolFeaturedName(currentPool, { locale })
       || localizeEntityName(currentPool?.up_character || currentPool?.upCharacter || '', {
         locale,
-        type: normalizedPoolType === 'weapon' ? 'weapon' : 'character'
+        type: isWeapon ? 'weapon' : 'character'
       });
-  }, [currentPool, isExtra, locale, normalizedPoolType]);
-  const displayPity6 = (isLimited || isExtra) ? effectivePity.pity6 : stats.currentPity;
-  const paidTotal = stats.paidTotal ?? stats.total;
-  const currentProbabilityInfo = !isGroupMode && !hasMergedAccountView
-    ? calculateCurrentProbability(displayPity6, normalizedPoolType)
-    : null;
+  }, [currentPool, currentPoolCapabilities.targetMode, isWeapon, locale]);
   const analysisPity = React.useMemo(
     () => getPoolAnalysisPityState(currentPool, stats, effectivePity),
     [currentPool, effectivePity, stats]
   );
+  const displayPity6 = analysisPity.displayPity6;
+  const paidTotal = stats.paidTotal ?? stats.total;
+  const rewardPaidTotal = stats.rewardPaidTotal ?? paidTotal;
+  const mobileAnalysisTitle = isReconstructionWeapon
+    ? t('dashboard.analysis.title.reconstructionWeapon')
+    : isReconstructionCharacter
+      ? t('dashboard.analysis.title.reconstructionCharacter')
+      : isWeapon
+        ? t('dashboard.analysis.title.weapon')
+        : isExtra
+          ? t('dashboard.analysis.title.extra')
+          : isLimited
+            ? t('dashboard.analysis.title.limited')
+            : t('dashboard.analysis.title.standard');
+  const currentProbabilityInfo = !isGroupMode && !hasMergedAccountView
+    ? calculateCurrentProbability(displayPity6, currentPool)
+    : null;
   const overviewAnalysisPityMap = React.useMemo(() => {
     if (!currentPool?.isGroupMode) {
       return null;
@@ -504,7 +523,7 @@ function MobileDashboardView() {
     : t('dashboard.resources.title');
   const primarySixStarLabel = isAllPoolsOverview
     ? t('dashboard.overview.targetSixStar')
-    : normalizedPoolType === 'weapon'
+    : isWeapon
       ? t('dashboard.overview.upWeapon')
       : normalizedPoolType === 'standard'
         ? standardSixLabel
@@ -879,9 +898,24 @@ function MobileDashboardView() {
                   {isWeapon ? <Swords size={18} /> : (isLimited || isExtra) ? <Star size={18} /> : <Layers size={18} />}
                 </div>
                 <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-600 dark:text-cyan-300">
+                    {mobileAnalysisTitle}
+                  </div>
                   <h2 className="text-lg font-black text-slate-900 dark:text-white">{localizedCurrentPoolName}</h2>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-slate-500 dark:text-zinc-500">
-                    <MobileStatusBadge>{isExtra ? t('dashboard.pool.type.extra') : isLimited ? t('dashboard.pool.type.limited') : isWeapon ? t('dashboard.pool.type.weapon') : t('dashboard.pool.type.standard')}</MobileStatusBadge>
+                    <MobileStatusBadge>
+                      {isReconstructionCharacter
+                        ? t('simulator.poolTypeName.reconstructionCharacter')
+                        : isReconstructionWeapon
+                          ? t('simulator.poolTypeName.reconstructionWeapon')
+                          : isExtra
+                            ? t('dashboard.pool.type.extra')
+                            : isLimited
+                              ? t('dashboard.pool.type.limited')
+                              : isWeapon
+                                ? t('dashboard.pool.type.weapon')
+                                : t('dashboard.pool.type.standard')}
+                    </MobileStatusBadge>
                     <span className="tabular-nums">{formatNumber(stats.total)} {pullUnitLabel}</span>
                   </div>
                 </div>
@@ -1075,7 +1109,11 @@ function MobileDashboardView() {
           return (
             <div className="mobile-ux-soft-card relative p-3">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] text-slate-500 dark:text-zinc-500 uppercase font-bold tracking-wide">{t('dashboard.analysis.pity6', { max: maxPity })}</span>
+                <span className="text-[10px] text-slate-500 dark:text-zinc-500 uppercase font-bold tracking-wide">
+                  {isReconstructionWeapon
+                    ? t('dashboard.analysis.reconstructionWeaponPity40')
+                    : t('dashboard.analysis.pity6', { max: maxPity })}
+                </span>
                 {currentProbabilityInfo?.hasSoftPity && currentProbabilityInfo?.isInSoftPity && (
                   <span className="animate-pulse rounded-full bg-red-500/15 px-1.5 py-0.5 text-[11px] font-mono font-bold text-red-300">
                     {t('dashboard.analysis.rateBoost', { percent: (currentProbabilityInfo.probability * 100).toFixed(0) })}
@@ -1095,7 +1133,7 @@ function MobileDashboardView() {
                 />
               </div>
                <div className="mt-1.5 flex justify-between text-[10px] text-slate-500 dark:text-zinc-500 font-mono">
-                 <span>{t('dashboard.analysis.currentPity', { count: displayPity })}{effectivePity?.isInherited && isLimited ? ` (${t('dashboard.analysis.crossPoolCarry')})` : ''}</span>
+                 <span>{t('dashboard.analysis.currentPity', { count: displayPity })}{analysisPity.isInherited6 ? ` (${t('dashboard.analysis.crossPoolCarry')})` : ''}</span>
                  <span>{t('dashboard.unit.limit', { count: maxPity })}</span>
                </div>
             </div>
@@ -1104,7 +1142,7 @@ function MobileDashboardView() {
 
         {/* 5星保底 */}
         {(() => {
-          const displayPity5 = isLimited ? effectivePity.pity5 : stats.currentPity5;
+          const displayPity5 = analysisPity.displayPity5;
           return (
             <div className="mobile-ux-soft-card p-3">
               <div className="mb-2 text-[10px] text-slate-500 dark:text-zinc-500 uppercase font-bold tracking-wide">{t('dashboard.analysis.pity5')}</div>
@@ -1121,7 +1159,7 @@ function MobileDashboardView() {
                 />
               </div>
                <div className="mt-1.5 flex justify-between text-[10px] text-slate-500 dark:text-zinc-500 font-mono">
-                 <span>{t('dashboard.analysis.currentPity', { count: displayPity5 })}{effectivePity?.isInherited && isLimited ? ` (${t('dashboard.analysis.crossPoolCarry')})` : ''}</span>
+                 <span>{t('dashboard.analysis.currentPity', { count: displayPity5 })}{analysisPity.isInherited5 ? ` (${t('dashboard.analysis.crossPoolCarry')})` : ''}</span>
                  <span>{t('dashboard.unit.limit', { count: 10 })}</span>
                </div>
             </div>
@@ -1133,6 +1171,125 @@ function MobileDashboardView() {
       {!isGroupMode && hasMergedAccountView && (
         <div className="mobile-ux-card-inset mx-4 border border-dashed border-zinc-200 bg-zinc-50/85 p-3 text-xs text-slate-500 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-500">
           {t('dashboard.analysis.mergedViewNote')}
+        </div>
+      )}
+
+      {!isGroupMode && !hasMergedAccountView && (
+        <div className="mobile-ux-card mx-4 mb-4 space-y-3 p-4">
+          <div className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500 dark:text-zinc-500">
+            {t('dashboard.analysis.specialProgress')}
+          </div>
+
+          {(specialProgress?.freeTenMilestones || []).map((milestone) => (
+            <div key={milestone.threshold} className="mobile-ux-card-inset space-y-2 border-l-2 border-cyan-500 p-3">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-bold text-slate-800 dark:text-zinc-200">
+                  {isReconstructionCharacter
+                    ? t('dashboard.analysis.freeTenMilestone', { count: milestone.threshold })
+                    : t('dashboard.analysis.freeTenOnce')}
+                </span>
+                <span className="font-mono text-slate-500 dark:text-zinc-500">
+                  {milestone.received
+                    ? t('dashboard.analysis.claimed')
+                    : `${formatNumber(milestone.progress)} / ${formatNumber(milestone.threshold)}`}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                <div
+                  className={`h-full ${milestone.received ? 'bg-green-500' : 'bg-cyan-500'}`}
+                  style={{ width: `${milestone.received ? 100 : Math.min((milestone.progress / milestone.threshold) * 100, 100)}%` }}
+                />
+              </div>
+              <div className="text-[10px] text-slate-500 dark:text-zinc-500">{t('dashboard.analysis.notCountPity')}</div>
+            </div>
+          ))}
+
+          {specialProgress?.targetGuarantee && (
+            <div className="mobile-ux-card-inset space-y-2 border-l-2 border-green-500 p-3">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-bold text-slate-800 dark:text-zinc-200">
+                  {isReconstructionWeapon
+                    ? t('dashboard.analysis.reconstructionWeaponGuarantee80')
+                    : isReconstructionCharacter
+                      ? t('dashboard.analysis.reconstructionCharacterGuarantee120')
+                      : isWeapon
+                        ? t('dashboard.analysis.guaranteedWeapon80')
+                        : t('dashboard.analysis.guaranteedLimited120')}
+                </span>
+                <span className="font-mono text-slate-500 dark:text-zinc-500">
+                  {specialProgress.targetGuarantee.reached
+                    ? t('dashboard.analysis.reached')
+                    : `${formatNumber(specialProgress.targetGuarantee.progress)} / ${formatNumber(specialProgress.targetGuarantee.threshold)}`}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                <div
+                  className={`h-full ${specialProgress.targetGuarantee.reached ? 'bg-green-500' : isWeapon ? 'bg-slate-500' : 'bg-cyan-500'}`}
+                  style={{ width: `${specialProgress.targetGuarantee.reached ? 100 : Math.min((specialProgress.targetGuarantee.progress / specialProgress.targetGuarantee.threshold) * 100, 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {currentPoolCapabilities.basePoolType === 'limited' && currentPoolCapabilities.entityType === 'character' && (
+            <div className="mobile-ux-card-inset space-y-2 border-l-2 border-purple-500 p-3">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-bold text-slate-800 dark:text-zinc-200">
+                  {isReconstructionCharacter
+                    ? t('dashboard.analysis.reconstructionCharacterToken240')
+                    : t('dashboard.analysis.potential240')}
+                </span>
+                <span className="font-mono text-slate-500 dark:text-zinc-500">
+                  {formatNumber(rewardPaidTotal % 240)} / 240
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                <div className="h-full bg-purple-500" style={{ width: `${((rewardPaidTotal % 240) / 240) * 100}%` }} />
+              </div>
+            </div>
+          )}
+
+          {currentPoolCapabilities.infoBookEnabled && (
+            <div className="mobile-ux-card-inset space-y-2 border-l-2 border-cyan-500 p-3">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="flex items-center gap-1 font-bold text-slate-800 dark:text-zinc-200">
+                  <FileText size={12} /> {t('dashboard.analysis.infoBook60')}
+                </span>
+                <span className="font-mono text-slate-500 dark:text-zinc-500">
+                  {stats.hasInfoBook ? t('dashboard.analysis.reached') : `${Math.min(paidTotal, 60)} / 60`}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {isWeapon && weaponGifts && (
+            <div className="mobile-ux-card-inset space-y-2 border-l-2 border-red-500 p-3">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-bold text-slate-800 dark:text-zinc-200">
+                  {t('dashboard.analysis.nextGift')} · {isReconstructionWeapon
+                    ? weaponGifts.nextGiftType === 'limited'
+                      ? t('dashboard.analysis.targetWeaponReward')
+                      : t('dashboard.analysis.arsenalGiftReward')
+                    : weaponGifts.nextGiftType === 'limited'
+                      ? t('dashboard.analysis.limitedShort')
+                      : t('dashboard.analysis.standardShort')}
+                </span>
+                <span className="font-mono text-slate-500 dark:text-zinc-500">
+                  {isReconstructionWeapon
+                    ? `${formatNumber(rewardPaidTotal / 10)} / ${formatNumber(weaponGifts.nextGift / 10)} ${t('dashboard.unit.claim')}`
+                    : `${formatNumber(rewardPaidTotal)} / ${formatNumber(weaponGifts.nextGift)}`}
+                </span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                <div className="h-full bg-red-500" style={{ width: `${Math.min((rewardPaidTotal / weaponGifts.nextGift) * 100, 100)}%` }} />
+              </div>
+              {isReconstructionWeapon && (
+                <div className="text-[10px] text-slate-500 dark:text-zinc-500">
+                  {t('dashboard.analysis.reconstructionWeaponGiftRule')}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1222,7 +1379,7 @@ function MobileDashboardView() {
                 <DistributionAreaChart
                   data={stats.pityStats.distribution}
                   isDark={isDark}
-                  variant={getDistributionVariant(normalizedPoolType)}
+                  variant={isWeapon ? 'weapon' : getDistributionVariant(normalizedPoolType)}
                   tooltipStyle={{
                     backgroundColor: isDark ? '#18181b' : '#fff',
                     border: `1px solid ${isDark ? '#3f3f46' : '#e4e4e7'}`,
@@ -1269,7 +1426,7 @@ function MobileDashboardView() {
 
       <AveragePullStatsPanel
         stats={stats}
-        poolType={normalizedPoolType}
+        poolType={analysisPity.normalizedType}
         isAllPoolsOverview={isAllPoolsOverview}
         compact={true}
         mobile={true}
@@ -1280,38 +1437,47 @@ function MobileDashboardView() {
       {!isGroupMode && (
       <MobileChartContainer title={t('dashboard.analysis.specialProgress')} defaultExpanded={false} className="mb-4 mx-4">
         <div className="space-y-3 pt-2">
-          {/* 限定池特殊进度 */}
-          {isLimited && (
-            <>
-              {/* 免费十连 */}
-              <div className="mobile-ux-soft-card mobile-ux-soft-card--info p-3">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">{t('dashboard.analysis.freeTenOnce')}</span>
-                  <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">
-                    {hasReceivedFreeTen ? t('dashboard.analysis.claimed') : '0 / 1'}
-                  </span>
-                </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                  <div
-                    className={`h-full ${hasReceivedFreeTen ? 'bg-green-500' : 'bg-blue-500'}`}
-                    style={{ width: hasReceivedFreeTen ? '100%' : '0%' }}
-                  />
-                </div>
-                <div className="mt-1 text-[11px] text-slate-600 dark:text-zinc-400 font-mono">{t('dashboard.analysis.notCountPity')}</div>
+          {(specialProgress?.freeTenMilestones || []).map((milestone) => (
+            <div key={milestone.threshold} className="mobile-ux-soft-card mobile-ux-soft-card--info p-3">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">
+                  {t('dashboard.analysis.freeTenOnce')} · {milestone.threshold}
+                </span>
+                <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">
+                  {milestone.received
+                    ? t('dashboard.analysis.claimed')
+                    : milestone.reached
+                      ? t('dashboard.analysis.reached')
+                      : `${milestone.progress} / ${milestone.threshold}`}
+                </span>
               </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                <div
+                  className={`h-full ${milestone.received ? 'bg-green-500' : isExtra ? 'bg-cyan-500' : 'bg-blue-500'}`}
+                  style={{ width: `${milestone.received ? 100 : Math.min((milestone.progress / milestone.threshold) * 100, 100)}%` }}
+                />
+              </div>
+              <div className="mt-1 text-[11px] text-slate-600 dark:text-zinc-400 font-mono">{t('dashboard.analysis.notCountPity')}</div>
+            </div>
+          ))}
 
+          {/* 限定角色规则进度；重构角色仍保留 extra 视觉样式 */}
+          {analysisPity.capabilities.basePoolType === 'limited' && analysisPity.capabilities.entityType === 'character' && (
+            <>
               {/* 120必出限定 */}
               <div className="mobile-ux-soft-card mobile-ux-soft-card--success p-3">
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">{t('dashboard.analysis.guaranteedLimited120')}</span>
                   <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">
-                    {checkLimitedInFirstN.firstLimitedIndex120 > 0 ? t('dashboard.analysis.reached') : `${Math.min(checkLimitedInFirstN.validPullCount, 120)} / 120`}
+                    {specialProgress?.targetGuarantee?.reached
+                      ? t('dashboard.analysis.reached')
+                      : `${specialProgress?.targetGuarantee?.progress ?? Math.min(checkLimitedInFirstN.validPullCount, 120)} / 120`}
                   </span>
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
                   <div
-                    className={`h-full ${checkLimitedInFirstN.firstLimitedIndex120 > 0 ? 'bg-green-500' : 'rainbow-progress'}`}
-                    style={{ width: checkLimitedInFirstN.firstLimitedIndex120 > 0 ? '100%' : `${Math.min((checkLimitedInFirstN.validPullCount / 120) * 100, 100)}%` }}
+                    className={`h-full ${specialProgress?.targetGuarantee?.reached ? 'bg-green-500' : isExtra ? 'bg-cyan-500' : 'rainbow-progress'}`}
+                    style={{ width: specialProgress?.targetGuarantee?.reached ? '100%' : `${Math.min(((specialProgress?.targetGuarantee?.progress ?? checkLimitedInFirstN.validPullCount) / 120) * 100, 100)}%` }}
                   />
                 </div>
               </div>
@@ -1320,20 +1486,15 @@ function MobileDashboardView() {
               <div className="mobile-ux-soft-card p-3">
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">{t('dashboard.analysis.potential240')}</span>
-                  <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">{paidTotal % 240} / 240</span>
+                  <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">{(specialProgress?.paidTotal ?? paidTotal) % 240} / 240</span>
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                  <div className="h-full bg-purple-500" style={{ width: `${((paidTotal % 240) / 240) * 100}%` }} />
+                  <div className="h-full bg-purple-500" style={{ width: `${(((specialProgress?.paidTotal ?? paidTotal) % 240) / 240) * 100}%` }} />
                 </div>
-                {Math.floor(paidTotal / 240) > 0 && (
-                  <div className="mt-1 text-[10px] text-purple-600 dark:text-purple-400 font-bold font-mono">
-                    {t('dashboard.analysis.obtained', { count: Math.floor(paidTotal / 240) })}
-                  </div>
-                )}
               </div>
 
               {/* 情报书 */}
-              <div className="mobile-ux-soft-card mobile-ux-soft-card--info p-3">
+              {analysisPity.capabilities.infoBookEnabled && <div className="mobile-ux-soft-card mobile-ux-soft-card--info p-3">
                 <div className="flex justify-between items-center mb-1">
                   <span className="flex items-center gap-1 text-xs font-bold text-slate-700 dark:text-zinc-200">
                     <FileText size={12} /> {t('dashboard.analysis.infoBook60')}
@@ -1348,26 +1509,8 @@ function MobileDashboardView() {
                     style={{ width: stats.hasInfoBook ? '100%' : `${Math.min((paidTotal / 60) * 100, 100)}%` }}
                   />
                 </div>
-              </div>
+              </div>}
             </>
-          )}
-
-          {isExtra && (
-            <div className="mobile-ux-soft-card mobile-ux-soft-card--info p-3">
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">{t('dashboard.analysis.freeTenOnce')}</span>
-                <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">
-                  {hasReceivedFreeTen ? t('dashboard.analysis.claimed') : '0 / 1'}
-                </span>
-              </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                <div
-                  className={`h-full ${hasReceivedFreeTen ? 'bg-green-500' : 'bg-cyan-500'}`}
-                  style={{ width: hasReceivedFreeTen ? '100%' : '0%' }}
-                />
-              </div>
-              <div className="mt-1 text-[11px] text-slate-600 dark:text-zinc-400 font-mono">{t('dashboard.analysis.notCountPity')}</div>
-            </div>
           )}
 
           {/* 武器池特殊进度 */}
@@ -1378,13 +1521,15 @@ function MobileDashboardView() {
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">{t('dashboard.analysis.guaranteedWeapon80')}</span>
                   <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">
-                    {checkLimitedInFirstN.firstLimitedIndex80 > 0 ? t('dashboard.analysis.reached') : `${Math.min(paidTotal, 80)} / 80`}
+                    {specialProgress?.targetGuarantee?.reached
+                      ? t('dashboard.analysis.reached')
+                      : `${specialProgress?.targetGuarantee?.progress ?? Math.min(checkLimitedInFirstN.validPullCount, 80)} / 80`}
                   </span>
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
                   <div
-                    className={`h-full ${checkLimitedInFirstN.firstLimitedIndex80 > 0 ? 'bg-green-500' : 'bg-slate-500'}`}
-                    style={{ width: checkLimitedInFirstN.firstLimitedIndex80 > 0 ? '100%' : `${Math.min((paidTotal / 80) * 100, 100)}%` }}
+                    className={`h-full ${specialProgress?.targetGuarantee?.reached ? 'bg-green-500' : 'bg-slate-500'}`}
+                    style={{ width: specialProgress?.targetGuarantee?.reached ? '100%' : `${Math.min(((specialProgress?.targetGuarantee?.progress ?? checkLimitedInFirstN.validPullCount) / 80) * 100, 100)}%` }}
                   />
                 </div>
               </div>
@@ -1399,12 +1544,12 @@ function MobileDashboardView() {
                         {weaponGifts.nextGiftType === 'limited' ? t('dashboard.analysis.limitedShort') : t('dashboard.analysis.standardShort')}
                       </span>
                     </span>
-                    <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">{paidTotal} / {weaponGifts.nextGift}</span>
+                    <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">{specialProgress?.paidTotal ?? paidTotal} / {weaponGifts.nextGift}</span>
                   </div>
                   <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
                     <div
                       className={`h-full ${weaponGifts.nextGiftType === 'limited' ? 'rainbow-progress' : 'bg-red-500'}`}
-                      style={{ width: `${Math.min((paidTotal / weaponGifts.nextGift) * 100, 100)}%` }}
+                      style={{ width: `${Math.min(((specialProgress?.paidTotal ?? paidTotal) / weaponGifts.nextGift) * 100, 100)}%` }}
                     />
                   </div>
                   <div className="mt-1 flex gap-3 text-[11px] text-slate-500 dark:text-zinc-500 font-mono uppercase">
@@ -1509,7 +1654,7 @@ function MobileDashboardView() {
               const avatarUrl = getCharacterAvatar(char.name);
               const localizedCharacterName = localizeEntityName(char.name, {
                 locale,
-                type: normalizedPoolType === 'weapon' ? 'weapon' : 'character'
+                type: isWeapon ? 'weapon' : 'character'
               });
 
               // 生成出货抽数描述

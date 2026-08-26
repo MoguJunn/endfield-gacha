@@ -168,7 +168,7 @@ INSERT INTO public.pools (user_id, pool_id, name, type, up_character, is_limited
 VALUES
   ('00000000-0000-0000-0000-000000000001', 'limited_pool', '限定池', 'limited', '目标A', true),
   ('00000000-0000-0000-0000-000000000001', 'weapon_pool', '武器池', 'weapon', '目标武器', true)
-ON CONFLICT (user_id, pool_id) DO NOTHING;
+ON CONFLICT (pool_id) DO NOTHING;
 
 INSERT INTO public.history (user_id, record_id, pool_id, rarity, is_standard, item_name)
 VALUES
@@ -1132,6 +1132,593 @@ SELECT 'official_import_rpc=ok';
 `.trim();
 }
 
+function buildExtraPoolSubtypeContractSql() {
+  return `
+CREATE OR REPLACE FUNCTION auth.uid()
+RETURNS UUID
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::UUID
+$$;
+
+CREATE OR REPLACE FUNCTION auth.role()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT COALESCE(NULLIF(current_setting('request.jwt.claim.role', true), ''), 'authenticated')
+$$;
+
+INSERT INTO auth.users (id, email)
+VALUES ('00000000-0000-0000-0000-000000000201', 'extra-pool-admin@example.com')
+ON CONFLICT (id) DO NOTHING;
+
+UPDATE public.profiles
+SET role = 'super_admin'
+WHERE id = '00000000-0000-0000-0000-000000000201';
+
+DO $contract$
+DECLARE
+  v_actor_id UUID := '00000000-0000-0000-0000-000000000201';
+  v_json_signature REGPROCEDURE :=
+    'public.admin_upsert_pool_with_aliases(text,jsonb,jsonb,jsonb,jsonb,uuid)'::REGPROCEDURE;
+  v_legacy_signature REGPROCEDURE :=
+    'public.admin_upsert_pool_with_aliases(text,text,text,text,timestamp with time zone,timestamp with time zone,text,text[],text,jsonb,jsonb,uuid)'::REGPROCEDURE;
+BEGIN
+  IF NOT has_function_privilege('authenticated', v_json_signature, 'EXECUTE')
+    OR NOT has_function_privilege('authenticated', v_legacy_signature, 'EXECUTE')
+    OR NOT has_function_privilege('service_role', v_json_signature, 'EXECUTE')
+    OR NOT has_function_privilege('service_role', v_legacy_signature, 'EXECUTE')
+  THEN
+    RAISE EXCEPTION 'extra_pool_rpc_privileges_invalid';
+  END IF;
+
+  INSERT INTO public.pools (user_id, pool_id, name, type)
+  VALUES (v_actor_id, 'contract_extra_uncategorized', 'Uncategorized extra', 'extra');
+
+  INSERT INTO public.pools (
+    user_id, pool_id, name, type,
+    extra_subtype, extra_rule_profile
+  ) VALUES (
+    v_actor_id, 'contract_extra_special', 'Special extra', 'extra',
+    'special', 'brilliance_festival_v1'
+  );
+
+  INSERT INTO public.pools (
+    user_id, pool_id, name, type,
+    extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase
+  ) VALUES
+    (
+      v_actor_id, 'contract_extra_reconstruction_character', 'Character reconstruction', 'extra',
+      'reconstruction', 'reconstruction_character_v1', 'contract_character_series', 1
+    ),
+    (
+      v_actor_id, 'contract_extra_reconstruction_weapon', 'Weapon reconstruction', 'extra',
+      'reconstruction', 'reconstruction_weapon_v1', 'contract_weapon_series', 2
+    );
+
+  BEGIN
+    INSERT INTO public.pools (
+      user_id, pool_id, name, type,
+      extra_subtype, extra_rule_profile
+    ) VALUES (
+      v_actor_id, 'contract_invalid_special_null_profile', 'Invalid special', 'extra',
+      'special', NULL
+    );
+    RAISE EXCEPTION 'special_with_null_profile_was_accepted';
+  EXCEPTION
+    WHEN check_violation THEN NULL;
+  END;
+
+  BEGIN
+    INSERT INTO public.pools (
+      user_id, pool_id, name, type,
+      extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase
+    ) VALUES (
+      v_actor_id, 'contract_invalid_reconstruction_null_phase', 'Invalid reconstruction', 'extra',
+      'reconstruction', 'reconstruction_character_v1', 'contract_invalid_series', NULL
+    );
+    RAISE EXCEPTION 'reconstruction_with_null_phase_was_accepted';
+  EXCEPTION
+    WHEN check_violation THEN NULL;
+  END;
+
+  BEGIN
+    INSERT INTO public.pools (
+      user_id, pool_id, name, type,
+      extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase
+    ) VALUES (
+      v_actor_id, 'contract_invalid_claim_character_profile', 'Invalid reconstruction claim', 'extra',
+      'reconstruction_claim', 'reconstruction_character_v1', 'contract_invalid_claim_series', 1
+    );
+    RAISE EXCEPTION 'reconstruction_claim_with_character_profile_was_accepted';
+  EXCEPTION
+    WHEN check_violation THEN NULL;
+  END;
+
+  BEGIN
+    INSERT INTO public.pools (
+      user_id, pool_id, name, type,
+      extra_subtype, extra_rule_profile
+    ) VALUES (
+      v_actor_id, 'contract_invalid_null_subtype_profile', 'Invalid null subtype', 'extra',
+      NULL, 'brilliance_festival_v1'
+    );
+    RAISE EXCEPTION 'null_subtype_with_profile_was_accepted';
+  EXCEPTION
+    WHEN check_violation THEN NULL;
+  END;
+
+  BEGIN
+    INSERT INTO public.pools (
+      user_id, pool_id, name, type,
+      extra_subtype, extra_rule_profile
+    ) VALUES (
+      v_actor_id, 'contract_invalid_non_extra_metadata', 'Invalid limited metadata', 'limited',
+      'special', 'brilliance_festival_v1'
+    );
+    RAISE EXCEPTION 'non_extra_metadata_was_accepted';
+  EXCEPTION
+    WHEN check_violation THEN NULL;
+  END;
+
+  INSERT INTO public.pools (
+    user_id, pool_id, name, type,
+    extra_subtype, extra_rule_profile
+  ) VALUES (
+    v_actor_id, 'joint_1_2_2', 'Joint contract fixture', 'extra',
+    'special', 'brilliance_festival_v1'
+  );
+END;
+$contract$;
+
+SELECT set_config('request.jwt.claim.role', 'authenticated', false);
+SELECT set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000201', false);
+SET ROLE authenticated;
+
+SELECT public.admin_upsert_pool_with_aliases(
+  'contract_legacy_authenticated_extra',
+  'Legacy authenticated extra',
+  'extra',
+  NULL::TEXT,
+  NULL::TIMESTAMPTZ,
+  NULL::TIMESTAMPTZ,
+  NULL::TEXT,
+  NULL::TEXT[],
+  NULL::TEXT,
+  '[]'::JSONB,
+  '[]'::JSONB,
+  NULL::UUID
+);
+
+SELECT public.admin_upsert_pool_with_aliases(
+  'joint_1_2_2',
+  'Joint updated by legacy overload',
+  'extra',
+  NULL::TEXT,
+  NULL::TIMESTAMPTZ,
+  NULL::TIMESTAMPTZ,
+  NULL::TEXT,
+  NULL::TEXT[],
+  NULL::TEXT,
+  '[]'::JSONB,
+  '[]'::JSONB,
+  NULL::UUID
+);
+
+DO $contract$
+BEGIN
+  BEGIN
+    PERFORM public.admin_upsert_pool_with_aliases(
+      'contract_json_missing_template',
+      '{"name":"Strict JSON extra","type":"extra"}'::JSONB,
+      '{"name":"Strict JSON extra","type":"extra"}'::JSONB,
+      '[]'::JSONB,
+      '[]'::JSONB,
+      NULL::UUID
+    );
+    RAISE EXCEPTION 'json_extra_without_template_was_accepted';
+  EXCEPTION
+    WHEN SQLSTATE '22023' THEN
+      IF SQLERRM <> 'extra_pool_template_required' THEN
+        RAISE;
+      END IF;
+  END;
+END;
+$contract$;
+
+SELECT public.admin_upsert_pool_with_aliases(
+  'contract_json_authenticated_special',
+  '{"name":"JSON authenticated special","type":"extra","extra_subtype":"special","extra_rule_profile":"brilliance_festival_v1"}'::JSONB,
+  '{"name":"JSON authenticated special","type":"extra","extra_subtype":"special","extra_rule_profile":"brilliance_festival_v1"}'::JSONB,
+  '[]'::JSONB,
+  '[]'::JSONB,
+  NULL::UUID
+);
+
+RESET ROLE;
+SELECT set_config('request.jwt.claim.role', 'service_role', false);
+SELECT set_config('request.jwt.claim.sub', '', false);
+SET ROLE service_role;
+
+SELECT public.admin_upsert_pool_with_aliases(
+  'contract_legacy_service_extra',
+  'Legacy service extra',
+  'extra',
+  NULL::TEXT,
+  NULL::TIMESTAMPTZ,
+  NULL::TIMESTAMPTZ,
+  NULL::TEXT,
+  NULL::TEXT[],
+  NULL::TEXT,
+  '[]'::JSONB,
+  '[]'::JSONB,
+  '00000000-0000-0000-0000-000000000201'::UUID
+);
+
+SELECT public.admin_upsert_pool_with_aliases(
+  'contract_json_service_reconstruction',
+  '{"name":"JSON service reconstruction","type":"extra","extra_subtype":"reconstruction","extra_rule_profile":"reconstruction_weapon_v1","extra_series_key":"contract_service_series","extra_series_phase":1}'::JSONB,
+  '{"name":"JSON service reconstruction","type":"extra","extra_subtype":"reconstruction","extra_rule_profile":"reconstruction_weapon_v1","extra_series_key":"contract_service_series","extra_series_phase":1}'::JSONB,
+  '[]'::JSONB,
+  '[]'::JSONB,
+  '00000000-0000-0000-0000-000000000201'::UUID
+);
+
+RESET ROLE;
+
+DO $contract$
+BEGIN
+  IF (
+    SELECT COUNT(*)
+    FROM public.pools
+    WHERE pool_id IN ('contract_legacy_authenticated_extra', 'contract_legacy_service_extra')
+      AND type = 'extra'
+      AND extra_subtype IS NULL
+      AND extra_rule_profile IS NULL
+      AND extra_series_key IS NULL
+      AND extra_series_phase IS NULL
+  ) <> 2 THEN
+    RAISE EXCEPTION 'legacy_extra_was_not_saved_uncategorized';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.pools
+    WHERE pool_id = 'joint_1_2_2'
+      AND type = 'extra'
+      AND extra_subtype = 'special'
+      AND extra_rule_profile = 'brilliance_festival_v1'
+      AND extra_series_key IS NULL
+      AND extra_series_phase IS NULL
+  ) OR (SELECT COUNT(*) FROM public.pools WHERE pool_id = 'joint_1_2_2') <> 1 THEN
+    RAISE EXCEPTION 'joint_1_2_2_identity_or_classification_changed';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.pools
+    WHERE pool_id = 'contract_json_authenticated_special'
+      AND extra_subtype = 'special'
+      AND extra_rule_profile = 'brilliance_festival_v1'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM public.pools
+    WHERE pool_id = 'contract_json_service_reconstruction'
+      AND extra_subtype = 'reconstruction_claim'
+      AND extra_rule_profile = 'reconstruction_weapon_v1'
+      AND extra_series_key = 'contract_service_series'
+      AND extra_series_phase = 1
+  ) THEN
+    RAISE EXCEPTION 'json_overload_explicit_classification_missing';
+  END IF;
+END;
+$contract$;
+
+SELECT 'extra_pool_subtypes_contract=ok';
+`.trim();
+}
+
+function buildReconstructionPromotionContractSql() {
+  return `
+CREATE OR REPLACE FUNCTION auth.role()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT COALESCE(NULLIF(current_setting('request.jwt.claim.role', true), ''), 'authenticated')
+$$;
+
+DO $contract$
+DECLARE
+  v_timeline JSONB;
+  v_version JSONB;
+BEGIN
+  IF (
+    SELECT COUNT(*)
+    FROM public.pools
+    WHERE pool_id IN (
+      'joint_manual_extra_reconstruction_yvonne_p1',
+      'joint_manual_extra_reconstruction_arttyrant_p1'
+    )
+      AND user_id IS NULL
+      AND type = 'extra'
+      AND (
+        (pool_id = 'joint_manual_extra_reconstruction_yvonne_p1' AND extra_subtype = 'reconstruction')
+        OR (pool_id = 'joint_manual_extra_reconstruction_arttyrant_p1' AND extra_subtype = 'reconstruction_claim')
+      )
+      AND extra_series_key = 'reconstruction-xuesong-youmeng'
+      AND extra_series_phase = 1
+      AND locked = TRUE
+      AND banner_url IS NULL
+      AND start_time = '2026-09-24T12:00:00+08:00'::TIMESTAMPTZ
+      AND end_time IS NULL
+      AND description LIKE '%版本更新维护前%'
+  ) <> 2 THEN
+    RAISE EXCEPTION 'reconstruction_seed_pool_contract_invalid';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.pools
+    WHERE pool_id = 'joint_manual_extra_reconstruction_yvonne_p1'
+      AND name = '绚丽异彩'
+      AND extra_rule_profile = 'reconstruction_character_v1'
+      AND up_character = '伊冯'
+      AND featured_characters = ARRAY['chr_0017_yvonne']::TEXT[]
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM public.pools
+    WHERE pool_id = 'joint_manual_extra_reconstruction_arttyrant_p1'
+      AND name = '点绘申领'
+      AND extra_rule_profile = 'reconstruction_weapon_v1'
+      AND up_character = '艺术暴君'
+      AND featured_characters = ARRAY['wpn_pistol_0010']::TEXT[]
+  ) THEN
+    RAISE EXCEPTION 'reconstruction_seed_pool_profile_invalid';
+  END IF;
+
+  IF (
+    SELECT COUNT(*)
+    FROM public.pool_characters
+    WHERE pool_id = 'joint_manual_extra_reconstruction_yvonne_p1'
+      AND character_id IN (
+        'chr_0017_yvonne',
+        'chr_0009_azrila',
+        'chr_0015_lifeng',
+        'chr_0025_ardelia',
+        'chr_0026_lastrite',
+        'chr_0029_pograni'
+      )
+  ) <> 6 OR NOT EXISTS (
+    SELECT 1
+    FROM public.pool_characters
+    WHERE pool_id = 'joint_manual_extra_reconstruction_yvonne_p1'
+      AND character_id = 'chr_0017_yvonne'
+      AND is_up = TRUE
+  ) OR EXISTS (
+    SELECT 1
+    FROM public.pool_characters
+    WHERE pool_id = 'joint_manual_extra_reconstruction_yvonne_p1'
+      AND character_id <> 'chr_0017_yvonne'
+      AND is_up = TRUE
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM public.pool_characters
+    WHERE pool_id = 'joint_manual_extra_reconstruction_arttyrant_p1'
+      AND character_id = 'wpn_pistol_0010'
+      AND is_up = TRUE
+  ) THEN
+    RAISE EXCEPTION 'reconstruction_seed_roster_invalid';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.version_content_snapshots
+    WHERE version_key = 'version-6'
+      AND revision = 1
+      AND title = '雪凇幽梦'
+      AND starts_at = '2026-09-02T06:00:00+08:00'::TIMESTAMPTZ
+      AND ends_at IS NULL
+      AND pool_bindings->>'reconstruction-xuesong-youmeng-character-p1' = 'joint_manual_extra_reconstruction_yvonne_p1'
+      AND pool_bindings->>'reconstruction-xuesong-youmeng-weapon-p1' = 'joint_manual_extra_reconstruction_arttyrant_p1'
+      AND jsonb_array_length(content->'events') >= 2
+  ) THEN
+    RAISE EXCEPTION 'reconstruction_version_snapshot_invalid';
+  END IF;
+
+  SELECT value::JSONB
+  INTO v_timeline
+  FROM public.site_config
+  WHERE key = 'home_version_timeline';
+
+  SELECT version_row
+  INTO v_version
+  FROM jsonb_array_elements(v_timeline->'versions') AS version_row
+  WHERE version_row->>'id' = 'version-6';
+
+  IF v_version->>'name' <> '雪凇幽梦'
+    OR v_version->'ends_at' <> 'null'::JSONB
+    OR (v_version->>'enabled')::BOOLEAN IS NOT TRUE
+    OR (v_version->>'order')::INTEGER <> 60
+    OR NOT (v_version->'pool_ids' @> '["joint_manual_extra_reconstruction_yvonne_p1","joint_manual_extra_reconstruction_arttyrant_p1"]'::JSONB)
+  THEN
+    RAISE EXCEPTION 'reconstruction_home_timeline_invalid';
+  END IF;
+
+  IF NOT has_function_privilege(
+    'service_role',
+    'public.promote_manual_pool_to_official_id(text,jsonb)'::REGPROCEDURE,
+    'EXECUTE'
+  ) OR has_function_privilege(
+    'authenticated',
+    'public.promote_manual_pool_to_official_id(text,jsonb)'::REGPROCEDURE,
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'reconstruction_promotion_privileges_invalid';
+  END IF;
+END;
+$contract$;
+
+UPDATE public.pools
+SET
+  description = 'promotion-preserved-description',
+  banner_url = '/banners/promotion-preserved.webp',
+  locked = TRUE
+WHERE pool_id = 'joint_manual_extra_reconstruction_arttyrant_p1';
+
+INSERT INTO public.pools (pool_id, user_id, name, type, locked)
+VALUES ('joint_9_0_2', NULL, 'Imported reconstruction claim', 'extra', FALSE)
+ON CONFLICT (pool_id) DO NOTHING;
+
+INSERT INTO public.pool_characters (pool_id, character_id, is_up)
+VALUES ('joint_9_0_2', 'wpn_pistol_0010', FALSE)
+ON CONFLICT (pool_id, character_id) DO UPDATE SET is_up = FALSE;
+
+INSERT INTO public.history (
+  user_id,
+  record_id,
+  pool_id,
+  rarity,
+  game_uid,
+  seq_id,
+  server_id,
+  item_name
+)
+VALUES
+  (
+    '00000000-0000-0000-0000-000000000001',
+    'promotion-conflict-manual',
+    'joint_manual_extra_reconstruction_arttyrant_p1',
+    6,
+    'promotion-game',
+    'promotion-conflict-seq',
+    '1',
+    '艺术暴君'
+  ),
+  (
+    '00000000-0000-0000-0000-000000000001',
+    'promotion-conflict-official',
+    'joint_9_0_2',
+    6,
+    'promotion-game',
+    'promotion-conflict-seq',
+    '1',
+    '艺术暴君'
+  ),
+  (
+    '00000000-0000-0000-0000-000000000001',
+    'promotion-migrate-manual',
+    'joint_manual_extra_reconstruction_arttyrant_p1',
+    6,
+    'promotion-game',
+    'promotion-migrate-seq',
+    '1',
+    '艺术暴君'
+  );
+
+SELECT set_config('request.jwt.claim.role', 'service_role', false);
+SET ROLE service_role;
+SELECT public.promote_manual_pool_to_official_id(
+  'joint_manual_extra_reconstruction_arttyrant_p1',
+  '{"pool_id":"joint_9_0_2","name":"点绘申领","type":"extra","start_time":"2026-09-24T12:00:00+08:00","up_character":"艺术暴君","featured_characters":["wpn_pistol_0010"]}'::JSONB
+);
+RESET ROLE;
+
+DO $contract$
+DECLARE
+  v_timeline JSONB;
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM public.pools
+    WHERE pool_id = 'joint_manual_extra_reconstruction_arttyrant_p1'
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM public.pools
+    WHERE pool_id = 'joint_9_0_2'
+      AND type = 'extra'
+      AND extra_subtype = 'reconstruction_claim'
+      AND extra_rule_profile = 'reconstruction_weapon_v1'
+      AND extra_series_key = 'reconstruction-xuesong-youmeng'
+      AND extra_series_phase = 1
+      AND description = 'promotion-preserved-description'
+      AND banner_url = '/banners/promotion-preserved.webp'
+      AND locked = TRUE
+  ) THEN
+    RAISE EXCEPTION 'reconstruction_promoted_pool_invalid';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.history
+    WHERE pool_id = 'joint_manual_extra_reconstruction_arttyrant_p1'
+  ) OR (
+    SELECT COUNT(*) FROM public.history
+    WHERE pool_id = 'joint_9_0_2'
+      AND game_uid = 'promotion-game'
+  ) <> 2 THEN
+    RAISE EXCEPTION 'reconstruction_promoted_history_invalid';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.pool_characters
+    WHERE pool_id = 'joint_manual_extra_reconstruction_arttyrant_p1'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM public.pool_characters
+    WHERE pool_id = 'joint_9_0_2'
+      AND character_id = 'wpn_pistol_0010'
+      AND is_up = TRUE
+  ) THEN
+    RAISE EXCEPTION 'reconstruction_promoted_roster_invalid';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.pool_id_aliases
+    WHERE source = 'manual_placeholder'
+      AND alias_id = 'joint_manual_extra_reconstruction_arttyrant_p1'
+      AND pool_id = 'joint_9_0_2'
+  ) OR NOT EXISTS (
+    SELECT 1 FROM public.pool_id_aliases
+    WHERE source = 'official_api'
+      AND alias_id = 'joint_9_0_2'
+      AND pool_id = 'joint_9_0_2'
+  ) THEN
+    RAISE EXCEPTION 'reconstruction_promoted_aliases_invalid';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.version_content_snapshots
+    WHERE EXISTS (
+      SELECT 1 FROM jsonb_each(pool_bindings) AS binding(binding_key, binding_value)
+      WHERE binding_value = to_jsonb('joint_manual_extra_reconstruction_arttyrant_p1'::TEXT)
+    )
+  ) OR NOT EXISTS (
+    SELECT 1
+    FROM public.version_content_snapshots
+    WHERE version_key = 'version-6'
+      AND pool_bindings->>'reconstruction-xuesong-youmeng-weapon-p1' = 'joint_9_0_2'
+  ) THEN
+    RAISE EXCEPTION 'reconstruction_promoted_bindings_invalid';
+  END IF;
+
+  SELECT value::JSONB
+  INTO v_timeline
+  FROM public.site_config
+  WHERE key = 'home_version_timeline';
+
+  IF v_timeline::TEXT LIKE '%joint_manual_extra_reconstruction_arttyrant_p1%'
+    OR v_timeline::TEXT NOT LIKE '%joint_9_0_2%'
+  THEN
+    RAISE EXCEPTION 'reconstruction_promoted_timeline_invalid';
+  END IF;
+END;
+$contract$;
+
+SELECT 'reconstruction_promotion_contract=ok';
+`.trim();
+}
+
 async function main() {
   const baselineSql = await readFile(baselinePath, 'utf8');
 
@@ -1221,6 +1808,30 @@ async function main() {
     if (!officialImportVerification.stdout.includes('official_import_rpc=ok')) {
       throw new Error(
         `Official import RPC verification returned incomplete output:\n${officialImportVerification.stdout}`
+      );
+    }
+
+    const extraPoolSubtypeVerification = await run(
+      'docker',
+      ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName, '-At'],
+      { input: `${buildExtraPoolSubtypeContractSql()}\n` }
+    );
+
+    if (!extraPoolSubtypeVerification.stdout.includes('extra_pool_subtypes_contract=ok')) {
+      throw new Error(
+        `Extra pool subtype contract verification returned incomplete output:\n${extraPoolSubtypeVerification.stdout}`
+      );
+    }
+
+    const reconstructionPromotionVerification = await run(
+      'docker',
+      ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName, '-At'],
+      { input: `${buildReconstructionPromotionContractSql()}\n` }
+    );
+
+    if (!reconstructionPromotionVerification.stdout.includes('reconstruction_promotion_contract=ok')) {
+      throw new Error(
+        `Reconstruction promotion verification returned incomplete output:\n${reconstructionPromotionVerification.stdout}`
       );
     }
 

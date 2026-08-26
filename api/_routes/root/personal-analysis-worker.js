@@ -6,6 +6,68 @@ function readEnvironment() {
   return globalThis.process?.env || {};
 }
 
+function parseBoundedInteger(value, fallback, { min, max }) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+async function runPersonalAnalysisWorkerBatches({
+  adminClient,
+  maxBatches = 1,
+  timeBudgetMs = 45000,
+  now = () => Date.now(),
+} = {}) {
+  const startedAt = now();
+  const aggregate = {
+    ok: true,
+    skipped: false,
+    code: 'personal_analysis_worker_completed',
+    backfill: null,
+    stats: {
+      claimedOwner: 0,
+      claimedScope: 0,
+      succeeded: 0,
+      stale: 0,
+      failed: 0,
+    },
+    results: [],
+    batches: 0,
+    timeBudgetReached: false,
+  };
+
+  for (let batch = 0; batch < maxBatches; batch += 1) {
+    const result = await runPersonalAnalysisWorker({ adminClient });
+    if (result?.skipped === true) return result;
+
+    aggregate.batches += 1;
+    aggregate.backfill = result?.backfill || aggregate.backfill;
+    aggregate.stats.claimedOwner += Number(result?.stats?.claimedOwner || 0);
+    aggregate.stats.claimedScope += Number(result?.stats?.claimedScope || 0);
+    aggregate.stats.succeeded += Number(result?.stats?.succeeded || 0);
+    aggregate.stats.stale += Number(result?.stats?.stale || 0);
+    aggregate.stats.failed += Number(result?.stats?.failed || 0);
+    aggregate.results.push(...(Array.isArray(result?.results) ? result.results : []));
+
+    if (result?.ok === false) {
+      aggregate.ok = false;
+      aggregate.code = 'personal_analysis_worker_partial_failure';
+      break;
+    }
+
+    const claimed = Number(result?.stats?.claimedOwner || 0)
+      + Number(result?.stats?.claimedScope || 0);
+    if (claimed === 0) break;
+
+    if (now() - startedAt >= timeBudgetMs) {
+      aggregate.timeBudgetReached = true;
+      break;
+    }
+  }
+
+  return aggregate;
+}
+
 function getAcceptedSecrets(env = readEnvironment()) {
   return [
     env.PERSONAL_ANALYSIS_WORKER_SECRET,
@@ -80,7 +142,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    const result = await runPersonalAnalysisWorker({ adminClient });
+    const requestBody = req.body && typeof req.body === 'object' ? req.body : {};
+    const maxBatches = parseBoundedInteger(requestBody.maxBatches, 1, {
+      min: 1,
+      max: 8,
+    });
+    const timeBudgetMs = parseBoundedInteger(requestBody.timeBudgetMs, 45000, {
+      min: 5000,
+      max: 50000,
+    });
+    const result = await runPersonalAnalysisWorkerBatches({
+      adminClient,
+      maxBatches,
+      timeBudgetMs,
+    });
     return res.status(200).json({
       success: true,
       partial: result.ok === false,
@@ -97,4 +172,6 @@ export default async function handler(req, res) {
 export const __internal = {
   authorizePersonalAnalysisWorkerRequest,
   getAcceptedSecrets,
+  parseBoundedInteger,
+  runPersonalAnalysisWorkerBatches,
 };

@@ -78,6 +78,48 @@ describe('useAuthenticatedSessionSync', () => {
     });
   });
 
+  it.each([
+    ['SIGNED_IN', 'supabase_auth_change'],
+    ['TOKEN_REFRESHED', 'supabase_auth_change'],
+    ['SITE_SESSION_SYNC', 'site_session'],
+  ])('同 owner building 时 %s 不打断后台等待', async (event, source) => {
+    usePersonalDataStore.getState().switchOwner('user-1');
+    usePersonalDataStore.setState({
+      phase: 'building',
+      hasSnapshot: false,
+    });
+    const refreshPersonalData = vi.fn();
+    const { result } = renderHook(() => useAuthenticatedSessionSync({
+      refreshPersonalData,
+    }));
+
+    let syncResult;
+    await act(async () => {
+      syncResult = await result.current.applyAuthenticatedSession({
+        id: 'user-1',
+      }, {
+        event,
+        source,
+      });
+    });
+
+    expect(syncResult).toMatchObject({
+      ok: true,
+      skipped: true,
+      applied: false,
+      classification: {
+        isSameOwnerBuilding: true,
+        shouldRefreshPersonalData: false,
+      },
+    });
+    expect(refreshPersonalData).not.toHaveBeenCalled();
+    expect(usePersonalDataStore.getState()).toMatchObject({
+      ownerId: 'user-1',
+      phase: 'building',
+      hasSnapshot: false,
+    });
+  });
+
   it('首次 SIGNED_IN 读取一次并建立 owner', async () => {
     const publicPools = [{ id: 'public-pool' }];
     usePersonalDataStore.getState().setPublicPools(publicPools);

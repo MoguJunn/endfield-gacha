@@ -33,6 +33,11 @@ var init_messages_en_US = __esm({
       "app.metaKeywords": "Arknights Endfield, Endfield, gacha analyzer, pity, pull history, simulator",
       "home.rotation.calendar": "Version Calendar",
       "home.rotation.openCalendar": "Open Version Calendar",
+      "home.rotation.status.rerunNext": "Next Rerun",
+      "home.rotation.status.rerunCurrent": "Current Rerun",
+      "home.rotation.folded.currentRerun": "Merged current rerun: {name}",
+      "home.rotation.folded.extra": "Merged: {name}",
+      "home.rotation.folded.extraCount": "Merged {count} expired extra pool(s)",
       "common.loading": "Loading...",
       "common.unit.pulls": "{count} pulls",
       "common.retry": "Retry",
@@ -280,6 +285,24 @@ var init_messages_en_US = __esm({
       "home.poolMechanics.current.upcoming": "// starts in {days}d {hours}h",
       "home.poolMechanics.current.expired": "// ended",
       "home.poolMechanics.pending": "TBD",
+      "home.poolMechanics.extra.title": "Extra Headhunting Rules",
+      "home.poolMechanics.extra.subtitle": "Extra Headhunting includes Reconstruction, Reconstruction Claim, and Special Headhunting; reconstruction product rules are shown first.",
+      "home.poolMechanics.extra.reconstruction.badge": "Reconstruction",
+      "home.poolMechanics.extra.special.badge": "Special",
+      "home.poolMechanics.extra.reconstructionCharacter.title": "Reconstruction \xB7 Character",
+      "home.poolMechanics.extra.reconstructionCharacter.base": "Uses the base rules of a regular limited character banner with one featured target.",
+      "home.poolMechanics.extra.reconstructionCharacter.free": "Grants a free ten-pull at 30, 60, and 90 paid pulls; free pulls do not advance paid pity or reward progress.",
+      "home.poolMechanics.extra.reconstructionCharacter.target": "Guarantees the target once within 120 pulls and grants a target token every 240 pulls.",
+      "home.poolMechanics.extra.reconstructionCharacter.carryOver": "Pity and rewards carry across periods within the same series.",
+      "home.poolMechanics.extra.reconstructionWeapon.title": "Reconstruction Claim \xB7 Weapon",
+      "home.poolMechanics.extra.reconstructionWeapon.base": "Uses the base weapon-claim rules with one featured weapon.",
+      "home.poolMechanics.extra.reconstructionWeapon.target": "Guarantees the target once within the first 8 claims.",
+      "home.poolMechanics.extra.reconstructionWeapon.rewards": "Grants an arsenal gift at claim 10, the featured weapon at claim 18, then alternates every 8 claims; series rewards carry over.",
+      "home.poolMechanics.extra.reconstructionWeapon.pity": "The regular 6\u2605 guarantee is within 4 claims and is tracked per banner.",
+      "home.poolMechanics.extra.brilliance.title": "Special \xB7 Brilliance Festival",
+      "home.poolMechanics.extra.brilliance.targets": "All four 6\u2605 targets have equal odds.",
+      "home.poolMechanics.extra.brilliance.free": "Grants one free ten-pull after 30 paid pulls; it does not advance pity or reward progress.",
+      "home.poolMechanics.extra.brilliance.pity": "Pity is independent and does not carry into other banners.",
       "home.poolMechanics.common.sixPity": "6\u2605 pity",
       "home.poolMechanics.common.hardPity": "Hard guarantee",
       "home.poolMechanics.common.gift": "Gift",
@@ -324,8 +347,11 @@ var init_messages_en_US = __esm({
       "home.rotation.status.next": "Next banner UP",
       "home.rotation.status.nextPool": "Next Pool",
       "home.rotation.status.nextNext": "UP After Next",
-      "home.rotation.status.extraCurrent": "Extra Pool Live",
+      "home.rotation.status.extraReconstructionCurrent": "Current Reconstruction",
+      "home.rotation.status.extraReconstructionNode": "Reconstruction Pool",
+      "home.rotation.status.extraCurrent": "Current Extra",
       "home.rotation.status.extraNode": "Extra Pool",
+      "home.rotation.endLabel.openEnded": "Before Version Update Maintenance",
       "home.rotation.inPoolBadge": "in banner",
       "home.rotation.pending": "TBD...",
       "home.rotation.versionPoolCount": "{count} pools",
@@ -898,6 +924,10 @@ var init_messages_en_US = __esm({
       "resource.trustToken": "Token",
       "pool.group.all": "Banners",
       "pool.group.extra": "Extra Banner",
+      "pool.group.extraReconstruction": "Reconstruction Banner",
+      "pool.group.extraReconstructionClaim": "Reconstruction Claim",
+      "pool.group.extraSpecial": "Special Banner",
+      "pool.group.extraUnclassified": "Unclassified Extra Banner",
       "pool.group.limited": "Limited Character",
       "pool.group.standard": "Standard",
       "pool.group.weaponLimited": "Limited Weapon",
@@ -1354,6 +1384,7 @@ var init_messages_en_US = __esm({
       "chart.distribution.tooltip.range": "{range} pulls \xB7 {count} total",
       "chart.distribution.tooltip.count": "{count} items",
       "dashboard.unit.pull": "pulls",
+      "dashboard.unit.claim": "claims",
       "dashboard.unit.pulls": "{count} pulls",
       "dashboard.unit.remaining": "left",
       "dashboard.unit.limit": "Limit: {count}",
@@ -1480,6 +1511,8 @@ var init_messages_en_US = __esm({
       "dashboard.logs": "Detailed Logs",
       "dashboard.analysis.title.limited": "Limited Banner Analysis",
       "dashboard.analysis.title.extra": "Extra Banner Analysis",
+      "dashboard.analysis.title.reconstructionCharacter": "Reconstruction Character Analysis",
+      "dashboard.analysis.title.reconstructionWeapon": "Reconstruction Weapon Claim Analysis",
       "dashboard.analysis.title.weapon": "Weapon Banner Analysis",
       "dashboard.analysis.title.standard": "Standard Banner Analysis",
       "dashboard.analysis.currentPool": "Current banner:",
@@ -1504,11 +1537,26 @@ var init_messages_en_US = __esm({
       "dashboard.analysis.winRateBreakdown": "UP: {up} / Standard off-rate: {offStandard} / Limited off-rate: {offLimited}",
       "dashboard.analysis.specialProgress": "Special Mechanic Progress",
       "dashboard.analysis.freeTenOnce": "Urgent Recruitment (once)",
+      "dashboard.analysis.freeTenMilestone": "Free ten-pull at {count}",
+      "dashboard.analysis.reconstructionFreeTen.title": "Series Free Ten-Pulls",
+      "dashboard.analysis.reconstructionFreeTen.stage": "{count} pulls",
+      "dashboard.analysis.reconstructionFreeTen.status.claimed": "Claimed",
+      "dashboard.analysis.reconstructionFreeTen.status.available": "Reached, ready to claim",
+      "dashboard.analysis.reconstructionFreeTen.status.locked": "Not reached",
+      "dashboard.analysis.reconstructionFreeTen.remaining": "{count} pulls remaining",
+      "dashboard.analysis.reconstructionFreeTen.summary.available": "{count} free ten-pull(s) available. Use them in the action area.",
+      "dashboard.analysis.reconstructionFreeTen.summary.allClaimed": "All three free ten-pulls have been claimed",
+      "dashboard.analysis.reconstructionFreeTen.summary.next": "{count} pulls remaining to the next stage",
+      "dashboard.analysis.reconstructionFreeTen.progressValue": "{current} of {max} pulls completed",
       "dashboard.analysis.claimed": "Claimed",
       "dashboard.analysis.notCountPity": "Does not count toward pity",
       "dashboard.analysis.completed": "Completed",
       "dashboard.analysis.guaranteedLimited120": "Limited guarantee (120)",
       "dashboard.analysis.guaranteedWeapon80": "First-cycle limited guarantee (80)",
+      "dashboard.analysis.reconstructionCharacterGuarantee120": "Series target character guarantee (120)",
+      "dashboard.analysis.reconstructionCharacterToken240": "Series target character token (every 240)",
+      "dashboard.analysis.reconstructionWeaponPity40": "6\u2605 guarantee (4 claims / 40 pulls)",
+      "dashboard.analysis.reconstructionWeaponGuarantee80": "Series target weapon guarantee (8 claims / 80 pulls)",
       "dashboard.analysis.reached": "Reached",
       "dashboard.analysis.potential240": "Bonus Potential (every 240)",
       "dashboard.analysis.obtained": "Obtained: {count}",
@@ -1518,6 +1566,9 @@ var init_messages_en_US = __esm({
       "dashboard.analysis.limitedShort": "Limited",
       "dashboard.analysis.standardShort": "Standard",
       "dashboard.analysis.obtainedSummary": "Obtained:",
+      "dashboard.analysis.arsenalGiftReward": "Arsenal Gift",
+      "dashboard.analysis.targetWeaponReward": "Target Weapon",
+      "dashboard.analysis.reconstructionWeaponGiftRule": "The series grants an Arsenal Gift on claim 10, the target weapon on claim 18, then alternates every 8 claims.",
       "dashboard.analysis.firstSelector300": "First selector gift (300)",
       "dashboard.average.title": "Average Drop Cost",
       "dashboard.average.avg5": "Avg 5\u2605",
@@ -1780,6 +1831,8 @@ var init_messages_en_US = __esm({
       "simulator.hero.limited": "LIMITED HEADHUNTING",
       "simulator.hero.weapon": "WEAPON ARSENAL",
       "simulator.hero.standard": "STANDARD HEADHUNTING",
+      "simulator.hero.reconstructionCharacter": "RECONSTRUCTION HEADHUNTING",
+      "simulator.hero.reconstructionWeapon": "RECONSTRUCTION CLAIM",
       "simulator.hero.subtitle": "Probability Up Event",
       "simulator.reset.title": "Reset Simulator",
       "simulator.reset.confirmAll": "Reset every banner type? This clears simulated history, pity, and resources by default.",
@@ -1896,6 +1949,8 @@ var init_messages_en_US = __esm({
       "simulator.analysis.oneTimeOnly": "one-time",
       "simulator.poolTypeName.limited": "Limited Character Banners",
       "simulator.poolTypeName.extra": "Extra Banner",
+      "simulator.poolTypeName.reconstructionCharacter": "Reconstruction \xB7 Character",
+      "simulator.poolTypeName.reconstructionWeapon": "Reconstruction \xB7 Weapon",
       "simulator.poolTypeName.weapon": "Weapon Banners",
       "simulator.poolTypeName.standard": "Standard Banners",
       "simulator.defaultPoolName": "Simulator Banner",
@@ -2291,6 +2346,11 @@ var messages = {
   "app.metaKeywords": "\u660E\u65E5\u65B9\u821F,\u7EC8\u672B\u5730,Endfield,\u62BD\u5361,\u5206\u6790\u5668,\u4FDD\u5E95,\u6982\u7387,\u6A21\u62DF\u5668,\u5BFC\u5165\u5BFC\u51FA",
   "home.rotation.calendar": "\u7248\u672C\u65E5\u5386",
   "home.rotation.openCalendar": "\u6253\u5F00\u7248\u672C\u65E5\u5386",
+  "home.rotation.status.rerunNext": "\u4E0B\u4E00\u6B21\u590D\u523B",
+  "home.rotation.status.rerunCurrent": "\u5F53\u524D\u590D\u523B",
+  "home.rotation.folded.currentRerun": "\u5DF2\u5408\u5E76\u5F53\u671F\u590D\u523B\uFF1A{name}",
+  "home.rotation.folded.extra": "\u5DF2\u5408\u5E76\uFF1A{name}",
+  "home.rotation.folded.extraCount": "\u5DF2\u5408\u5E76 {count} \u4E2A\u8FC7\u671F\u9644\u52A0\u6C60",
   "common.loading": "\u52A0\u8F7D\u4E2D...",
   "common.unit.pulls": "{count} \u62BD",
   "common.retry": "\u91CD\u8BD5",
@@ -2478,8 +2538,11 @@ var messages = {
   "home.rotation.status.next": "\u4E0B\u4E00\u5361\u6C60UP",
   "home.rotation.status.nextPool": "\u4E0B\u4E00\u5361\u6C60",
   "home.rotation.status.nextNext": "\u4E0B\u4E0B\u6B21\u5361\u6C60UP",
-  "home.rotation.status.extraCurrent": "\u9644\u52A0\u5BFB\u8BBF\u5F00\u653E\u4E2D",
+  "home.rotation.status.extraReconstructionCurrent": "\u5F53\u524D\u91CD\u6784",
+  "home.rotation.status.extraReconstructionNode": "\u91CD\u6784\u5BFB\u8BBF",
+  "home.rotation.status.extraCurrent": "\u5F53\u524D\u9644\u52A0",
   "home.rotation.status.extraNode": "\u9644\u52A0\u5BFB\u8BBF",
+  "home.rotation.endLabel.openEnded": "\u7248\u672C\u66F4\u65B0\u7EF4\u62A4\u524D",
   "home.rotation.inPoolBadge": "\u5728\u5361\u6C60\u4E2D",
   "home.rotation.pending": "\u5F85\u516C\u5E03...",
   "home.rotation.versionPoolCount": "{count} \u4E2A\u5361\u6C60",
@@ -2514,6 +2577,24 @@ var messages = {
   "home.poolMechanics.badge": "\u7CFB\u7EDF\u4FE1\u606F",
   "home.poolMechanics.currentLabel": "\u5F53\u524D UP",
   "home.poolMechanics.pending": "\u5F85\u516C\u5E03",
+  "home.poolMechanics.extra.title": "\u9644\u52A0\u5BFB\u8BBF\u89C4\u5219",
+  "home.poolMechanics.extra.subtitle": "\u9644\u52A0\u5BFB\u8BBF\u5206\u4E3A\u91CD\u6784\u5BFB\u8BBF\u3001\u91CD\u6784\u7533\u9886\u4E0E\u7279\u6B8A\u5BFB\u8BBF\uFF1B\u91CD\u6784\u4EA7\u54C1\u89C4\u5219\u4F18\u5148\u5C55\u793A\u3002",
+  "home.poolMechanics.extra.reconstruction.badge": "\u91CD\u6784",
+  "home.poolMechanics.extra.special.badge": "\u7279\u6B8A",
+  "home.poolMechanics.extra.reconstructionCharacter.title": "\u91CD\u6784\u5BFB\u8BBF \xB7 \u89D2\u8272",
+  "home.poolMechanics.extra.reconstructionCharacter.base": "\u590D\u7528\u666E\u901A\u9650\u5B9A\u5BFB\u8BBF\u57FA\u7840\u89C4\u5219\uFF0C\u8BBE\u7F6E\u5355\u4E00\u6982\u7387\u63D0\u5347\u76EE\u6807\u3002",
+  "home.poolMechanics.extra.reconstructionCharacter.free": "\u7D2F\u8BA1 30 / 60 / 90 \u62BD\u5404\u8D60\u4E00\u6B21\u514D\u8D39\u5341\u8FDE\uFF1B\u514D\u8D39\u5341\u8FDE\u4E0D\u63A8\u8FDB\u4ED8\u8D39\u4FDD\u5E95\u6216\u5956\u52B1\u8FDB\u5EA6\u3002",
+  "home.poolMechanics.extra.reconstructionCharacter.target": "120 \u62BD\u5185\u786E\u4FDD\u76EE\u6807\u89D2\u8272\u4E00\u6B21\uFF1B\u6BCF 240 \u62BD\u8D60\u9001\u76EE\u6807\u4FE1\u7269\u3002",
+  "home.poolMechanics.extra.reconstructionCharacter.carryOver": "\u4FDD\u5E95\u4E0E\u5956\u52B1\u6309\u540C\u4E00\u7CFB\u5217\u8DE8\u671F\u7EE7\u627F\u3002",
+  "home.poolMechanics.extra.reconstructionWeapon.title": "\u91CD\u6784\u7533\u9886 \xB7 \u6B66\u5668",
+  "home.poolMechanics.extra.reconstructionWeapon.base": "\u590D\u7528\u6B66\u5668\u5BFB\u8BBF\u57FA\u7840\u89C4\u5219\uFF0C\u8BBE\u7F6E\u5355\u4E00\u6982\u7387\u63D0\u5347\u6B66\u5668\u3002",
+  "home.poolMechanics.extra.reconstructionWeapon.target": "\u524D 8 \u6B21\u7533\u9886\u5185\u786E\u4FDD\u76EE\u6807\u6B66\u5668\u4E00\u6B21\u3002",
+  "home.poolMechanics.extra.reconstructionWeapon.rewards": "\u7B2C 10 \u6B21\u7533\u9886\u8D60\u6B66\u5E93\u8D60\u793C\uFF0C\u7B2C 18 \u6B21\u8D60\u6982\u7387\u63D0\u5347\u6B66\u5668\uFF0C\u4E4B\u540E\u6BCF 8 \u6B21\u4EA4\u66FF\uFF1B\u540C\u7CFB\u5217\u5956\u52B1\u7EE7\u627F\u3002",
+  "home.poolMechanics.extra.reconstructionWeapon.pity": "\u666E\u901A 6\u2605 \u4FDD\u5E95\u6700\u591A 4 \u6B21\u7533\u9886\uFF0C\u6309\u5355\u6C60\u72EC\u7ACB\u8BA1\u7B97\u3002",
+  "home.poolMechanics.extra.brilliance.title": "\u7279\u6B8A\u5BFB\u8BBF \xB7 \u8F89\u5149\u5E86\u5178",
+  "home.poolMechanics.extra.brilliance.targets": "\u56DB\u540D 6\u2605 \u76EE\u6807\u7B49\u6982\u7387\u51FA\u73B0\u3002",
+  "home.poolMechanics.extra.brilliance.free": "\u7D2F\u8BA1 30 \u62BD\u8D60\u9001\u4E00\u6B21\u514D\u8D39\u5341\u8FDE\uFF0C\u514D\u8D39\u5341\u8FDE\u4E0D\u63A8\u8FDB\u4FDD\u5E95\u6216\u5956\u52B1\u8FDB\u5EA6\u3002",
+  "home.poolMechanics.extra.brilliance.pity": "\u4FDD\u5E95\u72EC\u7ACB\u8BA1\u7B97\uFF0C\u4E0D\u7EE7\u627F\u5230\u5176\u4ED6\u5BFB\u8BBF\u3002",
   "home.poolMechanics.cards.limited.title": "\u9650\u5B9A\u89D2\u8272\u6C60",
   "home.poolMechanics.cards.limited.sixPity.value": "80 \u62BD\u5185\u5FC5\u51FA 6\u2605",
   "home.poolMechanics.cards.limited.sixPity.note": "65 \u62BD\u540E\u6BCF\u62BD\u989D\u5916 +5%",
@@ -3107,6 +3188,10 @@ var messages = {
   "resource.trustToken": "\u4FE1\u7269",
   "pool.group.all": "\u5361\u6C60",
   "pool.group.extra": "\u9644\u52A0\u5BFB\u8BBF",
+  "pool.group.extraReconstruction": "\u91CD\u6784\u5BFB\u8BBF",
+  "pool.group.extraReconstructionClaim": "\u91CD\u6784\u7533\u9886",
+  "pool.group.extraSpecial": "\u7279\u6B8A\u5BFB\u8BBF",
+  "pool.group.extraUnclassified": "\u672A\u5206\u7C7B\u9644\u52A0\u5BFB\u8BBF",
   "pool.group.limited": "\u9650\u5B9A\u89D2\u8272",
   "pool.group.standard": "\u5E38\u9A7B",
   "pool.group.weaponLimited": "\u9650\u5B9A\u6B66\u5668",
@@ -3563,6 +3648,7 @@ var messages = {
   "chart.distribution.tooltip.range": "{range} \u62BD\u533A\u95F4 \xB7 \u5171 {count} \u4E2A",
   "chart.distribution.tooltip.count": "{count} \u4E2A",
   "dashboard.unit.pull": "\u62BD",
+  "dashboard.unit.claim": "\u6B21\u7533\u9886",
   "dashboard.unit.pulls": "{count} \u62BD",
   "dashboard.unit.remaining": "\u5269\u4F59",
   "dashboard.unit.limit": "\u4E0A\u9650: {count}",
@@ -3689,6 +3775,8 @@ var messages = {
   "dashboard.logs": "\u8BE6\u7EC6\u65E5\u5FD7",
   "dashboard.analysis.title.limited": "\u9650\u5B9A\u6C60\u5206\u6790",
   "dashboard.analysis.title.extra": "\u9644\u52A0\u5BFB\u8BBF\u5206\u6790",
+  "dashboard.analysis.title.reconstructionCharacter": "\u91CD\u6784\u5BFB\u8BBF\u89D2\u8272\u5206\u6790",
+  "dashboard.analysis.title.reconstructionWeapon": "\u91CD\u6784\u7533\u9886\u6B66\u5668\u5206\u6790",
   "dashboard.analysis.title.weapon": "\u6B66\u5668\u6C60\u5206\u6790",
   "dashboard.analysis.title.standard": "\u5E38\u9A7B\u6C60\u5206\u6790",
   "dashboard.analysis.currentPool": "\u5F53\u524D\u5361\u6C60:",
@@ -3713,11 +3801,26 @@ var messages = {
   "dashboard.analysis.winRateBreakdown": "UP: {up} / \u6B6A\u5E38\u9A7B: {offStandard} / \u6B6A\u9650\u5B9A: {offLimited}",
   "dashboard.analysis.specialProgress": "\u7279\u6B8A\u673A\u5236\u8FDB\u5EA6",
   "dashboard.analysis.freeTenOnce": "\u514D\u8D39\u5341\u8FDE (\u4EC5\u4E00\u6B21)",
+  "dashboard.analysis.freeTenMilestone": "{count}\u62BD\u514D\u8D39\u5341\u8FDE",
+  "dashboard.analysis.reconstructionFreeTen.title": "\u540C\u7CFB\u5217\u514D\u8D39\u5341\u8FDE",
+  "dashboard.analysis.reconstructionFreeTen.stage": "{count}\u62BD",
+  "dashboard.analysis.reconstructionFreeTen.status.claimed": "\u5DF2\u9886\u53D6",
+  "dashboard.analysis.reconstructionFreeTen.status.available": "\u5DF2\u8FBE\u6210\uFF0C\u5F85\u9886\u53D6",
+  "dashboard.analysis.reconstructionFreeTen.status.locked": "\u672A\u8FBE\u6210",
+  "dashboard.analysis.reconstructionFreeTen.remaining": "\u8FD8\u5DEE {count} \u62BD",
+  "dashboard.analysis.reconstructionFreeTen.summary.available": "\u53EF\u9886\u53D6 {count} \u6B21\u514D\u8D39\u5341\u8FDE\uFF0C\u8BF7\u5728\u64CD\u4F5C\u533A\u4F7F\u7528",
+  "dashboard.analysis.reconstructionFreeTen.summary.allClaimed": "\u4E09\u6B21\u514D\u8D39\u5341\u8FDE\u5747\u5DF2\u9886\u53D6",
+  "dashboard.analysis.reconstructionFreeTen.summary.next": "\u4E0B\u4E00\u9636\u6BB5\u8FD8\u5DEE {count} \u62BD",
+  "dashboard.analysis.reconstructionFreeTen.progressValue": "\u5DF2\u5B8C\u6210 {current} / {max} \u62BD",
   "dashboard.analysis.claimed": "\u5DF2\u9886\u53D6",
   "dashboard.analysis.notCountPity": "\u4E0D\u8BA1\u5165\u4FDD\u5E95\u6B21\u6570",
   "dashboard.analysis.completed": "\u5DF2\u5B8C\u6210",
   "dashboard.analysis.guaranteedLimited120": "\u5FC5\u51FA\u9650\u5B9A (120\u62BD)",
   "dashboard.analysis.guaranteedWeapon80": "\u9996\u8F6E\u9650\u5B9A\u5FC5\u51FA (80\u62BD)",
+  "dashboard.analysis.reconstructionCharacterGuarantee120": "\u540C\u7CFB\u5217\u76EE\u6807\u89D2\u8272\u4FDD\u969C (120\u62BD)",
+  "dashboard.analysis.reconstructionCharacterToken240": "\u540C\u7CFB\u5217\u76EE\u6807\u89D2\u8272\u4FE1\u7269 (\u6BCF240\u62BD)",
+  "dashboard.analysis.reconstructionWeaponPity40": "6\u661F\u4FDD\u969C (4\u6B21\u7533\u9886 / 40\u62BD)",
+  "dashboard.analysis.reconstructionWeaponGuarantee80": "\u540C\u7CFB\u5217\u76EE\u6807\u6B66\u5668\u4FDD\u969C (8\u6B21\u7533\u9886 / 80\u62BD)",
   "dashboard.analysis.reached": "\u5DF2\u8FBE\u6210",
   "dashboard.analysis.potential240": "\u8D60\u9001\u89D2\u8272\u6F5C\u80FD (\u6BCF240\u62BD)",
   "dashboard.analysis.obtained": "\u5DF2\u83B7\u5F97: {count}",
@@ -3727,6 +3830,9 @@ var messages = {
   "dashboard.analysis.limitedShort": "\u9650\u5B9A",
   "dashboard.analysis.standardShort": "\u5E38\u9A7B",
   "dashboard.analysis.obtainedSummary": "\u5DF2\u83B7\u5F97:",
+  "dashboard.analysis.arsenalGiftReward": "\u6B66\u5E93\u8D60\u793C",
+  "dashboard.analysis.targetWeaponReward": "\u76EE\u6807\u6B66\u5668",
+  "dashboard.analysis.reconstructionWeaponGiftRule": "\u7CFB\u5217\u7B2C10\u6B21\u7533\u9886\u83B7\u6B66\u5E93\u8D60\u793C\uFF0C\u7B2C18\u6B21\u83B7\u76EE\u6807\u6B66\u5668\uFF0C\u4E4B\u540E\u6BCF8\u6B21\u7533\u9886\u4EA4\u66FF\u5956\u52B1\u3002",
   "dashboard.analysis.firstSelector300": "\u9996\u6B21\u8D60\u9001\u81EA\u9009 (300\u62BD)",
   "dashboard.average.title": "\u5E73\u5747\u51FA\u8D27",
   "dashboard.average.avg5": "5\u2605 \u5E73\u5747",
@@ -3989,6 +4095,8 @@ var messages = {
   "simulator.hero.limited": "LIMITED HEADHUNTING",
   "simulator.hero.weapon": "WEAPON ARSENAL",
   "simulator.hero.standard": "STANDARD HEADHUNTING",
+  "simulator.hero.reconstructionCharacter": "RECONSTRUCTION HEADHUNTING",
+  "simulator.hero.reconstructionWeapon": "RECONSTRUCTION CLAIM",
   "simulator.hero.subtitle": "Probability Up Event",
   "simulator.reset.title": "\u91CD\u7F6E\u6A21\u62DF\u5668",
   "simulator.reset.confirmAll": "\u786E\u5B9A\u8981\u91CD\u7F6E\u6240\u6709\u7C7B\u578B\u7684\u5361\u6C60\u5417\uFF1F\u9ED8\u8BA4\u4F1A\u6E05\u7A7A\u6A21\u62DF\u8BB0\u5F55\u3001\u4FDD\u5E95\u4E0E\u8D44\u6E90\u3002",
@@ -4105,6 +4213,8 @@ var messages = {
   "simulator.analysis.oneTimeOnly": "\u4EC5\u4E00\u6B21",
   "simulator.poolTypeName.limited": "\u9650\u5B9A\u89D2\u8272\u6C60",
   "simulator.poolTypeName.extra": "\u9644\u52A0\u5BFB\u8BBF",
+  "simulator.poolTypeName.reconstructionCharacter": "\u91CD\u6784\u5BFB\u8BBF\xB7\u89D2\u8272",
+  "simulator.poolTypeName.reconstructionWeapon": "\u91CD\u6784\u7533\u9886\xB7\u6B66\u5668",
   "simulator.poolTypeName.weapon": "\u6B66\u5668\u6C60",
   "simulator.poolTypeName.standard": "\u5E38\u9A7B\u6C60",
   "simulator.defaultPoolName": "\u6A21\u62DF\u6C60",
@@ -4674,6 +4784,249 @@ var ShareBrandPanel = ({
   );
 };
 var ShareBrandPanel_default = ShareBrandPanel;
+
+// src/constants/index.js
+var LIMITED_POOL_RULES = {
+  // 6星保底
+  sixStarPity: 80,
+  // 最多80抽必出6星
+  sixStarBaseProbability: 8e-3,
+  // 6星基础概率 0.8%
+  sixStarSoftPityStart: 66,
+  // 连续65抽未出6星后，第66抽开始概率递增
+  sixStarSoftPityIncrease: 0.05,
+  // 每抽增加5%概率
+  hasSoftPity: true,
+  // 有软保底机制
+  // 5星保底
+  fiveStarPity: 10,
+  // 最多10抽必出5星+
+  fiveStarBaseProbability: 0.08,
+  // 5星基础概率 8%
+  // 硬保底（必出限定UP）
+  guaranteedLimitedPity: 120,
+  // 120抽必出限定（仅生效1次）
+  // 赠送机制
+  giftInterval: 240,
+  // 每240抽赠送限定信物
+  freeTenPullInterval: 30,
+  // 30抽赠送一次不计入保底的十连
+  freeTenPullCountsTowardPity: false,
+  // 赠送十连不计入保底
+  freeTenPullCountsTowardRewards: false,
+  // 赠送十连不计入奖励累计
+  // 情报书（仅获得1次）
+  infoBookThreshold: 60,
+  // 累计60抽送1本寻访情报书
+  infoBookLimit: 1,
+  // 仅可获得1次
+  // 50/50机制
+  upProbability: 0.5,
+  // 出6星时50%概率为UP
+  // 卡池轮换
+  poolDuration: 15,
+  // 卡池开放15天
+  // 保底继承
+  pityInherits: true
+  // 6星和5星保底继承到其他限定池
+};
+var EXTRA_POOL_RULES = {
+  sixStarPity: 80,
+  sixStarBaseProbability: 8e-3,
+  sixStarSoftPityStart: 66,
+  sixStarSoftPityIncrease: 0.05,
+  hasSoftPity: true,
+  fiveStarPity: 10,
+  fiveStarBaseProbability: 0.08,
+  freeTenPullInterval: 30,
+  freeTenPullCountsTowardPity: false,
+  freeTenPullCountsTowardRewards: false,
+  pityInherits: false
+};
+var UNRESOLVED_POOL_RULES = {
+  sixStarPity: 80,
+  sixStarBaseProbability: 8e-3,
+  sixStarSoftPityStart: 66,
+  sixStarSoftPityIncrease: 0.05,
+  hasSoftPity: true,
+  fiveStarPity: 10,
+  fiveStarBaseProbability: 0.08,
+  upProbability: 0,
+  pityInherits: false,
+  isUnresolved: true
+};
+var LIMITED_POOL_SCHEDULE = [
+  {
+    name: "\u83B1\u4E07\u6C40",
+    startDate: "2026-01-22T11:00:00+08:00",
+    endDate: "2026-02-07T11:59:59+08:00",
+    removesAfter: 3
+    // 3次后移出
+  },
+  {
+    name: "\u6D01\u5C14\u4F69\u5854",
+    startDate: "2026-02-07T12:00:00+08:00",
+    endDate: "2026-02-24T11:59:59+08:00",
+    removesAfter: 5
+  },
+  {
+    name: "\u4F0A\u51AF",
+    startDate: "2026-02-24T12:00:00+08:00",
+    endDate: "2026-03-31T23:59:59+08:00",
+    // 直到下一版本
+    removesAfter: 4
+  }
+];
+var getCurrentUpPool = () => {
+  const now = /* @__PURE__ */ new Date();
+  for (const pool of LIMITED_POOL_SCHEDULE) {
+    const start = new Date(pool.startDate);
+    const end = new Date(pool.endDate);
+    if (now >= start && now < end) {
+      const index = LIMITED_POOL_SCHEDULE.indexOf(pool);
+      const nextPool = LIMITED_POOL_SCHEDULE[index + 1];
+      const remainingMs = end - now;
+      const remainingDays = Math.floor(remainingMs / (1e3 * 60 * 60 * 24));
+      const remainingHours = Math.floor(remainingMs % (1e3 * 60 * 60 * 24) / (1e3 * 60 * 60));
+      return {
+        ...pool,
+        startDateObj: start,
+        endDateObj: end,
+        nextPool: nextPool?.name || "\u5F85\u516C\u5E03",
+        isActive: true,
+        remainingDays,
+        remainingHours
+      };
+    }
+  }
+  const firstPool = LIMITED_POOL_SCHEDULE[0];
+  const firstStart = new Date(firstPool.startDate);
+  if (now < firstStart) {
+    const firstEnd = new Date(firstPool.endDate);
+    const startsInMs = firstStart - now;
+    return {
+      ...firstPool,
+      startDateObj: firstStart,
+      endDateObj: firstEnd,
+      nextPool: LIMITED_POOL_SCHEDULE[1]?.name || "\u5F85\u516C\u5E03",
+      isActive: false,
+      startsIn: Math.floor(startsInMs / (1e3 * 60 * 60 * 24)),
+      startsInHours: Math.floor(startsInMs % (1e3 * 60 * 60 * 24) / (1e3 * 60 * 60))
+    };
+  }
+  const lastPool = LIMITED_POOL_SCHEDULE[LIMITED_POOL_SCHEDULE.length - 1];
+  const lastStart = new Date(lastPool.startDate);
+  const lastEnd = new Date(lastPool.endDate);
+  return {
+    ...lastPool,
+    startDateObj: lastStart,
+    endDateObj: lastEnd,
+    nextPool: "\u5F85\u516C\u5E03",
+    isActive: false,
+    isExpired: true
+  };
+};
+var CURRENT_UP_POOL_INFO = getCurrentUpPool();
+var STANDARD_POOL_RULES = {
+  sixStarPity: 80,
+  sixStarBaseProbability: 8e-3,
+  sixStarSoftPityStart: 66,
+  // 连续65抽未出6星后，第66抽开始概率递增
+  sixStarSoftPityIncrease: 0.05,
+  // 每抽增加5%概率
+  hasSoftPity: true,
+  // 有软保底机制
+  fiveStarPity: 10,
+  fiveStarBaseProbability: 0.08,
+  // 自选赠送
+  selectGiftThreshold: 300,
+  // 300抽送自选6星
+  selectGiftLimit: 1,
+  // 仅可获得1次
+  pityInherits: false
+  // 常驻池保底独立计算
+};
+var WEAPON_POOL_RULES = {
+  claimSize: 10,
+  // 每次武库申领获得10件武器
+  // 6星保底 (每十连 = 1次申领)
+  sixStarPity: 40,
+  // 每4次申领(40抽)必出6星
+  sixStarClaimPity: 4,
+  // 连续3次申领未出6星，第4次申领保6星
+  sixStarBaseProbability: 0.04,
+  // 6星基础概率 4%
+  hasSoftPity: false,
+  // 武器池无软保底机制（概率不递增）
+  // 5星保底
+  fiveStarPity: 10,
+  // 每次申领至少1件5星+
+  fiveStarBaseProbability: 0.15,
+  // 5星基础概率 15%
+  // 硬保底（必出限定UP武器）
+  guaranteedLimitedPity: 80,
+  // 80抽首轮必出限定（仅生效1次）
+  guaranteedLimitedClaimPity: 8,
+  // 连续7次申领未出UP，第8次申领保UP（仅首轮）
+  // 赠送机制
+  firstStandardGift: 100,
+  // 第100抽送补充武库箱(常驻自选)
+  firstLimitedGift: 180,
+  // 第180抽送限定UP武器
+  giftAlternateInterval: 80,
+  // 之后每80抽交替发放
+  // UP概率
+  upProbability: 0.25,
+  // UP武器占6星25%概率
+  pityInherits: false
+  // 武器池保底不继承
+};
+var PRESET_POOLS = [
+  // 通用卡池类型
+  { label: "\u9650\u5B9A\u89D2\u8272\u6C60", type: "limited", charName: "" },
+  { label: "\u5E38\u9A7B\u89D2\u8272\u6C60", type: "standard", charName: "" },
+  { label: "\u6B66\u5668\u6C60", type: "weapon", charName: "" },
+  // 当前版本限定角色池（按轮换顺序）
+  ...LIMITED_POOL_SCHEDULE.map((pool) => ({
+    label: `\u9650\u5B9A-${pool.name}`,
+    type: "limited",
+    charName: pool.name
+  })),
+  // 当前版本限定武器池
+  ...LIMITED_POOL_SCHEDULE.map((pool) => ({
+    label: `\u6B66\u5668-${pool.name}`,
+    type: "weapon",
+    charName: pool.name
+  }))
+];
+
+// shared/extraPoolSubtype.js
+var EXTRA_POOL_SUBTYPES = Object.freeze({
+  RECONSTRUCTION: "reconstruction",
+  RECONSTRUCTION_CLAIM: "reconstruction_claim",
+  SPECIAL: "special"
+});
+var EXTRA_POOL_RULE_PROFILES = Object.freeze({
+  RECONSTRUCTION_CHARACTER: "reconstruction_character_v1",
+  RECONSTRUCTION_WEAPON: "reconstruction_weapon_v1",
+  BRILLIANCE_FESTIVAL: "brilliance_festival_v1"
+});
+
+// src/utils/poolCapabilities.js
+var POOL_RULE_KEYS = {
+  LIMITED: "LIMITED_POOL_RULES",
+  WEAPON: "WEAPON_POOL_RULES",
+  STANDARD: "STANDARD_POOL_RULES",
+  EXTRA: "EXTRA_POOL_RULES",
+  UNRESOLVED: "UNRESOLVED_POOL_RULES"
+};
+var RULES_BY_KEY = {
+  [POOL_RULE_KEYS.LIMITED]: LIMITED_POOL_RULES,
+  [POOL_RULE_KEYS.WEAPON]: WEAPON_POOL_RULES,
+  [POOL_RULE_KEYS.STANDARD]: STANDARD_POOL_RULES,
+  [POOL_RULE_KEYS.EXTRA]: EXTRA_POOL_RULES,
+  [POOL_RULE_KEYS.UNRESOLVED]: UNRESOLVED_POOL_RULES
+};
 
 // src/utils/quotaEconomy.js
 var FULL_POTENTIAL_COPY_COUNT = 6;

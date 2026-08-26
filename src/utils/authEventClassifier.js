@@ -70,6 +70,7 @@ export function classifyAuthEvent({
   nextOwnerId = null,
   nextUser = null,
   hasSnapshot = false,
+  personalDataPhase = 'idle',
   refreshKind = null,
 } = {}) {
   const normalizedEvent = normalizeAuthEvent(event, source);
@@ -90,10 +91,16 @@ export function classifyAuthEvent({
     normalizedEvent,
     { isFirstOwner, ownerChanged }
   );
+  const isSameOwnerBuilding = Boolean(
+    isAuthenticated
+    && previousOwnerId
+    && previousOwnerId === targetOwnerId
+    && personalDataPhase === 'building'
+  );
   const shouldRefreshPersonalData = isAuthenticated && Boolean(
     requestedRefreshKind
     || ownerChanged
-    || !hasSnapshot
+    || (!hasSnapshot && !isSameOwnerBuilding)
   );
 
   return {
@@ -105,6 +112,8 @@ export function classifyAuthEvent({
     isFirstOwner,
     ownerChanged,
     hasSnapshot: Boolean(hasSnapshot),
+    personalDataPhase,
+    isSameOwnerBuilding,
     shouldRefreshPersonalData,
     shouldUpdateLastSeen: isAuthenticated && (isFirstOwner || ownerChanged),
     refreshKind: requestedRefreshKind || PERSONAL_DATA_REFRESH_KIND.SESSION,

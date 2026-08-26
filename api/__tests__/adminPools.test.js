@@ -131,6 +131,10 @@ function createAdminClient() {
         rarity: 6,
         type: 'character',
       },
+      { id: 'char-2', name: '测试角色二', rarity: 6, type: 'character' },
+      { id: 'char-3', name: '测试角色三', rarity: 6, type: 'character' },
+      { id: 'char-4', name: '测试角色四', rarity: 6, type: 'character' },
+      { id: 'weapon-1', name: '测试武器', rarity: 6, type: 'weapon' },
     ],
     poolCharacters: [
       {
@@ -305,6 +309,185 @@ describe('/api/admin-pools', () => {
     expect(rpcCall.payload.p_insert_payload.user_id).not.toBe('attacker-user');
   });
 
+  it('rejects unclassified extra pools from explicit admin saves', async () => {
+    const adminClient = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    configureSuperAdminAuth(adminClient);
+    const req = createRequest({
+      method: 'POST',
+      body: {
+        action: 'savePool',
+        poolData: {
+          name: '未分类附加寻访',
+          type: 'extra',
+          featured_characters: ['测试角色'],
+          up_character: '测试角色',
+        },
+        characters: adminClient.__state.characters,
+        editingPoolCharacters: [{ character_id: 'char-1', is_up: true }],
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await adminPoolsHandler(req, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'extra_pool_template_required',
+    });
+    expect(adminClient.rpc).not.toHaveBeenCalled();
+  });
+
+  it('saves reconstruction weapon metadata with one six-star weapon UP', async () => {
+    const adminClient = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    configureSuperAdminAuth(adminClient);
+    const req = createRequest({
+      method: 'POST',
+      body: {
+        action: 'savePool',
+        poolData: {
+          name: '重构申领',
+          type: 'extra',
+          extra_subtype: 'reconstruction',
+          extra_rule_profile: 'reconstruction_weapon_v1',
+          extra_series_key: 'reconstruction-weapon-test',
+          extra_series_phase: 1,
+          featured_characters: ['测试武器'],
+          up_character: '测试武器',
+        },
+        characters: adminClient.__state.characters,
+        editingPoolCharacters: [{ character_id: 'weapon-1', is_up: true }],
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await adminPoolsHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    const rpcCall = adminClient.__state.rpcCalls.find((call) => call.name === 'admin_upsert_pool_with_aliases');
+    expect(rpcCall.payload.p_insert_payload).toMatchObject({
+      type: 'extra',
+      extra_subtype: 'reconstruction_claim',
+      extra_rule_profile: 'reconstruction_weapon_v1',
+      extra_series_key: 'reconstruction-weapon-test',
+      extra_series_phase: 1,
+    });
+    expect(rpcCall.payload.p_pool_character_rows).toEqual([
+      { character_id: 'weapon-1', is_up: true },
+    ]);
+  });
+
+  it.each([
+    ['reconstruction_character_v1', 'character', '重构角色'],
+    ['reconstruction_weapon_v1', 'weapon', '重构武器'],
+  ])('creates limited %s UP targets with the correct object type', async (extraRuleProfile, expectedType, characterName) => {
+    const adminClient = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    configureSuperAdminAuth(adminClient);
+    const req = createRequest({
+      method: 'POST',
+      body: {
+        action: 'createUpCharacter',
+        characterName,
+        poolType: 'extra',
+        itemType: expectedType,
+        extraRuleProfile,
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await adminPoolsHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.character).toMatchObject({
+      name: characterName,
+      type: expectedType,
+      is_limited: true,
+    });
+    expect(adminClient.__state.rpcCalls).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'admin_upsert_character_with_aliases',
+        payload: expect.objectContaining({
+          p_insert_payload: expect.objectContaining({
+            type: expectedType,
+            is_limited: true,
+          }),
+        }),
+      }),
+    ]));
+  });
+
+  it('rejects automatic target creation for an unresolved ordinary extra pool', async () => {
+    const adminClient = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    configureSuperAdminAuth(adminClient);
+    const req = createRequest({
+      method: 'POST',
+      body: {
+        action: 'createUpCharacter',
+        characterName: '不应创建',
+        poolType: 'extra',
+        itemType: 'character',
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await adminPoolsHandler(req, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'extra_up_character_profile_required',
+    });
+    expect(adminClient.rpc).not.toHaveBeenCalled();
+  });
+
+  it('requires exactly four distinct six-star character UPs for brilliance festival', async () => {
+    const adminClient = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    configureSuperAdminAuth(adminClient);
+    const basePoolData = {
+      name: '辉光庆典',
+      type: 'extra',
+      extra_subtype: 'special',
+      extra_rule_profile: 'brilliance_festival_v1',
+      extra_series_key: null,
+      extra_series_phase: null,
+      featured_characters: ['测试角色', '测试角色二', '测试角色三', '测试角色四'],
+      up_character: '测试角色',
+    };
+    const req = createRequest({
+      method: 'POST',
+      body: {
+        action: 'savePool',
+        poolData: basePoolData,
+        characters: adminClient.__state.characters,
+        editingPoolCharacters: ['char-1', 'char-2', 'char-3', 'char-4'].map((character_id) => ({
+          character_id,
+          is_up: true,
+        })),
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await adminPoolsHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(adminClient.__state.rpcCalls).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'admin_upsert_pool_with_aliases',
+        payload: expect.objectContaining({
+          p_insert_payload: expect.objectContaining({
+            extra_subtype: 'special',
+            extra_rule_profile: 'brilliance_festival_v1',
+          }),
+        }),
+      }),
+    ]));
+  });
+
   it('deletes pool roster rows before deleting the pool row', async () => {
     const adminClient = createAdminClient();
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
@@ -372,6 +555,94 @@ describe('/api/admin-pools', () => {
         filters: [{ op: 'eq', column: 'record_id', value: 2 }],
       }),
     ]));
+  });
+
+  it('recalculates extra pools from capabilities without treating unknown profiles as targets', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.history = [
+      { record_id: 11, pool_id: 'recon-character', rarity: 6, character_name: '重构角色UP', is_standard: true },
+      { record_id: 12, pool_id: 'recon-character', rarity: 6, character_name: '角色歪出', is_standard: false },
+      { record_id: 13, pool_id: 'recon-weapon', rarity: 6, item_name: '重构武器UP', is_standard: true },
+      { record_id: 14, pool_id: 'recon-weapon', rarity: 6, item_name: '武器歪出', is_standard: false },
+      ...['辉光目标一', '辉光目标二', '辉光目标三', '辉光目标四'].map((name, index) => ({
+        record_id: 20 + index,
+        pool_id: 'brilliance',
+        rarity: 6,
+        character_name: name,
+        is_standard: true,
+      })),
+      { record_id: 31, pool_id: 'joint-unknown', rarity: 6, character_name: '未知目标一', is_standard: false },
+      { record_id: 32, pool_id: 'joint-unknown', rarity: 6, character_name: '未知目标二', is_standard: false },
+    ];
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    configureSuperAdminAuth(adminClient);
+    const req = createRequest({
+      method: 'POST',
+      body: {
+        action: 'recalculateIsStandard',
+        pools: [
+          {
+            pool_id: 'recon-character',
+            type: 'extra',
+            up_character: '重构角色UP',
+            extra_subtype: 'reconstruction',
+            extra_rule_profile: 'reconstruction_character_v1',
+            extra_series_key: 'recon-character-series',
+            extra_series_phase: 1,
+          },
+          {
+            id: 'recon-weapon',
+            type: 'extra',
+            upCharacter: '重构武器UP',
+            extraSubtype: 'reconstruction',
+            extraRuleProfile: 'reconstruction_weapon_v1',
+            extraSeriesKey: 'recon-weapon-series',
+            extraSeriesPhase: 2,
+          },
+          {
+            pool_id: 'brilliance',
+            type: 'extra',
+            extra_subtype: 'special',
+            extra_rule_profile: 'brilliance_festival_v1',
+            extra_series_key: null,
+            extra_series_phase: null,
+          },
+          {
+            pool_id: 'joint-unknown',
+            type: 'extra',
+            extra_subtype: 'special',
+            extra_rule_profile: 'future_joint_profile',
+            extra_series_key: null,
+            extra_series_phase: null,
+          },
+        ],
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await adminPoolsHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ success: true, changedCount: 8 });
+    expect(adminClient.__state.history.filter((row) => [11, 13, 20, 21, 22, 23].includes(row.record_id)))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ record_id: 11, is_standard: false }),
+        expect.objectContaining({ record_id: 13, is_standard: false }),
+        expect.objectContaining({ record_id: 20, is_standard: false }),
+        expect.objectContaining({ record_id: 21, is_standard: false }),
+        expect.objectContaining({ record_id: 22, is_standard: false }),
+        expect.objectContaining({ record_id: 23, is_standard: false }),
+      ]));
+    expect(adminClient.__state.history.filter((row) => [12, 14].includes(row.record_id)))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ record_id: 12, is_standard: true }),
+        expect.objectContaining({ record_id: 14, is_standard: true }),
+      ]));
+    expect(adminClient.__state.history.filter((row) => [31, 32].includes(row.record_id)))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ record_id: 31, is_standard: false }),
+        expect.objectContaining({ record_id: 32, is_standard: false }),
+      ]));
   });
 
   it('rejects non-super-admin requests before returning pool data', async () => {

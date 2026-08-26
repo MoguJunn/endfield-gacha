@@ -16,6 +16,7 @@ import {
   serializeHomeVersionTimelineRows,
   validateHomeVersionTimelineRows,
 } from '../../utils/homeVersionTimelineEditor.js';
+import { resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
 import { PanelSection, PanelToolbarButton, StatusDot } from './panels/shared/PanelUi.jsx';
 
 const FIELD_CLASS = 'w-full border border-zinc-300 bg-white px-2 py-1.5 text-xs text-slate-700 transition-colors focus:border-amber-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:focus:border-endfield-yellow';
@@ -29,8 +30,24 @@ function getPoolId(pool) {
   return normalizeText(pool?.pool_id || pool?.id || pool?.poolId);
 }
 
-function getPoolTypeLabel(type) {
-  if (type === 'extra') return '附加寻访';
+function getPoolTypeLabel(pool) {
+  const source = typeof pool === 'object' && pool !== null ? pool : { type: pool };
+  const type = source.type || source.pool_type || source.poolType;
+
+  if (type === 'extra') {
+    const capabilities = resolvePoolCapabilities(source);
+    if (capabilities.extraSubtype === 'reconstruction') {
+      return '重构寻访';
+    }
+    if (capabilities.extraSubtype === 'reconstruction_claim') {
+      return '重构申领';
+    }
+    if (capabilities.extraSubtype === 'special') {
+      return '特殊寻访';
+    }
+    return '附加寻访';
+  }
+
   if (type === 'weapon' || type === 'limited_weapon') return '武器池';
   if (type === 'standard') return '常驻池';
   return '角色池';
@@ -425,7 +442,7 @@ export default function HomeVersionTimelineManager({ pools = [], showToast }) {
           </button>
         </div>
         <div className="truncate font-mono text-[10px] text-zinc-400 dark:text-zinc-500">
-          {getPoolTypeLabel(pool.type)} · {formatAdminShortDateTime(pool.start_time || pool.startDate)}
+          {getPoolTypeLabel(pool)} · {formatAdminShortDateTime(pool.start_time || pool.startDate)}
         </div>
       </div>
     );
@@ -671,7 +688,7 @@ export default function HomeVersionTimelineManager({ pools = [], showToast }) {
                             <span className="min-w-0 flex-1">
                               <span className="block truncate font-medium">{pool.name || poolId}</span>
                               <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-400 dark:text-zinc-500">
-                                {poolId} · {getPoolTypeLabel(pool.type)} · {formatAdminShortDateTime(pool.start_time || pool.startDate)}
+                                {poolId} · {getPoolTypeLabel(pool)} · {formatAdminShortDateTime(pool.start_time || pool.startDate)}
                               </span>
                             </span>
                             {assigned ? <Check size={13} className="shrink-0 text-amber-500 dark:text-endfield-yellow" /> : null}
@@ -708,7 +725,7 @@ export default function HomeVersionTimelineManager({ pools = [], showToast }) {
                   {section.pools.map((pool) => (
                     <div key={`${section.id}-${pool.id || pool.name}`} className="flex items-center justify-between gap-2 text-[11px]">
                       <span className="min-w-0 truncate font-medium text-slate-600 dark:text-zinc-300">{pool.displayName || pool.name || pool.id}</span>
-                      <span className="shrink-0 text-slate-400 dark:text-zinc-500">{getPoolTypeLabel(pool.poolType || pool.poolData?.type)}</span>
+                      <span className="shrink-0 text-slate-400 dark:text-zinc-500">{getPoolTypeLabel(pool.poolData || pool)}</span>
                       {Array.isArray(pool.foldedExtraPools) && pool.foldedExtraPools.length > 0 ? (
                         <span className="shrink-0 text-cyan-600 dark:text-cyan-300">
                           合并 {pool.foldedExtraPools.length}

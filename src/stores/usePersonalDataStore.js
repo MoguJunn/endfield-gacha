@@ -66,6 +66,11 @@ export function createPersonalDataInitialState() {
     activeRequest: null,
     reason: null,
     publicPools: [],
+    analysisRetry: {
+      key: null,
+      attempt: 0,
+      nextRetryAt: null,
+    },
   };
 }
 
@@ -95,6 +100,11 @@ const usePersonalDataStore = create((set, get) => ({
       error: null,
       activeRequest: null,
       reason: null,
+      analysisRetry: {
+        key: null,
+        attempt: 0,
+        nextRetryAt: null,
+      },
     });
 
     return {
@@ -122,9 +132,11 @@ const usePersonalDataStore = create((set, get) => ({
       requestGeneration,
       kind,
     });
+    // Once an owner is waiting for a snapshot, every same-owner read remains
+    // non-blocking. Passive session events and explicit retries must not turn
+    // the authoritative building state back into the initial loading gate.
     const preserveBuildingPhase = !current.hasSnapshot
-      && current.phase === 'building'
-      && kind === 'building-poll';
+      && current.phase === 'building';
 
     set({
       requestGeneration,
@@ -148,6 +160,7 @@ const usePersonalDataStore = create((set, get) => ({
       return false;
     }
 
+    const availability = data?.analysis?.availability || null;
     set({
       phase: completion.phase,
       refreshing: false,
@@ -156,6 +169,9 @@ const usePersonalDataStore = create((set, get) => ({
       error: null,
       activeRequest: null,
       reason: null,
+      analysisRetry: ['ready', 'empty'].includes(availability)
+        ? { key: null, attempt: 0, nextRetryAt: null }
+        : get().analysisRetry,
     });
     return true;
   },
@@ -184,6 +200,11 @@ const usePersonalDataStore = create((set, get) => ({
       refreshing: false,
       activeRequest: null,
       reason,
+      analysisRetry: {
+        key: null,
+        attempt: 0,
+        nextRetryAt: null,
+      },
     });
   },
 
@@ -200,6 +221,11 @@ const usePersonalDataStore = create((set, get) => ({
       error: null,
       activeRequest: null,
       reason,
+      analysisRetry: {
+        key: null,
+        attempt: 0,
+        nextRetryAt: null,
+      },
     });
   },
 
@@ -212,6 +238,51 @@ const usePersonalDataStore = create((set, get) => ({
       && current.ownerGeneration === token.ownerGeneration
       && current.requestGeneration === token.requestGeneration
     );
+  },
+
+  ensureAnalysisRetrySchedule: (key, delayMs, now = Date.now()) => {
+    const normalizedKey = String(key || '').trim();
+    if (!normalizedKey) return null;
+    const current = get().analysisRetry;
+    if (
+      current.key === normalizedKey
+      && Number.isFinite(Number(current.nextRetryAt))
+      && Number(current.nextRetryAt) > now
+    ) {
+      return current;
+    }
+
+    const next = {
+      key: normalizedKey,
+      attempt: current.key === normalizedKey ? current.attempt : 0,
+      nextRetryAt: now + Math.max(0, Number(delayMs) || 0),
+    };
+    set({ analysisRetry: next });
+    return next;
+  },
+
+  markAnalysisRetryFired: (key) => {
+    const normalizedKey = String(key || '').trim();
+    const current = get().analysisRetry;
+    if (!normalizedKey || current.key !== normalizedKey) return false;
+    set({
+      analysisRetry: {
+        key: normalizedKey,
+        attempt: current.attempt + 1,
+        nextRetryAt: null,
+      },
+    });
+    return true;
+  },
+
+  resetAnalysisRetry: (key = null) => {
+    set({
+      analysisRetry: {
+        key: String(key || '').trim() || null,
+        attempt: 0,
+        nextRetryAt: null,
+      },
+    });
   },
 
   setPublicPools: (publicPools) => {

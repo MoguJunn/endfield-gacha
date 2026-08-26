@@ -11,6 +11,7 @@ import {
   resolveSupabaseServerKey,
   resolveSupabaseUrl,
 } from '../../_lib/supabaseEnv.js';
+import { getCanonicalExtraPoolSubtype } from '../../../shared/extraPoolSubtype.js';
 
 const CACHE_TTL = 60 * 1000;
 
@@ -82,6 +83,10 @@ function formatVisiblePoolRecord(record) {
     name: record.name,
     name_en: record.name_en || null,
     type: normalizeRemotePoolType(record.type, record.is_limited_weapon),
+    extra_subtype: getCanonicalExtraPoolSubtype(record),
+    extra_rule_profile: record.extra_rule_profile || null,
+    extra_series_key: record.extra_series_key || null,
+    extra_series_phase: record.extra_series_phase ?? null,
     locked: record.locked || false,
     isLimitedWeapon: record.is_limited_weapon !== false,
     created_at: record.created_at || null,

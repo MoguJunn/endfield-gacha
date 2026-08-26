@@ -2,10 +2,43 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   serializeHistoryForUpsert,
+  serializePoolForUpsert,
   upsertHistoryRowsWithOptionalColumnFallback,
 } from '../cloudDataWriteRows.js';
 
 describe('cloudDataWriteRows', () => {
+  it('serializes extra pool subtype fields and clears them for non-extra pools', () => {
+    expect(serializePoolForUpsert({
+      id: 'manual-extra',
+      name: '重构申领',
+      type: 'extra',
+      extraSubtype: 'reconstruction',
+      extraRuleProfile: 'reconstruction_weapon_v1',
+      extraSeriesKey: 'reconstruction-weapon-a',
+      extraSeriesPhase: '2',
+    }, 'user-1')).toMatchObject({
+      type: 'extra',
+      extra_subtype: 'reconstruction_claim',
+      extra_rule_profile: 'reconstruction_weapon_v1',
+      extra_series_key: 'reconstruction-weapon-a',
+      extra_series_phase: 2,
+    });
+
+    expect(serializePoolForUpsert({
+      id: 'limited-test',
+      name: '限定池',
+      type: 'limited',
+      extra_subtype: 'special',
+      extra_rule_profile: 'brilliance_festival_v1',
+    }, 'user-1')).toMatchObject({
+      type: 'limited',
+      extra_subtype: null,
+      extra_rule_profile: null,
+      extra_series_key: null,
+      extra_series_phase: null,
+    });
+  });
+
   it('stores server id and normalized region on history rows', () => {
     const cnRow = serializeHistoryForUpsert({
       id: '1001',

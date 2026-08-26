@@ -10,6 +10,10 @@ import {
   upsertCharacterAliases,
   upsertPoolAliases,
 } from './idAliasService.js';
+import {
+  getCanonicalExtraPoolMetadata,
+  getCanonicalExtraPoolSubtype,
+} from '../../shared/extraPoolSubtype.js';
 
 const MAX_CATALOG_ROWS = 2000;
 const MIN_POOL_MATCH_SCORE = 40;
@@ -53,8 +57,16 @@ function normalizeDateKey(value) {
   return normalizeText(value).slice(0, 10);
 }
 
-function isOfficialImportPoolId(poolId) {
-  return classifyPoolIdSource(poolId) === 'official';
+function isOfficialImportPoolId(poolId, { allowUnknownOfficialIds = false } = {}) {
+  const source = classifyPoolIdSource(poolId);
+  if (source === 'official') {
+    return true;
+  }
+
+  return allowUnknownOfficialIds
+    && source !== 'unknown'
+    && source !== 'manual_placeholder'
+    && source !== 'legacy_manual_seed';
 }
 
 function isManualPoolId(poolId) {
@@ -153,20 +165,35 @@ async function deleteEq(adminClient, tableName, columnName, value) {
   }
 }
 
-function normalizePoolCandidate(pool) {
+function normalizePoolCandidate(pool, options = {}) {
   const poolId = normalizeText(pool?.pool_id || pool?.id || pool?.poolId);
-  if (!poolId || !isOfficialImportPoolId(poolId)) {
+  if (!poolId || !isOfficialImportPoolId(poolId, options)) {
     return null;
   }
+  const type = normalizePoolType(pool?.type || pool?.pool_type || pool?.poolType);
+  const extraMetadata = type === 'extra'
+    ? getCanonicalExtraPoolMetadata(pool)
+    : {
+        extra_subtype: null,
+        extra_rule_profile: null,
+        extra_series_key: null,
+        extra_series_phase: null,
+      };
 
   return {
     pool_id: poolId,
     name: normalizeText(pool?.name || pool?.pool_name || pool?.poolName) || poolId,
-    type: normalizePoolType(pool?.type || pool?.pool_type || pool?.poolType),
+    type,
+    ...extraMetadata,
     start_time: pool?.start_time || pool?.startTime || null,
     end_time: pool?.end_time || pool?.endTime || null,
     up_character: normalizeText(pool?.up_character || pool?.upCharacter || pool?.currentUpCharacter) || null,
-    featured_characters: Array.isArray(pool?.featured_characters) ? pool.featured_characters : null,
+    featured_characters: Array.isArray(pool?.featured_characters)
+      ? pool.featured_characters
+      : (Array.isArray(pool?.featuredCharacters) ? pool.featuredCharacters : null),
+    description: normalizeText(pool?.description) || null,
+    banner_url: normalizeText(pool?.banner_url || pool?.bannerUrl) || null,
+    locked: Boolean(pool?.locked),
     user_id: pool?.user_id || null,
   };
 }
@@ -194,7 +221,21 @@ function normalizeCharacterCandidate(record) {
 }
 
 function scorePoolCandidate(officialPool, manualPool) {
-  if (normalizePoolType(officialPool?.type) !== normalizePoolType(manualPool?.type)) {
+  const officialType = normalizePoolType(officialPool?.type);
+  const manualType = normalizePoolType(manualPool?.type);
+  const manualProfile = normalizeText(manualPool?.extra_rule_profile);
+  const isReconstructionCharacterMatch =
+    new Set(['extra', 'limited']).has(officialType)
+    && manualType === 'extra'
+    && getCanonicalExtraPoolSubtype(manualPool) === 'reconstruction'
+    && manualProfile === 'reconstruction_character_v1';
+  const isReconstructionWeaponMatch =
+    new Set(['extra', 'weapon']).has(officialType)
+    && manualType === 'extra'
+    && getCanonicalExtraPoolSubtype(manualPool) === 'reconstruction_claim'
+    && manualProfile === 'reconstruction_weapon_v1';
+
+  if (officialType !== manualType && !isReconstructionCharacterMatch && !isReconstructionWeaponMatch) {
     return 0;
   }
 
@@ -274,17 +315,64 @@ function findUniqueMatch(target, candidates, scorer, minScore) {
 }
 
 function buildMergedPoolRow(officialPool, manualPool, userId) {
+  const manualSubtype = getCanonicalExtraPoolSubtype(manualPool);
+  const preserveReconstructionContract =
+    normalizePoolType(manualPool?.type) === 'extra'
+    && ['reconstruction', 'reconstruction_claim'].includes(manualSubtype);
+
   return {
     pool_id: officialPool.pool_id,
     name: officialPool.name || manualPool?.name || officialPool.pool_id,
-    type: officialPool.type || manualPool?.type || 'standard',
+    type: preserveReconstructionContract ? 'extra' : (officialPool.type || manualPool?.type || 'standard'),
+    extra_subtype: preserveReconstructionContract
+      ? manualSubtype
+      : getCanonicalExtraPoolSubtype(officialPool),
+    extra_rule_profile: manualPool?.extra_rule_profile || officialPool.extra_rule_profile || null,
+    extra_series_key: manualPool?.extra_series_key || officialPool.extra_series_key || null,
+    extra_series_phase: manualPool?.extra_series_phase || officialPool.extra_series_phase || null,
     start_time: officialPool.start_time || manualPool?.start_time || null,
     end_time: officialPool.end_time || manualPool?.end_time || null,
     up_character: officialPool.up_character || manualPool?.up_character || null,
     featured_characters: officialPool.featured_characters || manualPool?.featured_characters || null,
-    user_id: officialPool.user_id || manualPool?.user_id || userId || null,
+    description: manualPool?.description || officialPool.description || null,
+    banner_url: manualPool?.banner_url || officialPool.banner_url || null,
+    locked: manualPool ? Boolean(manualPool.locked) : Boolean(officialPool.locked),
+    user_id: manualPool ? (manualPool.user_id ?? null) : (officialPool.user_id || userId || null),
     updated_at: new Date().toISOString(),
   };
+}
+
+function isPromotionRpcMissing(error) {
+  return normalizeText(error?.code) === 'PGRST202';
+}
+
+function requiresAtomicPoolPromotion(pool) {
+  return normalizePoolType(pool?.type) === 'extra'
+    && normalizeText(pool?.extra_subtype) === 'reconstruction'
+    && new Set(['reconstruction_character_v1', 'reconstruction_weapon_v1']).has(
+      normalizeText(pool?.extra_rule_profile)
+    );
+}
+
+async function promoteManualPoolWithRpc(adminClient, manualPoolId, officialPool) {
+  if (typeof adminClient?.rpc !== 'function') {
+    throw new Error('Supabase admin client does not support RPC pool promotion');
+  }
+
+  const { error } = await adminClient.rpc('promote_manual_pool_to_official_id', {
+    p_manual_pool_id: manualPoolId,
+    p_official_pool: officialPool,
+  });
+
+  if (!error) {
+    return { promoted: true, fallback: false };
+  }
+
+  if (isPromotionRpcMissing(error)) {
+    return { promoted: false, fallback: true };
+  }
+
+  throw error;
 }
 
 function getPoolConfigWeight(config) {
@@ -537,9 +625,15 @@ async function retireRawCharacterDuplicate(adminClient, sourceCharacter, targetC
   await deleteEq(adminClient, 'characters', 'id', sourceCharacter.id);
 }
 
-export async function reconcileOfficialPoolIds(adminClient, pools, { userId = null } = {}) {
+export async function reconcileOfficialPoolIds(
+  adminClient,
+  pools,
+  { userId = null, allowUnknownOfficialIds = false } = {}
+) {
   const officialPools = uniqueById(
-    (Array.isArray(pools) ? pools : []).map(normalizePoolCandidate).filter(Boolean),
+    (Array.isArray(pools) ? pools : [])
+      .map((pool) => normalizePoolCandidate(pool, { allowUnknownOfficialIds }))
+      .filter(Boolean),
     (row) => row.pool_id
   );
 
@@ -550,7 +644,7 @@ export async function reconcileOfficialPoolIds(adminClient, pools, { userId = nu
   const existingPools = await loadTableRows(
     adminClient,
     'pools',
-    'pool_id, name, type, start_time, end_time, up_character, featured_characters, user_id'
+    'pool_id, name, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase, start_time, end_time, up_character, featured_characters, description, banner_url, locked, user_id'
   );
   const byId = new Map(existingPools.map((row) => [normalizeText(row.pool_id), row]));
   const manualPools = existingPools.filter((row) => isManualPoolId(row.pool_id));
@@ -566,11 +660,10 @@ export async function reconcileOfficialPoolIds(adminClient, pools, { userId = nu
       MIN_POOL_MATCH_SCORE
     );
 
-    if (!existingTarget || match) {
-      targetRows.push(buildMergedPoolRow(officialPool, match || existingTarget, userId));
-    }
-
     if (!match) {
+      if (!existingTarget) {
+        targetRows.push(buildMergedPoolRow(officialPool, null, userId));
+      }
       operations.push({
         kind: 'pool',
         officialId: officialPool.pool_id,
@@ -580,11 +673,22 @@ export async function reconcileOfficialPoolIds(adminClient, pools, { userId = nu
       continue;
     }
 
+    const mergedPool = buildMergedPoolRow(officialPool, match, userId);
+    const useAtomicPromotion = requiresAtomicPoolPromotion(match);
+    const promotion = useAtomicPromotion
+      ? await promoteManualPoolWithRpc(adminClient, match.pool_id, mergedPool)
+      : { promoted: false, fallback: true };
+
+    if (!promotion.promoted) {
+      targetRows.push(mergedPool);
+    }
+
     operations.push({
       kind: 'pool',
       officialId: officialPool.pool_id,
       manualId: match.pool_id,
       action: 'migrated_manual_placeholder',
+      promotionMode: promotion.promoted ? 'rpc' : (useAtomicPromotion ? 'compatibility' : 'legacy'),
       score,
     });
   }
@@ -592,7 +696,7 @@ export async function reconcileOfficialPoolIds(adminClient, pools, { userId = nu
   await upsertRows(adminClient, 'pools', targetRows, { onConflict: 'pool_id' });
 
   for (const operation of operations) {
-    if (operation.action !== 'migrated_manual_placeholder') {
+    if (operation.action !== 'migrated_manual_placeholder' || operation.promotionMode === 'rpc') {
       continue;
     }
     const sourcePool = byId.get(operation.manualId);

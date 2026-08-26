@@ -1,7 +1,8 @@
 import React from 'react';
-import { Calculator, FileText, Sparkles } from 'lucide-react';
+import { Calculator, FileText, Flag, Sparkles } from 'lucide-react';
 import { useI18n } from '../../i18n/index.js';
 import { localizeEntityName, localizePoolFeaturedList, localizePoolFeaturedName, localizePoolName } from '../../utils/gameDataI18n.js';
+import { EXTRA_RULE_PROFILES, resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
 
 /**
  * 限定池分析组件
@@ -40,29 +41,182 @@ const StatCard = ({ label, value, subValue, footer, progress, progressColor, ext
   </div>
 );
 
+const RECONSTRUCTION_FREE_TEN_MILESTONES = [30, 60, 90];
+
+const reconstructionStageClasses = {
+  claimed: {
+    card: 'border-green-400 bg-green-50 dark:border-green-700 dark:bg-green-950/30',
+    flag: 'text-green-600 dark:text-green-400',
+    status: 'text-green-700 dark:text-green-400',
+  },
+  available: {
+    card: 'border-cyan-500 bg-cyan-50 dark:border-amber-400 dark:bg-amber-950/30',
+    flag: 'text-cyan-600 dark:text-amber-300',
+    status: 'text-cyan-700 dark:text-amber-300',
+  },
+  locked: {
+    card: 'border-zinc-300 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900/60',
+    flag: 'text-zinc-400 dark:text-zinc-600',
+    status: 'text-slate-500 dark:text-zinc-400',
+  },
+};
+
+const ReconstructionFreeTenProgress = ({ paidTotal, received, formatCount, t }) => {
+  const maxProgress = 90;
+  const numericPaidTotal = Number(paidTotal);
+  const paidProgress = Math.min(
+    Math.max(Number.isFinite(numericPaidTotal) ? numericPaidTotal : 0, 0),
+    maxProgress
+  );
+  const numericReceived = Number(received);
+  const receivedCount = Math.min(
+    RECONSTRUCTION_FREE_TEN_MILESTONES.length,
+    Math.max(Number.isFinite(numericReceived) ? Math.trunc(numericReceived) : 0, 0)
+  );
+  const stages = RECONSTRUCTION_FREE_TEN_MILESTONES.map((threshold, index) => {
+    const status = index < receivedCount
+      ? 'claimed'
+      : paidProgress >= threshold
+        ? 'available'
+        : 'locked';
+
+    return {
+      threshold,
+      status,
+      remaining: Math.max(threshold - paidProgress, 0),
+      anchor: index === RECONSTRUCTION_FREE_TEN_MILESTONES.length - 1
+        ? '100%'
+        : `${((threshold / maxProgress) * 100).toFixed(3)}%`,
+    };
+  });
+  const availableCount = stages.filter((stage) => stage.status === 'available').length;
+  const nextLockedStage = stages.find((stage) => stage.status === 'locked');
+  const summary = availableCount > 0
+    ? t('dashboard.analysis.reconstructionFreeTen.summary.available', { count: availableCount })
+    : receivedCount === RECONSTRUCTION_FREE_TEN_MILESTONES.length
+      ? t('dashboard.analysis.reconstructionFreeTen.summary.allClaimed')
+      : t('dashboard.analysis.reconstructionFreeTen.summary.next', {
+          count: formatCount(nextLockedStage?.remaining || 0),
+        });
+  const title = t('dashboard.analysis.reconstructionFreeTen.title');
+
+  return (
+    <section
+      aria-label={title}
+      className="bg-zinc-50 dark:bg-endfield-panel p-3 border-l-2 border-cyan-500"
+      data-testid="reconstruction-free-ten-panel"
+    >
+      <div className="flex flex-wrap justify-between items-baseline gap-2">
+        <h4 className="text-xs text-slate-700 dark:text-endfield-text font-bold">{title}</h4>
+        <span className="text-xs font-mono text-slate-500 dark:text-endfield-muted">
+          {formatCount(paidProgress)} / {formatCount(maxProgress)}
+        </span>
+      </div>
+
+      <div className="px-3 pt-8 pb-1">
+        <div className="relative overflow-visible">
+          <div
+            aria-label={title}
+            aria-valuemax={maxProgress}
+            aria-valuemin={0}
+            aria-valuenow={paidProgress}
+            aria-valuetext={t('dashboard.analysis.reconstructionFreeTen.progressValue', {
+              current: formatCount(paidProgress),
+              max: formatCount(maxProgress),
+            })}
+            className="h-2 w-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden"
+            role="progressbar"
+          >
+            <div
+              className="h-full bg-cyan-500 transition-all duration-500"
+              style={{ width: `${(paidProgress / maxProgress) * 100}%` }}
+            />
+          </div>
+          {stages.map((stage) => (
+            <Flag
+              key={stage.threshold}
+              aria-hidden="true"
+              className={`absolute bottom-3 -translate-x-1/2 fill-current ${reconstructionStageClasses[stage.status].flag}`}
+              data-status={stage.status}
+              data-testid="reconstruction-free-ten-flag"
+              size={18}
+              strokeWidth={2.5}
+              style={{ left: stage.anchor }}
+            />
+          ))}
+        </div>
+        <div className="flex justify-between mt-1 text-[9px] font-mono text-slate-400 dark:text-zinc-500" aria-hidden="true">
+          <span>0</span>
+          <span>{maxProgress}</span>
+        </div>
+      </div>
+
+      <ol className="grid grid-cols-3 gap-2 mt-2">
+        {stages.map((stage) => (
+          <li
+            key={stage.threshold}
+            className={`min-w-0 border p-2 ${reconstructionStageClasses[stage.status].card}`}
+            data-status={stage.status}
+          >
+            <div className="text-xs font-bold font-mono text-slate-700 dark:text-endfield-text">
+              {t('dashboard.analysis.reconstructionFreeTen.stage', { count: stage.threshold })}
+            </div>
+            <div className={`mt-1 text-[10px] font-bold ${reconstructionStageClasses[stage.status].status}`}>
+              {t(`dashboard.analysis.reconstructionFreeTen.status.${stage.status}`)}
+            </div>
+            {stage.status === 'locked' && (
+              <div className="mt-1 text-[9px] text-slate-500 dark:text-endfield-muted">
+                {t('dashboard.analysis.reconstructionFreeTen.remaining', {
+                  count: formatCount(stage.remaining),
+                })}
+              </div>
+            )}
+          </li>
+        ))}
+      </ol>
+
+      <p className={`mt-3 text-[10px] font-bold ${
+        availableCount > 0
+          ? 'text-cyan-700 dark:text-amber-300'
+          : receivedCount === RECONSTRUCTION_FREE_TEN_MILESTONES.length
+            ? 'text-green-700 dark:text-green-400'
+            : 'text-slate-500 dark:text-endfield-muted'
+      }`}>
+        {summary}
+      </p>
+      <p className="mt-1 text-[9px] text-slate-500 dark:text-endfield-muted">
+        {t('dashboard.analysis.notCountPity')}
+      </p>
+    </section>
+  );
+};
+
 // Helper component for Weapon Gifts to keep main component clean
-const WeaponGifts = ({ stats, locale, t }) => {
-  const giftThresholds = [100, 180, 260, 340, 420, 500];
-  let nextWeaponGift = 0;
-  let nextWeaponGiftType = 'standard';
+const WeaponGifts = ({ stats, capabilities, locale, t }) => {
+  const paidTotal = Number(stats.rewardPaidTotal ?? stats.paidTotal ?? stats.total ?? 0);
+  const firstStandardGift = Number(capabilities.rules?.firstStandardGift || 100);
+  const firstLimitedGift = Number(capabilities.rules?.firstLimitedGift || 180);
+  const alternateInterval = Number(capabilities.rules?.giftAlternateInterval || 80);
+  const isReconstructionWeapon = capabilities.ruleProfile === EXTRA_RULE_PROFILES.RECONSTRUCTION_WEAPON;
+  let nextWeaponGift = paidTotal < firstStandardGift ? firstStandardGift : firstLimitedGift;
+  let nextWeaponGiftType = paidTotal < firstStandardGift ? 'standard' : 'limited';
 
-  for (const threshold of giftThresholds) {
-    if (stats.total < threshold) {
-      nextWeaponGift = threshold;
-      nextWeaponGiftType = threshold === 100 ? 'standard' : (threshold === 180 || threshold === 340 || threshold === 500) ? 'limited' : 'standard';
-      break;
-    }
-  }
-
-  if (nextWeaponGift === 0) {
-    const cycle = Math.floor((stats.total - 180) / 160);
-    nextWeaponGift = 180 + (cycle + 1) * 160;
-    nextWeaponGiftType = nextWeaponGift % 160 === 20 ? 'limited' : 'standard';
+  if (paidTotal >= firstLimitedGift && alternateInterval > 0) {
+    const completedIntervals = Math.floor((paidTotal - firstLimitedGift) / alternateInterval);
+    nextWeaponGift = firstLimitedGift + (completedIntervals + 1) * alternateInterval;
+    nextWeaponGiftType = completedIntervals % 2 === 0 ? 'standard' : 'limited';
   }
 
   const formatCount = (value) => new Intl.NumberFormat(locale).format(Number(value) || 0);
-  const nextGiftTypeLabel =
-    nextWeaponGiftType === 'limited' ? t('dashboard.analysis.limitedShort') : t('dashboard.analysis.standardShort');
+  const nextGiftTypeLabel = isReconstructionWeapon
+    ? nextWeaponGiftType === 'limited'
+      ? t('dashboard.analysis.targetWeaponReward')
+      : t('dashboard.analysis.arsenalGiftReward')
+    : nextWeaponGiftType === 'limited'
+      ? t('dashboard.analysis.limitedShort')
+      : t('dashboard.analysis.standardShort');
+  const currentProgress = isReconstructionWeapon ? paidTotal / 10 : paidTotal;
+  const nextProgress = isReconstructionWeapon ? nextWeaponGift / 10 : nextWeaponGift;
 
   return (
     <div className="bg-zinc-50 dark:bg-endfield-panel p-2 border-l-2 border-red-500 flex flex-col gap-1">
@@ -74,34 +228,44 @@ const WeaponGifts = ({ stats, locale, t }) => {
           </span>
         </span>
         <span className="text-xs font-mono text-slate-500 dark:text-endfield-muted">
-          {formatCount(stats.total)} / {formatCount(nextWeaponGift)}
+          {formatCount(currentProgress)} / {formatCount(nextProgress)}
+          {isReconstructionWeapon ? ` ${t('dashboard.unit.claim')}` : ''}
         </span>
       </div>
       <div className="h-1 bg-zinc-200 dark:bg-zinc-800 w-full overflow-hidden">
         <div
           className={`h-full ${nextWeaponGiftType === 'limited' ? 'rainbow-progress' : 'bg-red-500'}`}
-          style={{ width: `${Math.min((stats.total / nextWeaponGift) * 100, 100)}%` }}
+          style={{ width: `${Math.min((paidTotal / nextWeaponGift) * 100, 100)}%` }}
         />
       </div>
       <div className="flex gap-2 text-[9px] text-slate-500 dark:text-endfield-muted font-mono mt-1">
         <span>{t('dashboard.analysis.obtainedSummary')}</span>
         <span className="text-red-500 dark:text-red-400">
-          {formatCount(stats.gifts?.standardCount || 0)} {t('dashboard.analysis.standardShort')}
+          {formatCount(stats.gifts?.standardCount || 0)} {isReconstructionWeapon ? t('dashboard.analysis.arsenalGiftReward') : t('dashboard.analysis.standardShort')}
         </span>
         <span className="text-blue-500 dark:text-cyan-400">
-          {formatCount(stats.gifts?.limitedCount || 0)} {t('dashboard.analysis.limitedShort')}
+          {formatCount(stats.gifts?.limitedCount || 0)} {isReconstructionWeapon ? t('dashboard.analysis.targetWeaponReward') : t('dashboard.analysis.limitedShort')}
         </span>
       </div>
+      {isReconstructionWeapon && (
+        <div className="text-[9px] text-slate-500 dark:text-endfield-muted font-mono">
+          {t('dashboard.analysis.reconstructionWeaponGiftRule')}
+        </div>
+      )}
     </div>
   );
 };
 
 const LimitedPoolAnalysis = ({ currentPool, stats, effectivePity, pityInfo }) => {
   const { t, locale } = useI18n();
-  const isLimited = currentPool.type === 'limited';
+  const capabilities = resolvePoolCapabilities(currentPool);
+  const isLimited = capabilities.rawPoolType === 'limited';
   const isExtra = currentPool.type === 'extra';
-  const isWeapon = currentPool.type === 'weapon';
-  const isStandard = currentPool.type === 'standard';
+  const isWeapon = capabilities.entityType === 'weapon';
+  const isStandard = capabilities.basePoolType === 'standard';
+  const isReconstructionCharacter = capabilities.ruleProfile === EXTRA_RULE_PROFILES.RECONSTRUCTION_CHARACTER;
+  const isReconstructionWeapon = capabilities.ruleProfile === EXTRA_RULE_PROFILES.RECONSTRUCTION_WEAPON;
+  const hasLimitedCharacterProgress = capabilities.basePoolType === 'limited' && capabilities.entityType === 'character';
   const targetProbabilityInfo = stats.targetProbabilityInfo;
   const currentTargetProbabilityPercent = targetProbabilityInfo
     ? (targetProbabilityInfo.probability * 100).toFixed(2)
@@ -125,7 +289,7 @@ const LimitedPoolAnalysis = ({ currentPool, stats, effectivePity, pityInfo }) =>
         })
     : t('simulator.analysis.noTargetProbability');
 
-  const maxPity = isWeapon ? 40 : 80;
+  const maxPity = Number(capabilities.rules?.sixStarPity || (isWeapon ? 40 : 80));
   
   // Theme Colors - Adjusted for Light/Dark mode
   // Light: text-blue-600, text-slate-600, text-yellow-600
@@ -167,15 +331,27 @@ const LimitedPoolAnalysis = ({ currentPool, stats, effectivePity, pityInfo }) =>
     locale,
     type: isWeapon ? 'weapon' : 'character'
   });
-  const featuredDisplay = isExtra
+  const featuredDisplay = capabilities.targetMode === 'four-target-equal'
     ? localizedFeaturedCharacters.join(' / ')
     : localizedUpCharacter;
-  const freeTenReceived = Math.min(Number(stats.freeTenPulls?.received || 0), 1);
-  const freeTenProgress = freeTenReceived >= 1 ? 30 : Math.min(Number(stats.total || 0), 30);
-  const freeTenProgressPercent = freeTenReceived >= 1 ? 100 : Math.min((freeTenProgress / 30) * 100, 100);
-  const freeTenStatus = freeTenReceived >= 1
-    ? t('dashboard.analysis.completed')
-    : formatProgress(freeTenProgress, 30);
+  const rewardPaidTotal = Number(stats.rewardPaidTotal ?? stats.paidTotal ?? stats.total ?? 0);
+  const freeTenReceived = Number(stats.freeTenPulls?.received || 0);
+  const targetGuarantee = pityInfo?.guaranteedUp || stats.guaranteeState || null;
+  const targetGuaranteeProgress = Math.min(
+    Number(targetGuarantee?.current || 0),
+    Number(capabilities.rules?.guaranteedLimitedPity || 0)
+  );
+  const analysisTitle = isReconstructionWeapon
+    ? t('dashboard.analysis.title.reconstructionWeapon')
+    : isReconstructionCharacter
+      ? t('dashboard.analysis.title.reconstructionCharacter')
+      : isWeapon
+        ? t('dashboard.analysis.title.weapon')
+        : isExtra
+          ? t('dashboard.analysis.title.extra')
+          : isLimited
+            ? t('dashboard.analysis.title.limited')
+            : t('dashboard.analysis.title.standard');
 
   return (
     <div className="bg-white dark:bg-endfield-dark border border-zinc-200 dark:border-endfield-border p-6 relative overflow-hidden">
@@ -187,13 +363,7 @@ const LimitedPoolAnalysis = ({ currentPool, stats, effectivePity, pityInfo }) =>
         <div>
           <h3 className="text-xl font-bold text-slate-800 dark:text-endfield-text flex items-center gap-2 uppercase tracking-wide">
             <Calculator size={20} className={accentColor} />
-            {isWeapon
-              ? t('dashboard.analysis.title.weapon')
-              : isExtra
-                ? t('dashboard.analysis.title.extra')
-                : isLimited
-                ? t('dashboard.analysis.title.limited')
-                : t('dashboard.analysis.title.standard')}
+            {analysisTitle}
           </h3>
           <div className="flex items-center gap-2 mt-1">
              <span className="text-xs text-slate-500 dark:text-endfield-muted uppercase">{t('dashboard.analysis.currentPool')}</span>
@@ -203,7 +373,7 @@ const LimitedPoolAnalysis = ({ currentPool, stats, effectivePity, pityInfo }) =>
         {(isLimited || isWeapon || isExtra) && featuredDisplay && (
            <div className="text-right">
              <div className="text-[10px] text-slate-500 dark:text-endfield-muted uppercase">
-               {isExtra ? t('simulator.analysis.featuredRoster') : t('pool.card.currentUp')}
+               {capabilities.targetMode === 'four-target-equal' ? t('simulator.analysis.featuredRoster') : t('pool.card.currentUp')}
              </div>
              <div className="text-sm font-bold text-slate-800 dark:text-endfield-text">{featuredDisplay}</div>
            </div>
@@ -213,7 +383,9 @@ const LimitedPoolAnalysis = ({ currentPool, stats, effectivePity, pityInfo }) =>
       {/* Pity Stats Grid */}
       <div className="grid grid-cols-2 gap-4 mb-4">
         <StatCard 
-           label={t('dashboard.analysis.pity6', { max: maxPity })}
+           label={isReconstructionWeapon
+             ? t('dashboard.analysis.reconstructionWeaponPity40')
+             : t('dashboard.analysis.pity6', { max: maxPity })}
            value={formatCount(Math.max(maxPity - stats.currentPity, 0))}
            subValue={t('simulator.analysis.pullUnit')}
            progress={(stats.currentPity / maxPity) * 100}
@@ -288,106 +460,99 @@ const LimitedPoolAnalysis = ({ currentPool, stats, effectivePity, pityInfo }) =>
       <div className="space-y-3 pt-4 border-t border-zinc-200 dark:border-endfield-border">
          <div className="text-[10px] uppercase text-slate-500 dark:text-endfield-muted font-bold tracking-wider mb-2">{t('dashboard.analysis.specialProgress')}</div>
          
-         {/* Limited Pool Specials */}
-         {isLimited && (
-           <>
-             {/* 30 Pulls Gift */}
-             <div className="bg-zinc-50 dark:bg-endfield-panel p-2 border-l-2 border-blue-500 flex flex-col gap-1">
-               <div className="flex justify-between items-center">
-                 <span className="text-xs text-slate-700 dark:text-endfield-text font-bold">
-                   {t('dashboard.analysis.freeTenOnce')}
-                 </span>
-                 <span className="text-xs font-mono text-slate-500 dark:text-endfield-muted">
-                   {freeTenStatus}
-                 </span>
-               </div>
-               <div className="h-1 bg-zinc-200 dark:bg-zinc-800 w-full overflow-hidden">
-                 <div
-                   className={`h-full ${freeTenReceived >= 1 ? 'bg-green-500' : 'bg-blue-500'}`}
-                   style={{ width: `${freeTenProgressPercent}%` }}
-                 ></div>
-               </div>
-               <div className="flex justify-between items-center mt-1">
-                 <span className="text-[9px] text-slate-500 dark:text-endfield-muted">{t('dashboard.analysis.notCountPity')}</span>
-                 {freeTenReceived >= 1 && (
-                   <span className="text-[9px] text-green-600 dark:text-green-400 font-bold">
-                     {t('dashboard.analysis.completed')} ({t('simulator.analysis.oneTimeOnly')})
+         {isReconstructionCharacter ? (
+           <ReconstructionFreeTenProgress
+             formatCount={formatCount}
+             paidTotal={rewardPaidTotal}
+             received={freeTenReceived}
+             t={t}
+           />
+         ) : (
+           (capabilities.freeTenPullMilestones || []).map((threshold, index) => {
+             const received = freeTenReceived >= index + 1;
+             const progress = Math.min(rewardPaidTotal, threshold);
+             return (
+               <div key={threshold} className={`bg-zinc-50 dark:bg-endfield-panel p-2 border-l-2 ${isExtra ? 'border-cyan-500' : 'border-blue-500'} flex flex-col gap-1`}>
+                 <div className="flex justify-between items-center">
+                   <span className="text-xs text-slate-700 dark:text-endfield-text font-bold">
+                     {t('dashboard.analysis.freeTenOnce')}
                    </span>
-                 )}
+                   <span className="text-xs font-mono text-slate-500 dark:text-endfield-muted">
+                     {received ? t('dashboard.analysis.claimed') : formatProgress(progress, threshold)}
+                   </span>
+                 </div>
+                 <div className="h-1 bg-zinc-200 dark:bg-zinc-800 w-full overflow-hidden">
+                   <div
+                     className={`h-full ${received ? 'bg-green-500' : isExtra ? 'bg-cyan-500' : 'bg-blue-500'}`}
+                     style={{ width: `${received ? 100 : Math.min((progress / threshold) * 100, 100)}%` }}
+                   ></div>
+                 </div>
+                 <div className="flex justify-between items-center mt-1">
+                   <span className="text-[9px] text-slate-500 dark:text-endfield-muted">{t('dashboard.analysis.notCountPity')}</span>
+                   {received && (
+                     <span className="text-[9px] text-green-600 dark:text-green-400 font-bold">
+                       {t('dashboard.analysis.completed')} ({t('simulator.analysis.oneTimeOnly')})
+                     </span>
+                   )}
+                 </div>
                </div>
-             </div>
+             );
+           })
+         )}
 
-             {/* 120 Spark */}
+         {hasLimitedCharacterProgress && (
+           <>
              <div className="bg-zinc-50 dark:bg-endfield-panel p-2 border-l-2 border-green-500 flex flex-col gap-1">
                 <div className="flex justify-between items-center">
-                  <span className="text-xs text-slate-700 dark:text-endfield-text font-bold">{t('dashboard.analysis.guaranteedLimited120')}</span>
+                  <span className="text-xs text-slate-700 dark:text-endfield-text font-bold">
+                    {isReconstructionCharacter
+                      ? t('dashboard.analysis.reconstructionCharacterGuarantee120')
+                      : t('dashboard.analysis.guaranteedLimited120')}
+                  </span>
                   <span className="text-xs font-mono text-slate-500 dark:text-endfield-muted">
-                    {pityInfo?.guaranteedUp?.hasReceived ? t('dashboard.analysis.reached') : formatProgress(Math.min(stats.total, 120), 120)}
+                    {targetGuarantee?.hasReceived ? t('dashboard.analysis.reached') : formatProgress(targetGuaranteeProgress, 120)}
                   </span>
                 </div>
                 <div className="h-1 bg-zinc-200 dark:bg-zinc-800 w-full overflow-hidden">
-                  <div className={`h-full ${pityInfo?.guaranteedUp?.hasReceived ? 'bg-green-500' : 'rainbow-progress'}`} 
-                       style={{width: `${pityInfo?.guaranteedUp?.hasReceived ? 100 : Math.min((stats.total / 120) * 100, 100)}%`}}></div>
+                  <div className={`h-full ${targetGuarantee?.hasReceived ? 'bg-green-500' : isExtra ? 'bg-cyan-500' : 'rainbow-progress'}`}
+                       style={{width: `${targetGuarantee?.hasReceived ? 100 : Math.min((targetGuaranteeProgress / 120) * 100, 100)}%`}}></div>
                 </div>
              </div>
 
-             {/* 240 Potential */}
              <div className="bg-zinc-50 dark:bg-endfield-panel p-2 border-l-2 border-purple-500 flex flex-col gap-1">
                 <div className="flex justify-between items-center">
-                  <span className="text-xs text-slate-700 dark:text-endfield-text font-bold">{t('dashboard.analysis.potential240')}</span>
-                  <span className="text-xs font-mono text-slate-500 dark:text-endfield-muted">{formatProgress(stats.total % 240, 240)}</span>
+                  <span className="text-xs text-slate-700 dark:text-endfield-text font-bold">
+                    {isReconstructionCharacter
+                      ? t('dashboard.analysis.reconstructionCharacterToken240')
+                      : t('dashboard.analysis.potential240')}
+                  </span>
+                  <span className="text-xs font-mono text-slate-500 dark:text-endfield-muted">{formatProgress(rewardPaidTotal % 240, 240)}</span>
                 </div>
                 <div className="h-1 bg-zinc-200 dark:bg-zinc-800 w-full overflow-hidden">
-                  <div className="h-full bg-purple-500" style={{width: `${((stats.total % 240) / 240) * 100}%`}}></div>
+                  <div className="h-full bg-purple-500" style={{width: `${((rewardPaidTotal % 240) / 240) * 100}%`}}></div>
                 </div>
-                {Math.floor(stats.total / 240) > 0 && (
+                {Math.floor(rewardPaidTotal / 240) > 0 && (
                   <div className="text-right text-[9px] text-purple-600 dark:text-purple-400 font-bold">
-                    {t('dashboard.analysis.obtained', { count: formatCount(Math.floor(stats.total / 240)) })}
+                    {t('dashboard.analysis.obtained', { count: formatCount(Math.floor(rewardPaidTotal / 240)) })}
                   </div>
                 )}
              </div>
 
-             {/* 60 Info Book */}
-             <div className="bg-zinc-50 dark:bg-endfield-panel p-2 border-l-2 border-cyan-500 flex flex-col gap-1">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-slate-700 dark:text-endfield-text font-bold flex items-center gap-1"><FileText size={10}/> {t('dashboard.analysis.infoBook60')}</span>
-                  <span className="text-xs font-mono text-slate-500 dark:text-endfield-muted">
-                    {stats.hasInfoBook ? t('dashboard.analysis.reached') : formatProgress(Math.min(stats.total, 60), 60)}
-                  </span>
-                </div>
-                <div className="h-1 bg-zinc-200 dark:bg-zinc-800 w-full overflow-hidden">
-                  <div className={`h-full ${stats.hasInfoBook ? 'bg-green-500' : 'bg-cyan-500'}`} 
-                       style={{width: `${stats.hasInfoBook ? 100 : Math.min((stats.total / 60) * 100, 100)}%`}}></div>
-                </div>
-             </div>
+             {capabilities.infoBookEnabled && (
+               <div className="bg-zinc-50 dark:bg-endfield-panel p-2 border-l-2 border-cyan-500 flex flex-col gap-1">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-slate-700 dark:text-endfield-text font-bold flex items-center gap-1"><FileText size={10}/> {t('dashboard.analysis.infoBook60')}</span>
+                    <span className="text-xs font-mono text-slate-500 dark:text-endfield-muted">
+                      {stats.hasInfoBook ? t('dashboard.analysis.reached') : formatProgress(Math.min(stats.total, 60), 60)}
+                    </span>
+                  </div>
+                  <div className="h-1 bg-zinc-200 dark:bg-zinc-800 w-full overflow-hidden">
+                    <div className={`h-full ${stats.hasInfoBook ? 'bg-green-500' : 'bg-cyan-500'}`}
+                         style={{width: `${stats.hasInfoBook ? 100 : Math.min((stats.total / 60) * 100, 100)}%`}}></div>
+                  </div>
+               </div>
+             )}
            </>
-         )}
-
-         {isExtra && (
-           <div className="bg-zinc-50 dark:bg-endfield-panel p-2 border-l-2 border-cyan-500 flex flex-col gap-1">
-             <div className="flex justify-between items-center">
-               <span className="text-xs text-slate-700 dark:text-endfield-text font-bold">
-                 {t('dashboard.analysis.freeTenOnce')}
-               </span>
-               <span className="text-xs font-mono text-slate-500 dark:text-endfield-muted">
-                 {freeTenStatus}
-               </span>
-             </div>
-             <div className="h-1 bg-zinc-200 dark:bg-zinc-800 w-full overflow-hidden">
-               <div
-                 className={`h-full ${freeTenReceived >= 1 ? 'bg-green-500' : 'bg-cyan-500'}`}
-                 style={{ width: `${freeTenProgressPercent}%` }}
-               ></div>
-             </div>
-             <div className="flex justify-between items-center mt-1">
-               <span className="text-[9px] text-slate-500 dark:text-endfield-muted">{t('dashboard.analysis.notCountPity')}</span>
-               {freeTenReceived >= 1 && (
-                 <span className="text-[9px] text-green-600 dark:text-green-400 font-bold">
-                   {t('dashboard.analysis.completed')} ({t('simulator.analysis.oneTimeOnly')})
-                 </span>
-               )}
-             </div>
-           </div>
          )}
 
          {/* Weapon Pool Specials */}
@@ -396,19 +561,23 @@ const LimitedPoolAnalysis = ({ currentPool, stats, effectivePity, pityInfo }) =>
              {/* 80 Spark */}
              <div className="bg-zinc-50 dark:bg-endfield-panel p-2 border-l-2 border-slate-500 flex flex-col gap-1">
                 <div className="flex justify-between items-center">
-                   <span className="text-xs text-slate-700 dark:text-endfield-text font-bold">{t('dashboard.analysis.guaranteedWeapon80')}</span>
+                   <span className="text-xs text-slate-700 dark:text-endfield-text font-bold">
+                     {isReconstructionWeapon
+                       ? t('dashboard.analysis.reconstructionWeaponGuarantee80')
+                       : t('dashboard.analysis.guaranteedWeapon80')}
+                   </span>
                    <span className="text-xs font-mono text-slate-500 dark:text-endfield-muted">
-                     {pityInfo?.guaranteedUp?.hasReceived ? t('dashboard.analysis.reached') : formatProgress(Math.min(stats.total, 80), 80)}
+                     {targetGuarantee?.hasReceived ? t('dashboard.analysis.reached') : formatProgress(targetGuaranteeProgress, 80)}
                    </span>
                 </div>
                 <div className="h-1 bg-zinc-200 dark:bg-zinc-800 w-full overflow-hidden">
-                   <div className={`h-full ${pityInfo?.guaranteedUp?.hasReceived ? 'bg-green-500' : 'bg-slate-500'}`}
-                        style={{width: `${pityInfo?.guaranteedUp?.hasReceived ? 100 : Math.min((stats.total / 80) * 100, 100)}%`}}></div>
+                   <div className={`h-full ${targetGuarantee?.hasReceived ? 'bg-green-500' : 'bg-slate-500'}`}
+                        style={{width: `${targetGuarantee?.hasReceived ? 100 : Math.min((targetGuaranteeProgress / 80) * 100, 100)}%`}}></div>
                 </div>
              </div>
              
              {/* Weapon Gifts */}
-             {currentPool.isLimitedWeapon !== false && <WeaponGifts stats={stats} locale={locale} t={t} />}
+             {currentPool.isLimitedWeapon !== false && <WeaponGifts stats={stats} capabilities={capabilities} locale={locale} t={t} />}
            </>
          )}
 

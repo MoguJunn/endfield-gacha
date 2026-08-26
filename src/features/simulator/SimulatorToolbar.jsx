@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Copy, Download, Loader2, Plus, RefreshCw, Share2, User } from 'lucide-react';
 import { usePersonalGameAccounts } from '../../hooks/app/usePersonalGameAccounts.js';
 import { getLocalizedResourceLabel, RESOURCE_ICON_URLS } from '../../utils/resourceEconomy';
 import PoolGroupCardRail from '../../components/pool/PoolGroupCardRail';
 import ShareActionStatus from '../../components/share/ShareActionStatus';
-import { buildPoolSelectorGroups } from '../../utils/poolSelectorDisplay';
+import { applyPoolSelectorScopeView, buildPoolSelectorGroups } from '../../utils/poolSelectorDisplay';
 import { useI18n } from '../../i18n/index.js';
 import { localizeGameAccountServerTag } from '../../utils/gameAccountMetadata.js';
 
@@ -107,7 +107,8 @@ function ResourceChip({
   const canConvertOriginite =
     resourceKey === 'jade' && editor?.mode === 'add' && numericInput > 0 && numericInput <= originiteBalance;
   const editTitle = t('simulator.resource.editTitle', { label });
-  const addTitle = resourceKey === 'jade' ? t('simulator.resource.convertTitle') : t('simulator.resource.addTitle', { label });
+  const addTitle =
+    resourceKey === 'jade' ? t('simulator.resource.convertTitle') : t('simulator.resource.addTitle', { label });
   const editorTitle =
     resourceKey === 'jade' && editor?.mode === 'add'
       ? t('simulator.resource.convertTitle')
@@ -195,7 +196,10 @@ function ResourceChip({
                 className="mt-2 w-full px-2 py-1.5 text-[11px] font-bold border border-amber-500 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {t('simulator.resource.convertAction', {
-                  gain: numericInput > 0 ? `(+${(numericInput * exchangeRate).toLocaleString(locale)} ${getLocalizedResourceLabel('jade', locale)})` : '',
+                  gain:
+                    numericInput > 0
+                      ? `(+${(numericInput * exchangeRate).toLocaleString(locale)} ${getLocalizedResourceLabel('jade', locale)})`
+                      : '',
                 })}
               </button>
             </div>
@@ -207,7 +211,9 @@ function ResourceChip({
             quickAddPresets.length > 0 && (
               <div className="mt-3 border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-black/20 px-2 py-2">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400">{t('simulator.resource.presetTitle')}</div>
+                  <div className="text-[10px] font-mono text-zinc-500 dark:text-zinc-400">
+                    {t('simulator.resource.presetTitle')}
+                  </div>
                   {showCnOriginiteDoubleBonusToggle && (
                     <button
                       type="button"
@@ -236,7 +242,8 @@ function ResourceChip({
                     >
                       <div className="text-[11px] font-bold">{preset.label}</div>
                       <div className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono">
-                        {preset.displayLabel || Number(preset.displayAmount ?? preset.amount ?? 0).toLocaleString(locale)}
+                        {preset.displayLabel ||
+                          Number(preset.displayAmount ?? preset.amount ?? 0).toLocaleString(locale)}
                       </div>
                     </button>
                   ))}
@@ -299,35 +306,50 @@ const SimulatorToolbar = ({
   const [activeEditor, setActiveEditor] = useState(null);
   const [showInheritAccountDropdown, setShowInheritAccountDropdown] = useState(false);
   const [showShareMenu, setShowShareMenu] = useState(false);
+  const [subgroupExpansionOverrides, setSubgroupExpansionOverrides] = useState({});
   const shareMenuRef = useRef(null);
   const gameAccounts = usePersonalGameAccounts();
   const isEnglishLocale = locale?.toLowerCase().startsWith('en');
   const cnOriginiteDoubleBonusEnabled = Boolean(resourceSettings?.cnOriginiteDoubleBonusEnabled);
   const infiniteResourcesEnabled = Boolean(resourceSettings?.infiniteResources);
   const originiteQuickAddPresets = useMemo(
-    () => (isEnglishLocale ? EN_ORIGINITE_PURCHASE_PRESETS : buildChineseOriginitePurchasePresets(cnOriginiteDoubleBonusEnabled)),
+    () =>
+      isEnglishLocale
+        ? EN_ORIGINITE_PURCHASE_PRESETS
+        : buildChineseOriginitePurchasePresets(cnOriginiteDoubleBonusEnabled),
     [cnOriginiteDoubleBonusEnabled, isEnglishLocale]
   );
   const resourceItems = useMemo(
     () => [
       {
         resourceKey: 'jade',
-        value: resourceLedger?.infiniteResources ? Number.POSITIVE_INFINITY : Math.max(Number(resourceLedger?.jadeBalance || 0), 0)
+        value: resourceLedger?.infiniteResources
+          ? Number.POSITIVE_INFINITY
+          : Math.max(Number(resourceLedger?.jadeBalance || 0), 0),
       },
       {
         resourceKey: 'originite',
-        value: resourceLedger?.infiniteResources ? Number.POSITIVE_INFINITY : Math.max(Number(resourceLedger?.originiteBalance || 0), 0)
+        value: resourceLedger?.infiniteResources
+          ? Number.POSITIVE_INFINITY
+          : Math.max(Number(resourceLedger?.originiteBalance || 0), 0),
       },
       {
         resourceKey: 'arsenalQuota',
-        value: resourceLedger?.infiniteResources ? Number.POSITIVE_INFINITY : Math.max(Number(resourceLedger?.arsenalBalance || 0), 0)
+        value: resourceLedger?.infiniteResources
+          ? Number.POSITIVE_INFINITY
+          : Math.max(Number(resourceLedger?.arsenalBalance || 0), 0),
       },
     ],
     [resourceLedger]
   );
   const cumulativeItems = useMemo(
     () => [
-      { key: 'jadeSpent', label: t('simulator.resource.cumulative.jadeSpent'), value: Number(resourceLedger?.jadeSpent || 0), icon: RESOURCE_ICON_URLS.jade },
+      {
+        key: 'jadeSpent',
+        label: t('simulator.resource.cumulative.jadeSpent'),
+        value: Number(resourceLedger?.jadeSpent || 0),
+        icon: RESOURCE_ICON_URLS.jade,
+      },
       {
         key: 'originiteEquivalent',
         label: t('simulator.resource.cumulative.originiteEquivalent'),
@@ -367,15 +389,31 @@ const SimulatorToolbar = ({
     ],
     [resourceLedger, t]
   );
-  const selectorGroups = useMemo(
+  const selectorCatalogGroups = useMemo(
     () =>
       buildPoolSelectorGroups({
         pools: simulatorPools,
         poolPullCounts,
+        currentPoolId: currentSimPoolId,
         locale,
       }),
-    [locale, poolPullCounts, simulatorPools]
+    [currentSimPoolId, locale, poolPullCounts, simulatorPools]
   );
+  const selectorGroups = useMemo(
+    () =>
+      applyPoolSelectorScopeView({
+        groups: selectorCatalogGroups,
+        currentPoolId: currentSimPoolId,
+        subgroupExpansionOverrides,
+      }),
+    [currentSimPoolId, selectorCatalogGroups, subgroupExpansionOverrides]
+  );
+  const toggleSubgroup = useCallback((subgroupId, currentlyExpanded) => {
+    setSubgroupExpansionOverrides((current) => ({
+      ...current,
+      [subgroupId]: !currentlyExpanded,
+    }));
+  }, []);
   const openEditor = (resourceKey, mode, value) => {
     setActiveEditor({
       resourceKey,
@@ -407,6 +445,7 @@ const SimulatorToolbar = ({
         groups={selectorGroups}
         currentSelectionId={currentSimPoolId}
         onSelectPool={onSwitchPool}
+        onToggleSubgroup={toggleSubgroup}
         showGroupOverviewCards={false}
       />
 
@@ -443,15 +482,21 @@ const SimulatorToolbar = ({
                   : 'border-zinc-200 bg-zinc-100 text-slate-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300'
               }`}
             >
-              <span className="text-[10px] font-bold uppercase tracking-wider">{t('simulator.toolbar.infiniteResources')}</span>
-              <span className={`flex h-5 w-10 items-center rounded-full border px-0.5 transition-colors ${
-                infiniteResourcesEnabled
-                  ? 'border-emerald-500 bg-emerald-500/20 justify-end'
-                  : 'border-zinc-300 dark:border-zinc-700 bg-white/70 dark:bg-black/30 justify-start'
-              }`}>
-                <span className={`block h-3.5 w-3.5 rounded-full ${
-                  infiniteResourcesEnabled ? 'bg-emerald-500' : 'bg-zinc-400 dark:bg-zinc-500'
-                }`} />
+              <span className="text-[10px] font-bold uppercase tracking-wider">
+                {t('simulator.toolbar.infiniteResources')}
+              </span>
+              <span
+                className={`flex h-5 w-10 items-center rounded-full border px-0.5 transition-colors ${
+                  infiniteResourcesEnabled
+                    ? 'border-emerald-500 bg-emerald-500/20 justify-end'
+                    : 'border-zinc-300 dark:border-zinc-700 bg-white/70 dark:bg-black/30 justify-start'
+                }`}
+              >
+                <span
+                  className={`block h-3.5 w-3.5 rounded-full ${
+                    infiniteResourcesEnabled ? 'bg-emerald-500' : 'bg-zinc-400 dark:bg-zinc-500'
+                  }`}
+                />
               </span>
             </button>
           </div>
@@ -473,7 +518,7 @@ const SimulatorToolbar = ({
           <div className="text-[10px] uppercase tracking-wider text-zinc-500 dark:text-zinc-400 font-bold mb-1">
             {t('simulator.controls', 'Simulator Controls')}
           </div>
-          
+
           <div className="flex flex-wrap items-center gap-2">
             <div
               onClick={onToggleSkipAnimation}
@@ -483,7 +528,9 @@ const SimulatorToolbar = ({
                   : 'bg-zinc-50 dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-800 text-slate-500 dark:text-zinc-500 hover:border-slate-300 dark:hover:border-zinc-700'
               }`}
             >
-              <div className={`w-3.5 h-3.5 border flex items-center justify-center transition-colors rounded-sm ${skipAnimation ? 'border-yellow-600 dark:border-endfield-yellow bg-yellow-500 dark:bg-endfield-yellow' : 'border-zinc-300 dark:border-zinc-600'}`}>
+              <div
+                className={`w-3.5 h-3.5 border flex items-center justify-center transition-colors rounded-sm ${skipAnimation ? 'border-yellow-600 dark:border-endfield-yellow bg-yellow-500 dark:bg-endfield-yellow' : 'border-zinc-300 dark:border-zinc-600'}`}
+              >
                 {skipAnimation && <Check size={10} className="text-white dark:text-black" strokeWidth={4} />}
               </div>
               <span className="text-xs font-bold uppercase truncate">{t('simulator.toolbar.skipAnimation')}</span>
@@ -507,7 +554,10 @@ const SimulatorToolbar = ({
                 <RefreshCw size={14} />
                 <span className="truncate">{t('simulator.toolbar.inheritShort')}</span>
                 {gameAccounts.length > 1 && (
-                  <ChevronDown size={12} className={`transition-transform ${showInheritAccountDropdown ? 'rotate-180' : ''}`} />
+                  <ChevronDown
+                    size={12}
+                    className={`transition-transform ${showInheritAccountDropdown ? 'rotate-180' : ''}`}
+                  />
                 )}
               </button>
               {showInheritAccountDropdown && gameAccounts.length > 1 && (
@@ -545,12 +595,16 @@ const SimulatorToolbar = ({
                 onClick={() => setShowShareMenu((visible) => !visible)}
                 disabled={shareActionBusy}
                 className={`w-full px-3 py-2 flex items-center justify-center gap-2 text-xs font-bold bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-400 transition-colors rounded-sm ${
-                  shareActionBusy ? 'cursor-not-allowed opacity-60' : 'hover:text-endfield-yellow hover:border-endfield-yellow'
+                  shareActionBusy
+                    ? 'cursor-not-allowed opacity-60'
+                    : 'hover:text-endfield-yellow hover:border-endfield-yellow'
                 }`}
                 title={t('simulator.toolbar.shareTitle')}
               >
                 {shareActionBusy ? <Loader2 size={14} className="animate-spin" /> : <Share2 size={14} />}
-                <span className="truncate">{shareActionBusy ? t('simulator.toolbar.shareBusy') : t('simulator.toolbar.share')}</span>
+                <span className="truncate">
+                  {shareActionBusy ? t('simulator.toolbar.shareBusy') : t('simulator.toolbar.share')}
+                </span>
               </button>
 
               {showShareMenu && (
@@ -559,16 +613,23 @@ const SimulatorToolbar = ({
                     <button
                       type="button"
                       disabled={shareActionBusy}
-                      onClick={() => { setShowShareMenu(false); onShareImage(); }}
+                      onClick={() => {
+                        setShowShareMenu(false);
+                        onShareImage();
+                      }}
                       className={`w-full text-left px-3 py-2.5 text-xs text-slate-600 dark:text-zinc-300 transition-colors flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-800/50 ${shareActionBusy ? 'cursor-not-allowed opacity-60' : 'hover:bg-slate-50 dark:hover:bg-zinc-800'}`}
                     >
-                      <Share2 size={14} className="text-zinc-400" /> <span>{t('simulator.toolbar.systemShareImage')}</span>
+                      <Share2 size={14} className="text-zinc-400" />{' '}
+                      <span>{t('simulator.toolbar.systemShareImage')}</span>
                     </button>
                   )}
                   <button
                     type="button"
                     disabled={shareActionBusy}
-                    onClick={() => { setShowShareMenu(false); onDownloadImage(); }}
+                    onClick={() => {
+                      setShowShareMenu(false);
+                      onDownloadImage();
+                    }}
                     className={`w-full text-left px-3 py-2.5 text-xs text-slate-600 dark:text-zinc-300 transition-colors flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-800/50 ${shareActionBusy ? 'cursor-not-allowed opacity-60' : 'hover:bg-slate-50 dark:hover:bg-zinc-800'}`}
                   >
                     <Download size={14} className="text-zinc-400" /> <span>{t('simulator.toolbar.downloadPng')}</span>
@@ -577,7 +638,10 @@ const SimulatorToolbar = ({
                     <button
                       type="button"
                       disabled={shareActionBusy}
-                      onClick={() => { setShowShareMenu(false); onCopyImage(); }}
+                      onClick={() => {
+                        setShowShareMenu(false);
+                        onCopyImage();
+                      }}
                       className={`w-full text-left px-3 py-2.5 text-xs text-slate-600 dark:text-zinc-300 transition-colors flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-800/50 ${shareActionBusy ? 'cursor-not-allowed opacity-60' : 'hover:bg-slate-50 dark:hover:bg-zinc-800'}`}
                     >
                       <Copy size={14} className="text-zinc-400" /> <span>{t('simulator.toolbar.copyImage')}</span>
@@ -586,7 +650,10 @@ const SimulatorToolbar = ({
                   <button
                     type="button"
                     disabled={shareActionBusy}
-                    onClick={() => { setShowShareMenu(false); onShareText(); }}
+                    onClick={() => {
+                      setShowShareMenu(false);
+                      onShareText();
+                    }}
                     className={`w-full text-left px-3 py-2.5 text-xs text-slate-600 dark:text-zinc-300 transition-colors flex items-center gap-2 ${shareActionBusy ? 'cursor-not-allowed opacity-60' : 'hover:bg-slate-50 dark:hover:bg-zinc-800'}`}
                   >
                     <Copy size={14} className="text-zinc-400" /> <span>{t('simulator.toolbar.copyText')}</span>

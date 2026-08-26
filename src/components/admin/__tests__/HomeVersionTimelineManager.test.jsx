@@ -132,4 +132,53 @@ describe('HomeVersionTimelineManager', () => {
     });
     expect(showToast).toHaveBeenCalledWith('版本时间线已保存', 'success');
   });
+
+  it('labels and saves both reconstruction pools in version pool_ids', async () => {
+    render(
+      <HomeVersionTimelineManager
+        pools={[
+          {
+            pool_id: 'extra_reconstruction_character',
+            name: '重构寻访·伊冯',
+            type: 'extra',
+            up_character: '伊冯',
+            extra_rule_profile: 'reconstruction_character_v1',
+            start_time: '2026-04-01T12:00:00+08:00',
+            end_time: null,
+          },
+          {
+            pool_id: 'extra_reconstruction_weapon',
+            name: '重构申领·艺术暴君',
+            type: 'extra',
+            up_character: '艺术暴君',
+            extra_subtype: 'reconstruction_claim',
+            extra_rule_profile: 'reconstruction_weapon_v1',
+            start_time: '2026-04-01T12:00:00+08:00',
+            end_time: null,
+          },
+        ]}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('版本节点 1')).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('button', { name: /extra_reconstruction_character · 重构寻访/u })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /extra_reconstruction_weapon · 重构申领/u })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /重构寻访·伊冯/u }));
+    fireEvent.click(screen.getByRole('button', { name: /重构申领·艺术暴君/u }));
+    fireEvent.click(screen.getByRole('button', { name: '保存版本时间线' }));
+
+    await waitFor(() => {
+      expect(updateConfigMock).toHaveBeenCalledTimes(1);
+    });
+
+    const savedTimeline = JSON.parse(updateConfigMock.mock.calls[0][1]);
+    expect(savedTimeline.versions[0].pool_ids).toEqual([
+      'extra_reconstruction_character',
+      'extra_reconstruction_weapon',
+    ]);
+  });
 });

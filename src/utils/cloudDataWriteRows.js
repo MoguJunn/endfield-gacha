@@ -4,6 +4,7 @@ import {
   normalizeGameAccountRegion,
   normalizeGameAccountServerId,
 } from './gameAccountMetadata.js';
+import { getCanonicalExtraPoolMetadata } from '../../shared/extraPoolSubtype.js';
 
 function resolveOwnerId(explicitUserId, currentUserId) {
   return explicitUserId || currentUserId || null;
@@ -50,13 +51,23 @@ function normalizeCharacterIdForStorage(record, resolvedCharacterId) {
 
 export function serializePoolForUpsert(pool, currentUserId, resolvedPoolId = null) {
   const ownerId = resolveOwnerId(pool.user_id, currentUserId);
+  const poolType = pool.type;
+  const extraMetadata = poolType === 'extra'
+    ? getCanonicalExtraPoolMetadata(pool)
+    : {
+        extra_subtype: null,
+        extra_rule_profile: null,
+        extra_series_key: null,
+        extra_series_phase: null,
+      };
 
   return {
     user_id: ownerId,
     pool_id: resolvedPoolId || pool.id || pool.pool_id,
     name: pool.name,
     name_en: pool.name_en || null,
-    type: pool.type,
+    type: poolType,
+    ...extraMetadata,
     locked: pool.locked || false,
     is_limited_weapon: pool.isLimitedWeapon !== undefined ? pool.isLimitedWeapon : (pool.is_limited_weapon !== false),
     up_character: pool.upCharacter || pool.up_character || null,
