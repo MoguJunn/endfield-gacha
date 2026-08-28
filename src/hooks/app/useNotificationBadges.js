@@ -5,6 +5,7 @@ import { loadTickets } from '../../services/ticketService.js';
 import { useAuthStore, useAppStore } from '../../stores';
 import { STORAGE_KEYS, hasNewContent, getStorageItem } from '../../utils';
 import { findGameAnnouncementCalendarImage } from '../../utils/gameAnnouncementCalendar.js';
+import { isContributorDemoModeEnabled } from '../../dev/contributorDemoMode.js';
 
 const GAME_ANNOUNCEMENT_VISIBLE_DAYS = 7;
 const GAME_ANNOUNCEMENT_HISTORY_FALLBACK_LIMIT = 5;
@@ -239,6 +240,22 @@ export function useNotificationBadges() {
     let cancelled = false;
 
     const load = async () => {
+      if (isContributorDemoModeEnabled()) {
+        const {
+          getContributorDemoSandboxSnapshot,
+          initializeContributorDemoSandbox,
+        } = await import('../../dev/contributorDemoSandboxStore.js');
+        await initializeContributorDemoSandbox();
+        const demoAnnouncements = getContributorDemoSandboxSnapshot().announcements;
+        if (cancelled) return;
+        const siteRecords = normalizeSiteAnnouncementRecords(demoAnnouncements);
+        setAnnouncements(siteRecords);
+        setHasNewAnnouncement(siteRecords.length > 0);
+        setGameAnnouncements([]);
+        setGameAnnouncementDigest(null);
+        return;
+      }
+
       const cutoffIso = getRecentGameAnnouncementCutoffIso();
       let apiPayload = null;
       try {
@@ -316,6 +333,7 @@ export function useNotificationBadges() {
 
   useEffect(() => {
     const load = async () => {
+      if (isContributorDemoModeEnabled()) return 0;
       if (!user) return 0;
       try {
         const lastViewed = getStorageItem(STORAGE_KEYS.TICKETS_LAST_VIEWED, 0);

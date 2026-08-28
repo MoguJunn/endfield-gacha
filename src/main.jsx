@@ -15,6 +15,7 @@ import { I18nProvider, ensureLocaleMessages, getAppLocale } from './i18n/index.j
 import { installRuntimeObservability } from './utils/runtimeObservability.js'
 import { readStorageValue, STORAGE_KEYS } from './utils/storageUtils.js'
 import { markAppMounted, renderAppCrashFallback } from './utils/appCrashFallback.js'
+import { isContributorDemoModeEnabled } from './dev/contributorDemoMode.js'
 
 function syncDeviceRedirect() {
   const preference = readStorageValue(STORAGE_KEYS.PLATFORM_PREFERENCE, null, { raw: true });
@@ -70,8 +71,8 @@ async function bootstrapApp() {
           </ErrorBoundary>
         </BrowserRouter>
       </I18nProvider>
-      <Analytics />
-      <SpeedInsights />
+      {!isContributorDemoModeEnabled() && <Analytics />}
+      {!isContributorDemoModeEnabled() && <SpeedInsights />}
     </StrictMode>,
   );
   markAppMounted();

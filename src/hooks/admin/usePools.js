@@ -382,7 +382,11 @@ export function buildPoolDraftDiff({
 /**
  * 卡池管理主 Hook
  */
-export const usePools = (showToast) => {
+export const usePools = (showToast, {
+  service = poolService,
+  invalidateCache = invalidatePublicCache,
+  refreshCharacterCatalog = () => characterCache.refresh(),
+} = {}) => {
   const userRole = useAuthStore((state) => state.userRole);
 
   // 数据状态
@@ -420,28 +424,28 @@ export const usePools = (showToast) => {
   // 加载数据
   const loadPoolsData = useCallback(async () => {
     setLoading(true);
-    const result = await poolService.loadPools();
+    const result = await service.loadPools();
     if (result.success) {
       setPools(result.data);
     } else {
       showToast('加载卡池失败: ' + result.error, 'error');
     }
     setLoading(false);
-  }, [showToast]);
+  }, [service, showToast]);
 
   const loadCharactersData = useCallback(async () => {
-    const result = await poolService.loadCharacters();
+    const result = await service.loadCharacters();
     if (result.success) {
       setCharacters(result.data);
     }
-  }, []);
+  }, [service]);
 
   const loadAllPoolCharactersData = useCallback(async () => {
-    const result = await poolService.loadAllPoolCharacters();
+    const result = await service.loadAllPoolCharacters();
     if (result.success) {
       setPoolCharacters(result.data);
     }
-  }, []);
+  }, [service]);
 
   // 初始加载
   useEffect(() => {
@@ -518,7 +522,7 @@ export const usePools = (showToast) => {
       return `${year}-${month}-${day}T${hours}:${minutes}`;
     };
 
-    const result = await poolService.loadPoolCharactersForEdit(pool.pool_id);
+    const result = await service.loadPoolCharactersForEdit(pool.pool_id);
     setEditingPoolCharacters(result.data);
     setEditingPoolOriginalCharacters(result.data);
     const featuredCharacterLabels = Array.isArray(pool.featured_characters)
@@ -546,7 +550,7 @@ export const usePools = (showToast) => {
     });
     setEditingPool(pool);
     setShowEditDialog(true);
-  }, [characters]);
+  }, [characters, service]);
 
   const startCreate = useCallback(() => {
     setPoolForm(INITIAL_POOL_FORM);
@@ -653,7 +657,7 @@ export const usePools = (showToast) => {
             const poolStartTime = poolForm.start_time
               ? new Date(poolForm.start_time).toISOString()
               : new Date().toISOString();
-            const createdCharacter = await poolService.createUpCharacter(
+            const createdCharacter = await service.createUpCharacter(
               upCharacterName,
               normalizedPoolType,
               poolStartTime,
@@ -670,8 +674,8 @@ export const usePools = (showToast) => {
             }
             showToast(`已自动创建UP角色「${upCharacterName}」并加入本次卡池草稿`, 'success');
             await loadCharactersData();
-            await characterCache.refresh();
-            await invalidatePublicCache('characters', 'admin:pool:create-up-character');
+            await refreshCharacterCatalog();
+            await invalidateCache('characters', 'admin:pool:create-up-character');
           } catch (createError) {
             showToast('创建UP角色失败: ' + createError.message, 'error');
             setActionLoading(null);
@@ -690,7 +694,7 @@ export const usePools = (showToast) => {
 
       const { poolData } = buildPoolDataFromForm(poolForm);
 
-      const result = await poolService.savePool(poolData, editingPool, charactersForSave, editingPoolCharactersForSave);
+      const result = await service.savePool(poolData, editingPool, charactersForSave, editingPoolCharactersForSave);
 
       if (result.success) {
         if (result.isNew) {
@@ -700,7 +704,7 @@ export const usePools = (showToast) => {
         }
         await loadPoolsData();
         await loadAllPoolCharactersData();
-        await invalidatePublicCache('pools', 'admin:pool:save');
+        await invalidateCache('pools', 'admin:pool:save');
         const savedPool = {
           ...poolData,
           pool_id: result.poolId || poolData.pool_id || editingPool?.pool_id,
@@ -726,6 +730,9 @@ export const usePools = (showToast) => {
     loadCharactersData,
     loadAllPoolCharactersData,
     resetForm,
+    service,
+    invalidateCache,
+    refreshCharacterCatalog,
   ]);
 
   // 删除卡池
@@ -739,18 +746,18 @@ export const usePools = (showToast) => {
 
       setActionLoading(pool.pool_id);
 
-      const result = await poolService.deletePool(pool.pool_id);
+      const result = await service.deletePool(pool.pool_id);
       if (result.success) {
         showToast('卡池已删除', 'success');
         await loadPoolsData();
-        await invalidatePublicCache('pools', 'admin:pool:delete');
+        await invalidateCache('pools', 'admin:pool:delete');
       } else {
         showToast('删除失败: ' + result.error, 'error');
       }
 
       setActionLoading(null);
     },
-    [ensureSuperAdmin, showToast, loadPoolsData]
+    [ensureSuperAdmin, invalidateCache, loadPoolsData, service, showToast]
   );
 
   // 重新计算限定/常驻
@@ -759,12 +766,12 @@ export const usePools = (showToast) => {
 
     setActionLoading('recalculate');
 
-    const result = await poolService.recalculateIsStandard(pools);
+    const result = await service.recalculateIsStandard(pools);
     if (result.success) {
       if (result.changedCount === 0) {
         showToast(result.message || '所有记录已是最新状态，无需更新', 'info');
       } else {
-        await invalidatePublicCache('stats', 'admin:pool:recalculate-is-standard');
+        await invalidateCache('stats', 'admin:pool:recalculate-is-standard');
         showToast(`已更新 ${result.changedCount} 条记录的限定/常驻状态。刷新页面后生效。`, 'success');
       }
     } else {
@@ -772,7 +779,7 @@ export const usePools = (showToast) => {
     }
 
     setActionLoading(null);
-  }, [ensureSuperAdmin, pools, showToast]);
+  }, [ensureSuperAdmin, invalidateCache, pools, service, showToast]);
 
   // 角色池子管理操作
   const toggleCharacterInPool = useCallback(

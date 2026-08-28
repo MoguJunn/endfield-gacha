@@ -83,6 +83,8 @@ const CharacterRow = ({
         <img
           src={char.avatar_url}
           alt={char.name}
+          crossOrigin="anonymous"
+          referrerPolicy="no-referrer"
           className="w-10 h-10 rounded object-cover"
           onError={(event) => {
             event.currentTarget.style.display = 'none';

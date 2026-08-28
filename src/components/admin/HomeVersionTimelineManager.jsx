@@ -167,7 +167,7 @@ function sortRowEntriesByStartsAt(rows) {
     });
 }
 
-export default function HomeVersionTimelineManager({ pools = [], showToast }) {
+export default function HomeVersionTimelineManager({ pools = [], showToast, configAdapter = null }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState(() => createHomeVersionTimelineRows(DEFAULT_HOME_VERSION_TIMELINE).rows);
@@ -180,7 +180,9 @@ export default function HomeVersionTimelineManager({ pools = [], showToast }) {
     async function loadTimeline() {
       setLoading(true);
       try {
-        const items = await loadAdminSiteConfigItems();
+        const items = configAdapter
+          ? await configAdapter.loadItems()
+          : await loadAdminSiteConfigItems();
         const item = items.find((entry) => entry.key === HOME_VERSION_TIMELINE_CONFIG_KEY);
         const parsed = createHomeVersionTimelineRows(item?.value || JSON.stringify({ versions: DEFAULT_HOME_VERSION_TIMELINE }));
         if (!mounted) return;
@@ -200,7 +202,7 @@ export default function HomeVersionTimelineManager({ pools = [], showToast }) {
     return () => {
       mounted = false;
     };
-  }, [showToast]);
+  }, [configAdapter, showToast]);
 
   const poolById = useMemo(() => new Map(sortPoolsForPicker(pools).map((pool) => [getPoolId(pool), pool])), [pools]);
   const sortedPools = useMemo(() => sortPoolsForPicker(pools), [pools]);
@@ -354,12 +356,12 @@ export default function HomeVersionTimelineManager({ pools = [], showToast }) {
         order: String((index + 1) * 10),
       }));
       const serialized = serializeHomeVersionTimelineRows(orderedRows);
-      const success = await useSiteConfigStore.getState().updateConfig(HOME_VERSION_TIMELINE_CONFIG_KEY, serialized, {
-        label: '首页版本时间线',
-        category: 'content',
-      });
+      const metadata = { label: '首页版本时间线', category: 'content' };
+      const success = configAdapter
+        ? await configAdapter.updateConfig(HOME_VERSION_TIMELINE_CONFIG_KEY, serialized, metadata)
+        : await useSiteConfigStore.getState().updateConfig(HOME_VERSION_TIMELINE_CONFIG_KEY, serialized, metadata);
       if (!success) {
-        const updateError = useSiteConfigStore.getState().updateError;
+        const updateError = configAdapter?.getError?.() || useSiteConfigStore.getState().updateError;
         showToast?.(`版本时间线保存失败: ${updateError?.message || '请检查登录状态和超级管理员权限'}`, 'error');
         return;
       }

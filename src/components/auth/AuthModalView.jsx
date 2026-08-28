@@ -25,6 +25,8 @@ import AuthCaptchaBox from '../captcha/AuthCaptchaBox.jsx';
 export default function AuthModalView({
   agreedToTerms,
   confirmPassword,
+  contributorDemoCredentials,
+  contributorDemoOnly,
   email,
   emailDomainError,
   emailValid,
@@ -48,6 +50,7 @@ export default function AuthModalView({
   emailLoginSendCount,
   passwordResetSendCount,
   onPasswordChange,
+  onUseContributorDemo,
   onAddRecoveryClaim,
   onSubmit,
   onEmailLogin,
@@ -215,6 +218,39 @@ export default function AuthModalView({
                     className="w-full min-h-[44px] bg-endfield-yellow hover:bg-yellow-400 text-black font-bold uppercase tracking-wider py-2 px-4 rounded-none transition-colors text-sm whitespace-normal text-center leading-tight"
                   >
                     {tt('使用此邮箱登录', 'Sign In Instead')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {mode === 'login' && contributorDemoCredentials && (
+            <div
+              className="border border-cyan-300 bg-cyan-50 p-4 text-cyan-950 dark:border-cyan-800 dark:bg-cyan-950/30 dark:text-cyan-100"
+              data-testid="contributor-demo-login-card"
+            >
+              <div className="flex items-start gap-3">
+                <FileSearch size={20} className="mt-0.5 shrink-0 text-cyan-600 dark:text-cyan-300" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold">{tt('前端贡献者本地沙盒账号', 'Local Contributor Sandbox')}</p>
+                  <p className="mt-1 text-xs leading-5 text-cyan-800 dark:text-cyan-200">
+                    {tt(
+                      '仅在本地开发模式生效。游戏目录来自正式站公开 API；公告、卡池、角色和站点内容可在浏览器沙盒中编辑，但不会调用真实认证或写入接口。',
+                      'Only available in local development. The game catalog comes from the public production API; content is editable inside a browser sandbox without calling real auth or write APIs.'
+                    )}
+                  </p>
+                  <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 font-mono text-xs">
+                    <dt>{tt('邮箱', 'Email')}</dt>
+                    <dd className="break-all">{contributorDemoCredentials.email}</dd>
+                    <dt>{tt('密码', 'Password')}</dt>
+                    <dd>{contributorDemoCredentials.password}</dd>
+                  </dl>
+                  <button
+                    type="button"
+                    onClick={onUseContributorDemo}
+                    className="mt-3 min-h-10 w-full border border-cyan-500 bg-white px-3 py-2 text-xs font-bold uppercase tracking-wider text-cyan-800 transition-colors hover:bg-cyan-100 dark:bg-zinc-950 dark:text-cyan-200 dark:hover:bg-cyan-950"
+                  >
+                    {tt('填入演示账号', 'Fill Demo Credentials')}
                   </button>
                 </div>
               </div>
@@ -522,7 +558,7 @@ export default function AuthModalView({
                   className="w-full pl-10 pr-4 py-3 border border-zinc-200 dark:border-zinc-700 rounded-none bg-white dark:bg-zinc-900 text-slate-800 dark:text-zinc-100 placeholder-slate-400 dark:placeholder-zinc-600 focus:ring-2 focus:ring-endfield-yellow focus:border-endfield-yellow outline-none transition-all"
                 />
               </div>
-              {mode === 'login' && (
+              {mode === 'login' && !contributorDemoOnly && (
                 <div className="mt-2 text-right">
                   <button
                     type="button"
@@ -738,7 +774,7 @@ export default function AuthModalView({
             )}
           </button>
 
-          {mode === 'login' && (
+          {mode === 'login' && !contributorDemoOnly && (
             <button
               type="button"
               onClick={onEmailLogin}
@@ -792,7 +828,7 @@ export default function AuthModalView({
           )}
         </form>
 
-        <div className="shrink-0 border-t border-zinc-100 bg-white px-4 py-3 text-center dark:border-zinc-800 dark:bg-zinc-900 sm:px-6 sm:py-4">
+        {!contributorDemoOnly && <div className="shrink-0 border-t border-zinc-100 bg-white px-4 py-3 text-center dark:border-zinc-800 dark:bg-zinc-900 sm:px-6 sm:py-4">
           <p className="text-slate-500 dark:text-zinc-500 text-sm">
             {mode === 'login' ? (
               <>
@@ -827,7 +863,7 @@ export default function AuthModalView({
               </button>
             )}
           </p>
-        </div>
+        </div>}
       </div>
       </div>
     </div>

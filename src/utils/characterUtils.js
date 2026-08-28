@@ -13,6 +13,9 @@ import { executeSupabaseMutation, executeSupabaseRead } from '../services/supaba
 import { isSupabaseRealtimeEnabled, supabase } from '../supabaseClient.js';
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from './storageUtils.js';
 import { normalizeEntityNameForMatch } from './canonicalEntityUtils.js';
+import { isContributorDemoModeEnabled } from '../dev/contributorDemoMode.js';
+import { sanitizePublicCharacterRecord } from '../../shared/publicCatalogDto.js';
+import { APPROVED_PUBLIC_RESOURCE_HOSTS } from './publicResourceUrl.js';
 
 const PUBLIC_CHARACTERS_API_TIMEOUT_MS = 25000;
 
@@ -37,7 +40,9 @@ function readCharacterSnapshot() {
     }
 
     const parsedSnapshot = JSON.parse(rawSnapshot);
-    return Array.isArray(parsedSnapshot?.characters) ? parsedSnapshot.characters : [];
+    return (Array.isArray(parsedSnapshot?.characters) ? parsedSnapshot.characters : [])
+      .map((character) => sanitizePublicCharacterRecord(character, { allowedHosts: APPROVED_PUBLIC_RESOURCE_HOSTS }))
+      .filter(Boolean);
   } catch {
     return [];
   }
@@ -103,19 +108,22 @@ class CharacterCache {
     this.cache.clear();
     this.aliasMap.clear();
 
-    characters.forEach((char) => {
-      this.cache.set(char.id, char);
+    characters
+      .map((character) => sanitizePublicCharacterRecord(character, { allowedHosts: APPROVED_PUBLIC_RESOURCE_HOSTS }))
+      .filter(Boolean)
+      .forEach((char) => {
+        this.cache.set(char.id, char);
 
-      if (char.aliases && Array.isArray(char.aliases)) {
-        char.aliases.forEach((alias) => {
-          this.aliasMap.set(alias.toLowerCase(), char.id);
-        });
-      }
+        if (char.aliases && Array.isArray(char.aliases)) {
+          char.aliases.forEach((alias) => {
+            this.aliasMap.set(alias.toLowerCase(), char.id);
+          });
+        }
 
-      if (char.name) {
-        this.aliasMap.set(char.name.toLowerCase(), char.id);
-      }
-    });
+        if (char.name) {
+          this.aliasMap.set(char.name.toLowerCase(), char.id);
+        }
+      });
   }
 
   finishLoading() {
@@ -147,6 +155,18 @@ class CharacterCache {
     }
 
     this.loading = true;
+
+    if (isContributorDemoModeEnabled()) {
+      const {
+        getContributorDemoSandboxSnapshot,
+        initializeContributorDemoSandbox,
+      } = await import('../dev/contributorDemoSandboxStore.js');
+      await initializeContributorDemoSandbox();
+      this.applyCharacters(getContributorDemoSandboxSnapshot().characters);
+      this.finishLoading();
+      return;
+    }
+
     const cachedCharacters = readCharacterSnapshot();
 
     try {
@@ -254,14 +274,16 @@ class CharacterCache {
       case 'INSERT':
       case 'UPDATE':
         if (newRecord) {
-          this.cache.set(newRecord.id, newRecord);
+          const safeRecord = sanitizePublicCharacterRecord(newRecord, { allowedHosts: APPROVED_PUBLIC_RESOURCE_HOSTS });
+          if (!safeRecord) break;
+          this.cache.set(safeRecord.id, safeRecord);
           // 更新别名映射
-          if (newRecord.aliases) {
-            newRecord.aliases.forEach((alias) => {
-              this.aliasMap.set(alias.toLowerCase(), newRecord.id);
+          if (safeRecord.aliases) {
+            safeRecord.aliases.forEach((alias) => {
+              this.aliasMap.set(alias.toLowerCase(), safeRecord.id);
             });
           }
-          this.aliasMap.set(newRecord.name.toLowerCase(), newRecord.id);
+          this.aliasMap.set(safeRecord.name.toLowerCase(), safeRecord.id);
           this.persistSnapshot();
         }
         break;

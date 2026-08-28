@@ -1,6 +1,8 @@
 import React, { Suspense, lazy } from 'react';
 import { Shield, RefreshCw, ChevronRight, Users, Database, Layers, Star, Bell, Settings, KeyRound, Bot, Globe, Activity, Mail, MessageSquare, AlertTriangle, Gift } from 'lucide-react';
 import { useAdminData, useUserDataViewer } from '../hooks/admin';
+import { isContributorDemoUser } from '../dev/contributorDemoMode.js';
+import ContributorDemoAdminPanel from './admin/ContributorDemoAdminPanel.jsx';
 
 const CharacterManagement = lazy(() => import('./admin/CharacterManagement'));
 const PoolManagement = lazy(() => import('./admin/PoolManagement'));
@@ -41,7 +43,7 @@ const AdminPanelFallback = () => (
   </div>
 );
 
-const AdminPanel = React.memo(({ user, userRole, showToast, addDurableNotification }) => {
+const LiveAdminPanel = React.memo(({ user, userRole, showToast, addDurableNotification }) => {
   const [activeMenu, setActiveMenu] = React.useState('siteHealth');
 
   // 使用拆分后的 hooks
@@ -267,4 +269,9 @@ const AdminPanel = React.memo(({ user, userRole, showToast, addDurableNotificati
   );
 });
 
-export default AdminPanel;
+export default function AdminPanel(props) {
+  if (isContributorDemoUser(props.user)) {
+    return <ContributorDemoAdminPanel showToast={props.showToast} />;
+  }
+  return <LiveAdminPanel {...props} />;
+}

@@ -1,6 +1,7 @@
 import { supabase } from '../supabaseClient.js';
 import { fetchPublicApiJson, shouldAllowPublicSupabaseFallback } from '../services/publicResourceClient.js';
 import { characterCache, getLimitedCharacterPoolStatus } from './characterUtils.js';
+import { isContributorDemoModeEnabled } from '../dev/contributorDemoMode.js';
 
 const POOL_ROSTER_API_CACHE_TTL = 5 * 60 * 1000;
 const POOL_ROSTER_API_TIMEOUT_MS = 15000;
@@ -302,6 +303,16 @@ export function buildDynamicRosterBuckets({
 }
 
 export async function fetchPoolRosterBuckets(poolId, { expectedType = 'character', currentUpName = null } = {}) {
+  if (isContributorDemoModeEnabled() && poolId) {
+    const {
+      getContributorDemoSandboxSnapshot,
+      initializeContributorDemoSandbox,
+    } = await import('../dev/contributorDemoSandboxStore.js');
+    await initializeContributorDemoSandbox();
+    const records = getContributorDemoSandboxSnapshot().poolCharacters[poolId] || [];
+    return buildBucketsFromPoolCharacters(records, { expectedType, currentUpName });
+  }
+
   if (!shouldAllowPublicSupabaseFallback() || !supabase || !poolId) {
     return null;
   }
@@ -386,6 +397,16 @@ export async function fetchPoolRosterRecordsBatch(poolIds = [], { forceRefresh =
   const normalizedPoolIds = Array.from(new Set(poolIds.map(normalizePoolId).filter(Boolean)));
   if (normalizedPoolIds.length === 0) {
     return new Map();
+  }
+
+  if (isContributorDemoModeEnabled()) {
+    const {
+      getContributorDemoSandboxSnapshot,
+      initializeContributorDemoSandbox,
+    } = await import('../dev/contributorDemoSandboxStore.js');
+    await initializeContributorDemoSandbox();
+    const records = getContributorDemoSandboxSnapshot().poolCharacters;
+    return new Map(normalizedPoolIds.map((poolId) => [poolId, records[poolId] || []]));
   }
 
   if (!import.meta.env?.PROD && !forceRefresh) {

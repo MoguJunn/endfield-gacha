@@ -1,7 +1,8 @@
 import React, { Suspense, lazy } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Navigate, Routes, Route } from 'react-router-dom';
 import DeviceRedirectGuard from './components/guards/DeviceRedirectGuard';
 import { useI18n } from './i18n/index.js';
+import { isContributorDemoModeEnabled } from './dev/contributorDemoMode.js';
 
 // 懒加载桌面端入口，避免移动端与独立页面首包提前带入完整桌面壳层
 const App = lazy(() => import('./App'));
@@ -33,17 +34,25 @@ function AppRouter() {
         <Route
           path="/reset-password"
           element={
-            <Suspense fallback={<MobileLoadingFallback />}>
-              <ResetPasswordPage />
-            </Suspense>
+            isContributorDemoModeEnabled()
+              ? <Navigate to="/" replace />
+              : (
+                <Suspense fallback={<MobileLoadingFallback />}>
+                  <ResetPasswordPage />
+                </Suspense>
+              )
           }
         />
         <Route
           path="/auth/callback"
           element={
-            <Suspense fallback={<MobileLoadingFallback />}>
-              <AuthCallbackPage />
-            </Suspense>
+            isContributorDemoModeEnabled()
+              ? <Navigate to="/" replace />
+              : (
+                <Suspense fallback={<MobileLoadingFallback />}>
+                  <AuthCallbackPage />
+                </Suspense>
+              )
           }
         />
         <Route

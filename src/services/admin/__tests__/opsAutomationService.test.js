@@ -96,25 +96,37 @@ describe('opsAutomationService same-origin API client', () => {
   });
 
   it('triggers manual jobs with same-origin cookies when no native token exists', async () => {
+    fetchJsonWithTimeout.mockResolvedValueOnce({
+      response: { ok: true, status: 200 },
+      data: { success: true },
+    });
+
     await expect(triggerManualSync('all', {
       forceRefresh: true,
       refreshMode: 'all',
       announcementLimit: 20,
     })).resolves.toEqual({ success: true });
 
-    expect(fetch).toHaveBeenCalledWith('/api/admin-ops-automation', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith(
+      '/api/admin-ops-automation',
+      {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          job: 'all',
+          forceRefresh: true,
+          refreshMode: 'all',
+          announcementLimit: 20,
+        }),
       },
-      body: JSON.stringify({
-        job: 'all',
-        forceRefresh: true,
-        refreshMode: 'all',
-        announcementLimit: 20,
+      expect.objectContaining({
+        label: 'admin-ops-automation-trigger',
       }),
-    });
+    );
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('throws readable failures when the admin route rejects the request', async () => {

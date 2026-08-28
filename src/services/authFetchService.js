@@ -4,6 +4,7 @@ import {
   getKnownSiteSessionUserId,
   hasKnownAuthenticatedSiteSession,
 } from './siteSessionService.js';
+import { isContributorDemoModeEnabled } from '../dev/contributorDemoMode.js';
 
 async function clearInvalidSupabaseSession() {
   await supabase?.auth?.signOut?.({ scope: 'local' }).catch(() => null);
@@ -62,7 +63,7 @@ async function getSiteSessionAccessToken({
 }
 
 export async function getValidatedSupabaseSession() {
-  if (!supabase) {
+  if (isContributorDemoModeEnabled() || !supabase) {
     return null;
   }
 
@@ -96,7 +97,7 @@ export async function getSupabaseAccessToken({
   allowSiteSessionToken = true,
   preferSiteSessionToken = false,
 } = {}) {
-  if (!supabase) {
+  if (isContributorDemoModeEnabled() || !supabase) {
     return null;
   }
 
@@ -148,6 +149,12 @@ export async function getAuthFetchHeaders(baseHeaders = {}, {
   allowSiteSessionToken = true,
   preferSiteSessionToken = false,
 } = {}) {
+  if (isContributorDemoModeEnabled()) {
+    if (requireToken) {
+      throw new Error('贡献者内容沙盒不提供真实认证凭据');
+    }
+    return { headers: { ...baseHeaders }, accessToken: null };
+  }
   const headers = {
     ...baseHeaders,
   };
@@ -173,6 +180,14 @@ export async function getAuthFetchHeaders(baseHeaders = {}, {
 }
 
 export async function getSameOriginAuthHeaders(baseHeaders = {}, options = {}) {
+  if (isContributorDemoModeEnabled()) {
+    return {
+      headers: { ...baseHeaders },
+      accessToken: null,
+      credentialSource: 'contributor_sandbox',
+      credentialOwnerId: null,
+    };
+  }
   if (hasKnownAuthenticatedSiteSession()) {
     return {
       headers: {
@@ -202,6 +217,9 @@ export async function buildAuthenticatedFetchInit(init = {}, options = {}) {
 }
 
 export async function withAuthenticatedSupabaseRequest(buildRequest, options = {}) {
+  if (isContributorDemoModeEnabled()) {
+    throw new Error('贡献者内容沙盒不执行真实 Supabase 请求');
+  }
   const { accessToken } = await getAuthFetchHeaders({}, options);
   let request = await buildRequest();
 
@@ -217,6 +235,10 @@ export async function getCurrentAuthenticatedUser({
   syncSiteSession = true,
   useSiteSessionCache = true,
 } = {}) {
+  if (isContributorDemoModeEnabled()) {
+    if (requireUser) throw new Error('贡献者内容沙盒不提供真实认证用户');
+    return null;
+  }
   if (syncSiteSession) {
     const siteSession = await getCurrentSiteSession({
       syncSupabase: true,

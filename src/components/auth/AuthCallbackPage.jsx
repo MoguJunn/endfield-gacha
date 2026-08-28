@@ -9,6 +9,7 @@ import {
   buildBridgeCallbackForwardUrl,
   getBridgeProviderFromState,
 } from './authCallbackBridge.js';
+import { isContributorDemoModeEnabled } from '../../dev/contributorDemoMode.js';
 
 function cleanCallbackUrl(next) {
   const url = new URL(window.location.href);
@@ -52,6 +53,19 @@ export default function AuthCallbackPage() {
 
     let cancelled = false;
     let redirectTimer = null;
+
+    if (isContributorDemoModeEnabled()) {
+      setStatus({
+        type: 'error',
+        next: '/',
+        message: tt('本地内容沙盒不处理真实登录回调。', 'Real sign-in callbacks are disabled in the local content sandbox.'),
+      });
+      redirectTimer = window.setTimeout(() => navigate('/', { replace: true }), 300);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(redirectTimer);
+      };
+    }
 
     function finishSuccess(next) {
       if (cancelled) {

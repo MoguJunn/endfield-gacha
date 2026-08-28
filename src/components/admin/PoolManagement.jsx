@@ -223,7 +223,7 @@ const TargetPreviewList = ({ title, targets, empty }) => (
  * 卡池管理界面
  * 超级管理员专用，用于管理所有卡池的 CRUD 操作
  */
-const PoolManagement = ({ showToast }) => {
+const PoolManagement = ({ showToast, service = null, configAdapter = null, sandboxMode = false }) => {
   const [activeTab, setActiveTab] = useState('pools');
   const {
     // 数据
@@ -267,7 +267,11 @@ const PoolManagement = ({ showToast }) => {
     toggleCharacterInPool,
     addAllCharactersToPool,
     removeAllCharactersFromPool,
-  } = usePools(showToast);
+  } = usePools(showToast, service ? {
+    service,
+    invalidateCache: async () => true,
+    refreshCharacterCatalog: async () => true,
+  } : undefined);
 
   const [poolPushPreview, setPoolPushPreview] = useState(null);
   const [poolPushResult, setPoolPushResult] = useState(null);
@@ -383,7 +387,7 @@ const PoolManagement = ({ showToast }) => {
       </div>
 
       {activeTab === 'versions' ? (
-        <HomeVersionTimelineManager pools={pools} showToast={showToast} />
+        <HomeVersionTimelineManager pools={pools} showToast={showToast} configAdapter={configAdapter} />
       ) : (
         <>
           <PanelSection
@@ -499,7 +503,7 @@ const PoolManagement = ({ showToast }) => {
                         actionLoading={actionLoading}
                         onEdit={startEdit}
                         onDelete={handleDeletePool}
-                        onPreviewPush={openPoolPushPreview}
+                        onPreviewPush={sandboxMode ? null : openPoolPushPreview}
                       />
                     </div>
                   )}
@@ -520,19 +524,21 @@ const PoolManagement = ({ showToast }) => {
             actionLoading={actionLoading}
             checkUpCharacterExists={checkUpCharacterExists}
             onSave={handleSavePool}
-            onSaveAndPreviewPush={handleSaveAndPreviewPush}
+            onSaveAndPreviewPush={sandboxMode ? null : handleSaveAndPreviewPush}
             onClose={resetForm}
             onToggleCharacter={toggleCharacterInPool}
             onAddAllCharacters={addAllCharactersToPool}
             onRemoveAllCharacters={removeAllCharactersFromPool}
           />
-          <PoolPushConfirmDialog
-            preview={poolPushPreview}
-            result={poolPushResult}
-            loading={poolPushLoading}
-            onClose={closePoolPushDialog}
-            onConfirm={handleConfirmPoolPush}
-          />
+          {!sandboxMode && (
+            <PoolPushConfirmDialog
+              preview={poolPushPreview}
+              result={poolPushResult}
+              loading={poolPushLoading}
+              onClose={closePoolPushDialog}
+              onConfirm={handleConfirmPoolPush}
+            />
+          )}
         </>
       )}
     </div>

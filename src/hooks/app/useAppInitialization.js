@@ -9,6 +9,11 @@ import { getCurrentSiteSession } from '../../services/siteSessionService.js';
 import { updateAccountLastSeen } from '../../services/accountLastSeenService.js';
 import { subscribeAuthSessionSync } from '../../services/authSessionEvents.js';
 import {
+  isContributorDemoModeEnabled,
+  isContributorDemoSessionActive,
+} from '../../dev/contributorDemoMode.js';
+import { activateContributorDemoSession } from '../../dev/contributorDemoSession.js';
+import {
   canUsePrivateCloudDataFromSiteSession,
   useAuthenticatedSessionSync
 } from './useAuthenticatedSessionSync.js';
@@ -49,6 +54,20 @@ export function useAppInitialization({ refreshPersonalData, loadPublicPools }) {
     };
 
     const initializeApp = async () => {
+      if (isContributorDemoModeEnabled()) {
+        await Promise.allSettled([
+          characterCache.load(),
+          useSiteConfigStore.getState().loadConfig(),
+          typeof loadPublicPools === 'function' ? loadPublicPools() : Promise.resolve(null),
+        ]);
+        if (isContributorDemoSessionActive()) {
+          await activateContributorDemoSession();
+        } else {
+          setAuthResolved(true);
+        }
+        return;
+      }
+
       if (!supabase) {
         setAuthResolved(true);
         if (typeof loadPublicPools === 'function') {
@@ -121,6 +140,12 @@ export function useAppInitialization({ refreshPersonalData, loadPublicPools }) {
     };
 
     initializeApp();
+
+    if (isContributorDemoModeEnabled()) {
+      return () => {
+        isMounted = false;
+      };
+    }
 
     const unsubscribeAuthSessionSync = subscribeAuthSessionSync((event) => {
       queueMicrotask(async () => {

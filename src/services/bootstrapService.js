@@ -1,8 +1,22 @@
 import { fetchPublicApiJson } from './publicResourceClient.js';
-import { readStorageValue, STORAGE_KEYS, writeStorageValue } from '../utils/storageUtils.js';
+import {
+  readStorageValue,
+  removeStorageValue,
+  STORAGE_KEYS,
+  writeStorageValue,
+} from '../utils/storageUtils.js';
+import { isContributorDemoModeEnabled } from '../dev/contributorDemoMode.js';
+import {
+  getContributorDemoSandboxSnapshot,
+  initializeContributorDemoSandbox,
+} from '../dev/contributorDemoSandboxStore.js';
+import { pickPublicSiteConfig } from '../../shared/publicSiteConfig.js';
+import { sanitizePublicPoolRecord } from '../../shared/publicCatalogDto.js';
+import { APPROVED_PUBLIC_RESOURCE_HOSTS } from '../utils/publicResourceUrl.js';
 
 const BOOTSTRAP_API_TIMEOUT_MS = 25000;
 const BOOTSTRAP_MEMORY_TTL = 5 * 60 * 1000;
+const BOOTSTRAP_SNAPSHOT_SCHEMA_VERSION = 3;
 const bootstrapState = {
   data: null,
   fetchedAt: 0,
@@ -13,8 +27,10 @@ function normalizeBootstrapPayload(payload) {
   const data = payload && typeof payload === 'object' ? payload : {};
 
   return {
-    siteConfig: data.siteConfig && typeof data.siteConfig === 'object' ? data.siteConfig : {},
-    pools: Array.isArray(data.pools) ? data.pools : []
+    siteConfig: pickPublicSiteConfig(data.siteConfig),
+    pools: (Array.isArray(data.pools) ? data.pools : [])
+      .map((pool) => sanitizePublicPoolRecord(pool, { allowedHosts: APPROVED_PUBLIC_RESOURCE_HOSTS }))
+      .filter(Boolean)
   };
 }
 
@@ -24,13 +40,14 @@ function readPersistedBootstrapSnapshot() {
   }
 
   try {
-    const raw = readStorageValue(STORAGE_KEYS.PUBLIC_BOOTSTRAP_SNAPSHOT_V2, null, { raw: true });
+    removeStorageValue(STORAGE_KEYS.PUBLIC_BOOTSTRAP_SNAPSHOT_V2, { raw: true });
+    const raw = readStorageValue(STORAGE_KEYS.PUBLIC_BOOTSTRAP_SNAPSHOT_V3, null, { raw: true });
     if (!raw) {
       return null;
     }
 
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
+    if (!parsed || typeof parsed !== 'object' || parsed.schemaVersion !== BOOTSTRAP_SNAPSHOT_SCHEMA_VERSION) {
       return null;
     }
 
@@ -49,7 +66,9 @@ function writePersistedBootstrapSnapshot(data) {
   }
 
   try {
-    writeStorageValue(STORAGE_KEYS.PUBLIC_BOOTSTRAP_SNAPSHOT_V2, JSON.stringify({
+    removeStorageValue(STORAGE_KEYS.PUBLIC_BOOTSTRAP_SNAPSHOT_V2, { raw: true });
+    writeStorageValue(STORAGE_KEYS.PUBLIC_BOOTSTRAP_SNAPSHOT_V3, JSON.stringify({
+      schemaVersion: BOOTSTRAP_SNAPSHOT_SCHEMA_VERSION,
       data: normalizeBootstrapPayload(data),
       fetchedAt: Date.now()
     }), { raw: true });
@@ -82,6 +101,15 @@ async function fetchBootstrapFromApi(forceRefresh = false) {
 }
 
 export async function preloadPublicBootstrap(forceRefresh = false) {
+  if (isContributorDemoModeEnabled()) {
+    await initializeContributorDemoSandbox();
+    const snapshot = getContributorDemoSandboxSnapshot();
+    const demoData = { siteConfig: snapshot.siteConfig, pools: snapshot.pools };
+    bootstrapState.data = demoData;
+    bootstrapState.fetchedAt = Date.now();
+    return demoData;
+  }
+
   if (isFreshBootstrapCache(forceRefresh)) {
     return bootstrapState.data;
   }
@@ -137,4 +165,11 @@ export default {
   getBootstrapSnapshot,
   getBootstrapSiteConfig,
   getBootstrapVisiblePools
+};
+
+export const __internal = {
+  BOOTSTRAP_SNAPSHOT_SCHEMA_VERSION,
+  normalizeBootstrapPayload,
+  readPersistedBootstrapSnapshot,
+  writePersistedBootstrapSnapshot,
 };

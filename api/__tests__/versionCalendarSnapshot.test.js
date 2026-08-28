@@ -51,7 +51,7 @@ describe('version calendar snapshot', () => {
       type: 'limited_weapon',
       start_time: '2026-07-16T04:00:00+00:00',
       end_time: '2026-09-05T04:00:00+00:00',
-      banner_url: 'https://cdn.example/pool-a.webp',
+      banner_url: 'https://127.0.0.1/private.webp',
       user_id: 'private-user',
       creator_username: 'private-name',
     });
@@ -60,7 +60,7 @@ describe('version calendar snapshot', () => {
       poolId: 'weapon-pool-a',
       name: '军列申领',
       type: 'arsenal',
-      bannerUrl: 'https://cdn.example/pool-a.webp',
+      bannerUrl: null,
     }));
     expect(result).not.toHaveProperty('user_id');
     expect(result).not.toHaveProperty('creator_username');

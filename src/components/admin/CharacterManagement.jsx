@@ -19,8 +19,10 @@ const EMPTY_LOCALIZATION_CONFIG = {};
 /**
  * 角色管理组件
  */
-const CharacterManagement = ({ showToast }) => {
-  const entityLocalizationConfig = useJsonConfig(ENTITY_LOCALIZATION_CONFIG_KEY, EMPTY_LOCALIZATION_CONFIG);
+const CharacterManagement = ({ showToast, service = null, configAdapter = null, sandboxMode = false }) => {
+  const storedEntityLocalizationConfig = useJsonConfig(ENTITY_LOCALIZATION_CONFIG_KEY, EMPTY_LOCALIZATION_CONFIG);
+  const [sandboxLocalizationConfig, setSandboxLocalizationConfig] = React.useState(EMPTY_LOCALIZATION_CONFIG);
+  const entityLocalizationConfig = sandboxMode ? sandboxLocalizationConfig : storedEntityLocalizationConfig;
   const [localizedNameEnOverride, setLocalizedNameEnOverride] = React.useState('');
   const {
     // 数据状态
@@ -94,7 +96,29 @@ const CharacterManagement = ({ showToast }) => {
 
     // 同步操作
     handleSyncFromAPI
-  } = useCharacters({ showToast });
+  } = useCharacters({
+    showToast,
+    service: service || undefined,
+    invalidateCache: service ? async () => true : undefined,
+    sandboxMode,
+  });
+
+  React.useEffect(() => {
+    if (!sandboxMode || !configAdapter) return;
+    let mounted = true;
+    configAdapter.loadItems().then((items) => {
+      if (!mounted) return;
+      const item = items.find((entry) => entry.key === ENTITY_LOCALIZATION_CONFIG_KEY);
+      try {
+        setSandboxLocalizationConfig(item?.value ? JSON.parse(item.value) : EMPTY_LOCALIZATION_CONFIG);
+      } catch {
+        setSandboxLocalizationConfig(EMPTY_LOCALIZATION_CONFIG);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [configAdapter, sandboxMode]);
 
   const getStoredEnglishOverride = React.useCallback((characterLike) => {
     if (!characterLike || !entityLocalizationConfig || typeof entityLocalizationConfig !== 'object') {
@@ -157,19 +181,21 @@ const CharacterManagement = ({ showToast }) => {
       delete nextConfig[result.characterData.id];
     }
 
-    const success = await useSiteConfigStore.getState().updateConfig(
-      ENTITY_LOCALIZATION_CONFIG_KEY,
-      JSON.stringify(nextConfig, null, 2),
-      {
-        label: '角色/武器名称本地化',
-        category: 'content',
-      }
-    );
+    const metadata = { label: '角色/武器名称本地化', category: 'content' };
+    const success = configAdapter
+      ? await configAdapter.updateConfig(ENTITY_LOCALIZATION_CONFIG_KEY, JSON.stringify(nextConfig, null, 2), metadata)
+      : await useSiteConfigStore.getState().updateConfig(
+        ENTITY_LOCALIZATION_CONFIG_KEY,
+        JSON.stringify(nextConfig, null, 2),
+        metadata
+      );
 
     if (!success) {
       showToast?.('角色已保存，但英文名本地化覆盖保存失败', 'warning');
+    } else if (sandboxMode) {
+      setSandboxLocalizationConfig(nextConfig);
     }
-  }, [entityLocalizationConfig, localizedNameEnOverride, saveCharacter, showToast]);
+  }, [configAdapter, entityLocalizationConfig, localizedNameEnOverride, sandboxMode, saveCharacter, showToast]);
 
   if (loading) {
     return (
@@ -246,7 +272,7 @@ const CharacterManagement = ({ showToast }) => {
           <Plus size={16} />
           新增{activeTab === 'character' ? '角色' : '武器'}
         </button>
-        <button
+        {!sandboxMode && <button
           onClick={() => handleSyncFromAPI()}
           disabled={isSyncing}
           className="flex items-center gap-1 px-3 py-2 bg-green-500 hover:bg-green-600 disabled:bg-green-400 text-white text-sm font-medium rounded-none transition-colors"
@@ -254,8 +280,8 @@ const CharacterManagement = ({ showToast }) => {
         >
           <RefreshCw size={16} className={isSyncing ? 'animate-spin' : ''} />
           {isSyncing ? syncProgress || '同步中...' : '同步数据'}
-        </button>
-        <a
+        </button>}
+        {!sandboxMode && <a
           href={SKLAND_CATALOG_URLS.character}
           target="_blank"
           rel="noreferrer"
@@ -264,8 +290,8 @@ const CharacterManagement = ({ showToast }) => {
         >
           <ExternalLink size={16} />
           角色图鉴
-        </a>
-        <a
+        </a>}
+        {!sandboxMode && <a
           href={SKLAND_CATALOG_URLS.weapon}
           target="_blank"
           rel="noreferrer"
@@ -274,19 +300,21 @@ const CharacterManagement = ({ showToast }) => {
         >
           <ExternalLink size={16} />
           武器图鉴
-        </a>
-        <button
+        </a>}
+        {!sandboxMode && <button
           onClick={openSklandImportDialog}
           className="flex items-center gap-1 px-3 py-2 border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-sm font-medium rounded-none transition-colors"
           title={`从当前${activeTab === 'weapon' ? '武器' : '角色'}森空岛终末地 WIKI 批量导入图片链接`}
         >
           <ImagePlus size={16} />
           导入图鉴图片
-        </button>
+        </button>}
       </div>
 
       <div className="rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 px-3 py-2 text-xs text-slate-500 dark:text-zinc-400">
-        当前“同步数据”仍使用 {CURRENT_SYNC_SOURCE_LABEL} 作为基础数据源；`ADMIN-001` 推进阶段优先将角色 / 武器图片维护入口收口到森空岛终末地 WIKI 官方图鉴，自动抓图源待后续继续推进。
+        {sandboxMode
+          ? '本地沙盒可新增、编辑、批量修改和删除角色 / 武器；刷新正式目录与重置入口位于控制台顶部。外部图鉴同步和上传已禁用。'
+          : <>当前“同步数据”仍使用 {CURRENT_SYNC_SOURCE_LABEL} 作为基础数据源；`ADMIN-001` 推进阶段优先将角色 / 武器图片维护入口收口到森空岛终末地 WIKI 官方图鉴，自动抓图源待后续继续推进。</>}
       </div>
 
       {/* 批量操作栏 */}
@@ -382,7 +410,7 @@ const CharacterManagement = ({ showToast }) => {
         onClose={closeBatchEditDialog}
       />
 
-      <SklandImageImportDialog
+      {!sandboxMode && <SklandImageImportDialog
         show={showSklandImportDialog}
         itemType={activeTab}
         importText={sklandImportText}
@@ -392,7 +420,7 @@ const CharacterManagement = ({ showToast }) => {
         onClose={closeSklandImportDialog}
         onCopyScript={copySklandExtractScript}
         onImport={applySklandImages}
-      />
+      />}
     </div>
   );
 };

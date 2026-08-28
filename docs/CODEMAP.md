@@ -29,11 +29,11 @@
 
 | 范围 | 文件 |
 |------|------|
-| auth / pool / history / app 状态 | `src/stores/*` |
+| auth / pool / history / app / 个人数据生命周期 / 分析快照状态 | `src/stores/*` |
 | 启动初始化 | `src/hooks/app/useAppInitialization.js` |
 | 当前卡池上下文 | `src/hooks/app/useCurrentPoolData.js` |
 | 云同步 | `src/hooks/app/useCloudSync.js` |
-| 账号历史读取与精确变更 | `src/services/accountGachaDataService.js`、`src/hooks/app/useHistoryOperations.js` |
+| 个人分析、账号历史分页与精确变更 | `src/services/accountGachaDataService.js`、`src/hooks/app/useCloudSync.js`、`src/hooks/app/useHistoryOperations.js` |
 | 官方导入控制器 / 完成策略 / 导入后异常入口 | `src/features/import/useOfficialImportController.js`、`src/features/import/importCompletionPolicy.js`、`src/features/import/ImportManager.jsx` |
 | 历史异常客户端 | `src/services/historyAnomalyService.js` |
 | 桌面 / 移动共用异常核对面板 | `src/components/records/HistoryAnomalyReview.jsx` |
@@ -43,6 +43,8 @@
 | 云写入 | `src/services/cloudWriteService.js` |
 | 文件导入草稿恢复 | `src/hooks/app/useDataExportImport.js`、`src/utils/importPendingDraft.js` |
 | Toast / 持久通知模型 | `src/hooks/useToast.js`、`src/components/ui/Toast.jsx`、`src/utils/notificationModel.js` |
+| 贡献者内容沙盒 / 正式目录缓存 / 真实 fallback / synthetic 会话 | `src/dev/contributorDemoMode.js`、`src/dev/contributorDemoSandboxStore.js`、`src/dev/contributorRealFallbackCatalog.js`、`src/dev/contributorDemoRuntimeData.js`、`src/dev/contributorDemoSession.js` |
+| 沙盒同步桥 / 横幅 / 本地管理控制台 | `src/hooks/app/useContributorDemoSandboxBridge.js`、`src/components/dev/ContributorDemoBanner.jsx`、`src/components/admin/ContributorDemoAdminPanel.jsx` |
 
 ## Vercel API
 
@@ -58,6 +60,7 @@
 | Identity hash keyring / 统一认证解析 | `api/_lib/identityHash.js`、`api/_lib/siteAuth.js`、`api/_lib/siteSession.js`、`api/_routes/root/auth-session.js` |
 | bootstrap / stats / announcements / pool-rosters | `api/_routes/root/*.js` |
 | 私有账号历史 / 精确编辑删除 | `api/_routes/root/account-gacha-data.js` |
+| 个人分析 Worker / 队列构建 | `api/_routes/root/personal-analysis-worker.js`、`api/_lib/personalAnalysisWorker.js` |
 | 用户异常提醒 / 后台异常复核 | `api/_routes/root/history-anomalies.js`、`api/_routes/root/admin-history-anomalies.js` |
 | 后台管理 | `api/_routes/root/admin.js` |
 | 运营自动化 | `api/_routes/root/ops-automation.js`、`api/_lib/runOpsAutomation.js` |
@@ -71,8 +74,10 @@
 | 邮件 worker / webhook 验证 / 手动入口 | `scripts/verify-mail-outbox-worker.mjs`、`scripts/verify-mail-delivery-feedback.mjs`、`scripts/verify-mail-inbound.mjs`、`scripts/verify-mail-service-entrypoints.mjs`、`scripts/run-mail-outbox-worker.mjs` |
 | 公共 API / cache 验证 | `scripts/verify-public-api-boundary.mjs`、`scripts/verify-bootstrap-cache-partial.mjs`、`scripts/verify-public-pool-analytics-cache.mjs` |
 | baseline / 数据库验证 | `scripts/verify-supabase-baseline.mjs`、`scripts/verify-supabase-baseline-smoke.mjs` |
+| 个人分析队列 SQL 合同 | `scripts/verify-personal-analysis-queue-sql.mjs` |
 | 认证 Phase A/B 与 C/D 专项 | `scripts/verify-auth-hardening-phase-a.mjs`、`scripts/verify-auth-hardening-phase-cd.mjs` |
 | 历史批量删除歧义保护验证 | `scripts/verify-history-batch-delete-guard.mjs` |
+| 贡献者沙盒真实目录、内容持久化与零私有请求验证 | `scripts/verify-contributor-demo-playwright.mjs` |
 | 生产历史异常扫描 / 受保护回填 | `scripts/backfill-history-anomalies.mjs` |
 
 ## Supabase 与资源
@@ -97,6 +102,10 @@
 | 当前 v4.5.4 运行时版本与缓存失效 | `supabase/migrations/158_bump_site_version_454.sql` |
 | 认证 Phase A/B | `supabase/migrations/166_harden_admin_profile_and_oauth_transactions.sql` |
 | 认证 Phase C/D | `supabase/migrations/167_harden_account_credentials_and_identity_keys.sql` |
+| 认证审查与旧邮箱空壳修复 | `supabase/migrations/168_close_auth_review_findings.sql`–`172_quarantine_oauth_email_artifact_atomically.sql` |
+| 个人分析 revision / 快照 / 活跃队列 | `supabase/migrations/173_add_personal_analysis_scope_revisions.sql`–`177_prioritize_active_personal_analysis_jobs.sql` |
+| 个人分析 `pg_cron + pg_net` 调度与即时派发 | `supabase/migrations/178_schedule_personal_analysis_worker_with_pg_cron.sql`–`180_prioritize_immediate_personal_analysis_dispatch.sql` |
+| 附加寻访、重构寻访与重构申领 | `supabase/migrations/181_add_extra_pool_subtypes.sql`–`183_split_reconstruction_claim_subtype.sql` |
 | 静态头像 | `public/avatars/` |
 | 版本日历静态图 | `public/game-calendar/` |
 
@@ -105,7 +114,8 @@
 - `SIM-004`：`src/features/simulator/useGachaSimulatorController.js` 仍承担较多模拟器 UI、资源、继承和分享状态。
 - `ARCH-021`：桌面 / 移动端 dashboard 与 settings 仍有重复控制器逻辑。
 - `DB-OPTIMIZE-001`：线上数据库体积治理要先做索引使用审计和查询计划验证，本轮未直接变更生产 schema 语义。
-- `AUTH-HARDEN-001`：Phase A–D、邮箱/凭据状态机、安全属性专项和 GitHub 核心浏览器闭环已完成，并由 `5dd8505` 固化；生产数据库已按 166 → 167 完成迁移和核验，API/主线代码尚未部署。LinuxDo 保持在独立分支 `feat/linuxdo-oauth`，已下调为 P3且不阻塞认证发布。
+- `AUTH-HARDEN-001`：Phase A–D、PR #14、邮箱/凭据状态机、安全属性专项和 GitHub 核心浏览器闭环已完成；生产数据库已确认 166–168，API / 主线已发布。LinuxDo 保持在独立分支 `feat/linuxdo-oauth`，已下调为 P3 且不阻塞认证发布。
+- `PERF-013 / UX-FLOW-001`：个人数据与分析可用性主链已由 PR #23–#25 收口；更广的桌面 / 移动重复控制器和视觉密度治理继续由 `ARCH-021`、`UI-*`、`MOBILE-006` 跟踪。
 
 ## 独立导入后端兼容层
 

@@ -14,6 +14,10 @@ import { serverLogger } from '../../_lib/serverLogger.js';
 import { resolveSupabaseServerKey, resolveSupabaseUrl } from '../../_lib/supabaseEnv.js';
 import { buildVersionCalendarPayload, mergeVersionTimelineConfig } from '../../_lib/versionCalendarSnapshot.js';
 import { getCanonicalExtraPoolSubtype } from '../../../shared/extraPoolSubtype.js';
+import {
+  sanitizePublicCatalogResourceUrl,
+  sanitizePublicPoolRecord,
+} from '../../../shared/publicCatalogDto.js';
 
 // 内存缓存
 const cache = {
@@ -113,8 +117,8 @@ function normalizeCharacterAvatarRecord(record) {
 
   return {
     ...record,
-    ...(record.avatar_url ? { avatar_url: resolveOptimizedLocalAvatarUrl(record.avatar_url) } : {}),
-    ...(record.avatarUrl ? { avatarUrl: resolveOptimizedLocalAvatarUrl(record.avatarUrl) } : {}),
+    ...(record.avatar_url ? { avatar_url: sanitizePublicCatalogResourceUrl(resolveOptimizedLocalAvatarUrl(record.avatar_url)) } : {}),
+    ...(record.avatarUrl ? { avatarUrl: sanitizePublicCatalogResourceUrl(resolveOptimizedLocalAvatarUrl(record.avatarUrl)) } : {}),
   };
 }
 
@@ -171,7 +175,7 @@ function dedupeVisiblePoolRecords(records) {
 
 function formatVisiblePoolRecord(record) {
   const hasSixStarRoster = Array.isArray(record?.six_star_entities);
-  return {
+  return sanitizePublicPoolRecord({
     id: record.pool_id,
     name: record.name,
     name_en: record.name_en || null,
@@ -184,9 +188,6 @@ function formatVisiblePoolRecord(record) {
     isLimitedWeapon: record.is_limited_weapon !== false,
     created_at: record.created_at || null,
     updated_at: record.updated_at || null,
-    user_id: record.user_id || null,
-    creator_username: record.creator_username || null,
-    creator_role: record.creator_role || null,
     up_character: record.up_character || null,
     description: record.description || null,
     banner_url: record.banner_url || null,
@@ -199,7 +200,7 @@ function formatVisiblePoolRecord(record) {
           six_star_roster_complete: record.six_star_roster_complete === true,
         }
       : {}),
-  };
+  });
 }
 
 function getPoolCatalogSortTimestamp(record) {
@@ -340,21 +341,6 @@ function sanitizeCharacterCatalog(catalog) {
   return catalog ? stripPrivateCharacterCatalogFields(catalog) : null;
 }
 
-async function fetchPublicProfilesMap(supabase, userIds = []) {
-  const uniqueIds = [...new Set((userIds || []).filter(Boolean))];
-  if (uniqueIds.length === 0) {
-    return new Map();
-  }
-
-  const { data, error } = await supabase.from('public_profiles').select('id, username, role').in('id', uniqueIds);
-
-  if (error) {
-    throw error;
-  }
-
-  return new Map((data || []).map((profile) => [profile.id, profile]));
-}
-
 async function fetchPoolSixStarRosterMap(supabase, poolIds = []) {
   const normalizedPoolIds = [...new Set((poolIds || []).filter(Boolean).map(String))];
   if (normalizedPoolIds.length === 0) {
@@ -389,7 +375,7 @@ async function fetchPoolCatalog(supabase) {
   const { data, error } = await supabase
     .from('pools')
     .select(
-      'pool_id, name, name_en, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase, locked, is_limited_weapon, created_at, updated_at, user_id, up_character, description, banner_url, start_time, end_time, featured_characters'
+      'pool_id, name, name_en, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase, locked, is_limited_weapon, created_at, updated_at, up_character, description, banner_url, start_time, end_time, featured_characters'
     );
 
   if (error) {
@@ -398,18 +384,12 @@ async function fetchPoolCatalog(supabase) {
 
   const poolRows = data || [];
   const poolIds = poolRows.map((row) => row.pool_id).filter(Boolean);
-  const [profilesMap, rosterResult] = await Promise.all([
-    fetchPublicProfilesMap(
-      supabase,
-      poolRows.map((row) => row.user_id)
-    ),
-    fetchPoolSixStarRosterMap(supabase, poolIds)
-      .then((rosterMap) => ({ rosterMap, error: null }))
-      .catch((rosterError) => ({
-        rosterMap: new Map(poolIds.map((poolId) => [poolId, []])),
-        error: rosterError,
-      })),
-  ]);
+  const rosterResult = await fetchPoolSixStarRosterMap(supabase, poolIds)
+    .then((rosterMap) => ({ rosterMap, error: null }))
+    .catch((rosterError) => ({
+      rosterMap: new Map(poolIds.map((poolId) => [poolId, []])),
+      error: rosterError,
+    }));
 
   if (rosterResult.error) {
     serverLogger.error('stats.pool_catalog.roster_unavailable', {
@@ -418,11 +398,7 @@ async function fetchPoolCatalog(supabase) {
   }
 
   const records = poolRows
-    .map((row) => ({
-      ...attachPoolSixStarRoster(row, rosterResult.rosterMap),
-      creator_username: profilesMap.get(row.user_id)?.username || null,
-      creator_role: profilesMap.get(row.user_id)?.role || null,
-    }))
+    .map((row) => attachPoolSixStarRoster(row, rosterResult.rosterMap))
     .sort(sortPoolCatalogRecords)
     .map(formatVisiblePoolRecord);
 

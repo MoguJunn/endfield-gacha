@@ -12,6 +12,8 @@ import {
   resolveSupabaseUrl,
 } from '../../_lib/supabaseEnv.js';
 import { getCanonicalExtraPoolSubtype } from '../../../shared/extraPoolSubtype.js';
+import { PUBLIC_SITE_CONFIG_KEYS } from '../../../shared/publicSiteConfig.js';
+import { sanitizePublicPoolRecord } from '../../../shared/publicCatalogDto.js';
 
 const CACHE_TTL = 60 * 1000;
 
@@ -78,7 +80,7 @@ function dedupeVisiblePoolRecords(records) {
 }
 
 function formatVisiblePoolRecord(record) {
-  return {
+  return sanitizePublicPoolRecord({
     id: record.pool_id,
     name: record.name,
     name_en: record.name_en || null,
@@ -91,16 +93,13 @@ function formatVisiblePoolRecord(record) {
     isLimitedWeapon: record.is_limited_weapon !== false,
     created_at: record.created_at || null,
     updated_at: record.updated_at || null,
-    user_id: record.user_id || null,
-    creator_username: record.creator_username || null,
-    creator_role: record.creator_role || null,
     up_character: record.up_character || null,
     description: record.description || null,
     banner_url: record.banner_url || null,
     start_time: record.start_time || null,
     end_time: record.end_time || null,
     featured_characters: record.featured_characters || null
-  };
+  });
 }
 
 function createEmptyBootstrapPayload() {
@@ -123,16 +122,18 @@ function mergeBootstrapPayload(previousPayload, nextPartialPayload) {
 async function fetchSiteConfig(supabase) {
   const { data, error } = await supabase
     .from('site_config')
-    .select('key, value');
+    .select('key, value')
+    .in('key', PUBLIC_SITE_CONFIG_KEYS);
 
   if (error) {
     throw error;
   }
 
-  return (data || []).reduce((config, row) => {
-    config[row.key] = row.value;
-    return config;
-  }, {});
+  return Object.fromEntries(
+    (data || [])
+      .filter((row) => PUBLIC_SITE_CONFIG_KEYS.includes(row?.key))
+      .map((row) => [row.key, row.value])
+  );
 }
 
 async function fetchVisiblePools(supabase) {
@@ -233,7 +234,10 @@ export default async function handler(req, res) {
 
 export const __internal = {
   CACHE_TTL,
+  PUBLIC_SITE_CONFIG_KEYS,
   cache,
   createEmptyBootstrapPayload,
+  fetchSiteConfig,
+  formatVisiblePoolRecord,
   mergeBootstrapPayload
 };

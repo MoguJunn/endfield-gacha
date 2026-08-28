@@ -4,6 +4,10 @@ import { Link } from 'react-router-dom';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+import {
+  sanitizeExternalNavigationUrl,
+  sanitizePublicResourceUrl,
+} from '../utils/publicResourceUrl.js';
 
 const OFFICIAL_ANNOUNCEMENT_IMAGE_PROXY_MARKER = '/api/official-announcement-image?';
 
@@ -53,14 +57,7 @@ const sanitizeSchema = {
     ...defaultSchema.attributes,
     // 允许 a 标签的 target 和 rel 属性
     a: [...(defaultSchema.attributes?.a || []), 'target', 'rel'],
-    // 允许 img 标签的 style 属性（用于尺寸调整）
-    img: [...(defaultSchema.attributes?.img || []), 'style', 'width', 'height', 'class', 'className'],
-    figure: [...(defaultSchema.attributes?.figure || []), 'class', 'className'],
-    figcaption: [...(defaultSchema.attributes?.figcaption || []), 'class', 'className'],
-    // 允许 span 的 class 属性
-    span: [...(defaultSchema.attributes?.span || []), 'className', 'class'],
-    // 允许所有元素的 class 属性
-    '*': [...(defaultSchema.attributes?.['*'] || []), 'className', 'class'],
+    img: [...(defaultSchema.attributes?.img || []), 'width', 'height'],
   },
   // 禁止所有 on* 事件属性（默认已禁止，显式声明以确保安全）
   strip: ['script', 'style', 'iframe', 'form', 'input', 'button', 'textarea', 'select'],
@@ -140,9 +137,11 @@ const SimpleMarkdown = ({ content, className = '' }) => {
         );
       }
 
+      const safeHref = sanitizeExternalNavigationUrl(href, { allowMailto: true });
+      if (!safeHref) return <span>{children}</span>;
       return (
         <a
-          href={href}
+          href={safeHref}
           target="_blank"
           rel="noopener noreferrer"
           className={className}
@@ -155,7 +154,7 @@ const SimpleMarkdown = ({ content, className = '' }) => {
     // 图片 - 支持尺寸调整
     // 语法: ![alt](url "title =宽x高") 或 ![alt](url "=宽") 或 ![alt](url "=宽x高")
     // 示例: ![图片](url "=300") 宽300px, ![图片](url "=300x200") 宽300高200, ![图片](url "说明 =50%") 宽50%
-    img: ({ src, alt, title, style: incomingStyle, className: incomingClassName, width, height }) => {
+    img: ({ src, alt, title, width, height }) => {
       let parsedWidth = width;
       let parsedHeight = height;
       let actualTitle;
@@ -175,10 +174,20 @@ const SimpleMarkdown = ({ content, className = '' }) => {
         }
       }
 
-      // 构建样式
-      const style = (incomingStyle && typeof incomingStyle === 'object' && !Array.isArray(incomingStyle))
-        ? { ...incomingStyle }
-        : {};
+      const safeSrc = sanitizePublicResourceUrl(src);
+      if (!safeSrc) return null;
+
+      const clampDimension = (value) => {
+        const normalized = String(value || '').trim();
+        if (/^\d{1,3}%$/u.test(normalized)) {
+          return `${Math.min(Math.max(Number.parseInt(normalized, 10), 1), 100)}%`;
+        }
+        const numeric = Number.parseInt(normalized, 10);
+        return Number.isFinite(numeric) ? Math.min(Math.max(numeric, 1), 1600) : null;
+      };
+      parsedWidth = clampDimension(parsedWidth);
+      parsedHeight = clampDimension(parsedHeight);
+      const style = {};
       if (parsedWidth) {
         style.width = String(parsedWidth).includes('%') ? parsedWidth : `${parsedWidth}px`;
       }
@@ -188,7 +197,7 @@ const SimpleMarkdown = ({ content, className = '' }) => {
 
       return (
         <img
-          src={src}
+          src={safeSrc}
           alt={alt}
           title={actualTitle}
           width={typeof parsedWidth === 'number' || typeof parsedWidth === 'string' ? parsedWidth : undefined}
@@ -197,19 +206,21 @@ const SimpleMarkdown = ({ content, className = '' }) => {
           loading={isOfficialAnnouncementImage ? 'eager' : 'lazy'}
           decoding={isOfficialAnnouncementImage ? 'sync' : 'async'}
           fetchPriority={isOfficialAnnouncementImage ? 'high' : 'auto'}
-          className={`block mx-auto ${parsedWidth ? '' : 'max-w-full'} h-auto rounded-none my-3 border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-950 ${incomingClassName || ''}`.trim()}
+          crossOrigin="anonymous"
+          referrerPolicy="no-referrer"
+          className={`block mx-auto ${parsedWidth ? '' : 'max-w-full'} h-auto rounded-none my-3 border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-950`.trim()}
         />
       );
     },
 
-    figure: ({ children, className }) => (
-      <figure className={`my-3 ${className || ''}`.trim()}>
+    figure: ({ children }) => (
+      <figure className="my-3">
         {children}
       </figure>
     ),
 
-    figcaption: ({ children, className }) => (
-      <figcaption className={`mt-1 text-xs text-center text-zinc-500 dark:text-zinc-400 ${className || ''}`.trim()}>
+    figcaption: ({ children }) => (
+      <figcaption className="mt-1 text-xs text-center text-zinc-500 dark:text-zinc-400">
         {children}
       </figcaption>
     ),

@@ -1,6 +1,10 @@
 import { supabase } from '../supabaseClient.js';
 import { buildOAuthCallbackUrl, buildOAuthStartUrl } from './authOAuthService.js';
 import { getCurrentSiteSession } from './siteSessionService.js';
+import {
+  createContributorDemoReadonlyError,
+  isContributorDemoModeEnabled,
+} from '../dev/contributorDemoMode.js';
 
 export const LOGIN_IDENTITY_PROVIDERS = Object.freeze({
   email: {
@@ -118,6 +122,9 @@ export function groupAuthIdentities(identities = []) {
 }
 
 export async function loadAuthIdentities() {
+  if (isContributorDemoModeEnabled()) {
+    throw createContributorDemoReadonlyError('auth-identities-load');
+  }
   const supabaseIdentities = [];
   const siteIdentities = [];
   let supabaseError = null;
@@ -177,6 +184,9 @@ export async function linkLoginIdentity(providerKey, {
   origin = window.location.origin,
   assign = window.location.assign.bind(window.location),
 } = {}) {
+  if (isContributorDemoModeEnabled()) {
+    throw createContributorDemoReadonlyError('auth-identity-link');
+  }
   const meta = LOGIN_IDENTITY_PROVIDERS[providerKey];
   if (!meta?.canLink) {
     throw new Error('unsupported_identity_provider');
@@ -224,6 +234,9 @@ export async function linkLoginIdentity(providerKey, {
 }
 
 export async function unlinkLoginIdentity(identity) {
+  if (isContributorDemoModeEnabled()) {
+    throw createContributorDemoReadonlyError('auth-identity-unlink');
+  }
   const providerKey = normalizeAuthIdentityProvider(identity);
   if (isSiteSessionIdentity(identity) || isBridgeManagedProvider(providerKey)) {
     const response = await fetch('/api/auth/identities/unlink', {

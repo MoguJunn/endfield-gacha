@@ -21,6 +21,9 @@ import {
   isGameAccountSelectionMatch,
 } from './utils/gameAccountMetadata.js';
 import { useSummerLotterySsoContinuation } from './hooks/auth/useSummerLotterySsoContinuation.js';
+import ContributorDemoBanner from './components/dev/ContributorDemoBanner.jsx';
+import { isContributorDemoUser } from './dev/contributorDemoMode.js';
+import { useContributorDemoSandboxBridge } from './hooks/app/useContributorDemoSandboxBridge.js';
 
 const GachaModals = React.lazy(() => import('./components/modals/GachaModals'));
 const DataImportWizardModal = React.lazy(() => import('./components/modals/DataImportWizardModal'));
@@ -39,6 +42,7 @@ export default function GachaAnalyzer() {
   const showAuthModal = useAuthStore(state => state.showAuthModal);
   const openAuthModal = useAuthStore(state => state.openAuthModal);
   const modalType = useUIStore(state => state.modalState.type);
+  useContributorDemoSandboxBridge();
   useSummerLotterySsoContinuation({ user, authResolved, openAuthModal });
 
   // 应用全局状态
@@ -156,7 +160,8 @@ export default function GachaAnalyzer() {
   }, [refreshPersonalData, showToast, user]);
 
   // 权限判断
-  const canEdit = userRole === 'admin' || userRole === 'super_admin';
+  const canEdit = !isContributorDemoUser(user)
+    && (userRole === 'admin' || userRole === 'super_admin');
   const isSuperAdmin = userRole === 'super_admin';
   const isAuthPending = !authResolved || (Boolean(user) && userRole === null);
 
@@ -394,6 +399,8 @@ export default function GachaAnalyzer() {
         openAuthModal={openAuthModal}
         handleLogout={handleLogout}
       />
+
+      <ContributorDemoBanner />
 
       <main className="w-full max-w-[1440px] mx-auto px-4 py-8">
         <DesktopAppRoutes
