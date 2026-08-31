@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   filterOfficialImportPullRecords,
+  getOfficialImportEventName,
   getOfficialImportRecordKind,
   hasActionableImportIdentityIssues,
   hasWriteBlockingImportIssues,
@@ -103,6 +104,42 @@ describe('officialImportRecordNormalizer', () => {
     expect(isOfficialImportNonPullRecord(records[10])).toBe(true);
     expect(filterOfficialImportPullRecords(records)).toHaveLength(10);
     expect(filterOfficialImportPullRecords(records).every((record) => record.kind === 'draw')).toBe(true);
+  });
+
+  it('filters both weapon gift events while preserving normal weapon claims', () => {
+    const records = [
+      {
+        kind: 'draw',
+        nameText: '军列申领',
+        poolId: 'weponbox_1_0_1',
+        seqId: '1',
+        weaponId: 'wpn_normal',
+        weaponName: '浪潮',
+        rarity: 6,
+        gachaTs: '1780000000000',
+      },
+      {
+        nameText: '武库赠礼-军列申领',
+        poolId: 'weponbox_1_0_1',
+        seqId: '2',
+        weaponName: '补充武库·军列',
+        gachaTs: '1780000000000',
+      },
+      {
+        name_text: '军列赠礼－军列申领',
+        poolId: 'weponbox_1_0_1',
+        seqId: '3',
+        weaponId: 'wpn_up',
+        weaponName: '四三式·高降',
+        rarity: 6,
+        gachaTs: '1780000000000',
+      },
+    ];
+
+    expect(getOfficialImportEventName(records[1])).toBe('武库赠礼-军列申领');
+    expect(isOfficialImportNonPullRecord(records[1])).toBe(true);
+    expect(isOfficialImportNonPullRecord(records[2])).toBe(true);
+    expect(filterOfficialImportPullRecords(records)).toEqual([records[0]]);
   });
 
   it('blocks records without an official sequence id', () => {

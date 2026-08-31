@@ -92,4 +92,24 @@ describe('analysis cloud snapshot', () => {
     expect(targets.switchPool).toHaveBeenCalledWith('pool-b');
     expect(setHistory).not.toHaveBeenCalled();
   });
+
+  it('应用聚合视图快照时保留虚拟卡池 ID，不回退到第一个真实卡池', () => {
+    const targets = {
+      setPools: vi.fn(),
+      switchPool: vi.fn(),
+      switchGameAccount: vi.fn(),
+      preferredPoolId: '__group_limited',
+      analysisStore: { applyAnalysis: vi.fn(() => true) },
+    };
+    const snapshot = createAnalysisSnapshot();
+    snapshot.analysis.scope.dashboard = {
+      views: {
+        __group_limited: { stats: { total: 8 } },
+      },
+    };
+
+    expect(applyCloudAnalysisToStores(snapshot, targets)).toBe(true);
+    expect(targets.switchPool).toHaveBeenCalledWith('__group_limited');
+    expect(targets.switchPool).not.toHaveBeenCalledWith('pool-a');
+  });
 });
