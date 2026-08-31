@@ -250,6 +250,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
     const allExclude = views.__group_all.excludeFree;
     const allInclude = views.__group_all.includeFree;
     const timelineViews = scopes[0].payload.dashboard.timelineViews;
+    const simulatorInheritance = scopes[0].payload.simulatorInheritance;
 
     expect(limitedExclude.characterStats).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: '限定甲', count: 1, pities: [2] }),
@@ -271,6 +272,34 @@ describe('buildPersonalAnalysisSnapshots', () => {
     expect(allExclude.splitOverviewStats.character.total).toBe(4);
     expect(allExclude.splitOverviewStats.weapon.total).toBe(1);
     expect(allInclude.splitOverviewStats.character.total).toBe(5);
+    expect(allExclude.overviewCharacterStats.limited).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: '限定甲', count: 1 }),
+      expect.objectContaining({ name: '往期限定', count: 1 })
+    ]));
+    expect(allInclude.overviewCharacterStats.limited).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: '限定甲', count: 2, freeCount: 1 })
+    ]));
+    expect(allExclude.overviewCharacterStats.standard).toEqual([
+      expect.objectContaining({ name: '常驻五星', count: 1 })
+    ]);
+    expect(allExclude.overviewCharacterStats.weapon).toEqual([
+      expect.objectContaining({ name: '限定武器', count: 1 })
+    ]);
+    expect(allExclude.overviewCharacterStats.extra).toEqual([]);
+    expect(simulatorInheritance).toMatchObject({
+      hasAnyData: true,
+      statesByPoolId: {
+        'sim_limited-a': expect.objectContaining({ totalPulls: 3, sixStarPity: 0 }),
+        'sim_standard-main': expect.objectContaining({ totalPulls: 1 }),
+        'sim_weapon-main': expect.objectContaining({ totalPulls: 1 }),
+      },
+    });
+    expect(simulatorInheritance.statesByPoolId['sim_limited-a'].pullHistory).toHaveLength(3);
+    expect(simulatorInheritance.statesByPoolId['sim_limited-a'].pullHistory[0]).toEqual(expect.objectContaining({
+      pullNumber: 1,
+      rarity: 4,
+      characterName: '四星甲',
+    }));
     expect(allExclude.dashboardResourceSummary).toMatchObject({
       characterPulls: 4,
       weaponPulls: 1,

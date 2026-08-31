@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createSimulator } from '../../utils/gachaSimulator';
 import { WEAPON_POOL_RULES } from '../../constants';
-import { useAuthStore, useHistoryStore, usePoolStore } from '../../stores';
+import { useAuthStore, useHistoryStore, usePersonalAnalysisStore, usePoolStore } from '../../stores';
 import { usePersonalGameAccounts } from '../../hooks/app/usePersonalGameAccounts.js';
-import { loadAllAccountGachaHistoryForAccounts } from '../../services/accountGachaDataService.js';
+import { loadAccountGachaAnalysis } from '../../services/accountGachaDataService.js';
 import { getBootstrapVisiblePools } from '../../services/bootstrapService';
 import { loadAllPoolsForCatalog, loadVisiblePools, mergePoolCollections } from '../../services/poolReadService';
 import {
@@ -59,7 +59,11 @@ import {
 } from '../../utils/simulatorShare';
 import { buildSinglePoolTimelineSection } from '../../utils/poolTimelineView.js';
 import { buildDashboardStats, buildPityInfoWithGuarantee, processHistoryGroups } from './simulatorViewUtils';
-import { buildInheritedSimulatorSnapshot, normalizeSimulatorPoolType } from './simulatorInheritance';
+import {
+  activateInheritedSimulatorSnapshot,
+  buildInheritedSimulatorSnapshot,
+  normalizeSimulatorPoolType,
+} from './simulatorInheritance';
 import { getLatestPendingInfoBook, reconcileInfoBookState, sortLimitedPoolsByStartTime } from './simulatorInfoBook';
 import { getCurrentUpPoolName } from '../../utils/poolTimeUtils';
 import { resolvePoolRosterBuckets } from '../../utils/poolRoster.js';
@@ -287,6 +291,7 @@ export function useGachaSimulatorController() {
   const { t, locale } = useI18n();
   const currentUserId = useAuthStore((state) => state.user?.id || null);
   const history = useHistoryStore((state) => state.history);
+  const analysisScope = usePersonalAnalysisStore((state) => state.scope);
   const personalGameAccounts = usePersonalGameAccounts();
   const storePools = usePoolStore((state) => state.pools);
   const currentGameUid = usePoolStore((state) => state.currentGameUid);
@@ -370,6 +375,7 @@ export function useGachaSimulatorController() {
   const [availableFreePulls, setAvailableFreePulls] = useState(0);
   const [infoBookTenPullAvailable, setInfoBookTenPullAvailable] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [isInheritingRealState, setIsInheritingRealState] = useState(false);
   const [showOriginitePrompt, setShowOriginitePrompt] = useState(null);
   const [disableOriginitePromptToday, setDisableOriginitePromptToday] = useState(false);
   const [resetAllPools, setResetAllPools] = useState(false);
@@ -1118,6 +1124,9 @@ export function useGachaSimulatorController() {
 
   const handleInheritRealState = useCallback(
     async (selectedAccount = null) => {
+      if (isInheritingRealState) {
+        return;
+      }
       if (!currentSimPoolId || !currentSimPool) {
         showToastMessage(t('simulator.toast.noInheritablePool'));
         return;
@@ -1141,29 +1150,53 @@ export function useGachaSimulatorController() {
         currentUserId,
         currentGameUid: selectedAccountValue,
       });
-      let inheritanceHistory = history;
-      if (currentUserId) {
-        try {
-          const loaded = await loadAllAccountGachaHistoryForAccounts({
-            accounts: [resolvedAccount],
-            expectedOwnerId: currentUserId,
+      setIsInheritingRealState(true);
+      showToastMessage(t('simulator.toast.inheritLoading'));
+
+      let inheritedSnapshot = null;
+      try {
+        if (currentUserId) {
+          const cachedAccountKey = String(analysisScope?.account?.accountKey || '').trim();
+          let inheritanceProjection = cachedAccountKey === selectedAccountValue
+            ? analysisScope?.simulatorInheritance || null
+            : null;
+
+          if (!inheritanceProjection) {
+            const realPoolId = currentSimPoolId.replace(/^sim_/, '');
+            const analysis = await loadAccountGachaAnalysis({
+              accountKey: selectedAccountValue,
+              viewKey: realPoolId,
+              locale,
+            });
+            if (analysis.availability === 'building') {
+              showToastMessage(t('simulator.toast.inheritBuilding'));
+              return;
+            }
+            inheritanceProjection = analysis.scope?.simulatorInheritance || null;
+          }
+
+          if (!inheritanceProjection) {
+            showToastMessage(t('simulator.toast.inheritUnavailable'));
+            return;
+          }
+          inheritedSnapshot = activateInheritedSimulatorSnapshot(inheritanceProjection, currentSimPoolId);
+        } else {
+          inheritedSnapshot = buildInheritedSimulatorSnapshot({
+            history,
+            realPools,
+            currentGameUid: selectedAccountValue,
+            currentUserId,
+            currentSimPoolId,
           });
-          inheritanceHistory = loaded.history;
-        } catch (error) {
-          showToastMessage(error?.message || t('simulator.toast.noRealHistory', { name: selectedAccountName }));
-          return;
         }
+      } catch (error) {
+        showToastMessage(error?.message || t('simulator.toast.noRealHistory', { name: selectedAccountName }));
+        return;
+      } finally {
+        setIsInheritingRealState(false);
       }
 
-      const inheritedSnapshot = buildInheritedSimulatorSnapshot({
-        history: inheritanceHistory,
-        realPools,
-        currentGameUid: selectedAccountValue,
-        currentUserId,
-        currentSimPoolId,
-      });
-
-      if (!inheritedSnapshot.hasAnyData) {
+      if (!inheritedSnapshot?.hasAnyData) {
         showToastMessage(t('simulator.toast.noRealHistory', { name: selectedAccountName }));
         return;
       }
@@ -1254,6 +1287,9 @@ export function useGachaSimulatorController() {
       currentSimPoolId,
       currentUserId,
       history,
+      analysisScope,
+      isInheritingRealState,
+      locale,
       personalGameAccounts,
       poolCharactersList,
       realPools,
@@ -1759,6 +1795,7 @@ export function useGachaSimulatorController() {
     historyGroups,
     infoBookTenPullAvailable,
     isAnimating,
+    isInheritingRealState,
     lastResults,
     pityInfoWithGuarantee,
     poolPullCounts,

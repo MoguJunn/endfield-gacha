@@ -28,9 +28,12 @@ import { buildDashboardOverviewSplitStats } from './dashboardOverviewSplitStats.
 import { buildDashboardResourceSummary } from './dashboardResourceSummary.js';
 import { buildOverviewTimelineSections, buildSinglePoolTimelineSection } from './poolTimelineView.js';
 import { buildOverviewPoolAnalysisPityMap, getPoolAnalysisPityState } from './poolAnalysisPity.js';
+import { getOverviewPoolBucket } from './dashboardOverviewPoolFilters.js';
+import { buildInheritedSimulatorSnapshot } from '../features/simulator/simulatorInheritance.js';
 
 const LEGACY_ACCOUNT_KEY = 'legacy';
 const GROUP_TYPES = ['all', 'extra', 'limited', 'standard', 'weapon_limited', 'weapon_standard', 'beginner'];
+const ALL_OVERVIEW_FILTER_BUCKETS = ['limited', 'extra', 'weapon', 'standard'];
 
 function buildGroupScopes(poolManifest) {
   const scopes = GROUP_TYPES.map((type) => ({ type, subtype: null }));
@@ -544,6 +547,36 @@ function buildCheckLimitedInFirstN({ history, accountHistory, poolCatalog, curre
   };
 }
 
+function buildAllOverviewCharacterStats({
+  history,
+  selectedPools,
+  crossPoolPityMap,
+  includeFreePullsInStats,
+}) {
+  return Object.fromEntries(ALL_OVERVIEW_FILTER_BUCKETS.map((bucket) => {
+    const bucketPools = selectedPools.filter((pool) => getOverviewPoolBucket(pool) === bucket);
+    const bucketPoolIds = new Set(bucketPools.map(getPoolId).filter(Boolean));
+    const bucketHistory = history.filter((record) => bucketPoolIds.has(getHistoryPoolId(record)));
+    const limitedPoolIds = new Set(
+      bucketPools
+        .filter((pool) => {
+          const capabilities = resolvePoolCapabilities(pool);
+          return capabilities.basePoolType === 'limited' && capabilities.entityType === 'character';
+        })
+        .map(getPoolId)
+        .filter(Boolean)
+    );
+
+    return [bucket, buildCharacterStats({
+      history: bucketHistory,
+      isLimitedPool: false,
+      crossPoolPityMap,
+      limitedPoolIds,
+      includeFreePullsInStats,
+    })];
+  }));
+}
+
 function buildStatsVariant({
   history,
   rawHistory,
@@ -592,6 +625,14 @@ function buildStatsVariant({
       currentPool,
     }),
     hasReceivedFreeTen: (base.stats.rewardFreePullCount ?? base.stats.freePullCount) > 0,
+    overviewCharacterStats: currentPool.isAllPoolsOverview
+      ? buildAllOverviewCharacterStats({
+          history,
+          selectedPools,
+          crossPoolPityMap,
+          includeFreePullsInStats,
+        })
+      : null,
     splitOverviewStats: currentPool.isAllPoolsOverview
       ? buildDashboardOverviewSplitStats({
           history,
@@ -827,6 +868,11 @@ export function buildPersonalAnalysisSnapshots({ history = [], pools = [], chara
         poolManifest,
         selector: buildSelector(accountGroup.records),
         dashboard: buildDashboard(accountGroup.records, poolsArray, poolManifest, resolveCharacter),
+        simulatorInheritance: buildInheritedSimulatorSnapshot({
+          history: accountGroup.records,
+          realPools: poolManifest,
+          currentUserId: userId,
+        }),
         recentSixStars: buildRecentSixStars(accountGroup.records, poolManifest, resolveCharacter),
       },
     };

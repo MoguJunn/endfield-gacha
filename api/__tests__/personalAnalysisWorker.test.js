@@ -322,7 +322,7 @@ describe('personal analysis worker', () => {
     expect(ownerCall[1]).toMatchObject({
       p_user_id: USER_ID,
       p_input_revision: LARGE_REVISION,
-      p_analysis_schema_version: 1,
+      p_analysis_schema_version: 2,
       p_lease_id: LEASE_ID,
     });
     expect(ownerCall[1].p_payload.accounts).toHaveLength(2);
@@ -331,7 +331,7 @@ describe('personal analysis worker', () => {
       p_scope_game_uid: 'game-1',
       p_server_scope: 'scope-1',
       p_input_revision: LARGE_REVISION,
-      p_analysis_schema_version: 1,
+      p_analysis_schema_version: 2,
       p_lease_id: LEASE_ID,
     });
     expect(scopeCall[1].p_snapshots).toHaveLength(2);

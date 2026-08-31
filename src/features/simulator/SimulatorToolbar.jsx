@@ -281,6 +281,7 @@ const SimulatorToolbar = ({
   onExportData,
   onExportReport,
   onInheritRealState,
+  inheritBusy = false,
   onReset,
   poolPullCounts,
   resourceLedger,
@@ -541,6 +542,9 @@ const SimulatorToolbar = ({
             {/* Inherit Button */}
             <div className="relative">
               <button
+                type="button"
+                disabled={inheritBusy}
+                aria-busy={inheritBusy}
                 onClick={() => {
                   if (gameAccounts.length <= 1) {
                     onInheritRealState(gameAccounts[0] || null);
@@ -548,11 +552,13 @@ const SimulatorToolbar = ({
                   }
                   setShowInheritAccountDropdown((visible) => !visible);
                 }}
-                className="w-full px-3 py-2 flex items-center justify-center gap-2 text-xs font-bold bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-endfield-yellow hover:border-endfield-yellow transition-colors rounded-sm"
+                className="w-full px-3 py-2 flex items-center justify-center gap-2 text-xs font-bold bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-endfield-yellow hover:border-endfield-yellow transition-colors rounded-sm disabled:cursor-wait disabled:opacity-60"
                 title={t('simulator.toolbar.inheritTitle')}
               >
-                <RefreshCw size={14} />
-                <span className="truncate">{t('simulator.toolbar.inheritShort')}</span>
+                <RefreshCw size={14} className={inheritBusy ? 'animate-spin' : ''} />
+                <span className="truncate">
+                  {inheritBusy ? t('simulator.toolbar.inheritLoading') : t('simulator.toolbar.inheritShort')}
+                </span>
                 {gameAccounts.length > 1 && (
                   <ChevronDown
                     size={12}
@@ -566,6 +572,7 @@ const SimulatorToolbar = ({
                     <button
                       key={account.accountKey || account.account_key || account.gameUid}
                       type="button"
+                      disabled={inheritBusy}
                       onClick={() => {
                         onInheritRealState(account);
                         setShowInheritAccountDropdown(false);
