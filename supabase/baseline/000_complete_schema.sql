@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-08-27T21:17:14.649Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/186_restrict_public_pool_column_reads.sql
+--   4. 生成时间: 2026-08-31T11:59:21.331Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/187_rebuild_personal_analysis_overview_filters.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -35581,4 +35581,64 @@ GRANT SELECT (
   featured_characters
 ) ON TABLE public.pools TO anon, authenticated;
 -- <<< END MIGRATION: active/186_restrict_public_pool_column_reads.sql
+
+-- >>> BEGIN MIGRATION: active/187_rebuild_personal_analysis_overview_filters.sql
+-- 187: rebuild personal analysis snapshots with all-overview filter projections.
+
+BEGIN;
+
+ALTER TABLE public.personal_analysis_owner_state
+  ALTER COLUMN analysis_schema_version SET DEFAULT 2;
+
+ALTER TABLE public.personal_analysis_scope_state
+  ALTER COLUMN analysis_schema_version SET DEFAULT 2;
+
+CREATE OR REPLACE FUNCTION public.enforce_personal_analysis_schema_v2()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = pg_catalog, public
+AS $$
+BEGIN
+  NEW.analysis_schema_version := GREATEST(COALESCE(NEW.analysis_schema_version, 2), 2);
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS enforce_personal_analysis_owner_schema_v2
+  ON public.personal_analysis_owner_state;
+CREATE TRIGGER enforce_personal_analysis_owner_schema_v2
+  BEFORE INSERT ON public.personal_analysis_owner_state
+  FOR EACH ROW
+  EXECUTE FUNCTION public.enforce_personal_analysis_schema_v2();
+
+DROP TRIGGER IF EXISTS enforce_personal_analysis_scope_schema_v2
+  ON public.personal_analysis_scope_state;
+CREATE TRIGGER enforce_personal_analysis_scope_schema_v2
+  BEFORE INSERT ON public.personal_analysis_scope_state
+  FOR EACH ROW
+  EXECUTE FUNCTION public.enforce_personal_analysis_schema_v2();
+
+UPDATE public.personal_analysis_owner_state
+SET
+  analysis_schema_version = GREATEST(analysis_schema_version, 2),
+  history_revision = history_revision + 1,
+  dirty_since = COALESCE(dirty_since, statement_timestamp()),
+  last_error = NULL,
+  next_attempt_at = NULL;
+
+UPDATE public.personal_analysis_scope_state
+SET
+  analysis_schema_version = GREATEST(analysis_schema_version, 2),
+  history_revision = history_revision + 1,
+  dirty_since = COALESCE(dirty_since, statement_timestamp()),
+  last_error = NULL,
+  next_attempt_at = NULL;
+
+REVOKE ALL ON FUNCTION public.enforce_personal_analysis_schema_v2()
+  FROM PUBLIC, anon, authenticated;
+
+COMMIT;
+
+NOTIFY pgrst, 'reload schema';
+-- <<< END MIGRATION: active/187_rebuild_personal_analysis_overview_filters.sql
 

@@ -590,7 +590,7 @@ BEGIN
   SELECT public.publish_personal_analysis_owner_snapshot(
     v_user_id,
     v_owner_revision,
-    1,
+    2,
     jsonb_build_object(
       'defaultAccountKey', 'revision-game::server:1',
       'accounts', jsonb_build_array(jsonb_build_object(
@@ -618,7 +618,7 @@ BEGIN
     'revision-game',
     '1',
     v_scope_revision,
-    1,
+    2,
     jsonb_build_array(jsonb_build_object(
       'scopeKey', 'revision-game::server:1',
       'payload', jsonb_build_object(
@@ -686,7 +686,7 @@ BEGIN
     'revision-game',
     '2',
     v_scope_revision,
-    1,
+    2,
     jsonb_build_array(jsonb_build_object(
       'scopeKey', 'revision-game::server:2',
       'payload', jsonb_build_object('selector', jsonb_build_object('totalPulls', 1))

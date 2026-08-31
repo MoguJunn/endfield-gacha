@@ -245,6 +245,11 @@ export function useDashboardViewState() {
     ? Boolean(snapshotVariant.hasReceivedFreeTen)
     : Number(stats.rewardFreePullCount ?? stats.freePullCount ?? 0) > 0;
   const snapshotSplitOverviewStats = isAnalysisBacked ? (snapshotVariant.splitOverviewStats ?? null) : null;
+  const snapshotOverviewCharacterStats = isAnalysisBacked
+    && snapshotVariant.overviewCharacterStats
+    && typeof snapshotVariant.overviewCharacterStats === 'object'
+    ? snapshotVariant.overviewCharacterStats
+    : null;
   const snapshotTimelineSections = isAnalysisBacked
     ? analysisScope?.dashboard?.timelineViews?.[locale]?.[analysisViewKey] ||
       analysisScope?.dashboard?.timelineViews?.['zh-CN']?.[analysisViewKey] ||
@@ -409,6 +414,7 @@ export function useDashboardViewState() {
     resourceSummaryVariant,
     isAnalysisBacked,
     snapshotSplitOverviewStats,
+    snapshotOverviewCharacterStats,
     snapshotTimelineSections,
   };
 }

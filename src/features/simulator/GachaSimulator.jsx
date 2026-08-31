@@ -42,6 +42,7 @@ const GachaSimulator = () => {
     handleShareImage,
     historyGroups,
     infoBookTenPullAvailable,
+    isInheritingRealState,
     isShareActionBusy,
     isAnimating,
     lastResults,
@@ -118,6 +119,7 @@ const GachaSimulator = () => {
         onExportData={handleExportData}
         onExportReport={handleExportReport}
         onInheritRealState={handleInheritRealState}
+        inheritBusy={isInheritingRealState}
         onReset={handleReset}
         poolPullCounts={poolPullCounts}
         onShareImage={() => handleShareImage(shareCardRef.current)}

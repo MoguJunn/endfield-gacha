@@ -181,7 +181,8 @@ function buildInheritedStateForPool({
   relevantHistory,
   poolMap,
   limitedPoolPullCounts,
-  currentSimPoolId = null
+  currentSimPoolId = null,
+  includePullHistory = true,
 }) {
   const realPoolId = currentPool?.id;
   if (!realPoolId) {
@@ -263,7 +264,7 @@ function buildInheritedStateForPool({
     hasReceivedSelectGift: normalizedPoolType === 'standard'
       ? currentPoolPaidCount >= STANDARD_POOL_RULES.selectGiftThreshold
       : false,
-    pullHistory: simulatorPullHistory
+    pullHistory: includePullHistory ? simulatorPullHistory : []
   };
 
   if (currentSimPoolKey && currentSimPoolKey === currentSimPoolId) {
@@ -334,7 +335,8 @@ export function buildInheritedSimulatorSnapshot({
   realPools,
   currentGameUid,
   currentUserId,
-  currentSimPoolId = null
+  currentSimPoolId = null,
+  includePullHistory = true,
 }) {
   const poolsArray = Array.isArray(realPools) ? realPools : [];
   const relevantHistory = getRelevantHistory(history, currentGameUid, currentUserId);
@@ -356,7 +358,8 @@ export function buildInheritedSimulatorSnapshot({
       relevantHistory,
       poolMap,
       limitedPoolPullCounts,
-      currentSimPoolId
+      currentSimPoolId,
+      includePullHistory,
     });
 
     if (inheritedState) {
@@ -410,6 +413,45 @@ export function buildInheritedSimulatorSnapshot({
   };
 }
 
+export function activateInheritedSimulatorSnapshot(snapshot, currentSimPoolId = null) {
+  if (!snapshot || typeof snapshot !== 'object') {
+    return null;
+  }
+
+  const statesByPoolId = Object.fromEntries(
+    Object.entries(snapshot.statesByPoolId || {}).map(([poolId, state]) => [poolId, { ...state }])
+  );
+  const infoBooks = Object.fromEntries(
+    Object.entries(snapshot.infoBooks || {}).map(([poolId, state]) => [poolId, { ...state }])
+  );
+
+  if (currentSimPoolId) {
+    Object.values(infoBooks).forEach((book) => {
+      if (book?.targetPoolId === currentSimPoolId && book.used !== true) {
+        book.activated = true;
+        const currentState = statesByPoolId[currentSimPoolId];
+        if (currentState) {
+          statesByPoolId[currentSimPoolId] = {
+            ...currentState,
+            infoBookTenPullAvailable: true,
+          };
+        }
+      }
+    });
+  }
+
+  return {
+    ...snapshot,
+    statesByPoolId,
+    infoBooks,
+    seriesStates: Object.fromEntries(
+      Object.entries(snapshot.seriesStates || {}).map(([key, state]) => [key, { ...state }])
+    ),
+    sharedPityState: snapshot.sharedPityState ? { ...snapshot.sharedPityState } : null,
+    hasAnyData: Object.keys(statesByPoolId).length > 0,
+  };
+}
+
 export function buildInheritedSimulatorState({
   history,
   realPools,
@@ -433,6 +475,7 @@ export function buildInheritedSimulatorState({
 }
 
 export default {
+  activateInheritedSimulatorSnapshot,
   buildInheritedSimulatorSnapshot,
   buildInheritedSimulatorState,
   normalizeSimulatorPoolType

@@ -170,4 +170,12 @@ describe('SimulatorToolbar extra pool subgroups', () => {
     fireEvent.click(screen.getByRole('button', { name: '切换特殊寻访' }));
     expect(screen.getByRole('button', { name: '辉光庆典 [模拟]' })).toBeInTheDocument();
   });
+
+  it('shows and locks the inherit action while loading account state', () => {
+    renderToolbar({ inheritBusy: true });
+
+    const inheritButton = screen.getByRole('button', { name: 'simulator.toolbar.inheritLoading' });
+    expect(inheritButton).toBeDisabled();
+    expect(inheritButton).toHaveAttribute('aria-busy', 'true');
+  });
 });

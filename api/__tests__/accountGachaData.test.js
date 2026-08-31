@@ -495,6 +495,10 @@ describe('/api/account-gacha-data', () => {
         },
       },
     };
+    adminClient.__state.accountSnapshots['game-1::server:2'].payload.simulatorInheritance = {
+      hasAnyData: true,
+      statesByPoolId: { sim_pool_current: { sixStarPity: 7 } },
+    };
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     const res = createJsonResponseRecorder();
 
@@ -508,12 +512,19 @@ describe('/api/account-gacha-data', () => {
       views: { 'pool-current': { total: 12 } },
       timelineViews: { 'en-US': { 'pool-current': [{ id: 'current-en' }] } },
     });
+    expect(res.body.scope.simulatorInheritance).toEqual({
+      hasAnyData: true,
+      statesByPoolId: { sim_pool_current: { sixStarPity: 7 } },
+    });
     const projectedRead = adminClient.__state.selectCalls.find((call) => (
       call.table === 'personal_analysis_snapshots'
       && call.selection.includes('view:payload->dashboard->views->pool-current')
     ));
     expect(projectedRead?.selection).toContain(
       'timeline:payload->dashboard->timelineViews->en-US->pool-current'
+    );
+    expect(projectedRead?.selection).toContain(
+      'simulator_inheritance:payload->simulatorInheritance'
     );
     expect(JSON.stringify(res.body.scope)).not.toContain('pool-other');
   });

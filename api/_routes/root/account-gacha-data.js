@@ -596,6 +596,9 @@ function buildProjectedAccountPayload(data, viewKey, locale) {
     selector: data?.selector && typeof data.selector === 'object'
       ? data.selector
       : fallbackPayload.selector || {},
+    simulatorInheritance: data?.simulator_inheritance && typeof data.simulator_inheritance === 'object'
+      ? data.simulator_inheritance
+      : fallbackPayload.simulatorInheritance || null,
     dashboard: {
       views: view ? { [viewKey]: view } : {},
       timelineViews: timeline ? { [locale]: { [viewKey]: timeline } } : {},
@@ -648,6 +651,7 @@ async function loadProjectedPersonalAnalysisAccountSnapshot(
     'account:payload->account',
     'pool_manifest:payload->poolManifest',
     'selector:payload->selector',
+    'simulator_inheritance:payload->simulatorInheritance',
     `view:payload->dashboard->views->${viewKey}`,
     `timeline:payload->dashboard->timelineViews->${locale}->${viewKey}`,
     'recent_six_stars:payload->recentSixStars',

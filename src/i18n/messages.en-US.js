@@ -1833,6 +1833,7 @@ const messages = {
   "simulator.toolbar.infiniteResources": "Infinite Resources",
   "simulator.toolbar.inheritAccount": "Inherit Account",
   "simulator.toolbar.inheritShort": "Inherit",
+  "simulator.toolbar.inheritLoading": "Inheriting...",
   "simulator.toolbar.inheritTitle": "Choose an account to inherit its real pull state",
   "simulator.toolbar.share": "Share",
   "simulator.toolbar.shareBusy": "Working",

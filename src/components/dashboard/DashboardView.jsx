@@ -315,6 +315,7 @@ const DashboardView = ({ showToast }) => {
     resourceSummaryVariant,
     isAnalysisBacked,
     snapshotSplitOverviewStats,
+    snapshotOverviewCharacterStats,
     snapshotTimelineSections,
   } = useDashboardViewState();
 
@@ -507,8 +508,13 @@ const DashboardView = ({ showToast }) => {
   );
 
   const visibleCharacterStats = React.useMemo(() => {
-    if (!isAllPoolsOverview || !allOverviewFilterPoolIds || (isAnalysisBacked && !hasCompleteRawHistory)) {
+    if (!isAllPoolsOverview || !allOverviewFilterPoolIds) {
       return characterStats;
+    }
+
+    if (isAnalysisBacked && !hasCompleteRawHistory) {
+      const snapshotStats = snapshotOverviewCharacterStats?.[allOverviewPoolFilter];
+      return Array.isArray(snapshotStats) ? snapshotStats : characterStats;
     }
 
     const filteredHistory = normalizedPoolHistory.filter((item) => {
@@ -524,6 +530,7 @@ const DashboardView = ({ showToast }) => {
       includeFreePullsInStats,
     });
   }, [
+    allOverviewPoolFilter,
     allOverviewFilterPoolIds,
     characterStats,
     crossPoolPityMap,
@@ -532,6 +539,7 @@ const DashboardView = ({ showToast }) => {
     isAnalysisBacked,
     normalizedPoolHistory,
     normalizedPoolType,
+    snapshotOverviewCharacterStats,
     visibleLimitedPoolIds,
     includeFreePullsInStats,
   ]);
@@ -557,7 +565,10 @@ const DashboardView = ({ showToast }) => {
   }, [allLimitedHistory, isGroupMode, normalizedPoolHistory, selectedPools]);
   const timelineSections = React.useMemo(() => {
     if (isAnalysisBacked && Array.isArray(snapshotTimelineSections)) {
-      return snapshotTimelineSections;
+      if (!isAllPoolsOverview || !allOverviewFilterPoolIds) {
+        return snapshotTimelineSections;
+      }
+      return snapshotTimelineSections.filter((section) => allOverviewFilterPoolIds.has(section?.id));
     }
     if (isAnalysisBacked && !hasCompleteRawHistory) {
       return [];
@@ -580,6 +591,7 @@ const DashboardView = ({ showToast }) => {
     });
   }, [
     allOverviewPoolFilter,
+    allOverviewFilterPoolIds,
     analysisPity,
     crossPoolPityMap,
     currentPool,

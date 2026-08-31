@@ -62,6 +62,7 @@ const CHARACTER_FIELDS = [
 
 const POOL_QUERY_CHUNK_SIZE = 100;
 const ERROR_CODE_PATTERN = /[^A-Za-z0-9_.:-]+/g;
+export const PERSONAL_ANALYSIS_SCHEMA_VERSION = 2;
 
 function readEnvironment() {
   return globalThis.process?.env || {};
@@ -369,7 +370,7 @@ async function publishJob(adminClient, job, model, leaseId) {
       published = await callRpc(adminClient, 'publish_personal_analysis_owner_snapshot', {
         p_user_id: job.userId,
         p_input_revision: job.historyRevision,
-        p_analysis_schema_version: job.analysisSchemaVersion,
+        p_analysis_schema_version: PERSONAL_ANALYSIS_SCHEMA_VERSION,
         p_payload: model.owner,
         p_lease_id: leaseId,
       });
@@ -395,7 +396,7 @@ async function publishJob(adminClient, job, model, leaseId) {
         p_scope_game_uid: job.scopeGameUid,
         p_server_scope: job.serverScope,
         p_input_revision: job.historyRevision,
-        p_analysis_schema_version: job.analysisSchemaVersion,
+        p_analysis_schema_version: PERSONAL_ANALYSIS_SCHEMA_VERSION,
         p_snapshots: snapshots,
         p_lease_id: leaseId,
       });
