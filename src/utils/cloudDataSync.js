@@ -1,6 +1,7 @@
 import { getPreferredPoolId } from './poolSelectionUtils';
 import { STORAGE_KEYS, writeStorageValue } from './storageUtils.js';
 import { isGameAccountSelectionMatch } from './gameAccountMetadata.js';
+import { isPoolGroupId } from './poolGroupUtils.js';
 import usePersonalAnalysisStore, {
   PERSONAL_ANALYSIS_AVAILABILITIES,
 } from '../stores/usePersonalAnalysisStore.js';
@@ -147,6 +148,14 @@ function resolveAnalysisAccountKey(analysis) {
 }
 
 function resolvePreferredPoolIdFromAnalysis(pools, analysis, preferredPoolId = null) {
+  const normalizedPreferredPoolId = normalizeText(preferredPoolId);
+  const requestedView = normalizedPreferredPoolId
+    ? analysis?.scope?.dashboard?.views?.[normalizedPreferredPoolId]
+    : null;
+  if (isPoolGroupId(normalizedPreferredPoolId) && requestedView) {
+    return normalizedPreferredPoolId;
+  }
+
   const pullCounts = analysis?.scope?.selector?.poolPullCounts;
   if (!pullCounts || typeof pullCounts !== 'object' || Array.isArray(pullCounts)) {
     return null;
@@ -160,8 +169,8 @@ function resolvePreferredPoolIdFromAnalysis(pools, analysis, preferredPoolId = n
     return null;
   }
 
-  if (preferredPoolId && poolIdsWithData.includes(preferredPoolId)) {
-    return preferredPoolId;
+  if (normalizedPreferredPoolId && poolIdsWithData.includes(normalizedPreferredPoolId)) {
+    return normalizedPreferredPoolId;
   }
 
   const idsWithData = new Set(poolIdsWithData);

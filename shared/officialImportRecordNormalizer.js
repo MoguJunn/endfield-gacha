@@ -1,6 +1,7 @@
 const ISSUE_SEVERITIES = new Set(['blocking', 'review', 'info']);
 const ACTIONABLE_IDENTITY_ISSUE_CODES = new Set(['MISSING_ITEM_ID_AND_NAME', 'MISSING_ITEM_ID', 'MISSING_ITEM_NAME']);
 const NON_PULL_RECORD_KINDS = new Set(['gift_intel_book']);
+const WEAPON_GIFT_EVENT_NAME_PATTERN = /^(?:武库赠礼|军列赠礼)(?:\s*[-－—–:：]\s*.+)?$/u;
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
@@ -14,8 +15,18 @@ export function getOfficialImportRecordKind(record = {}) {
   return normalizeText(firstDefined(record.kind, record.recordKind, record.record_kind)).toLowerCase();
 }
 
+export function getOfficialImportEventName(record = {}) {
+  return normalizeText(firstDefined(
+    record.nameText,
+    record.name_text,
+    record.eventName,
+    record.event_name
+  ));
+}
+
 export function isOfficialImportNonPullRecord(record = {}) {
-  return NON_PULL_RECORD_KINDS.has(getOfficialImportRecordKind(record));
+  return NON_PULL_RECORD_KINDS.has(getOfficialImportRecordKind(record))
+    || WEAPON_GIFT_EVENT_NAME_PATTERN.test(getOfficialImportEventName(record));
 }
 
 export function filterOfficialImportPullRecords(records = []) {
@@ -234,6 +245,7 @@ export function summarizeOfficialImportIssues(records) {
 
 export default {
   filterOfficialImportPullRecords,
+  getOfficialImportEventName,
   getOfficialImportRecordKind,
   hasActionableImportIdentityIssues,
   hasBlockingImportIssues,
