@@ -111,3 +111,11 @@ Migration 177 增加 `priority_requested_at`。分析 API 发现当前用户的 
 
 如果 Vault、pg_cron 或 pg_net 不可用，不能把用户请求伪装成“正在排队”。分析 API
 会返回明确的 `personal_analysis_queue_unavailable` 503，页面保留可诊断的错误状态。
+
+## 已核对的发布证据
+
+- PR #24 已将 Session 循环修复、即时派发、短间隔轻量检查和 45 秒多批 Worker 合入主线；PR #25 已修复含 `:` 的附加寻访 `viewKey` 触发 PostgREST `PGRST100 / HTTP 500` 的问题。
+- 2026-08-27 当前发布主线为 `d186a425d5fb29aad940b4f08027744dfecbc602`，GitHub CI 与 GitHub-connected Vercel Production 已核对为成功 / Ready。
+- 1789 条合成历史、4 个游戏账号、25 个卡池的一次真实浏览器冷启动观测约为 `13.1s`，其中 `building → ready` 约 `6s`，未观察到 `building → loading` 或页面错误。该结果是一次脱敏 E2E 观测，不是 SLA 或长期性能承诺。
+- 生产带 `viewKey=__group_extra:reconstruction` 的真实登录请求返回 HTTP 200 / `availability=ready`。测试账号没有该分组记录时目标视图为空属于正常结果；单元测试覆盖有数据时只投影目标 view / locale。
+- 源码 migration 181–183 是为解决分支编号冲突后的前向文件名。生产数据库只读核验确认已经具备最终字段、约束、触发器、受限 RPC、种子卡池与版本绑定；不要据此重复执行重编号迁移。

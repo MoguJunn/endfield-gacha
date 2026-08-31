@@ -6,11 +6,11 @@
 
 > 2026-08-04 生产跟进：迁移 171 与 operator 批准已生产应用。真实确认请求暴露出 GoTrue v2.188.1 Admin 更新用户会依次修改 email identity、Auth email、metadata 与封禁状态，活动 intent 的冻结触发器因此正确拒绝中间状态。迁移 `172_quarantine_oauth_email_artifact_atomically.sql` 将空壳用户、唯一 email identity、intent metadata 与长期封禁收口为同一数据库事务，并为活动空壳 identity 增加精确冻结触发器；应用层改用该 RPC，结果不明时先幂等重试，仍无法确认则进入人工协调状态，不再错误释放 claim。专项测试同时覆盖 identity 并发新增拒绝、用户更新失败后的整笔回滚，以及 v1/v2 最终隔离不变量。
 
-状态：`AUTH-HARDEN-001` 本地安全实现与候选验收已完成；远端审查和生产发布由 `AUTH-HARDEN-RELEASE-001` 继续跟踪。本地提交不等于已发布或允许部署。
+状态：`AUTH-HARDEN-001`、`AUTH-HARDEN-RELEASE-001`、PR #14 与生产 166–168 已完成；后续只在具体认证回归或 provider 任务中继续。历史提交或候选文件仍不自动授权新的生产迁移、账号修改或 provider 开放。
 
 > 新会话入口：根目录 `SESSION_HANDOFF.md` 与 `todo` 的 `AUTH-HARDEN-001`。
-> 实现目录：`D:\Learning\Endfield Gacha\_tmp\auth-hardening-integration`；当前检出纯认证候选 `fix/auth-hardening-integration`，Phase A–D 基线提交为 `5dd8505`。
-> Phase A、B、C、D 已集成到最新主线基线、重编号为 166/167，并由本地提交 `5dd8505` 固化；2026-08-02 已按 166 → 167 应用到生产数据库并完成权限/回填核验。远端审查发现的历史 identity 哈希、直连 RLS 撤销和凭据生命周期缺口由前向迁移 168 与配套代码收口；**168 尚未应用到生产，API 尚未部署，代码尚未合入主线**。
+> 当前实现入口：主站 `main`。旧 `_tmp/auth-hardening-integration` worktree 已于 2026-08-27 审计闭拢；Phase A–D 历史基线提交为 `5dd8505`，不再从已删除分支恢复。
+> Phase A、B、C、D 已重编号为 166/167，并于 2026-08-02 应用到生产数据库完成权限 / 回填核验；远端审查缺口由前向迁移 168 与配套代码收口。迁移 168、PR #14、认证 API 与主线发布均已完成；后续 169–172 的运行态仍需按具体生产任务实时核验，不能仅由 Git 文件推定。
 > LinuxDo 属于独立低优先级任务 `AUTH-LINUXDO-002`：实现继续隔离在 `feat/linuxdo-oauth`，不进入本认证候选；目前无法申请隔离 Connect Client，前后端开关保持关闭，不再阻塞认证发布。
 
 ## 当前决策
@@ -22,45 +22,40 @@
 
 ## 当前仓库事实
 
-- 生产版本仍是 `v4.5.4`；主站标准迁移链与主站 baseline 到 158。共享生产库另有独立抽奖项目迁移 160–165，这些迁移不属于主站 baseline，也不得复制或重复执行。
-- 远端 `origin/main` 当前为 `4826b76`（PR #13 合并提交）。
-- 主工作树仍检出 `feat/perf-013-history-scope` @ `2a4f909`，有大量用户改动和已完成的认证文档改动；**不要在这棵树上实现认证代码**。
-- **认证集成 worktree（当前唯一认证实现树）：**
-  - 路径：`D:\Learning\Endfield Gacha\_tmp\auth-hardening-integration`
-  - 认证分支：`fix/auth-hardening-integration` @ `5dd8505`（基于最新 `origin/main` `4826b76` 的本地认证提交）
-  - LinuxDo 存储分支：`feat/linuxdo-oauth`（从 `5dd8505` 切出，代码与文档均保持隔离，未合并、未部署）
-- `.agent-tmp/oauth-password-email-conflict` 是已注册的 `fix/oauth-password-email-conflict` worktree @ `ea7466a`，含未提交邮箱目标绑定、首次设密和遗留冲突修复候选；仅作参考，不是实现基线。
-- 命令工具对 `_tmp/*` / `.agent-tmp/*` 的 `working_directory` 可能错误回退到主工作树。Git 使用 `git -C "D:\Learning\Endfield Gacha\_tmp\auth-hardening-integration"`；npm 使用 `npm --prefix "D:\Learning\Endfield Gacha\_tmp\auth-hardening-integration"`。
-- `origin/main` 的主站标准迁移尾号是 158；共享生产数据库另含抽奖 160–165，并已于 2026-08-02 应用认证 166/167。主线代码和 API 部署仍未包含认证候选。
+- 生产版本文档口径仍是 `v4.5.4`；2026-08-27 主应用目录为干净的 `main@d186a425d5fb29aad940b4f08027744dfecbc602`，与 `origin/main` 一致，GitHub-connected Vercel Production Ready。
+- 当前生成 baseline 覆盖到 migration 183。已确认生产历史包括独立抽奖 160–165、认证 166–168 和正式导入修复 170；169–172 等后续合同的运行态仍需按具体任务实时核验，不从 Git 文件自动推定。
+- 旧认证 Phase A、Magic Link 和 `oauth-password-email-conflict` worktree 已于 2026-08-27 逐文件审计并闭拢；重复的 159/160/170 候选和旧跨系统手工修复脚本不再是恢复入口。
+- 当前认证实现、测试与专题文档均以主站 `main` 为准。LinuxDo 仍保留在独立 `feat/linuxdo-oauth` 分支，未推送、未合并、未部署，外部 Client 条件恢复前保持关闭。
+- Git / npm 默认入口为 `D:\Learning\Endfield Gacha\gacha-analyzer`。含 `.env.local` 的辅助目录只保留环境配置并停在 detached `main`；不得读取、公开或自动覆盖其中配置。
 
-### migration 编号的跨 worktree 冲突（不是同分支重复文件）
+### migration 编号历史冲突（已收口，仅用于解释最终编号）
 
 | 位置 | 文件名 | 含义 |
 | --- | --- | --- |
-| 认证集成 worktree | `166_harden_admin_profile_and_oauth_transactions.sql` | Phase A/B forward migration；已避开抽奖 160–165 |
-| 认证集成 worktree | `167_harden_account_credentials_and_identity_keys.sql` | Phase C/D forward migration；紧随 Phase A/B |
-| 认证集成 worktree | `168_close_auth_review_findings.sql` | 远端审查修复；历史 identity 原子迁移、直连 RLS Session 门禁和首次设密并发串行化；尚未生产应用 |
-| 主脏树性能线 | `159_add_history_scope_read_models.sql` | 本地性能 RPC/索引；**不得部署**；合入前必须重编号 |
-| 邮箱候选 worktree | `159_bind_email_verification_to_target.sql` | Phase C 参考候选；**不得部署**；合入前必须重编号 |
+| 当前主线 | `166_harden_admin_profile_and_oauth_transactions.sql` | Phase A/B forward migration；避开抽奖 160–165 |
+| 当前主线 | `167_harden_account_credentials_and_identity_keys.sql` | Phase C/D forward migration；紧随 Phase A/B |
+| 当前主线 | `168_close_auth_review_findings.sql` | 历史 identity 原子迁移、直连 RLS Session 门禁和首次设密并发串行化；已生产应用 |
+| 已闭拢旧候选 | `159_add_history_scope_read_models.sql` | 旧性能候选，不属于当前迁移链，不得补执行 |
+| 已闭拢旧候选 | `159_bind_email_verification_to_target.sql` | 旧邮箱参考候选，已被 167 与后续原子化流程取代，不得补执行 |
 
 - 2026-08-02 迁移前只读核对确认运行版本为 `v4.5.4`、抽奖 160–165 存在、性能 159 与认证结构不存在；随后已创建受限完整备份并按 166 → 167 应用认证迁移。生产库没有主站应用级 migration ledger。
 - 因此认证初始两条迁移使用连续新号 166/167，审查修复继续使用 168。性能线 159 和旧邮箱候选 159 仍是独立未发布候选，不进入本认证分支。
-- 166/167 已按编号顺序生产应用；168 是本 PR 新增的前向迁移，必须在部署依赖其 RPC 的 API 前单独授权并执行。性能线 159 仍未应用，也不得因编号较小而补执行。
+- 166/167/168 已按编号顺序生产应用并随 PR #14 发布。旧 159 候选未应用，也不得因编号较小而补执行；当前新迁移编号只看实时 baseline、所有活动候选与生产记录。
 
 ## 实现进度
 
 | 阶段 | 状态 |
 | --- | --- |
-| 文档 / 任务账本 / 交接 | 已同步到 2026-08-02 实现与浏览器证据 |
-| 认证实现 worktree | 已创建；Phase A–D 由 `5dd8505` 固化；LinuxDo 保持在独立分支，不进入本候选 |
-| Phase A 代码（admin RPC + OAuth transaction） | **完成并提交；数据库面已生产应用，API 未部署** |
-| Phase B 代码（双凭据、刷新凭据、session 撤销、兼容 JWT 回查） | **完成并提交；数据库面已生产应用，API 未部署** |
-| Phase C 代码（候选邮箱、首次设密、临时密码到期） | **完成并提交；数据库面已生产应用，API 未部署** |
-| Phase D 代码（identity keyring、原子认领、补偿恢复） | **完成并提交；数据库面已生产应用，API 未部署** |
+| 文档 / 任务账本 / 交接 | 已同步到 2026-08-27 当前主线与发布事实 |
+| 认证实现入口 | 当前主站 `main`；Phase A–D 历史由 `5dd8505` 固化，旧认证 worktree 已闭拢 |
+| Phase A 代码（admin RPC + OAuth transaction） | **完成、合入并生产发布** |
+| Phase B 代码（双凭据、刷新凭据、session 撤销、兼容 JWT 回查） | **完成、合入并生产发布** |
+| Phase C 代码（候选邮箱、首次设密、临时密码到期） | **完成、合入并生产发布** |
+| Phase D 代码（identity keyring、原子认领、补偿恢复） | **完成、合入并生产发布** |
 | 候选验收（GitHub / 邮箱 / 安全属性） | **已完成**：GitHub 核心闭环使用隔离浏览器验证；跨浏览器 transaction、link Session 切换、callback 重放及邮箱/凭据状态机由专项自动化与本地 PostgreSQL 17 验证；已授权 App 无取消控件的限制已记录 |
 | LinuxDo provider | **转 `AUTH-LINUXDO-002`（P3）**：代码和自动化合同已完成，真实 Client 验收因外部条件暂停，不阻塞本任务 |
-| 生产 migration | **部分完成**：166 → 167、3,095 个确认邮箱归属回填、83 条 identity key 版本和角色权限核验通过；审查修复迁移 168 尚未生产应用 |
-| push / 合并 / API 部署 | **转 `AUTH-HARDEN-RELEASE-001`**：候选进入远端审查；合并和部署仍需独立授权 |
+| 生产 migration | **当前阶段完成**：166 → 168、确认邮箱归属回填、identity key 版本和角色权限核验通过；后续 169–172 运行态按具体任务实时核验 |
+| push / 合并 / API 部署 | **完成**：PR #14、主线 CI 和 Vercel Production 已完成；后续生产动作继续独立授权 |
 
 ## 认证数据流
 
@@ -138,7 +133,7 @@ flowchart LR
 
 ### Phase A：关闭直接攻击面
 
-**实现状态：已由 `5dd8505` 提交；数据库面已生产应用，API 尚未部署。**
+**实现状态：已完成、合入并生产发布；`5dd8505` 仅作为历史候选基线。**
 
 1. migration `166_harden_admin_profile_and_oauth_transactions.sql`：
    - 撤销 `PUBLIC/anon/authenticated` 对 `admin_update_profile` 的 EXECUTE；仅 `service_role`
@@ -153,7 +148,7 @@ flowchart LR
 
 ### Phase B：统一请求身份与凭据撤销
 
-**实现状态：已由 `5dd8505` 提交；数据库面已生产应用，API 尚未部署。**
+**实现状态：已完成、合入并生产发布；`5dd8505` 仅作为历史候选基线。**
 
 1. `POST /api/auth/session` bootstrap 只走 `resolveBearerRequestUser`；已有 Cookie 不能覆盖待引导用户。
 2. `resolveAuthenticatedRequestUser`：有 Authorization 时先校验 Bearer；若同时有有效 Cookie session，比较 user ID，不一致返回 `auth_identity_conflict`。
@@ -165,7 +160,7 @@ flowchart LR
 
 ### Phase C：收敛邮箱与密码状态机
 
-**实现状态：已由 `5dd8505` 提交；数据库面已生产应用，API 尚未部署。**
+**实现状态：已完成、合入并生产发布；`5dd8505` 仅作为历史候选基线。**
 
 1. 建立规范化候选邮箱/pending 状态；验证前不把候选值写成 canonical `profiles.email`。migration 167 新增 `account_email_ownerships`（规范化唯一归属）与 `account_email_challenges`（一次性挑战，绑定 `user_id + target_email + 版本`，`start/consume` RPC 以 advisory lock + 条件更新保证单次消费）。
 2. 邮箱归属使用数据库唯一约束或原子 claim，不用全量扫描 Auth 用户替代唯一性。
@@ -179,7 +174,7 @@ flowchart LR
 
 ### Phase D：稳定 OAuth identity
 
-**实现状态：已由 `5dd8505` 提交；数据库面已生产应用，API 尚未部署。**
+**实现状态：已完成、合入并生产发布；`5dd8505` 仅作为历史候选基线。**
 
 1. 引入独立、版本化的 identity hash key：`api/_lib/identityHash.js`（`AUTH_IDENTITY_HASH_KEY_CURRENT/PREVIOUS`，缺 key 安全关闭、版本冲突拒绝，与 state 密钥解耦）。
 2. 支持旧 key 查询、新 key 写入和登录时原子迁移（`claim_oauth_identity` RPC 双 hash 双读，owner 不可变、hash split 拒绝）；迁移完成前不得轮换/退役旧 key。

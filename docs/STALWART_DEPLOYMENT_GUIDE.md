@@ -4,7 +4,7 @@
 
 ## 认证发布额外门禁
 
-`AUTH-HARDEN-001` Phase A–D 与本地候选验收已完成；生产数据库已于 2026-08-02 按 166 → 167 部署邮箱归属、首次设密和临时凭据数据库能力，API 尚未部署。测试邮件只证明投递链路，不能证明账号归属或 OAuth/Session 安全闭环；LinuxDo 已降为 P3，真实 Connect Client 验收完成前保持关闭且不阻塞本发布。
+`AUTH-HARDEN-001` Phase A–D、PR #14 和生产 166–168 已完成，认证 API 已随主线发布。测试邮件只证明投递链路，不能证明账号归属或 OAuth / Session 安全闭环；LinuxDo 已降为 P3，真实 Connect Client 验收完成前保持关闭且不阻塞本发布。
 
 ## 结论
 
