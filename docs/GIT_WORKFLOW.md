@@ -82,10 +82,10 @@ chore:发布v4.4.1
 认证和数据库变更需要额外分层：
 
 1. 合入前分别检查主站标准链、各 worktree 候选和共享生产库迁移记录；不能只按本地文件名推断生产编号。
-2. 本认证 worktree 已按共享生产 schema 将迁移重编号为 166/167，避开独立抽奖 160–165；性能线和旧邮箱候选的同号 159 未进入认证分支。
-3. 认证集成 baseline 已重新生成并验证到 167；生产数据库已于 2026-08-02 按 166 → 167 执行并完成权限、回填、函数和触发器核验。
-4. 数据库已先于依赖新列/RPC 的 API 应用；API 部署仍需独立授权。每个 provider 都必须完成各自真实浏览器回归后才开放，GitHub 验收不能替代 LinuxDo/QQ 验收。
-5. commit、push、部署、生产 migration 和生产账号修改分别授权，不能相互推定。
+2. 迁移编号必须以当前 baseline 覆盖范围、所有活动 worktree 候选和共享生产记录共同决定；不能只把旧文档中的 166/167 或任意尾号当作下一编号。
+3. 变更 `archive/` 或 `migrations/` 后必须重新生成 baseline，并验证每个 migration block 的内容一致性和临时 PostgreSQL smoke；当前覆盖范围看 baseline 头部与 `supabase/README.md`。
+4. 数据库必须先于依赖新列 / RPC 的 API 应用；API 部署仍需独立授权。每个 provider 都必须完成各自真实浏览器回归后才开放，GitHub 验收不能替代 LinuxDo / QQ 验收。
+5. commit、push、部署、生产 migration 和生产账号修改分别授权，不能相互推定。生产已存在等价最终 schema 时，重编号后的仓库迁移不得重复执行。
 
 主站正常发布不直接运行 `vercel deploy --prod`。只有用户明确批准紧急回滚、promotion 或切换已有部署时，才使用 Vercel CLI；操作前必须说明目标部署 URL / ID，操作后必须重新核对生产 alias。独立状态页等其他 Vercel 项目是不同部署目标，不得与主站发布混用。
 
@@ -119,5 +119,15 @@ git diff --check
 5. 同步更新 `todo` 和 `SESSION_HANDOFF.md`。
 
 根目录 `todo` 与 `SESSION_HANDOFF.md` 位于主仓库外层，不会随 `gacha-analyzer` 提交自动进入 Git。发布交接时必须单独检查它们是否已经同步，仓库内文档提交不要假定会包含这两个文件。
+
+## 已合并分支闭拢
+
+分支或 worktree 的“已合并”不能只看名称或 PR 标题。闭拢前必须：
+
+1. 用 `git merge-base --is-ancestor <branch> main` 确认 tip 已进入当前 `main`。
+2. 检查该 worktree 的跟踪改动、未跟踪文件和被忽略的本地配置；未提交内容需要逐文件判断是否已被主线覆盖。
+3. `.env.local`、密钥、数据库导出、Git bundle 和恢复材料不得因删除 worktree 被顺带清理；不得读取或复制其值到公开文档。
+4. 干净 worktree 可先移除再用 `git branch -d` 删除分支；有本地环境配置的目录可切到 detached `main` 保留环境，分支仍用非强制删除。
+5. 远端分支只在确认已合并且没有开放 PR 后删除；本地与远端引用分别核验，不使用强推或按名称批量猜测。
 
 历史改写只适合本练习项目或已明确允许的仓库。协作仓库默认用新增修复提交解决问题。

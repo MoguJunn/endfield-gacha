@@ -13,6 +13,8 @@
 
 | 范围 | 当前证据 | 收口目标 | 归属任务 |
 | --- | --- | --- | --- |
+| 个人分析快照 | owner/account revision、持久快照、活跃用户 FIFO、`pg_cron + pg_net` 即时派发、45 秒多批 Worker、渐进检查与同 owner Session 保护已由 PR #23–#25 合入并完成生产 E2E；含冒号 viewKey 已有回归测试和生产 HTTP 200 证据。 | `完成`。后续只做 dispatch / HTTP 2xx 和生产 Web Vitals 低频观察；出现具体回归再拆 BUG，不重新打开旧 PERF 候选。 | `PERF-013 / UX-FLOW-001 / PROD-OBS-001` |
+| 附加寻访子类型 | migrations 181–183、管理写入、官方导入、版本绑定、个人分析、模拟器和桌面 / 移动展示均区分 `reconstruction`、`reconstruction_claim`、`special`；生产最终字段、约束、触发器、受限晋升 RPC、种子卡池与绑定已只读核验。 | `完成`。保留 `type=extra` 作为粗粒度兼容；未来增加新规则模板时必须扩展统一 capability / profile 合同，不能只按 ID 前缀猜测。 | `EXTRA-POOL-SUBTYPE-001 / PROD-OBS-001` |
 | 官方 ID 回填 | `src/utils/canonicalEntityUtils.js` 仍将 `char_manual_*`、`weapon_manual_*` 和 `*_manual_*` 卡池 ID 归类为 `manual_placeholder`；admin 卡池测试仍创建 `special_manual_*` alias。 | 先提供非破坏性审计，再把 placeholder 映射到官方 ID，保留 alias，更新外键，校验导出兼容，并产出回滚报告。 | `DATA-NEW-017` |
 | 公共卡池分析 | 已新增 `public_pool_analytics_cache` / `public_pool_trend_cache` 与 `refresh_public_analytics_cache()`；`api/_lib/publicAnalytics.js` 优先读取预聚合缓存，单池指标和趋势点都带 `analyticsMeta.partial / cacheKey / cacheVersion / warning`。缺表或缺行时，趋势端点返回空 `points`，单池端点只降级为 bounded count。 | 后续补生产迁移应用、真实 refresh 耗时观测、长期 source/meta 看板，以及更多安全 admin/ops 写入点接线；继续避免请求期扫描原始 history。 | `API-003 / STATS-004` |
 | 开发者 API 审核 | admin 路由支持 `reviewNote`，设置页展示 `review_note`；`DeveloperApiPanel.jsx` 审核、拒绝、撤销和重新启用时会提示填写备注。审核结果通知已能在 `DEVELOPER_API_REVIEW_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时写入邮件 outbox，且邮件入队失败不会阻断审核。 | 后续补用户设置页更明确的下一步动作、历史审核记录、管理员风险提示和更完整责任链；邮件真实投递仍受队列处理器、演练模式、紧急停发开关和投递监控保护。 | `DEVAPI-004` |

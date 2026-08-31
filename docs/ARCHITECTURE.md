@@ -17,6 +17,10 @@ flowchart LR
   Browser --> ImportBackend["Private CN / INTL import backend"]
   ImportBackend --> ImportStaging["Official import staging"]
   ImportStaging --> SupabaseDb
+  Browser --> AnalysisApi["/api/account-gacha-data\nanalysis mode"]
+  AnalysisApi --> AnalysisSnapshot["personal_analysis_snapshots"]
+  AnalysisScheduler["Supabase pg_cron + pg_net"] --> AnalysisWorker["/api/personal-analysis-worker"]
+  AnalysisWorker --> AnalysisSnapshot
   PublicApi --> PublicCache["Serverless public cache"]
   PublicCache --> SupabaseDb["Supabase PostgreSQL"]
   Admin["Admin UI"] --> AdminApi["Protected admin API"]
@@ -29,7 +33,8 @@ flowchart LR
 
 - 公共数据：生产浏览器统一请求同源 `/api/*`，由 Serverless 层访问 Supabase。
 - 私有数据：用户抽卡历史、个人排行、工单、账号恢复和后台数据保持鉴权隔离与 `no-store`。
-- 认证：邮箱凭据继续由 Supabase Auth 管理；第三方 provider 经同源 OAuth bridge 接入，两条入口都以 `auth.users` UUID 为锚点并创建 `app_sessions`。`AUTH-HARDEN-001` Phase A–D 与候选验收已完成并由 `5dd8505` 固化；生产数据库已于 2026-08-02 按 166 → 167 完成迁移和权限/回填核验，API 与主线代码尚未部署。LinuxDo 代码提交为 `b8d14d2`，因无法申请 Connect Client 下调为 P3，保持关闭且不阻塞认证发布。
+- 认证：邮箱凭据继续由 Supabase Auth 管理；第三方 provider 经同源 OAuth bridge 接入，两条入口都以 `auth.users` UUID 为锚点并创建 `app_sessions`。`AUTH-HARDEN-001` Phase A–D、PR #14 和生产 166–168 已完成；LinuxDo 因无法申请 Connect Client 下调为 P3，保持关闭且不阻塞主线。
+- 个人分析：浏览器只读取 owner/account 快照，不在请求期下载完整历史重新聚合。活跃用户通过 service-role-only RPC 排队并即时触发 `pg_net`，`pg_cron` 每分钟兜底；Worker 使用 lease / revision 防止并发覆盖和陈旧发布。
 - 管理与自动化：后台写入、cron 和手动 ops 共享服务端 helper，写入成功后 best-effort 刷新公共缓存版本。
 - 私有导入：CN / INTL 后端负责访问官方数据源、过滤情报书等非寻访事件、规范化、问题分类和内部暂存，随后自动通过数据库 RPC 原子提交；可定位的未知角色 / 武器记录写入后由 `history_anomalies` 提醒用户核对。再次导入时，只有被官方数据精确证明为非寻访事件的旧版四星未知占位才会原子移除并重算对应卡池保底。
 - 仓库边界：`backend/` 只公开测试与数据契约需要的兼容 helper，不代表完整私有部署包。
@@ -41,9 +46,9 @@ flowchart LR
 | 入口 | `src/main.jsx`、`src/AppRouter.jsx` | React 挂载、主题、双端路由、Speed Insights |
 | 桌面端 | `src/App.jsx`、`src/GachaAnalyzer.jsx`、`src/components/app/DesktopAppRoutes.jsx` | 桌面壳层、初始化、主导航 |
 | 移动端 | `src/mobile/MobileApp.jsx`、`src/mobile/layouts/MobileLayout.jsx` | 移动壳层、底栏、移动页面 |
-| 状态 | `src/stores/*` | auth、pool、history、app 公共状态 |
+| 状态 | `src/stores/*` | auth、pool、history、个人数据请求生命周期与个人分析快照 |
 | 公共读取 | `src/services/publicResourceClient.js` | 同源请求、公共版本、内存缓存、localStorage snapshot |
-| 私有写入 | `src/services/accountGachaDataService.js`、`src/hooks/app/useCloudSync.js`、`src/utils/cloudDataSync.js` | 账号历史读取、精确变更、池信息和账号数据同步 |
+| 私有读取 / 写入 | `src/services/accountGachaDataService.js`、`src/hooks/app/useCloudSync.js`、`src/utils/cloudDataSync.js` | 个人分析读取、历史分页、精确变更、池信息和 owner 隔离同步 |
 | 官方导入 | `src/features/import/useOfficialImportController.js`、`src/features/import/ImportManager.jsx` | 创建 `import-full` 后台任务、轮询 `import-status`、结果刷新、导入后异常提示，以及兼容期遗留审阅元数据清理 |
 
 当前仍需后续治理的前端复杂点：
@@ -60,7 +65,8 @@ flowchart LR
 | 后台 API | `api/_routes/root/admin.js` | 管理面板统一入口 |
 | 自动化 API | `api/_routes/root/ops-automation.js`、`api/_lib/runOpsAutomation.js` | cron、manual、job graph、review bundle |
 | BOT / 开发者 API | `api/_routes/dev/**/*`、`api/_routes/integrations/**/*` | 受保护只读接口和平台绑定 |
-| 账号历史 | `api/_routes/root/account-gacha-data.js` | 私有历史并行分页读取、精确编辑 / 删除和别名解析 |
+| 账号历史与个人分析 | `api/_routes/root/account-gacha-data.js` | 私有历史分页、owner/account 快照投影、活跃排队、精确编辑 / 删除和别名解析 |
+| 个人分析 Worker | `api/_routes/root/personal-analysis-worker.js`、`api/_lib/personalAnalysisWorker.js` | 受保护 Worker、按用户领取 owner/scope、构建并发布 revision 快照 |
 | 历史异常 | `api/_routes/root/history-anomalies.js`、`admin-history-anomalies.js` | 用户当前作用域提醒与超级管理员复核 |
 | 认证与会话 | `api/_routes/root/auth-oauth.js`、`api/_lib/linuxDoOAuth.js`、`auth-session.js`、`account-email-action.js`、`account-email-verify.js`、`account-password-setup.js`、`account-security-state.js` | OAuth transaction、GitHub/LinuxDo provider 编排、统一站点 Session、邮箱归属、首次设密与凭据状态 |
 
@@ -91,7 +97,11 @@ DB-OPTIMIZE-001 的当前结论：线上 `history` 体积主要来自索引，�
 
 账号历史读取先取得用户精确记录数，再以固定并发分页读取必要列；卡池目录、可见池和账号历史在前端同步阶段并行等待。该优化不改变完整作用域定位、审计或保底重算语义。
 
-认证数据库面由 166/167 提供：admin RPC 权限、OAuth transaction、Session 撤销、规范化邮箱唯一归属、一次性邮箱 challenge、首次设密能力、临时凭据认证层门禁和版本化 identity hash keyring。共享生产 schema 已于 2026-08-02 完成 166/167；集成 baseline 覆盖到 167，API 部署仍需独立授权。
+认证数据库面由 166–172 提供：admin RPC 权限、OAuth transaction、Session 撤销、规范化邮箱唯一归属、一次性邮箱 challenge、首次设密能力、临时凭据认证层门禁、版本化 identity hash keyring，以及受审批 / 证据约束的旧邮箱空壳修复与原子隔离。已确认生产历史包括 166–168；后续运行态仍以实时核验为准，不能仅由 Git 文件推定。
+
+个人分析数据库面由 173–180 提供：owner/scope revision、快照队列、catalog 依赖失效、活跃用户优先级、Worker lease、`pg_cron + pg_net` 调度、5 秒全局节流和优先级感知即时派发。常规 Worker 保持 `PERSONAL_ANALYSIS_WORKER_BACKFILL_ENABLED=false`，历史回填只能在维护窗口显式开启。
+
+附加寻访数据库面由 181–183 提供：`extra_subtype / extra_rule_profile / extra_series_key / extra_series_phase`，并把产品语义区分为 `reconstruction`、`reconstruction_claim` 和 `special`。相同分类贯穿可见卡池 RPC、管理写入、官方导入、版本绑定、分析与模拟器；旧 `type=extra` 仍作为粗粒度兼容类型。
 
 ## 6. 运营自动化
 
@@ -123,6 +133,7 @@ npm run build
 npm run perf:report
 npm run test:supabase-baseline
 npm run test:supabase-baseline:smoke
+npm run test:personal-analysis-queue
 npm run test:auth-hardening-phase-a
 npm run test:auth-hardening-phase-cd
 npm run test:public-api-boundary

@@ -2,6 +2,15 @@
 
 本文件的未勾选项是下一次发布时复用的模板，不代表当前 `v4.5.4` 尚未完成。`v4.5.4` 已在 `78f5ed1 chore:发布v4.5.4` 收口：迁移 157 / 158 已执行且没有主动修改异常记录，CN / INTL 后端 `1.6.3` 健康，GitHub CI 全部通过，GitHub 触发的 Vercel Production 部署 Ready，生产首页、移动入口、bootstrap 版本、双区公网健康和 CORS 预检均通过。
 
+## v4.5.4 后主线补充记录（2026-08-27）
+
+- [x] PR #24 已合入个人分析 Session 循环修复、Supabase `pg_cron + pg_net` 调度、即时派发、短间隔检查、45 秒多批 Worker，以及重构寻访 / 重构申领 / 特殊附加寻访支持。
+- [x] PR #25 已修复含 PostgREST 保留字符的分析 `viewKey` 触发 `PGRST100 / HTTP 500`；生产真实登录请求返回 HTTP 200 / ready。
+- [x] 当前发布主线为 `d186a425d5fb29aad940b4f08027744dfecbc602`；GitHub CI、Vercel Preview 和 GitHub-connected Vercel Production 均已核对成功 / Ready。
+- [x] 完整回归为 239 个 Vitest 文件 / 1316 项测试，另通过 ESLint、公共验证、个人分析队列 PostgreSQL 合同、baseline smoke 和生产构建。
+- [x] 1789 条合成历史的一次真实浏览器冷启动观测约 `13.1s`；这是观测值，不是 SLA。
+- [x] 新环境 baseline 覆盖到 migration 183；生产已只读核验个人分析调度和附加寻访最终数据库合同。重编号后的 181–183 不应因此重复执行。
+
 ## 代码
 
 - [ ] 版本号和 changelog 已更新
@@ -57,7 +66,7 @@
 
 LinuxDo 代码、配置和验收矩阵由独立分支 `feat/linuxdo-oauth` 维护，不进入本认证候选。外部申请条件恢复前保持关闭，也不阻塞本次认证发布。
 
-## OAuth 邮箱旧空壳自助修复（migration 169）
+## OAuth 邮箱旧空壳自助修复（migration 169；以下保留为该阶段发布检查历史）
 
 - [x] `npm run test:auth-hardening-phase-cd` 已在临时 PostgreSQL 17 中完成候选识别、错码计数与持久预算、一次性验证、claim 原子占用、归属转移、完成及 restrictive RLS 门禁闭环
 - [x] API 专项覆盖：先提示可修复、重新核对候选、发送 6 位验证码、验证和显式确认分离、协调状态不暴露内部错误、确认必须绑定发起时的站点会话
@@ -85,7 +94,7 @@ LinuxDo 代码、配置和验收矩阵由独立分支 `feat/linuxdo-oauth` 维�
 
 ## 部署
 
-- [x] Supabase baseline / migration 状态已确认到本分支 169；生产当前到 168
+- [x] 当时 Supabase baseline / migration 状态已确认到本分支 169、生产到 168；当前覆盖范围必须读取 baseline 头部与 `supabase/README.md`，不能沿用该历史尾号
 - [x] 迁移前已通过 SSH 只读核对生产 schema；独立抽奖 160–165 存在且不属于主站 baseline，认证结构当时不存在
 - [x] 认证初始迁移已定为 166/167，审查修复使用前向迁移 168；baseline 已重新生成并在临时 PostgreSQL 中完整验证
 - [x] 生产数据库已按 166 → 167 执行；3,095 个邮箱归属、83 条 identity key 版本、权限/触发器/函数断言和 `site_version=v4.5.4` 均核对通过

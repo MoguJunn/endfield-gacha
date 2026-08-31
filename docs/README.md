@@ -6,6 +6,7 @@
 - `docs/AUTH_SECURITY_HARDENING.md`：Phase A–D 本地候选、认证不变量、迁移重编号、真实浏览器回归和发布门禁
 - `docs/PROJECT_GUIDE.md`：部署、环境变量、数据库维护、静态资源和 changelog 摘要
 - `docs/CODEMAP.md`：代码入口和主要模块索引
+- `docs/PERSONAL_ANALYSIS_WORKER.md`：个人分析快照队列、Supabase `pg_cron + pg_net` 调度、应急入口与生产核验
 - `docs/CLOSEOUT_LEDGER.md`：已上线但仍依赖 placeholder / fallback / 隐藏入口的功能收口总账
 - `docs/ACCOUNT_ALL_CLOSEOUT.md`：全部账号汇总的保留、关闭和重新开放条件
 - `docs/SELF_HOSTED_MAIL.md`：自建邮件平台选型、投递基础设施、outbox / suppression / 防刷预算边界和后续决策点
