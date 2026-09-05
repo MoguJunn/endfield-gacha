@@ -6,7 +6,8 @@
 - `docs/AUTH_SECURITY_HARDENING.md`：Phase A–D 本地候选、认证不变量、迁移重编号、真实浏览器回归和发布门禁
 - `docs/PROJECT_GUIDE.md`：部署、环境变量、数据库维护、静态资源和 changelog 摘要
 - `docs/CODEMAP.md`：代码入口和主要模块索引
-- `docs/DESKTOP_HOME_DEMO.md`：已验收并本地提交的桌面首页 / 导航预览、1366×768 布局、个人与全服统计拆分、统一消息弹窗、独立版本主题接口及验证边界；尚未推送或发布
+- `docs/DESKTOP_HOME_DEMO.md`：随 v4.6.0 纳入主线的桌面首页 / 导航预览、1366×768 布局、个人与全服统计拆分、统一消息弹窗、独立版本主题接口及 DEV 限制
+- `docs/RELEASE_4.6.0.md`：v4.6.0 交付范围、贡献署名、版本验证及运行时配置同步
 - `docs/ONBOARDING_GUIDE_PLAN.md`：首次使用教程与首页指南优化任务，记录目标、与 UX-011 的分工和验收；待开始
 - `docs/PERSONAL_ANALYSIS_WORKER.md`：个人分析快照队列、Supabase `pg_cron + pg_net` 调度、应急入口与生产核验
 - `docs/CLOSEOUT_LEDGER.md`：已上线但仍依赖 placeholder / fallback / 隐藏入口的功能收口总账

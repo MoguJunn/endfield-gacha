@@ -1,6 +1,16 @@
 # Release Checklist（可复用发布模板）
 
-本文件的未勾选项是下一次发布时复用的模板，不代表当前 `v4.5.4` 尚未完成。`v4.5.4` 已在 `78f5ed1 chore:发布v4.5.4` 收口：迁移 157 / 158 已执行且没有主动修改异常记录，CN / INTL 后端 `1.6.3` 健康，GitHub CI 全部通过，GitHub 触发的 Vercel Production 部署 Ready，生产首页、移动入口、bootstrap 版本、双区公网健康和 CORS 预检均通过。
+本次版本为 `v4.6.0`，范围与验证见 [RELEASE_4.6.0.md](RELEASE_4.6.0.md)。以下历史发布记录及复用模板保留各自阶段含义，不代表本轮全部重新执行。
+
+`v4.5.4` 已在 `78f5ed1 chore:发布v4.5.4` 收口：迁移 157 / 158 已执行且没有主动修改异常记录，CN / INTL 后端 `1.6.3` 健康，GitHub CI 全部通过，GitHub 触发的 Vercel Production 部署 Ready，生产首页、移动入口、bootstrap 版本、双区公网健康和 CORS 预检均通过。
+
+## v4.6.0 发布候选
+
+- [x] 主站包、锁文件、沙盒版本、构建日期、当前文档和 changelog 已同步。
+- [x] 隔离候选 lint、251 个文件 / 1363 项单测、包含抽奖子应用的完整构建通过。
+- [x] 明确保留桌面 Demo 的 DEV 限制及 Neptune-520 共同贡献署名。
+- [ ] GitHub 发布 PR 的 CI 通过后合入 main，并同步本地 main 与 v4.6.0 标签。
+- [ ] 核对 GitHub 触发的 Vercel Production Ready 和生产 alias；运行时版本配置同步按独立授权记录。
 
 ## v4.5.4 后主线补充记录（2026-08-27）
 
@@ -13,7 +23,7 @@
 
 ## 桌面 Demo 本地验收与正式接入边界（2026-09-05）
 
-`DESKTOP-HOME-001` 当前为已验收并分阶段本地提交的桌面 Demo，分支为 `feat/v4.5-desktop-home-demo`，尚未推送或发布。下列记录不改变前面的主线发布历史，具体合同见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
+`DESKTOP-HOME-001` 已验收，随 `v4.6.0` 纳入主线并保留 DEV 限制。下列记录保留首次本地提交时的验证情况，最新隔离候选结果见上面的 v4.6.0 节；具体合同见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
 
 - [x] 本地桌面布局与交互获用户确认；1366×768 基线、较大视口、窄窗分区、中英文 / 亮暗、侧栏收起、消息动作与减少动态效果已定向验证。
 - [x] 个人 / 全服统计及图鉴锁定来源，个人数据边界与公共统计隔离；统计拆分阶段 11 项相关测试通过。
