@@ -1,0 +1,106 @@
+/* Standalone version theme. Override --vc-* on the card to theme it separately. */
+.version-countdown-card {
+  --vc-surface: #fff;
+  --vc-text: #1e293b;
+  --vc-muted: #64748b;
+  --vc-accent: #0369a1;
+  --vc-line: #7dd3fc70;
+  --vc-edge: #38bdf8;
+  --vc-tint: #0ea5e90c;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  padding: 14px 20px 12px;
+  border: 1px solid var(--vc-line);
+  border-top: 3px solid var(--vc-edge);
+  background: linear-gradient(120deg, var(--vc-tint), transparent 75%), var(--vc-surface);
+  color: var(--vc-text);
+  font-family: var(--font-sans);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dark .version-countdown-card {
+  --vc-surface: #18181b;
+  --vc-text: #f4f4f5;
+  --vc-muted: #a1a1aa;
+  --vc-accent: #7dd3fc;
+}
+.vc-topline, .vc-topline > span, .vc-date, .version-countdown-card footer,
+.version-countdown-card button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.vc-topline, .version-countdown-card footer { justify-content: space-between; }
+.vc-topline > span {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: .05em;
+  color: var(--vc-muted);
+}
+.vc-topline > b {
+  color: var(--vc-accent);
+  background: var(--vc-tint);
+  padding: 2px 6px;
+  font-size: 10px;
+}
+.vc-main {
+  display: grid;
+  grid-template-columns: minmax(0, .85fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+.vc-title h3 { font-size: 23px; font-weight: 900; line-height: 1.35; overflow-wrap: anywhere; }
+.vc-title p { margin-top: 4px; font-size: 11px; line-height: 1.5; color: var(--vc-muted); }
+.vc-digits { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.vc-digits > span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 2px 7px;
+  border-bottom: 2px solid var(--vc-line);
+  background: var(--vc-tint);
+}
+.vc-digits b { font-size: 27px; line-height: 1; font-weight: 900; }
+.vc-digits small { font-size: 9px; color: var(--vc-muted); }
+.vc-digits > span:last-child b { color: var(--vc-accent); }
+.vc-released {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--vc-accent);
+  padding: 13px 10px;
+  background: var(--vc-tint);
+  border: 1px solid var(--vc-line);
+}
+.vc-released small { display: block; margin-top: 4px; font-size: 10px; color: var(--vc-muted); }
+.vc-released strong { font-size: 15px; line-height: 1.5; }
+.vc-released svg, .vc-date svg { flex-shrink: 0; }
+.vc-date { color: var(--vc-muted); font-size: 11px; }
+.version-countdown-card footer { border-top: 1px solid var(--vc-line); padding-top: 9px; }
+.version-countdown-card button {
+  cursor: pointer;
+  color: var(--vc-accent);
+  font-size: 11px;
+  padding: 5px 0;
+  transition: background-color 160ms, color 160ms;
+}
+.version-countdown-card button:first-child {
+  padding: 5px 8px;
+  border: 1px solid var(--vc-line);
+  background: var(--vc-tint);
+}
+.version-countdown-card button:hover { text-decoration: underline; }
+.version-countdown-card button:focus-visible { outline: 2px solid var(--vc-accent); outline-offset: 3px; }
+@media (max-width: 1200px) {
+  .vc-main { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .vc-digits { max-width: 240px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .version-countdown-card * { animation: none !important; transition: none !important; }
+}
