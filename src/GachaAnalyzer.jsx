@@ -27,6 +27,8 @@ import { useContributorDemoSandboxBridge } from './hooks/app/useContributorDemoS
 
 const GachaModals = React.lazy(() => import('./components/modals/GachaModals'));
 const DataImportWizardModal = React.lazy(() => import('./components/modals/DataImportWizardModal'));
+const HomeLandingHeader = import.meta.env.DEV ? React.lazy(() => import('./components/home/HomeLandingHeader.jsx')) : null;
+const DesktopMessageCenter = import.meta.env.DEV ? React.lazy(() => import('./components/home/DesktopMessageCenter.jsx')) : null;
 
 export default function GachaAnalyzer() {
   // --- 从 Zustand Stores 获取状态 ---
@@ -77,11 +79,33 @@ export default function GachaAnalyzer() {
   const gameAccounts = usePersonalGameAccounts();
 
   const activeTab = getDesktopTabFromPath(location.pathname);
+  const previewHome = import.meta.env.DEV && new URLSearchParams(location.search).get('home-demo') === 'unified';
+  const isDesktopHomePreview = import.meta.env.DEV && previewHome && location.pathname === '/';
+  const DesktopHeader = previewHome ? HomeLandingHeader : AppHeader;
+  const [messageRequest, setMessageRequest] = useState(null);
+  const messageParams = new URLSearchParams(location.search);
+  const queryMessageRequest = previewHome && messageParams.get('panel') === 'bulletin'
+    ? { category: ['system', 'site', 'game', 'official'].includes(messageParams.get('notice-category')) ? messageParams.get('notice-category') : 'site', id: messageParams.get('notice-id') }
+    : null;
+  const clearMessageQuery = useCallback(() => {
+    const query = new URLSearchParams(location.search);
+    if (query.get('panel') !== 'bulletin') return;
+    query.delete('panel'); query.delete('notice-category'); query.delete('notice-id');
+    navigate({ pathname: location.pathname, search: query.toString() }, { replace: true });
+  }, [location.pathname, location.search, navigate]);
+  const openDesktopMessages = useCallback((category = 'system', id) => {
+    setMessageRequest({ category, id });
+    clearMessageQuery();
+  }, [clearMessageQuery]);
+  const closeDesktopMessages = useCallback(() => {
+    setMessageRequest(null);
+    clearMessageQuery();
+  }, [clearMessageQuery]);
   const [editItemState, setEditItemState] = useState(null);
 
   const navigateToTab = useCallback((tab, options) => {
-    navigate(getDesktopPathForTab(tab), options);
-  }, [navigate]);
+    navigate(`${getDesktopPathForTab(tab)}${previewHome ? '?home-demo=unified' : ''}`, options);
+  }, [navigate, previewHome]);
 
   // 本地 UI 状态（仍然使用 useState）
 
@@ -382,12 +406,13 @@ export default function GachaAnalyzer() {
   // --- 组件 ---
 
   return (
-    <div data-testid="desktop-app-shell" className="min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-800 dark:text-zinc-100 font-sans pb-20 md:pb-10 relative">
+    <div data-testid="desktop-app-shell" className={`min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-800 dark:text-zinc-100 font-sans pb-20 md:pb-10 relative ${previewHome ? 'dp-shell' : ''} ${isDesktopHomePreview ? 'dh-shell' : ''}`}>
       {/* 全局加载进度条 */}
       <LoadingBar isLoading={syncing || globalStatsLoading} />
 
       {/* 顶部导航 */}
-      <AppHeader
+      <React.Suspense fallback={<div className="h-16" />}>
+      <DesktopHeader
         user={user}
         userRole={userRole}
         activeTab={activeTab}
@@ -398,12 +423,17 @@ export default function GachaAnalyzer() {
         setActiveTab={navigateToTab}
         openAuthModal={openAuthModal}
         handleLogout={handleLogout}
+        onOpenMessages={previewHome ? openDesktopMessages : undefined}
       />
+      </React.Suspense>
 
       <ContributorDemoBanner />
 
-      <main className="w-full max-w-[1440px] mx-auto px-4 py-8">
+      <main className={previewHome ? `dp-main ${isDesktopHomePreview ? 'dh-main' : ''}` : 'w-full max-w-[1440px] mx-auto px-4 py-8'}>
         <DesktopAppRoutes
+          desktopNotifications={durableNotifications}
+          desktopUnreadCount={durableUnreadCount}
+          onOpenMessages={openDesktopMessages}
           user={user}
           userRole={userRole}
           authResolved={authResolved}
@@ -475,14 +505,26 @@ export default function GachaAnalyzer() {
         </React.Suspense>
       )}
 
-      <NotificationCenter
+      {previewHome ? <React.Suspense fallback={null}><DesktopMessageCenter
+        request={messageRequest || queryMessageRequest}
+        onOpen={openDesktopMessages}
+        onClose={closeDesktopMessages}
+        notifications={durableNotifications}
+        unreadCount={durableUnreadCount}
+        hasNewAnnouncement={hasNewAnnouncement}
+        setHasNewAnnouncement={setHasNewAnnouncement}
+        onMarkRead={markDurableNotificationRead}
+        onMarkAllRead={markAllDurableNotificationsRead}
+        onDismiss={dismissDurableNotification}
+        onClearRead={clearReadDurableNotifications}
+      /></React.Suspense> : <NotificationCenter
         notifications={durableNotifications}
         unreadCount={durableUnreadCount}
         onMarkRead={markDurableNotificationRead}
         onMarkAllRead={markAllDurableNotificationsRead}
         onDismiss={dismissDurableNotification}
         onClearRead={clearReadDurableNotifications}
-      />
+      />}
 
       <style>{`
         /* 组件特有样式 - 通用动画已移至 index.css */

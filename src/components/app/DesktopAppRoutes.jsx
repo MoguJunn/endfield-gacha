@@ -1,9 +1,12 @@
 import React, { Suspense, lazy } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useI18n } from '../../i18n/index.js';
 import PersonalDataBoundary from './PersonalDataBoundary.jsx';
 
 const HomePage = lazy(() => import('../home/HomePage'));
+const DesktopHomeDemo = import.meta.env.DEV ? lazy(() => import('../home/DesktopHomeDemo.jsx')) : null;
+const DesktopPageMotion = import.meta.env.DEV ? lazy(() => import('./DesktopPageMotion.jsx')) : null;
+const DesktopPersonalWorkspace = import.meta.env.DEV ? lazy(() => import('./DesktopPersonalWorkspace.jsx')) : null;
 const DesktopDashboardWorkspace = lazy(() => import('./DesktopDashboardWorkspace'));
 const GachaSimulator = lazy(() => import('../../features/simulator/GachaSimulator'));
 const SummaryView = lazy(() => import('../SummaryView'));
@@ -25,7 +28,24 @@ function TabPanelFallback({ label = '正在加载模块...' }) {
   );
 }
 
+function RouteContent({ fallback, children }) {
+  const location = useLocation();
+  const preview = import.meta.env.DEV && new URLSearchParams(location.search).get('home-demo') === 'unified';
+  return (
+    <Suspense fallback={fallback}>
+      {preview ? <DesktopPageMotion>{children}</DesktopPageMotion> : children}
+    </Suspense>
+  );
+}
+
+function PersonalWorkspace({ preview, children, ...props }) {
+  return preview ? <DesktopPersonalWorkspace {...props}>{children}</DesktopPersonalWorkspace> : children;
+}
+
 export default function DesktopAppRoutes({
+  desktopNotifications,
+  desktopUnreadCount,
+  onOpenMessages,
   user,
   userRole,
   authResolved,
@@ -52,6 +72,8 @@ export default function DesktopAppRoutes({
   handleExportEndgachaKwerTopPlainTXT,
   addDurableNotification
 }) {
+  const location = useLocation();
+  const previewHome = import.meta.env.DEV && new URLSearchParams(location.search).get('home-demo') === 'unified';
   const { isEnglish } = useI18n();
   const tt = (zh, en) => (isEnglish ? en : zh);
   const isResolvingRole = !authResolved || (Boolean(user) && userRole === null);
@@ -61,25 +83,26 @@ export default function DesktopAppRoutes({
       <Route
         index
         element={
-          <Suspense fallback={<TabPanelFallback label={tt('正在加载首页...', 'Loading home...')} />}>
-            <HomePage />
-          </Suspense>
+          <RouteContent fallback={<TabPanelFallback label={tt('正在加载首页...', 'Loading home...')} />}>
+            {previewHome ? <DesktopHomeDemo notifications={desktopNotifications} unreadCount={desktopUnreadCount} onOpenMessages={onOpenMessages} /> : <HomePage />}
+          </RouteContent>
         }
       />
       <Route
         path="summary"
         element={
-          <Suspense fallback={<TabPanelFallback label={tt('正在加载统计...', 'Loading summary...')} />}>
-            <PersonalDataBoundary user={user} onRetry={onRetryPersonalData}>
+          <RouteContent fallback={<TabPanelFallback label={tt('正在加载统计...', 'Loading summary...')} />}>
+            {previewHome ? <SummaryView lockedDataSource="global" /> : <PersonalDataBoundary user={user} onRetry={onRetryPersonalData}>
               <SummaryView />
-            </PersonalDataBoundary>
-          </Suspense>
+            </PersonalDataBoundary>}
+          </RouteContent>
         }
       />
       <Route
         path="dashboard"
         element={
-          <Suspense fallback={<TabPanelFallback label={tt('正在加载卡池工作台...', 'Loading gacha workspace...')} />}>
+          <RouteContent fallback={<TabPanelFallback label={tt('正在加载卡池工作台...', 'Loading gacha workspace...')} />}>
+            <PersonalWorkspace preview={previewHome} user={user} onRetryPersonalData={onRetryPersonalData}>
             <DesktopDashboardWorkspace
               user={user}
               showToast={showToast}
@@ -102,52 +125,53 @@ export default function DesktopAppRoutes({
               handleExportEndgachaKwerTopPlainJSON={handleExportEndgachaKwerTopPlainJSON}
               handleExportEndgachaKwerTopPlainTXT={handleExportEndgachaKwerTopPlainTXT}
             />
-          </Suspense>
+            </PersonalWorkspace>
+          </RouteContent>
         }
       />
       <Route
         path="simulator"
         element={
-          <Suspense fallback={<TabPanelFallback label={tt('正在加载模拟器...', 'Loading simulator...')} />}>
+          <RouteContent fallback={<TabPanelFallback label={tt('正在加载模拟器...', 'Loading simulator...')} />}>
             <GachaSimulator />
-          </Suspense>
+          </RouteContent>
         }
       />
       <Route
         path="settings"
         element={
-          <Suspense fallback={<TabPanelFallback label={tt('正在加载设置...', 'Loading settings...')} />}>
+          <RouteContent fallback={<TabPanelFallback label={tt('正在加载设置...', 'Loading settings...')} />}>
             <SettingsPanel onDeleteAllData={deleteAllUserData} />
-          </Suspense>
+          </RouteContent>
         }
       />
       <Route
         path="developer-api"
         element={
-          <Suspense fallback={<TabPanelFallback label={tt('正在加载 API 文档...', 'Loading API docs...')} />}>
+          <RouteContent fallback={<TabPanelFallback label={tt('正在加载 API 文档...', 'Loading API docs...')} />}>
             <DeveloperApiDocsPage />
-          </Suspense>
+          </RouteContent>
         }
       />
       <Route
         path="about"
         element={
-          <Suspense fallback={<TabPanelFallback label={tt('正在加载关于页...', 'Loading about...')} />}>
+          <RouteContent fallback={<TabPanelFallback label={tt('正在加载关于页...', 'Loading about...')} />}>
             <AboutPanel />
-          </Suspense>
+          </RouteContent>
         }
       />
       <Route
         path="tickets"
         element={
-          <Suspense fallback={<TabPanelFallback label={tt('正在加载工单...', 'Loading tickets...')} />}>
+          <RouteContent fallback={<TabPanelFallback label={tt('正在加载工单...', 'Loading tickets...')} />}>
             <TicketPanel
               user={user}
               userRole={userRole}
               showToast={showToast}
               addDurableNotification={addDurableNotification}
             />
-          </Suspense>
+          </RouteContent>
         }
       />
       <Route
@@ -156,9 +180,9 @@ export default function DesktopAppRoutes({
           isResolvingRole ? (
             <TabPanelFallback label={tt('正在校验兑奖权限...', 'Checking lottery access...')} />
           ) : user ? (
-            <Suspense fallback={<TabPanelFallback label={tt('正在加载兑奖工作台...', 'Loading lottery workspace...')} />}>
+            <RouteContent fallback={<TabPanelFallback label={tt('正在加载兑奖工作台...', 'Loading lottery workspace...')} />}>
               <SummerLotteryOperatorPage showToast={showToast} />
-            </Suspense>
+            </RouteContent>
           ) : (
             <Navigate to="/" replace />
           )
@@ -170,14 +194,14 @@ export default function DesktopAppRoutes({
           isResolvingRole ? (
             <TabPanelFallback label={tt('正在校验管理权限...', 'Checking admin access...')} />
           ) : isSuperAdmin ? (
-            <Suspense fallback={<TabPanelFallback label={tt('正在加载管理后台...', 'Loading admin panel...')} />}>
+            <RouteContent fallback={<TabPanelFallback label={tt('正在加载管理后台...', 'Loading admin panel...')} />}>
               <AdminPanel
                 user={user}
                 userRole={userRole}
                 showToast={showToast}
                 addDurableNotification={addDurableNotification}
               />
-            </Suspense>
+            </RouteContent>
           ) : (
             <Navigate to="/" replace />
           )

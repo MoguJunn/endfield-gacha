@@ -19,6 +19,8 @@ const SummerLotteryOperatorPage = lazy(() => import('../../components/admin/Summ
 const MobileDrawer = lazy(() => import('../components/MobileDrawer'));
 const AuthModal = lazy(() => import('../../AuthModal'));
 const MobileHomePageView = lazy(() => import('../views/MobileHomePageView'));
+const HomeLandingDemo = import.meta.env.DEV ? lazy(() => import('../../components/home/HomeLandingDemo.jsx')) : null;
+const HomeLandingHeader = import.meta.env.DEV ? lazy(() => import('../../components/home/HomeLandingHeader.jsx')) : null;
 const MobileDashboardView = lazy(() => import('../views/MobileDashboardView'));
 const MobileOverviewView = lazy(() => import('../views/MobileOverviewView'));
 const MobileStatsView = lazy(() => import('../views/MobileStatsView'));
@@ -44,6 +46,7 @@ function MobileRouteFallback({ label }) {
  */
 function MobileLayout({ onOAuthSessionSynced, onRetryPersonalData }) {
   const location = useLocation();
+  const previewHome = import.meta.env.DEV && new URLSearchParams(location.search).get('home-demo') === 'unified';
   const navigate = useNavigate();
   const { user, userRole, authResolved, showAuthModal, openAuthModal, closeAuthModal, setUser } = useAuthStore();
   useSummerLotterySsoContinuation({ user, authResolved, openAuthModal });
@@ -78,13 +81,13 @@ function MobileLayout({ onOAuthSessionSynced, onRetryPersonalData }) {
 
   return (
     <div data-testid="mobile-app-shell" className="flex flex-col h-[100dvh] w-full overflow-hidden bg-ef-light dark:bg-ef-dark text-slate-900 dark:text-white font-sans transition-colors duration-300">
-      <MobileHeader onMenuClick={() => setIsDrawerOpen(true)} activeTab={activeTab} />
+      {previewHome ? <Suspense fallback={<div className="h-14 shrink-0" />}><HomeLandingHeader mobile /></Suspense> : <MobileHeader onMenuClick={() => setIsDrawerOpen(true)} activeTab={activeTab} />}
       <ContributorDemoBanner />
 
       <main className="flex-1 relative overflow-hidden flex flex-col">
         <Suspense fallback={<MobileRouteFallback label={t('common.loading')} />}>
           <Routes>
-            <Route index element={<MobileHomePageView />} />
+            <Route index element={previewHome ? <HomeLandingDemo mobile /> : <MobileHomePageView />} />
             <Route path="announcements" element={<MobileAnnouncementsView />} />
             <Route path="mechanics" element={<MobileMechanicsView />} />
             <Route path="roadmap" element={<MobileRoadmapView />} />

@@ -1029,6 +1029,7 @@ export default function CharacterCatalogView({
   globalStatsLoading = false,
   ranking = null,
   isRankingLoading = false,
+  lockedDataSource = null,
   mobile = false
 }) {
   const navigate = useNavigate();
@@ -1291,15 +1292,19 @@ export default function CharacterCatalogView({
       ? getMobilePathForTab('dashboard')
       : getDesktopPathForTab('dashboard');
     const targetPoolId = entry.poolId || entry.timelineSectionId || '';
-    const query = targetPoolId ? `?poolId=${encodeURIComponent(targetPoolId)}` : '';
-    navigate(`${targetPath}${query}`, {
+    const query = new URLSearchParams();
+    if (targetPoolId) query.set('poolId', targetPoolId);
+    if (import.meta.env.DEV && !mobile && new URLSearchParams(location.search).get('home-demo') === 'unified') {
+      query.set('home-demo', 'unified');
+    }
+    navigate(`${targetPath}${query.size ? `?${query}` : ''}`, {
       state: {
         scrollTo: entry.timelineElementId,
         dashboardCharViewMode: 'waterfall',
         _ts: Date.now()
       }
     });
-  }, [location.pathname, navigate]);
+  }, [location.pathname, location.search, mobile, navigate]);
   const formatDate = React.useCallback((value) => formatDateTime(value, {
     year: 'numeric',
     month: '2-digit',
@@ -1373,15 +1378,15 @@ export default function CharacterCatalogView({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <AccountSelect
+            {(!lockedDataSource || activeDataSource === 'local') && <AccountSelect
               accounts={gameAccounts}
               currentGameUid={effectiveGameUid}
               onChange={switchGameAccount}
               locale={locale}
               tt={tt}
               mobile={mobile}
-            />
-            <div className="flex bg-zinc-50 p-1 dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-800" style={{ clipPath: 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)' }}>
+            />}
+            {!lockedDataSource && <div className="flex bg-zinc-50 p-1 dark:bg-[#0c0c0e] border border-zinc-200 dark:border-zinc-800" style={{ clipPath: 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)' }}>
               {[
                 { value: 'local', label: tt('summary.source.local', '我的数据'), icon: User },
                 { value: 'global', label: tt('summary.source.global', '全服数据'), icon: Cloud }
@@ -1403,7 +1408,7 @@ export default function CharacterCatalogView({
                   </button>
                 );
               })}
-            </div>
+            </div>}
             <button
               type="button"
               onClick={handleRefresh}
