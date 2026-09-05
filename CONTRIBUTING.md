@@ -18,6 +18,8 @@ cp .env.contributor.example .env.local
 
 该模板只包含浏览器端公开变量。`VITE_SUPABASE_PUBLISHABLE_KEY` 需要由维护者提供低权限公开 key，或改用贡献者自己的本地 Supabase。不要把 service role、JWT secret、SMTP 密码、OAuth Client Secret、BOT token、Cron secret 或 CAPTCHA secret 写入 `.env.local` 后提交。
 
+当前本地桌面 Demo 可在开发服务器的 `/?home-demo=unified` 查看，已验收并保存于本地主题分支，尚未推送或发布。界面预览开关与贡献者数据沙盒是两层配置；调整首页、顶栏、统计入口或共享组件前，请对齐 [桌面 Demo 合同](docs/DESKTOP_HOME_DEMO.md)，保留 1366×768 基线、独立版本主题接口、原入口默认行为与移动端边界。
+
 ## 最低验证
 
 公开主链改动建议至少跑：
@@ -53,6 +55,7 @@ npm run test:supabase-baseline:smoke
 ## 文档要求
 
 - UI 或路由变更请同步更新 README、截图或代码地图。
+- 桌面 Demo 改动同步 `docs/DESKTOP_HOME_DEMO.md`；区分本地验收、最终改动验证和正式发布，预览阶段不替换 README 的正式站截图。
 - 环境变量、部署方式、Supabase baseline、公共缓存版本和自动化入口变更时，请同步更新对应文档。
 - 如果改动会影响 GitHub 页面展示，优先更新 README 顶部、预览图和更新日志。
 

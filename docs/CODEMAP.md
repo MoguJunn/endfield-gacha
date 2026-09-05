@@ -25,6 +25,19 @@
 | 工单 | `src/components/TicketPanel.jsx` | `src/mobile/views/MobileTicketView.jsx` |
 | 后台 | `src/components/AdminPanel.jsx` | `src/mobile/views/MobileAdminView.jsx` |
 
+### 本地桌面 Demo 入口
+
+以下为已验收并于 2026-09-05 本地提交的桌面 Demo 入口，尚未推送 / 发布，仅在 Vite DEV 且 `home-demo=unified` 时激活。原页面入口继续保留；布局、路由和数据合同详见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
+
+- 预览选择与消息接线：`src/GachaAnalyzer.jsx`、`src/components/app/DesktopAppRoutes.jsx`。
+- 桌面首页、卡池与日程适配：`src/components/home/DesktopHomeDemo.jsx`、`desktopHomeDemo.css`、`desktopHomeData.js`。
+- 顶栏、独立工单 / 管理入口、身份与主题菜单：`src/components/home/HomeLandingHeader.jsx`、`homeLandingDemo.css`。
+- 原生轮换与活动卡：`src/components/home/RotationScheduleCard.jsx`、`SummerLotteryBanner.jsx`。
+- 独立版本倒计时及 `--vc-*` 主题接口：`src/components/home/VersionCountdownCard.jsx`、`versionCountdownCard.css`。
+- 四类消息 / 公告模型与统一弹窗：`src/components/home/DesktopMessageCenter.jsx`、`desktopMessageModel.js`、`DesktopHomeDialog.jsx`；组件测试：`src/components/home/__tests__/DesktopMessageCenter.test.jsx`。
+- 个人概览 / 卡池分析二级菜单与持久化收起：`src/components/app/DesktopPersonalWorkspace.jsx`；共享宽度 / 外置菜单：`desktopPageLayout.css`。
+- 路由入场与滚动重置：`src/components/app/DesktopPageMotion.jsx`；统计来源锁定：`src/components/SummaryView.jsx`、`src/hooks/summary/useSummaryViewState.js`、`src/components/summary/CharacterCatalogView.jsx`。
+
 ## 状态与数据
 
 | 范围 | 文件 |
