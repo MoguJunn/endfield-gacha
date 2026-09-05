@@ -7,15 +7,16 @@ import './SummerLotteryBanner.css';
 
 const LOTTERY_URL = String(import.meta.env.VITE_SUMMER_LOTTERY_URL || '/lottery').trim();
 
-export default function SummerLotteryBanner({ compact = false }) {
-  const { t } = useI18n();
+export default function SummerLotteryBanner({ compact = false, onOpenDetails }) {
+  const { t, isEnglish } = useI18n();
   if (!LOTTERY_URL) return null;
+  const Container = onOpenDetails ? 'div' : 'a';
 
   return (
-    <a
-      href={LOTTERY_URL}
+    <Container
+      href={onOpenDetails ? undefined : LOTTERY_URL}
       className={`summer-lottery-banner group ${compact ? 'summer-lottery-banner--compact mb-6' : ''}`}
-      aria-label={t('home.summerLottery.open')}
+      aria-label={onOpenDetails ? undefined : t('home.summerLottery.open')}
     >
       <section className="summer-lottery-banner__info">
         <div className="summer-lottery-banner__kicker">
@@ -34,9 +35,20 @@ export default function SummerLotteryBanner({ compact = false }) {
             <Gift size={12} /> {t('home.summerLottery.prize')}
           </span>
         </div>
-        <span className="summer-lottery-banner__action">
-          {t('home.summerLottery.action')} <ArrowUpRight size={16} />
-        </span>
+        {onOpenDetails ? (
+          <div className="summer-lottery-banner__actions">
+            <a href={LOTTERY_URL} className="summer-lottery-banner__action" aria-label={t('home.summerLottery.open')}>
+              {t('home.summerLottery.action')} <ArrowUpRight size={16} />
+            </a>
+            <button type="button" onClick={onOpenDetails} className="summer-lottery-banner__details">
+              {isEnglish ? 'Event details' : '活动详情'} <ArrowUpRight size={13} />
+            </button>
+          </div>
+        ) : (
+          <span className="summer-lottery-banner__action">
+            {t('home.summerLottery.action')} <ArrowUpRight size={16} />
+          </span>
+        )}
       </section>
 
       <section className="summer-lottery-banner__visual" aria-hidden="true">
@@ -65,6 +77,6 @@ export default function SummerLotteryBanner({ compact = false }) {
         </div>
         <div className="summer-lottery-banner__coordinate">AREA 06 // COMMUNITY EVENT</div>
       </section>
-    </a>
+    </Container>
   );
 }

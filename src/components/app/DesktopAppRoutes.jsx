@@ -1,9 +1,10 @@
 import React, { Suspense, lazy } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useI18n } from '../../i18n/index.js';
 import PersonalDataBoundary from './PersonalDataBoundary.jsx';
 
 const HomePage = lazy(() => import('../home/HomePage'));
+const DesktopHomeDemo = import.meta.env.DEV ? lazy(() => import('../home/DesktopHomeDemo.jsx')) : null;
 const DesktopDashboardWorkspace = lazy(() => import('./DesktopDashboardWorkspace'));
 const GachaSimulator = lazy(() => import('../../features/simulator/GachaSimulator'));
 const SummaryView = lazy(() => import('../SummaryView'));
@@ -26,6 +27,9 @@ function TabPanelFallback({ label = '正在加载模块...' }) {
 }
 
 export default function DesktopAppRoutes({
+  desktopNotifications,
+  desktopUnreadCount,
+  onOpenMessages,
   user,
   userRole,
   authResolved,
@@ -52,6 +56,8 @@ export default function DesktopAppRoutes({
   handleExportEndgachaKwerTopPlainTXT,
   addDurableNotification
 }) {
+  const location = useLocation();
+  const previewHome = import.meta.env.DEV && new URLSearchParams(location.search).get('home-demo') === 'unified';
   const { isEnglish } = useI18n();
   const tt = (zh, en) => (isEnglish ? en : zh);
   const isResolvingRole = !authResolved || (Boolean(user) && userRole === null);
@@ -62,7 +68,7 @@ export default function DesktopAppRoutes({
         index
         element={
           <Suspense fallback={<TabPanelFallback label={tt('正在加载首页...', 'Loading home...')} />}>
-            <HomePage />
+            {previewHome ? <DesktopHomeDemo notifications={desktopNotifications} unreadCount={desktopUnreadCount} onOpenMessages={onOpenMessages} /> : <HomePage />}
           </Suspense>
         }
       />

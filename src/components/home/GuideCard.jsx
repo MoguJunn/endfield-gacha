@@ -30,7 +30,7 @@ const NavButton = ({ icon: Icon, label, onClick }) => (
   </button>
 );
 
-const GuideCard = React.memo(function GuideCard({ isOpen, onToggle }) {
+const GuideCard = React.memo(function GuideCard({ isOpen, onToggle, onBeforeAuth }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useI18n();
@@ -100,7 +100,7 @@ const GuideCard = React.memo(function GuideCard({ isOpen, onToggle }) {
                 </div>
                 <div className="mt-auto pt-3 border-t border-zinc-200/50 dark:border-zinc-700/50 flex flex-wrap items-center gap-2">
                   {!user && (
-                    <NavButton icon={LogIn} label={tt('home.guide.step1.action.login', '登录 / 注册')} onClick={openAuthModal} />
+                    <NavButton icon={LogIn} label={tt('home.guide.step1.action.login', '登录 / 注册')} onClick={() => { onBeforeAuth?.(); openAuthModal(); }} />
                   )}
                   <NavButton icon={Import} label={tt('home.guide.step1.action.import', '前往导入')} onClick={goTo('dashboard', 'guide-import-btn')} />
                 </div>
