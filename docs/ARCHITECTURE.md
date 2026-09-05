@@ -1,6 +1,6 @@
 # Architecture
 
-本文档描述当前 `v4.5.4` 主线架构。历史计划和退役部署方式不再作为主路径记录；独立 CN / INTL 后端仅保留官方数据获取、规范化、内部暂存与原子写入职责。
+本文档描述当前 `v4.5.4` 主线架构，并单独标明当前工作树中已验收但未发布的桌面 Demo。历史计划和退役部署方式不再作为主路径记录；独立 CN / INTL 后端仅保留官方数据获取、规范化、内部暂存与原子写入职责。
 
 ## 1. 系统边界
 
@@ -55,6 +55,16 @@ flowchart LR
 
 - `SIM-004`：模拟器控制器仍承担过多 UI、资源、继承和分享状态。
 - `ARCH-021`：桌面 / 移动端 dashboard、settings 仍有重复控制器逻辑。
+
+### 2.1 本地桌面 Demo（2026-09-05 已本地提交，未推送 / 发布）
+
+`GachaAnalyzer` 与 `DesktopAppRoutes` 仅在 Vite DEV 且 `home-demo=unified` 时选择新顶栏、`DesktopHomeDemo`、统一消息中心、个人工作区和页面动效。预览专用入口采用 DEV 条件懒加载，共享 `SummaryView`、图鉴和原生卡片继续兼容未传新增参数的原入口；移动布局保持原行为。界面预览开关不替代贡献者沙盒的数据隔离或现有认证权限。
+
+`DesktopPersonalWorkspace` 把 `/dashboard` 分为个人概览与卡池分析：前者在 `PersonalDataBoundary` 内复用 `SummaryView lockedDataSource="local"`，后者保留原卡池工作区。预览 `/summary` 直接使用 `lockedDataSource="global"`，不受个人读取状态阻塞。图鉴同样锁定来源，个人概览不再等待无关全服加载；这里没有新增统计计算器、修改 schema v2 或重新开放跨账号汇总。
+
+`desktopPageLayout.css` 统一预览壳层的 1366px 最大宽度、个人菜单和减少动态效果；首页通过固定卡片区与可伸展引导区适配 1366×768，较小容器使用分区页签。`DesktopPageMotion` 以路径和个人 `view` 管理入场 / 滚动重置，其他查询参数不触发整页重挂载。
+
+`DesktopMessageCenter` 与 `desktopMessageModel` 统一四类公告 / 通知呈现，继续使用现有持久通知数据及业务回调。`VersionCountdownCard` 只接收日期、名称和动作，通过独立 `--vc-*` 主题变量适配视觉，不与版本宣传素材或宿主 Store 耦合。详细合同与验证边界见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
 
 ## 3. API 层
 
