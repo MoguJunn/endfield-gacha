@@ -27,7 +27,7 @@
 
 ### 本地桌面 Demo 入口
 
-以下为已验收并于 2026-09-05 本地提交的桌面 Demo 入口，尚未推送 / 发布，仅在 Vite DEV 且 `home-demo=unified` 时激活。原页面入口继续保留；布局、路由和数据合同详见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
+以下桌面 Demo 入口随 `v4.6.0` 纳入主线，仅在 Vite DEV 且 `home-demo=unified` 时激活。原页面入口继续保留；布局、路由和数据合同详见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
 
 - 预览选择与消息接线：`src/GachaAnalyzer.jsx`、`src/components/app/DesktopAppRoutes.jsx`。
 - 桌面首页、卡池与日程适配：`src/components/home/DesktopHomeDemo.jsx`、`desktopHomeDemo.css`、`desktopHomeData.js`。
@@ -112,7 +112,8 @@
 | 旧批量删除歧义保护 | `supabase/migrations/155_guard_ambiguous_history_batch_delete.sql` |
 | 历史 v4.5.3 运行时版本与缓存失效 | `supabase/migrations/156_bump_site_version_453.sql` |
 | 官方非寻访事件旧占位精确修复 RPC | `supabase/migrations/157_repair_official_non_pull_artifact.sql` |
-| 当前 v4.5.4 运行时版本与缓存失效 | `supabase/migrations/158_bump_site_version_454.sql` |
+| 历史 v4.5.4 运行时版本与缓存失效 | `supabase/migrations/158_bump_site_version_454.sql` |
+| v4.6.0 包版本与运行时版本同步 | `package.json`、`src/constants/appMeta.js`、`docs/RELEASE_4.6.0.md` |
 | 认证 Phase A/B | `supabase/migrations/166_harden_admin_profile_and_oauth_transactions.sql` |
 | 认证 Phase C/D | `supabase/migrations/167_harden_account_credentials_and_identity_keys.sql` |
 | 认证审查与旧邮箱空壳修复 | `supabase/migrations/168_close_auth_review_findings.sql`–`172_quarantine_oauth_email_artifact_atomically.sql` |

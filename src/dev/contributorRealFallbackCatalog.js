@@ -159,7 +159,7 @@ export const CONTRIBUTOR_REAL_FALLBACK_POOL_CHARACTERS = Object.freeze({
 });
 
 export const CONTRIBUTOR_REAL_FALLBACK_SITE_CONFIG = Object.freeze({
-  site_version: 'v4.5.4-local-sandbox',
+  site_version: 'v4.6.0-local-sandbox',
   build_info: 'Contributor sandbox · local-only',
   homepage_notice: '当前为本地内容沙盒。游戏目录优先来自正式站公开 API，内容修改只保存在本浏览器。',
   home_next_version_target_at: '2026-09-24T04:00:00.000Z',
