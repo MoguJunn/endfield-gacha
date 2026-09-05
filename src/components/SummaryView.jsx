@@ -1,21 +1,8 @@
 import React from 'react';
-import {
-  BarChart3,
-  BookOpen,
-  Cloud,
-  Layers,
-  RefreshCw,
-  Star,
-  Swords,
-  User
-} from 'lucide-react';
+import { BarChart3, BookOpen, Cloud, Layers, RefreshCw, Star, Swords, User } from 'lucide-react';
 import { useAppStore, useAuthStore, useHistoryStore, usePoolStore } from '../stores';
 import { useI18n } from '../i18n/index.js';
-import {
-  ChartSection,
-  CharacterCatalogView,
-  SummarySidebar
-} from './summary';
+import { ChartSection, CharacterCatalogView, SummarySidebar } from './summary';
 import ResourceSummaryPanel from './resources/ResourceSummaryPanel';
 import { useThemeDetection, getTooltipStyle, useSummaryViewState } from '../hooks/summary';
 import { getCombinedCharacterAverageDisplay } from '../utils/summaryAverageDisplay.js';
@@ -23,9 +10,16 @@ import { getCombinedCharacterAverageDisplay } from '../utils/summaryAverageDispl
 function MetricCard({ icon: Icon, label, value, hint, tone = 'text-slate-900 dark:text-white' }) {
   return (
     <div className="relative min-w-0 overflow-hidden border border-zinc-100 bg-zinc-50 p-4 dark:border-zinc-800/50 dark:bg-zinc-950/50">
-      {Icon && <Icon size={38} className="absolute right-2 top-2 text-zinc-200 transition-transform group-hover/stat:scale-110 dark:text-zinc-800" />}
+      {Icon && (
+        <Icon
+          size={38}
+          className="absolute right-2 top-2 text-zinc-200 transition-transform group-hover/stat:scale-110 dark:text-zinc-800"
+        />
+      )}
       <div className="relative z-10">
-        <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">{label}</div>
+        <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+          {label}
+        </div>
         <div className={`break-words font-mono text-2xl font-black leading-tight ${tone}`}>{value}</div>
         {hint && <div className="mt-1 text-[10px] font-mono text-zinc-500">{hint}</div>}
       </div>
@@ -33,13 +27,7 @@ function MetricCard({ icon: Icon, label, value, hint, tone = 'text-slate-900 dar
   );
 }
 
-function StatsHeader({
-  dataSource,
-  currentStats,
-  contributorRegionStats,
-  formatCount,
-  tt
-}) {
+function StatsHeader({ dataSource, currentStats, contributorRegionStats, formatCount, tt }) {
   const safeStats = currentStats || {};
   const activeUsers30d = Number(safeStats.activeUsers30d || 0);
   const newUsers30d = Number(safeStats.newUsers30d || 0);
@@ -48,11 +36,13 @@ function StatsHeader({
   return (
     <div className="mb-6 flex items-center justify-between border-b border-zinc-100 pb-4 dark:border-zinc-800">
       <div className="flex items-center gap-3">
-        <div className={`rounded-sm p-2 ${
-          dataSource === 'global'
-            ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400'
-            : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-500'
-        }`}>
+        <div
+          className={`rounded-sm p-2 ${
+            dataSource === 'global'
+              ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400'
+              : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-500'
+          }`}
+        >
           {dataSource === 'global' ? <Cloud size={20} /> : <User size={20} />}
         </div>
         <div>
@@ -70,7 +60,9 @@ function StatsHeader({
 
       {safeStats.totalUsers ? (
         <div className="text-right">
-          <span className="block font-mono text-[10px] uppercase tracking-widest text-zinc-400">{tt('summary.metric.contributors', '贡献者')}</span>
+          <span className="block font-mono text-[10px] uppercase tracking-widest text-zinc-400">
+            {tt('summary.metric.contributors', '贡献者')}
+          </span>
           <span className="font-mono text-xl font-bold text-slate-700 dark:text-zinc-300">
             {formatCount(safeStats.totalContributors || safeStats.totalUsers)}
           </span>
@@ -81,14 +73,22 @@ function StatsHeader({
           )}
           {contributorRegionStats && (
             <div className="mt-1 flex flex-wrap justify-end gap-1 font-mono text-[10px] text-zinc-500">
-              <span>{tt('summary.metric.cn', '国服')}: {formatCount(contributorRegionStats.cn || 0)}</span>
-              <span>{tt('summary.metric.intl', '国际服')}: {formatCount(contributorRegionStats.intl || 0)}</span>
+              <span>
+                {tt('summary.metric.cn', '国服')}: {formatCount(contributorRegionStats.cn || 0)}
+              </span>
+              <span>
+                {tt('summary.metric.intl', '国际服')}: {formatCount(contributorRegionStats.intl || 0)}
+              </span>
             </div>
           )}
           {hasContributorActivityStats && (
             <div className="mt-1 flex flex-wrap justify-end gap-2 font-mono text-[10px] text-zinc-500">
-              <span>{tt('summary.metric.activeUsers30d', '30日活跃')}: {formatCount(activeUsers30d)}</span>
-              <span>{tt('summary.metric.newUsers30d', '30日新增')}: {formatCount(newUsers30d)}</span>
+              <span>
+                {tt('summary.metric.activeUsers30d', '30日活跃')}: {formatCount(activeUsers30d)}
+              </span>
+              <span>
+                {tt('summary.metric.newUsers30d', '30日新增')}: {formatCount(newUsers30d)}
+              </span>
             </div>
           )}
         </div>
@@ -141,63 +141,187 @@ function OverviewAllPoolsLegacy({ currentStats, dataSource, ranking, formatCount
     characterStats,
     extraStats,
     limitedStats,
-    standardStats
+    standardStats,
   });
 
   return (
     <div className="space-y-4">
       <div className="group/stat relative overflow-hidden border border-zinc-100 bg-zinc-50 p-5 dark:border-zinc-800/50 dark:bg-zinc-950/50">
-        <div className="absolute right-0 top-0 p-2 text-zinc-200 transition-transform group-hover/stat:scale-110 dark:text-zinc-800"><Layers size={40} /></div>
-        <div className="mb-1 text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">{tt('summary.metric.totalPulls', '总抽数')}</div>
-        <div className="font-mono text-3xl font-black text-slate-800 dark:text-white">{formatCount(currentStats.total || 0)}</div>
+        <div className="absolute right-0 top-0 p-2 text-zinc-200 transition-transform group-hover/stat:scale-110 dark:text-zinc-800">
+          <Layers size={40} />
+        </div>
+        <div className="mb-1 text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+          {tt('summary.metric.totalPulls', '总抽数')}
+        </div>
+        <div className="font-mono text-3xl font-black text-slate-800 dark:text-white">
+          {formatCount(currentStats.total || 0)}
+        </div>
       </div>
 
       <div className="space-y-4">
         <div className="border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/30">
           <div className="mb-4 flex items-center gap-2 border-b border-dashed border-zinc-200 pb-2 dark:border-zinc-800">
             <Star size={16} className="text-violet-500" />
-            <h4 className="text-sm font-bold uppercase tracking-wide text-slate-700 dark:text-zinc-300">{tt('summary.section.characterBannerData', '角色池数据')}</h4>
-            <span className="ml-auto font-mono text-[10px] text-zinc-400">{tt('summary.section.characterBannerSubtitle', '附加 + 限定 + 常驻')}</span>
+            <h4 className="text-sm font-bold uppercase tracking-wide text-slate-700 dark:text-zinc-300">
+              {tt('summary.section.characterBannerData', '角色池数据')}
+            </h4>
+            <span className="ml-auto font-mono text-[10px] text-zinc-400">
+              {tt('summary.section.characterBannerSubtitle', '附加 + 限定 + 常驻')}
+            </span>
           </div>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-6">
-            <LegacyStat label={tt('summary.metric.totalPulls', '总抽数')} value={formatCount(characterStats.total || 0)} tone="text-slate-700 dark:text-zinc-200" />
+            <LegacyStat
+              label={tt('summary.metric.totalPulls', '总抽数')}
+              value={formatCount(characterStats.total || 0)}
+              tone="text-slate-700 dark:text-zinc-200"
+            />
             <LegacyStat
               label={tt('summary.metric.sixStarCount', '6★ 数量')}
-              value={<>{formatCount(characterSixDisplay)}{currentStats.charGift > 0 && <span className="ml-1 text-xs text-purple-500">+{formatCount(currentStats.charGift)}</span>}</>}
-              hint={characterSixWithFree !== null ? <>{tt('summary.metric.withFree', '含免费')}: <span className="text-zinc-400">{formatCount(characterSixWithFree)}</span></> : null}
+              value={
+                <>
+                  {formatCount(characterSixDisplay)}
+                  {currentStats.charGift > 0 && (
+                    <span className="ml-1 text-xs text-purple-500">+{formatCount(currentStats.charGift)}</span>
+                  )}
+                </>
+              }
+              hint={
+                characterSixWithFree !== null ? (
+                  <>
+                    {tt('summary.metric.withFree', '含免费')}:{' '}
+                    <span className="text-zinc-400">{formatCount(characterSixWithFree)}</span>
+                  </>
+                ) : null
+              }
               tone="text-amber-500"
             />
             <LegacyStat
               label={tt('summary.metric.avgSixStarDrop', '六星平均出货')}
               value={characterAverageDisplay.value}
-              hint={characterAverageDisplay.withFree !== null ? <>{tt('summary.metric.withFree', '含免费')}: <span className="text-zinc-400">{characterAverageDisplay.withFree}</span></> : tt('summary.metric.avgAllSixHint', '全部6★ 抽/个')}
+              hint={
+                characterAverageDisplay.withFree !== null ? (
+                  <>
+                    {tt('summary.metric.withFree', '含免费')}:{' '}
+                    <span className="text-zinc-400">{characterAverageDisplay.withFree}</span>
+                  </>
+                ) : (
+                  tt('summary.metric.avgAllSixHint', '全部6★ 抽/个')
+                )
+              }
               tone="text-indigo-500"
             />
             {(characterStats.avgPityUp || limitedStats.avgPityUp) && (
-              <LegacyStat label={tt('summary.metric.avgTargetSixStarDrop', 'UP六星平均出货')} value={characterStats.avgPityUp || limitedStats.avgPityUp} hint={tt('summary.metric.avgTargetSixHint', '仅当期目标6★ 抽/个')} tone="text-emerald-500" />
+              <LegacyStat
+                label={tt('summary.metric.avgTargetSixStarDrop', 'UP六星平均出货')}
+                value={characterStats.avgPityUp || limitedStats.avgPityUp}
+                hint={tt('summary.metric.avgTargetSixHint', '仅当期目标6★ 抽/个')}
+                tone="text-emerald-500"
+              />
             )}
-            <LegacyStat label={tt('summary.metric.targetVsOff', '不歪/歪')} value={<><span className="text-emerald-500">{formatCount(totalCharacterTargets)}</span><span className="mx-1 text-zinc-400">/</span><span className="text-rose-500">{formatCount(Math.max(totalCharacterSix - totalCharacterTargets, 0))}</span><span className="ml-1 text-xs text-zinc-400">({formatPercent(characterTargetRate)})</span></>} />
+            <LegacyStat
+              label={tt('summary.metric.targetVsOff', '不歪/歪')}
+              value={
+                <>
+                  <span className="text-emerald-500">{formatCount(totalCharacterTargets)}</span>
+                  <span className="mx-1 text-zinc-400">/</span>
+                  <span className="text-rose-500">
+                    {formatCount(Math.max(totalCharacterSix - totalCharacterTargets, 0))}
+                  </span>
+                  <span className="ml-1 text-xs text-zinc-400">({formatPercent(characterTargetRate)})</span>
+                </>
+              }
+            />
           </div>
           <div className="mt-4 grid grid-cols-1 gap-4 border-t border-zinc-200 pt-3 font-mono text-xs text-zinc-500 dark:border-zinc-800/50 xl:grid-cols-3">
-            <PoolBreakdownLine colorClass="bg-cyan-500/50" label={tt('summary.scope.extra', '附加寻访')} total={extraStats.total} avg={extraStats.avgPityExcludingFree || extraStats.avgPity} withFreeAvg={extraStats.avgPityExcludingFree && extraStats.avgPityExcludingFree !== extraStats.avgPity ? extraStats.avgPity : null} formatCount={formatCount} tt={tt} />
-            <PoolBreakdownLine colorClass="bg-emerald-500/50" label={tt('summary.scope.limited', '限定角色池')} total={limitedStats.total} avg={limitedStats.avgPityExcludingFree || limitedStats.avgPity} withFreeAvg={limitedStats.avgPityExcludingFree && limitedStats.avgPityExcludingFree !== limitedStats.avgPity ? limitedStats.avgPity : null} formatCount={formatCount} tt={tt} />
-            <PoolBreakdownLine colorClass="bg-indigo-500/50" label={tt('summary.scope.standard', '常驻池')} total={standardStats.total} avg={standardStats.avgPity} formatCount={formatCount} tt={tt} />
+            <PoolBreakdownLine
+              colorClass="bg-cyan-500/50"
+              label={tt('summary.scope.extra', '附加寻访')}
+              total={extraStats.total}
+              avg={extraStats.avgPityExcludingFree || extraStats.avgPity}
+              withFreeAvg={
+                extraStats.avgPityExcludingFree && extraStats.avgPityExcludingFree !== extraStats.avgPity
+                  ? extraStats.avgPity
+                  : null
+              }
+              formatCount={formatCount}
+              tt={tt}
+            />
+            <PoolBreakdownLine
+              colorClass="bg-emerald-500/50"
+              label={tt('summary.scope.limited', '限定角色池')}
+              total={limitedStats.total}
+              avg={limitedStats.avgPityExcludingFree || limitedStats.avgPity}
+              withFreeAvg={
+                limitedStats.avgPityExcludingFree && limitedStats.avgPityExcludingFree !== limitedStats.avgPity
+                  ? limitedStats.avgPity
+                  : null
+              }
+              formatCount={formatCount}
+              tt={tt}
+            />
+            <PoolBreakdownLine
+              colorClass="bg-indigo-500/50"
+              label={tt('summary.scope.standard', '常驻池')}
+              total={standardStats.total}
+              avg={standardStats.avgPity}
+              formatCount={formatCount}
+              tt={tt}
+            />
           </div>
         </div>
 
         <div className="border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-950/30">
           <div className="mb-4 flex items-center gap-2 border-b border-dashed border-zinc-200 pb-2 dark:border-zinc-800">
             <Swords size={16} className="text-slate-500" />
-            <h4 className="text-sm font-bold uppercase tracking-wide text-slate-700 dark:text-zinc-300">{tt('summary.section.weaponBannerData', '武器池数据')}</h4>
+            <h4 className="text-sm font-bold uppercase tracking-wide text-slate-700 dark:text-zinc-300">
+              {tt('summary.section.weaponBannerData', '武器池数据')}
+            </h4>
           </div>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-6">
-            <LegacyStat label={tt('summary.metric.totalPulls', '总抽数')} value={formatCount(weaponStats.total || 0)} tone="text-slate-700 dark:text-zinc-200" />
-            <LegacyStat label={tt('summary.metric.sixStarCount', '6★ 数量')} value={<>{formatCount(weaponStats.six || 0)}{(currentStats.weaponGiftLimited > 0 || currentStats.weaponGiftStandard > 0) && <span className="ml-1 text-xs text-purple-500">+{formatCount((currentStats.weaponGiftLimited || 0) + (currentStats.weaponGiftStandard || 0))}</span>}</>} tone="text-amber-500" />
-            <LegacyStat label={tt('summary.metric.avgSixStarDrop', '六星平均出货')} value={weaponStats.avgPity || '-'} hint={tt('summary.metric.avgAllSixHint', '全部6★ 抽/个')} tone="text-indigo-500" />
+            <LegacyStat
+              label={tt('summary.metric.totalPulls', '总抽数')}
+              value={formatCount(weaponStats.total || 0)}
+              tone="text-slate-700 dark:text-zinc-200"
+            />
+            <LegacyStat
+              label={tt('summary.metric.sixStarCount', '6★ 数量')}
+              value={
+                <>
+                  {formatCount(weaponStats.six || 0)}
+                  {(currentStats.weaponGiftLimited > 0 || currentStats.weaponGiftStandard > 0) && (
+                    <span className="ml-1 text-xs text-purple-500">
+                      +{formatCount((currentStats.weaponGiftLimited || 0) + (currentStats.weaponGiftStandard || 0))}
+                    </span>
+                  )}
+                </>
+              }
+              tone="text-amber-500"
+            />
+            <LegacyStat
+              label={tt('summary.metric.avgSixStarDrop', '六星平均出货')}
+              value={weaponStats.avgPity || '-'}
+              hint={tt('summary.metric.avgAllSixHint', '全部6★ 抽/个')}
+              tone="text-indigo-500"
+            />
             {weaponStats.avgPityUp && (
-              <LegacyStat label={tt('summary.metric.avgTargetSixStarDrop', 'UP六星平均出货')} value={weaponStats.avgPityUp} hint={tt('summary.metric.avgTargetSixHint', '仅当期目标6★ 抽/个')} tone="text-emerald-500" />
+              <LegacyStat
+                label={tt('summary.metric.avgTargetSixStarDrop', 'UP六星平均出货')}
+                value={weaponStats.avgPityUp}
+                hint={tt('summary.metric.avgTargetSixHint', '仅当期目标6★ 抽/个')}
+                tone="text-emerald-500"
+              />
             )}
-            <LegacyStat label={tt('summary.metric.targetVsOff', '不歪/歪')} value={<><span className="text-emerald-500">{formatCount(weaponTargets)}</span><span className="mx-1 text-zinc-400">/</span><span className="text-rose-500">{formatCount(Math.max(weaponSix - weaponTargets, 0))}</span><span className="ml-1 text-xs text-zinc-400">({formatPercent(weaponTargetRate)})</span></>} />
+            <LegacyStat
+              label={tt('summary.metric.targetVsOff', '不歪/歪')}
+              value={
+                <>
+                  <span className="text-emerald-500">{formatCount(weaponTargets)}</span>
+                  <span className="mx-1 text-zinc-400">/</span>
+                  <span className="text-rose-500">{formatCount(Math.max(weaponSix - weaponTargets, 0))}</span>
+                  <span className="ml-1 text-xs text-zinc-400">({formatPercent(weaponTargetRate)})</span>
+                </>
+              }
+            />
           </div>
         </div>
       </div>
@@ -222,11 +346,17 @@ function PoolBreakdownLine({ colorClass, label, total, avg, withFreeAvg, formatC
   return (
     <div className="flex flex-wrap items-center gap-2 text-zinc-500">
       <span className={`h-2 w-2 flex-shrink-0 rounded-sm ${colorClass}`} />
-      <span>{label}: {formatCount(total || 0)} {tt('summary.metric.pullsUnit', '抽')}</span>
+      <span>
+        {label}: {formatCount(total || 0)} {tt('summary.metric.pullsUnit', '抽')}
+      </span>
       <span className="ml-auto flex items-center gap-1 text-right">
-        <span className="text-slate-600 dark:text-zinc-300">{avg || '-'} {tt('summary.metric.averageShort', '平均')}</span>
+        <span className="text-slate-600 dark:text-zinc-300">
+          {avg || '-'} {tt('summary.metric.averageShort', '平均')}
+        </span>
         {withFreeAvg && (
-          <span className="text-zinc-400">({tt('summary.metric.withFree', '含免费')}: {withFreeAvg})</span>
+          <span className="text-zinc-400">
+            ({tt('summary.metric.withFree', '含免费')}: {withFreeAvg})
+          </span>
         )}
       </span>
     </div>
@@ -236,10 +366,7 @@ function PoolBreakdownLine({ colorClass, label, total, avg, withFreeAvg, formatC
 function OverviewSinglePool({ currentStats, formatCount, formatPercent, tt }) {
   return (
     <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-4">
-      <MetricCard
-        label={tt('summary.metric.totalPulls', '总抽数')}
-        value={formatCount(currentStats.total || 0)}
-      />
+      <MetricCard label={tt('summary.metric.totalPulls', '总抽数')} value={formatCount(currentStats.total || 0)} />
       <MetricCard
         label={tt('summary.metric.sixStarCount', '6★ 数量')}
         value={formatCount(currentStats.sixStar || 0)}
@@ -288,13 +415,15 @@ function SummaryOverviewContent({
   ranking,
   formatCount,
   formatPercent,
-  tt
+  tt,
 }) {
-  if (globalStatsLoading || (dataSource === 'global' && !globalStats)) {
+  if (dataSource === 'global' && (globalStatsLoading || !globalStats)) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 border border-zinc-200 bg-zinc-50 p-12 text-center dark:border-zinc-800 dark:bg-zinc-900/50">
         <RefreshCw size={32} className="animate-spin text-zinc-400" />
-        <span className="font-mono text-sm uppercase tracking-widest text-zinc-500">{tt('summary.loading.data', '正在获取数据...')}</span>
+        <span className="font-mono text-sm uppercase tracking-widest text-zinc-500">
+          {tt('summary.loading.data', '正在获取数据...')}
+        </span>
       </div>
     );
   }
@@ -317,7 +446,10 @@ function SummaryOverviewContent({
             <div className="mb-4 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
               {currentStats.meta.status === 'stale'
                 ? tt('summary.notice.globalStale', '全服汇总暂时使用上次成功缓存，跨境网络较慢时请稍后重试。')
-                : tt('summary.notice.globalUnavailable', '全服汇总暂时不可用，当前网络或数据库响应较慢；排行榜和本地统计仍可继续查看。')}
+                : tt(
+                    'summary.notice.globalUnavailable',
+                    '全服汇总暂时不可用，当前网络或数据库响应较慢；排行榜和本地统计仍可继续查看。'
+                  )}
             </div>
           )}
 
@@ -350,8 +482,8 @@ function SummaryOverviewContent({
         <div className="absolute bottom-0 left-0 right-0 h-1 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(0,0,0,0.05)_10px,rgba(0,0,0,0.05)_20px)] dark:bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(255,255,255,0.02)_10px,rgba(255,255,255,0.02)_20px)]" />
       </div>
 
-      {currentStats.resources && (
-        poolTypeFilter === 'all' ? (
+      {currentStats.resources &&
+        (poolTypeFilter === 'all' ? (
           <ResourceSummaryPanel
             title={tt('summary.section.allResourceSummary', '全卡池资源统计')}
             resources={currentStats.resources}
@@ -360,14 +492,15 @@ function SummaryOverviewContent({
           />
         ) : (
           <ResourceSummaryPanel
-            title={poolTypeFilter === 'weapon'
-              ? tt('summary.section.weaponResourceSummary', '武器池资源统计')
-              : tt('summary.section.characterResourceSummary', '角色池资源统计')}
+            title={
+              poolTypeFilter === 'weapon'
+                ? tt('summary.section.weaponResourceSummary', '武器池资源统计')
+                : tt('summary.section.characterResourceSummary', '角色池资源统计')
+            }
             resources={currentStats.resources}
             variant={poolTypeFilter === 'weapon' ? 'weapon' : 'character'}
           />
-        )
-      )}
+        ))}
 
       <div className="space-y-6">
         {chartDisplayData.charts.map((chart, index) => (
@@ -387,14 +520,15 @@ function SummaryOverviewContent({
   );
 }
 
-const SummaryView = React.memo(() => {
-  const { t, formatNumber } = useI18n();
+const SummaryView = React.memo(({ lockedDataSource = null }) => {
+  const { t, isEnglish, formatNumber } = useI18n();
   const tt = (key, fallback, params = {}) => t(key, params, fallback);
   const formatCount = (value) => formatNumber(Number(value) || 0);
-  const formatPercent = (value, digits = 1) => `${formatNumber(Number(value) || 0, {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits
-  })}%`;
+  const formatPercent = (value, digits = 1) =>
+    `${formatNumber(Number(value) || 0, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    })}%`;
   const user = useAuthStore((state) => state.user);
   const pools = usePoolStore((state) => state.pools);
   const history = useHistoryStore((state) => state.history);
@@ -414,14 +548,16 @@ const SummaryView = React.memo(() => {
     currentStats,
     chartDisplayData,
     ranking,
-    isRankingLoading
+    isRankingLoading,
+    filterOptions,
   } = useSummaryViewState({
     history,
     pools,
     user,
     globalStats,
     fetchGlobalStats,
-    variant: 'desktop'
+    variant: 'desktop',
+    lockedDataSource,
   });
 
   const globalStatsMeta = dataSource === 'global' ? currentStats?.meta : null;
@@ -430,20 +566,26 @@ const SummaryView = React.memo(() => {
 
   const pageTabs = [
     { value: 'overview', label: tt('summary.page.overview', '统计概览'), icon: BarChart3 },
-    { value: 'catalog', label: tt('characterCatalog.title', '角色图鉴'), icon: BookOpen }
+    { value: 'catalog', label: tt('characterCatalog.title', '角色图鉴'), icon: BookOpen },
   ];
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in space-y-6" data-summary-source={dataSource}>
+      {lockedDataSource === 'global' && (
+        <header className="dp-workspace-heading">
+          <h1>{isEnglish ? 'Global statistics' : '全服统计'}</h1>
+          <p>{isEnglish ? 'Community pull statistics, drop rates and character ownership.' : '查看全服寻访样本、出货分布与角色拥有情况。'}</p>
+        </header>
+      )}
       <div className="flex min-w-0 gap-6">
-        <SummarySidebar
+        {!lockedDataSource && <SummarySidebar
           dataSource={dataSource}
           setDataSource={setDataSource}
           poolTypeFilter={poolTypeFilter}
           setPoolTypeFilter={setPoolTypeFilter}
           globalStats={globalStats}
           localStats={localStats}
-        />
+        />}
 
         <div className="min-w-0 flex-1 space-y-6">
           <div className="flex flex-wrap gap-2 border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900">
@@ -454,6 +596,7 @@ const SummaryView = React.memo(() => {
                   key={tab.value}
                   type="button"
                   onClick={() => setActivePage(tab.value)}
+                  aria-pressed={activePage === tab.value}
                   className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-bold transition ${
                     activePage === tab.value
                       ? 'bg-slate-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
@@ -467,6 +610,22 @@ const SummaryView = React.memo(() => {
             })}
           </div>
 
+          {lockedDataSource && activePage === 'overview' && (
+            <nav className="flex flex-wrap gap-2" aria-label={isEnglish ? 'Banner type filter' : '卡池类型筛选'}>
+              {filterOptions.map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={poolTypeFilter === value}
+                  onClick={() => setPoolTypeFilter(value)}
+                  className={`border px-4 py-2 text-xs font-bold transition-colors ${poolTypeFilter === value
+                    ? 'border-amber-400 bg-amber-50 text-amber-700 dark:border-endfield-yellow dark:bg-endfield-yellow/10 dark:text-endfield-yellow'
+                    : 'border-zinc-200 bg-white text-zinc-500 hover:border-amber-400 dark:border-zinc-800 dark:bg-zinc-900'}`}
+                >{label}</button>
+              ))}
+            </nav>
+          )}
+          <div key={activePage} className={lockedDataSource ? 'dp-view-motion' : undefined}>
           {activePage === 'catalog' ? (
             <CharacterCatalogView
               dataSource={dataSource}
@@ -481,6 +640,7 @@ const SummaryView = React.memo(() => {
               globalStatsLoading={globalStatsLoading}
               ranking={ranking}
               isRankingLoading={isRankingLoading}
+              lockedDataSource={lockedDataSource}
             />
           ) : (
             <SummaryOverviewContent
@@ -500,6 +660,7 @@ const SummaryView = React.memo(() => {
               tt={tt}
             />
           )}
+          </div>
         </div>
       </div>
     </div>
