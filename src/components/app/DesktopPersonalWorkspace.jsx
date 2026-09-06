@@ -49,7 +49,7 @@ export default function DesktopPersonalWorkspace({ children, user, onRetryPerson
             {sections.map(({ id, label, icon }) => (
               <Link
                 key={id}
-                to={`/dashboard?home-demo=unified${id === 'overview' ? '&view=overview' : ''}`}
+                to={`/dashboard${id === 'overview' ? '?view=overview' : ''}`}
                 aria-current={overview === (id === 'overview') ? 'page' : undefined}
                 aria-label={label}
                 title={label}

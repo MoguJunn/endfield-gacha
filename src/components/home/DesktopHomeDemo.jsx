@@ -132,7 +132,7 @@ function Avatar({ name }) {
   );
 }
 
-export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages }) {
+export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages, onUseClassicHome }) {
   const { t, locale, isEnglish } = useI18n();
   const tt = (zh, en) => (isEnglish ? en : zh);
   const location = useLocation();
@@ -255,7 +255,7 @@ export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages }) {
             <button
               className="dh-primary"
               type="button"
-              onClick={() => (user ? navigate('/dashboard?home-demo=unified') : openAuthModal())}
+              onClick={() => (user ? navigate('/dashboard') : openAuthModal())}
             >
               {user ? tt('我的分析', 'My analysis') : tt('登录 / 导入', 'Sign in / import')}
               <ArrowRight size={18} />
@@ -265,7 +265,7 @@ export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages }) {
                 <BookOpen size={18} />
                 <span><strong>{tt('指南', 'Guide')}</strong><small>{tt('从导入到备份', 'From import to backup')}</small></span>
               </button>
-              <Link to="/simulator?home-demo=unified">
+              <Link to="/simulator">
                 <Gamepad2 size={18} />
                 <span><strong>{tt('模拟器', 'Simulator')}</strong><small>{tt('试试下一次寻访', 'Try your next pull')}</small></span>
               </Link>
@@ -278,9 +278,9 @@ export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages }) {
                 <span><strong>{tt('友链', 'Links')}</strong><small>{tt('地图、规划与实用工具', 'Maps, planners and tools')}</small></span>
               </button>
             </div>
-            <Link to="/" replace className="dh-exit">
-              {tt('退出预览', 'Exit preview')}
-            </Link>
+            <button type="button" className="dh-exit" onClick={onUseClassicHome}>
+              {tt('切换至经典主页', 'Switch to classic home')}
+            </button>
           </nav>
         </div>
       </div>

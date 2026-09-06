@@ -1,16 +1,18 @@
 # 桌面首页与导航 Demo
 
-Last reviewed: 2026-09-05
+Last reviewed: 2026-09-06
 
-## 状态与预览入口
+## 状态与主页切换
 
-本轮桌面 Demo 已完成本地实现并获用户验收，纳入 `v4.6.0` 发布范围。原主题分支 `feat/v4.5-desktop-home-demo` 保留阶段提交；进入 `release/v4.6.0` 时将首页与分析两个业务提交整理为一个前端主题提交，测试、文档及版本收口分别保留。正式站默认入口尚未切换，其他并行代码与此前文档候选不进入本次发布。交付与验证见 [RELEASE_4.6.0.md](RELEASE_4.6.0.md)。
+本轮桌面 Demo 已完成本地实现并获用户验收，纳入 `v4.6.0` 发布范围，随后成为桌面端**默认首页**：生产构建不再要求 Vite DEV 或查询参数。桌面顶栏、首页、统一消息弹窗、个人 / 全服工作区与页面动效按用户偏好选择；首次访问或没有有效偏好时使用新版，选择经典主页后写入 `gacha_home_experience_v1` 并在后续访问保持。
+
+- 新版首页右下角提供“切换至经典主页”，经典主页左下角提供“切换至新版主页”；切换会清理 `home-demo` 等旧预览参数，不改变其他查询状态。
+- 旧预览链接 `/?home-demo=unified` 继续兼容，总是打开新版；移动端现有入口与行为保留，不在本次切换范围。
+- 原主题分支 `feat/v4.5-desktop-home-demo` 保留阶段提交；发布分支将两个业务提交整理为一个前端主题提交，测试、文档及版本收口分别保留。交付与验证见 [RELEASE_4.6.0.md](RELEASE_4.6.0.md)。
 
 本轮前端改动由 [Neptune-520](https://github.com/Neptune-520) 共同贡献，整合后的前端提交包含其 `Co-authored-by` 署名。
 
-启动 Vite 开发服务器后，在其实际地址打开 `/?home-demo=unified`。该入口同时要求 `import.meta.env.DEV` 和 `home-demo=unified`；生产构建不能通过查询参数开启预览。“退出预览”回到 `/`。预览专用页面通过 DEV 条件懒加载，共享组件仍保留原入口所需的默认行为。
-
-这是界面预览开关，不是认证或数据隔离开关。需要隔离的本地演示数据时，按 [PROJECT_GUIDE.md](PROJECT_GUIDE.md#本地开发) 启用贡献者内容沙盒；单独添加查询参数不会创建演示身份或改变现有权限。
+主页偏好是界面选择，不是认证或数据隔离开关。需要隔离的本地演示数据时，按 [PROJECT_GUIDE.md](PROJECT_GUIDE.md#本地开发) 启用贡献者内容沙盒；单独添加查询参数不会创建演示身份或改变现有权限。
 
 本轮范围为桌面首页、导航、页面壳层和个人 / 全服统计入口。移动端现有入口与行为继续保留，移动首页预览不是本轮新增布局的验收对象。
 
@@ -37,9 +39,9 @@ Last reviewed: 2026-09-05
 
 ### 个人分析、全服统计与页面壳层
 
-- `/dashboard?home-demo=unified`：个人卡池分析，继续使用原 `DesktopDashboardWorkspace`。
-- `/dashboard?home-demo=unified&view=overview`：个人概览，通过 `SummaryView lockedDataSource="local"` 展示个人统计、资源与图鉴；登录及 `PersonalDataBoundary` 继续保护个人数据状态。
-- `/summary?home-demo=unified`：全服统计，使用 `lockedDataSource="global"`，不再套用个人数据加载边界；个人数据失败不应阻塞公共统计。
+- `/dashboard`：个人卡池分析，继续使用原 `DesktopDashboardWorkspace`。
+- `/dashboard?view=overview`：个人概览，通过 `SummaryView lockedDataSource="local"` 展示个人统计、资源与图鉴；登录及 `PersonalDataBoundary` 继续保护个人数据状态。
+- `/summary`：全服统计，使用 `lockedDataSource="global"`，不再套用个人数据加载边界；个人数据失败不应阻塞公共统计。
 - 两处概览隐藏相互切换数据源的旧控件，图鉴也遵循锁定来源。个人概览不会因无关的全服统计加载状态而停留在加载页；本轮没有改写统计公式、快照 schema 或跨账号汇总合同。
 - “个人概览 / 卡池分析”二级导航可收起，并用现有存储工具持久化至 `gacha_desktop_personal_sidebar_collapsed`。视口宽至少 `1760px` 时，菜单位于主内容左侧外部，展开 `176px`、收起 `44px`，不挤占正文宽度；更窄桌面使用内容上方菜单。
 - `DesktopPageMotion` 为预览桌面路由提供淡入 / 轻微上移动效，按 pathname 和个人 `view` 切换重置滚动；统计内部切页使用独立轻量动效。无关查询参数变化不触发整页重挂载，减少动态效果开启时停用装饰动画和平滑滚动。
@@ -53,7 +55,7 @@ Last reviewed: 2026-09-05
 
 ## 维护入口
 
-- `src/GachaAnalyzer.jsx`、`src/components/app/DesktopAppRoutes.jsx`：预览开关、桌面壳层、路由与通知接线。
+- `src/GachaAnalyzer.jsx`、`src/components/app/DesktopAppRoutes.jsx`：主页偏好选择、桌面壳层、路由与通知接线。
 - `src/components/home/HomeLandingHeader.jsx`、`homeLandingDemo.css`：共享预览顶栏；本轮新增样式与交互按桌面分支限定。
 - `src/components/home/DesktopHomeDemo.jsx`、`desktopHomeDemo.css`、`desktopHomeData.js`：首页布局、分区、卡池与版本配置适配。
 - `src/components/home/VersionCountdownCard.jsx`、`versionCountdownCard.css`：独立版本倒计时。
@@ -75,4 +77,4 @@ Last reviewed: 2026-09-05
 
 `ONBOARDING-GUIDE-001`：优化首次使用教程与首页指南，当前只登记、待开始。要求与验收见 [ONBOARDING_GUIDE_PLAN.md](ONBOARDING_GUIDE_PLAN.md)；复用 `UX-011` 的真实完成条件及现有桌面入口，支持跳过、重看与失败恢复。
 
-全站设计 token、移动壳层、完整动画生命周期、通知采纳、可访问性、统计口径说明和运营位配置化仍由各自任务推进。本 Demo 不代表这些任务整体完成，也不改变抽奖运营状态。若后续决定正式接入，应先确定默认入口和预览代码归属，再以最终变更完成 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) 中相关检查，并更新正式截图；当前保留现有生产首页截图。
+全站设计 token、移动壳层、完整动画生命周期、通知采纳、可访问性、统计口径说明和运营位配置化仍由各自任务推进。本 Demo 不代表这些任务整体完成，也不改变抽奖运营状态。正式首页截图与生产证据在对应发布 PR 中更新；本文件不再保留“尚未接入”的过渡表述。

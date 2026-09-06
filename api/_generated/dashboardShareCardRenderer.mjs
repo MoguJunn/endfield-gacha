@@ -4312,6 +4312,7 @@ var STORAGE_KEYS = {
   APP_LOCALE: "app_locale",
   APP_LOCALE_MODE: "app_locale_mode_v2",
   PLATFORM_PREFERENCE: "platform-preference",
+  HOME_EXPERIENCE: "home_experience_v1",
   CURRENT_POOL_ID: "gacha_current_pool_id",
   CURRENT_GAME_UID: "gacha_current_game_uid",
   DASHBOARD_INCLUDE_FREE_PULLS: "dashboard_include_free_pulls",
