@@ -60,8 +60,9 @@ export default function HomeLandingHeader({
   const root = useRef(null);
   const tt = (zh, en) => (isEnglish ? en : zh);
   const home = mobile ? '/m' : '/';
-  const page = (desktop, phone = desktop) => `${mobile ? `/m/${phone}` : `/${desktop}`}?home-demo=unified`;
-  const panel = (id) => `${home}?home-demo=unified&panel=${id}`;
+  const experienceQuery = mobile ? '?home-demo=unified' : '';
+  const page = (desktop, phone = desktop) => `${mobile ? `/m/${phone}` : `/${desktop}`}${experienceQuery}`;
+  const panel = (id) => `${home}?${mobile ? 'home-demo=unified&' : ''}panel=${id}`;
   const username = buildUsernameHandle(user, user?.email?.split('@')[0]);
   const identity = role === 'super_admin' ? 'SUPER-ENDMIN' : role === 'admin' ? 'ENDMIN' : 'GUEST';
   const themeOptions = [
@@ -269,7 +270,7 @@ export default function HomeLandingHeader({
       }}
     >
       <div className="hl-header-inner">
-        <Link to={`${home}?home-demo=unified`} className="hl-brand" onClick={close} aria-label={tt('返回首页', 'Home')}>
+        <Link to={`${home}${experienceQuery}`} className="hl-brand" onClick={close} aria-label={tt('返回首页', 'Home')}>
           <span>
             <BarChart3 size={23} strokeWidth={2.5} />
           </span>
@@ -294,7 +295,7 @@ export default function HomeLandingHeader({
           <Link
             className="hl-nav-trigger"
             aria-current={location.pathname === home ? 'page' : undefined}
-            to={`${home}?home-demo=unified`}
+            to={`${home}${experienceQuery}`}
             onClick={close}
           >
             <Home size={16} />

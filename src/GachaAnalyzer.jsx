@@ -11,7 +11,12 @@ import { extractDrawerFromPoolName } from './utils';
 import { getPoolGroupType, isPoolGroupId } from './stores/usePoolStore';
 import { getPreferredPool } from './utils/poolSelectionUtils';
 import { getPoolTypeLabel } from './utils/poolSelectorDisplay.js';
-import { STORAGE_KEYS, writeStorageValue } from './utils/storageUtils.js';
+import { readStorageValue, STORAGE_KEYS, writeStorageValue } from './utils/storageUtils.js';
+import {
+  clearLegacyHomeQuery,
+  HOME_EXPERIENCE,
+  resolveHomeExperience,
+} from './utils/homeExperience.js';
 import { subscribePublicCacheWarnings } from './services/admin/publicCacheService.js';
 import { buildPublicCacheWarningNotification } from './utils/notificationModel.js';
 import { useI18n } from './i18n/index.js';
@@ -27,14 +32,32 @@ import { useContributorDemoSandboxBridge } from './hooks/app/useContributorDemoS
 
 const GachaModals = React.lazy(() => import('./components/modals/GachaModals'));
 const DataImportWizardModal = React.lazy(() => import('./components/modals/DataImportWizardModal'));
-const HomeLandingHeader = import.meta.env.DEV ? React.lazy(() => import('./components/home/HomeLandingHeader.jsx')) : null;
-const DesktopMessageCenter = import.meta.env.DEV ? React.lazy(() => import('./components/home/DesktopMessageCenter.jsx')) : null;
+const HomeLandingHeader = React.lazy(() => import('./components/home/HomeLandingHeader.jsx'));
+const DesktopMessageCenter = React.lazy(() => import('./components/home/DesktopMessageCenter.jsx'));
 
 export default function GachaAnalyzer() {
   // --- 从 Zustand Stores 获取状态 ---
   const location = useLocation();
   const navigate = useNavigate();
-  const { locale, t } = useI18n();
+  const { locale, t, isEnglish } = useI18n();
+  const [homeExperience, setHomeExperience] = useState(() => resolveHomeExperience({
+    storedValue: readStorageValue(STORAGE_KEYS.HOME_EXPERIENCE),
+    search: location.search,
+  }));
+  const legacyLatestHome = new URLSearchParams(location.search).get('home-demo') === 'unified';
+  const latestHome = legacyLatestHome || homeExperience === HOME_EXPERIENCE.LATEST;
+  const isDesktopHome = location.pathname === '/';
+  const selectHomeExperience = useCallback((nextExperience) => {
+    const normalized = nextExperience === HOME_EXPERIENCE.CLASSIC
+      ? HOME_EXPERIENCE.CLASSIC
+      : HOME_EXPERIENCE.LATEST;
+    writeStorageValue(STORAGE_KEYS.HOME_EXPERIENCE, normalized);
+    setHomeExperience(normalized);
+    navigate({
+      pathname: '/',
+      search: clearLegacyHomeQuery(location.search),
+    }, { replace: true });
+  }, [location.search, navigate]);
 
   // 认证状态
   const user = useAuthStore(state => state.user);
@@ -79,12 +102,11 @@ export default function GachaAnalyzer() {
   const gameAccounts = usePersonalGameAccounts();
 
   const activeTab = getDesktopTabFromPath(location.pathname);
-  const previewHome = import.meta.env.DEV && new URLSearchParams(location.search).get('home-demo') === 'unified';
-  const isDesktopHomePreview = import.meta.env.DEV && previewHome && location.pathname === '/';
-  const DesktopHeader = previewHome ? HomeLandingHeader : AppHeader;
+  const isLatestDesktopHome = latestHome && isDesktopHome;
+  const DesktopHeader = latestHome ? HomeLandingHeader : AppHeader;
   const [messageRequest, setMessageRequest] = useState(null);
   const messageParams = new URLSearchParams(location.search);
-  const queryMessageRequest = previewHome && messageParams.get('panel') === 'bulletin'
+  const queryMessageRequest = latestHome && messageParams.get('panel') === 'bulletin'
     ? { category: ['system', 'site', 'game', 'official'].includes(messageParams.get('notice-category')) ? messageParams.get('notice-category') : 'site', id: messageParams.get('notice-id') }
     : null;
   const clearMessageQuery = useCallback(() => {
@@ -104,8 +126,8 @@ export default function GachaAnalyzer() {
   const [editItemState, setEditItemState] = useState(null);
 
   const navigateToTab = useCallback((tab, options) => {
-    navigate(`${getDesktopPathForTab(tab)}${previewHome ? '?home-demo=unified' : ''}`, options);
-  }, [navigate, previewHome]);
+    navigate(getDesktopPathForTab(tab), options);
+  }, [navigate]);
 
   // 本地 UI 状态（仍然使用 useState）
 
@@ -406,7 +428,7 @@ export default function GachaAnalyzer() {
   // --- 组件 ---
 
   return (
-    <div data-testid="desktop-app-shell" className={`min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-800 dark:text-zinc-100 font-sans pb-20 md:pb-10 relative ${previewHome ? 'dp-shell' : ''} ${isDesktopHomePreview ? 'dh-shell' : ''}`}>
+    <div data-testid="desktop-app-shell" className={`min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-800 dark:text-zinc-100 font-sans pb-20 md:pb-10 relative ${latestHome ? 'dp-shell' : ''} ${isLatestDesktopHome ? 'dh-shell' : ''}`}>
       {/* 全局加载进度条 */}
       <LoadingBar isLoading={syncing || globalStatsLoading} />
 
@@ -423,14 +445,25 @@ export default function GachaAnalyzer() {
         setActiveTab={navigateToTab}
         openAuthModal={openAuthModal}
         handleLogout={handleLogout}
-        onOpenMessages={previewHome ? openDesktopMessages : undefined}
+        onOpenMessages={latestHome ? openDesktopMessages : undefined}
       />
       </React.Suspense>
 
       <ContributorDemoBanner />
 
-      <main className={previewHome ? `dp-main ${isDesktopHomePreview ? 'dh-main' : ''}` : 'w-full max-w-[1440px] mx-auto px-4 py-8'}>
+      <main className={latestHome ? `dp-main ${isLatestDesktopHome ? 'dh-main' : ''}` : 'w-full max-w-[1440px] mx-auto px-4 py-8'}>
+        {isDesktopHome && !latestHome ? (
+          <button
+            type="button"
+            onClick={() => selectHomeExperience(HOME_EXPERIENCE.LATEST)}
+            className="fixed bottom-5 left-5 z-30 border border-amber-400 bg-zinc-950 px-4 py-2.5 text-xs font-bold tracking-wide text-endfield-yellow shadow-lg transition hover:-translate-y-0.5 hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 dark:ring-offset-zinc-950"
+          >
+            {isEnglish ? 'Switch to latest home' : '切换至新版主页'}
+          </button>
+        ) : null}
         <DesktopAppRoutes
+          latestHome={latestHome}
+          onUseClassicHome={() => selectHomeExperience(HOME_EXPERIENCE.CLASSIC)}
           desktopNotifications={durableNotifications}
           desktopUnreadCount={durableUnreadCount}
           onOpenMessages={openDesktopMessages}
@@ -505,7 +538,7 @@ export default function GachaAnalyzer() {
         </React.Suspense>
       )}
 
-      {previewHome ? <React.Suspense fallback={null}><DesktopMessageCenter
+      {latestHome ? <React.Suspense fallback={null}><DesktopMessageCenter
         request={messageRequest || queryMessageRequest}
         onOpen={openDesktopMessages}
         onClose={closeDesktopMessages}
