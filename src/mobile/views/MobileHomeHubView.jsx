@@ -128,8 +128,8 @@ export default function MobileHomeHubView() {
   const localizedAnnouncementTitle = getLocalizedAnnouncementTitle(latestAnnouncement, locale) || t('announcement.empty');
   const localizedAnnouncementContent = getLocalizedAnnouncementContent(latestAnnouncement, locale);
   const gameAnnouncementDigest = useMemo(
-    () => resolveGameAnnouncementDigest(storedGameAnnouncementDigest, gameAnnouncements, t),
-    [gameAnnouncements, storedGameAnnouncementDigest, t]
+    () => resolveGameAnnouncementDigest(storedGameAnnouncementDigest, gameAnnouncements, t, locale),
+    [gameAnnouncements, locale, storedGameAnnouncementDigest, t]
   );
   
   const translatedLinks = useMemo(() => (Array.isArray(links) ? links : []).map((item, index) => ({

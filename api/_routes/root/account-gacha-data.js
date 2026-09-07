@@ -17,6 +17,7 @@ import {
   reconcileOfficialCharacterIds,
   reconcileOfficialPoolIds,
 } from '../../../backend/lib/officialIdReconciliation.js';
+import { getPoolIdCandidate, isReservedPoolTypeId } from '../../../shared/poolIdValidation.js';
 import { loadPersonalAnalysisModel } from '../../_lib/personalAnalysisWorker.js';
 import { serverLogger } from '../../_lib/serverLogger.js';
 
@@ -1575,6 +1576,19 @@ async function handleSaveAccountGachaData(
   const history = Array.isArray(body.history) ? body.history.slice(0, MAX_WRITE_HISTORY) : [];
   let savedPoolCount = 0;
   let protectedPoolCount = 0;
+
+  const invalidPoolRecord = pools.find((pool) => isReservedPoolTypeId(getPoolIdCandidate(pool)));
+  const invalidHistoryRecord = history.find((record) => (
+    isReservedPoolTypeId(record?.poolId || record?.pool_id)
+  ));
+  const invalidPoolId = getPoolIdCandidate(invalidPoolRecord)
+    || String(invalidHistoryRecord?.poolId || invalidHistoryRecord?.pool_id || '').trim();
+  if (invalidPoolId) {
+    throw new AccountGachaDataRequestError(
+      `Pool type ${invalidPoolId} cannot be used as a pool ID`,
+      'invalid_pool_type_id'
+    );
+  }
 
   if (pools.length === 0 && history.length === 0) {
     return res.status(200).json({

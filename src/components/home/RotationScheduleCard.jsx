@@ -2,7 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { CalendarDays, ExternalLink, RefreshCw, User } from 'lucide-react';
 import { getCharacterAvatarUrl } from '../../utils/characterUtils';
 import { useI18n } from '../../i18n/index.js';
-import { localizeEntityName } from '../../utils/gameDataI18n.js';
+import { localizeEntityName, localizePoolName } from '../../utils/gameDataI18n.js';
 import { bindHorizontalWheelScroll } from '../../utils/horizontalScroll.js';
 import {
   getPoolFeaturedLabel,
@@ -166,7 +166,7 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
     const localizedPoolName = isReconstructionCharacter
       ? localizeEntityName(homeCharacterName, { locale, type: 'character' }) || homeCharacterName
       : isExtraPool
-        ? pool.displayName || pool.name
+        ? localizePoolName(poolData, { locale }) || pool.displayName || pool.name
         : localizeEntityName(pool.name, { locale, type: 'character' }) || pool.name;
     const featuredCharacterNames = isExtraPool
       ? getPoolSelectorFeaturedCharacters(poolData, { locale })
@@ -188,7 +188,9 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
           return tt('home.rotation.folded.currentRerun', 'Merged current rerun: {name}', { name: characterName });
         }
 
-        const extraName = extraPool.displayName || extraPool.name;
+        const extraName = localizePoolName(extraPool.poolData || extraPool, { locale })
+          || extraPool.displayName
+          || extraPool.name;
         return extraName
           ? tt('home.rotation.folded.extra', 'Merged: {name}', { name: extraName })
           : null;

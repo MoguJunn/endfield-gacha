@@ -97,6 +97,7 @@
     "worker:mail-outbox": "node scripts/run-mail-outbox-worker.mjs",
     "sync:local-avatars": "node scripts/sync-local-avatar-assets.mjs",
     "fetch:skland-images": "node scripts/fetch-skland-images.mjs",
+    "sync:game-english": "node scripts/sync-game-english.mjs",
     "fetch:announcements": "node scripts/fetch-official-announcements.mjs"
   },
   "dependencies": {

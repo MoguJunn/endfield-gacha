@@ -18,6 +18,7 @@ import {
   sanitizePublicCatalogResourceUrl,
   sanitizePublicPoolRecord,
 } from '../../../shared/publicCatalogDto.js';
+import { isReservedPoolTypeId } from '../../../shared/poolIdValidation.js';
 
 // 内存缓存
 const cache = {
@@ -161,7 +162,7 @@ function dedupeVisiblePoolRecords(records) {
 
   (records || []).forEach((record) => {
     const poolId = getPoolRecordId(record);
-    if (!poolId) {
+    if (!poolId || isReservedPoolTypeId(poolId)) {
       return;
     }
 
@@ -382,7 +383,7 @@ async function fetchPoolCatalog(supabase) {
     throw error;
   }
 
-  const poolRows = data || [];
+  const poolRows = (data || []).filter((row) => !isReservedPoolTypeId(row?.pool_id));
   const poolIds = poolRows.map((row) => row.pool_id).filter(Boolean);
   const rosterResult = await fetchPoolSixStarRosterMap(supabase, poolIds)
     .then((rosterMap) => ({ rosterMap, error: null }))

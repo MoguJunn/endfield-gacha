@@ -22,6 +22,8 @@ describe('game announcement digest LLM', () => {
       .mockResolvedValueOnce(createResponse(JSON.stringify({
         title: '密境行者挑战开启，梨诺闪耀活动登场',
         subtitle: '近期开放密境行者六方挑战与梨诺闪耀一日活动，展开可查看完整规则。',
+        title_en: 'Hexed Hollow Challenge and Liino Spotlight Event Now Live',
+        subtitle_en: 'The Hexed Hollow challenge and Liino spotlight event are now available. Open the notice list for complete rules and schedules.',
       })));
 
     const digest = await __internal.summarizeDigestWithLlm([
@@ -50,6 +52,7 @@ describe('game announcement digest LLM', () => {
     });
     expect(digest).toMatchObject({
       title: '密境行者挑战开启，梨诺闪耀活动登场',
+      title_en: 'Hexed Hollow Challenge and Liino Spotlight Event Now Live',
       mode: 'llm',
     });
   });

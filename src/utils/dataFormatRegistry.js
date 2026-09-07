@@ -1,3 +1,5 @@
+import { isReservedPoolTypeId } from '../../shared/poolIdValidation.js';
+
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -117,8 +119,10 @@ function inferPoolType({ poolId, category, poolType, poolGachaType } = {}) {
 }
 
 function upsertExternalPool(poolMap, seed = {}) {
-  const poolId = pickText(seed.poolId, seed.pool_id, seed.pool, seed.poolName, seed.name);
-  if (!poolId) {
+  const explicitPoolId = pickText(seed.poolId, seed.pool_id);
+  const legacyPoolValue = pickText(seed.pool);
+  const poolId = explicitPoolId || legacyPoolValue;
+  if (!poolId || isReservedPoolTypeId(poolId)) {
     return null;
   }
 

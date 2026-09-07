@@ -30,7 +30,9 @@ const HeaderPoolTimeInfo = React.memo(() => {
   const isEndingSoon = remainingDays <= 3 && isActive && !isExpired;
   const isNotStarted = !isActive && !isExpired && (startsIn !== undefined || startsInHours !== undefined);
   const currentName = localizeEntityName(name, { locale, type: 'character' }) || name;
-  const nextPoolName = localizeEntityName(nextPool, { locale, type: 'character' }) || nextPool;
+  const nextPoolName = nextPool === '待公布'
+    ? t('header.pool.tba', {}, 'To be announced')
+    : localizeEntityName(nextPool, { locale, type: 'character' }) || nextPool;
 
   return (
     <div className="hidden md:flex items-center gap-3 text-xs font-mono bg-zinc-50 dark:bg-zinc-900 px-4 py-1.5 border-l border-r border-zinc-200 dark:border-zinc-800 h-full">

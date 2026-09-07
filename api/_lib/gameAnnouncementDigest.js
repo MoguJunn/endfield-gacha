@@ -204,15 +204,18 @@ export function buildFallbackGameAnnouncementDigest(records = [], {
     .filter(([category]) => categoryCounts[category] > 0)
     .map(([category, label]) => `${label} ${categoryCounts[category]} 条`);
   const sourceParts = [];
+  const sourcePartsEn = [];
 
   if (gameRecords.length > 0) {
     sourceParts.push(categoryParts.length > 0
       ? `游戏内 ${gameRecords.length} 条（${categoryParts.join(' / ')}）`
       : `游戏内 ${gameRecords.length} 条`);
+    sourcePartsEn.push(`${gameRecords.length} in-game notice${gameRecords.length === 1 ? '' : 's'}`);
   }
 
   if (officialRecords.length > 0) {
     sourceParts.push(`官网 ${officialRecords.length} 条`);
+    sourcePartsEn.push(`${officialRecords.length} official-site notice${officialRecords.length === 1 ? '' : 's'}`);
   }
 
   const topics = buildFallbackTopicList(gameRecords.length > 0 ? gameRecords : selectedRecords);
@@ -226,6 +229,8 @@ export function buildFallbackGameAnnouncementDigest(records = [], {
   return {
     title: truncateText(title, 32),
     subtitle: truncateText(subtitle, 96),
+    title_en: 'Recent Game Notices',
+    subtitle_en: sourcePartsEn.join(' · ') || 'No recent game notices are available to summarize.',
     mode: 'fallback',
   };
 }
@@ -256,7 +261,17 @@ function parseDigestJson(content) {
     throw new Error('Announcement digest LLM returned empty title or subtitle');
   }
 
-  return { title, subtitle, mode: 'llm' };
+  const titleEn = normalizeDigestText(payload?.title_en, 80) || 'Recent Game Notices';
+  const subtitleEn = normalizeDigestText(payload?.subtitle_en, 180)
+    || 'Open the notice list to view the latest official updates and event details.';
+
+  return {
+    title,
+    subtitle,
+    title_en: titleEn,
+    subtitle_en: subtitleEn,
+    mode: 'llm',
+  };
 }
 
 async function summarizeDigestWithLlm(records, {
@@ -276,7 +291,8 @@ async function summarizeDigestWithLlm(records, {
             '任务：把近期多条游戏内公告与官网公告，浓缩为首页折叠栏的主标题 title 与副标题 subtitle。',
             '绝对忠于事实：只基于用户输入公告提炼，不得添加未出现的活动、角色、福利、版本内容或结论。',
             '过滤输入标题和正文中的字面 /n、\\n 与实际换行控制符；输出文本也不得包含这些控制符或真实换行。',
-            '输出必须是合法的一行纯 JSON，格式严格为 {"title":"主标题文本","subtitle":"副标题文本"}。',
+            '同时提供忠实、自然的英文版本 title_en 与 subtitle_en；游戏内已有的官方英文专名必须保留。',
+            '最终格式严格为 {"title":"中文主标题","subtitle":"中文副标题","title_en":"English title","subtitle_en":"English subtitle"}。',
             '不要 Markdown，不要代码块，不要解释，不要在 JSON 外添加任何字符。',
           ].join('\n'),
         },
@@ -295,6 +311,7 @@ async function summarizeDigestWithLlm(records, {
             '4. subtitle 总长度控制在 32-72 个汉字。不必写成传统长句，优先使用“近期开放：xx、xx；近期修复：xx；近期资讯：xx”这类可扫读结构。',
             '5. 不要出现“近7天公告不足”“已用近期历史公告补齐”“总结如下”等解释性或元讨论文案。',
             '6. 若公告多为封禁、修复、周边或补偿，只按实际内容概括，不要夸大为活动或福利。',
+            '7. title_en 控制在 8-14 个英文单词，subtitle_en 控制在 15-32 个英文单词；不得夹杂中文。',
             '',
             '请直接输出一行纯 JSON，绝不要包含 ```json、Markdown 或任何多余字符。',
           ].join('\n'),
@@ -367,6 +384,8 @@ function normalizeStoredDigestValue(value) {
     ...payload,
     title,
     subtitle,
+    title_en: normalizeDigestText(payload?.title_en, 80),
+    subtitle_en: normalizeDigestText(payload?.subtitle_en, 180),
   };
 }
 
@@ -374,6 +393,8 @@ function isReusableCachedDigest(cachedDigest, fingerprint) {
   if (
     !cachedDigest?.title
     || !cachedDigest?.subtitle
+    || !cachedDigest?.title_en
+    || !cachedDigest?.subtitle_en
     || cachedDigest?.fingerprint !== fingerprint
   ) {
     return false;

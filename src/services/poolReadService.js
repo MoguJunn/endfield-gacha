@@ -12,6 +12,7 @@ import {
 } from '../dev/contributorDemoSandboxStore.js';
 import { sanitizePublicPoolRecord } from '../../shared/publicCatalogDto.js';
 import { APPROVED_PUBLIC_RESOURCE_HOSTS } from '../utils/publicResourceUrl.js';
+import { isReservedPoolTypeId } from '../../shared/poolIdValidation.js';
 
 const PUBLIC_STATS_API_TIMEOUT_MS = 25000;
 const PUBLIC_DATA_CACHE_TTL = 60 * 1000;
@@ -92,7 +93,7 @@ function dedupeVisiblePoolRecords(records) {
 
   (records || []).forEach((record) => {
     const poolId = getPoolRecordId(record);
-    if (!poolId) {
+    if (!poolId || isReservedPoolTypeId(poolId)) {
       return;
     }
 
@@ -135,7 +136,7 @@ async function loadPoolRowsByIds(poolIds) {
     throw error;
   }
 
-  return poolRows || [];
+  return (poolRows || []).filter((row) => !isReservedPoolTypeId(getPoolRecordId(row)));
 }
 
 async function loadAllPoolRows() {
@@ -157,7 +158,7 @@ async function loadAllPoolRows() {
     throw error;
   }
 
-  return poolRows || [];
+  return (poolRows || []).filter((row) => !isReservedPoolTypeId(getPoolRecordId(row)));
 }
 
 export function normalizeRemotePoolType(type, isLimitedWeaponFlag) {
@@ -222,7 +223,7 @@ export function mergePoolCollections(primaryPools = [], fallbackPools = []) {
   const merged = new Map();
 
   [...fallbackPools, ...primaryPools].forEach((pool) => {
-    if (!pool?.id) {
+    if (!pool?.id || isReservedPoolTypeId(pool.id)) {
       return;
     }
 

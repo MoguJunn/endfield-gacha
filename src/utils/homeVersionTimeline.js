@@ -6,7 +6,7 @@ export const DEFAULT_HOME_VERSION_TIMELINE = Object.freeze([
   Object.freeze({
     id: 'pre-summer-2026',
     name: '寻遗散记',
-    name_en: 'Lost Heirlooms',
+    name_en: 'Sketches of Lost Heirlooms',
     starts_at: DEFAULT_HOME_NEXT_VERSION_TARGET_DATE,
     ends_at: null,
     enabled: true,

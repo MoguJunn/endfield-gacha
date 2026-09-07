@@ -1,4 +1,4 @@
-import { sanitizeAnnouncementTitle } from './announcementLocale.js';
+import { getLocalizedAnnouncementTitle, sanitizeAnnouncementTitle } from './announcementLocale.js';
 
 function getAnnouncementSourceGroup(announcement = {}) {
   const sourceKind = String(announcement?.source_kind || '').toLowerCase();
@@ -55,13 +55,16 @@ function truncateText(value, maxLength) {
   return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
 }
 
-function buildDigestTopicList(records = []) {
+function buildDigestTopicList(records = [], locale = 'zh-CN') {
   const seen = new Set();
   const topics = [];
+  const useEnglish = String(locale || '').toLowerCase().startsWith('en');
 
   for (const record of records) {
-    const topic = normalizeDigestTopic(record.title || record.summary || '');
-    if (!topic || seen.has(topic)) {
+    const topic = normalizeDigestTopic(
+      getLocalizedAnnouncementTitle(record, locale) || record.summary || ''
+    );
+    if (!topic || seen.has(topic) || (useEnglish && /[\u3400-\u9fff]/u.test(topic))) {
       continue;
     }
 
@@ -75,8 +78,9 @@ function buildDigestTopicList(records = []) {
   return topics;
 }
 
-export function buildGameAnnouncementDigest(announcements = [], t) {
+export function buildGameAnnouncementDigest(announcements = [], t, locale = 'zh-CN') {
   const records = Array.isArray(announcements) ? announcements : [];
+  const useEnglish = String(locale || '').toLowerCase().startsWith('en');
   const gameRecords = records.filter(record => getAnnouncementSourceGroup(record) === 'game');
   const officialRecords = records.filter(record => getAnnouncementSourceGroup(record) === 'official');
   const categoryCounts = gameRecords.reduce((acc, record) => {
@@ -104,16 +108,16 @@ export function buildGameAnnouncementDigest(announcements = [], t) {
   }
 
   const latestGameRecord = gameRecords[0] || records[0] || null;
-  const topics = buildDigestTopicList(gameRecords.length > 0 ? gameRecords : records);
+  const topics = buildDigestTopicList(gameRecords.length > 0 ? gameRecords : records, locale);
   const subtitle = topics.length > 0
-    ? truncateText(`重点关注 ${topics.join('、')} 等近期公告，展开后可查看原文与摘要。`, 96)
+    ? truncateText(t('announcement.digest.focusTopics', { topics: topics.join(useEnglish ? ', ' : '、') }), useEnglish ? 180 : 96)
     : (sourceParts.length > 0
       ? sourceParts.join(' · ')
       : t('home.autoSummary'));
 
   return {
     title: topics.length > 0
-      ? truncateText(`近期公告：${topics.join('、')}`, 32)
+      ? truncateText(t('announcement.digest.recentTopics', { topics: topics.join(useEnglish ? ', ' : '、') }), useEnglish ? 80 : 32)
       : (gameRecords.length > 0
         ? t('announcement.digest.title')
         : t('announcement.digest.fallbackTitle')),
@@ -122,10 +126,17 @@ export function buildGameAnnouncementDigest(announcements = [], t) {
   };
 }
 
-export function resolveGameAnnouncementDigest(storedDigest, announcements = [], t) {
-  const fallbackDigest = buildGameAnnouncementDigest(announcements, t);
-  const title = typeof storedDigest?.title === 'string' ? storedDigest.title.trim() : '';
-  const subtitle = typeof storedDigest?.subtitle === 'string' ? storedDigest.subtitle.trim() : '';
+export function resolveGameAnnouncementDigest(storedDigest, announcements = [], t, locale = 'zh-CN') {
+  const useEnglish = String(locale || '').toLowerCase().startsWith('en');
+  const fallbackDigest = buildGameAnnouncementDigest(announcements, t, locale);
+  const titleValue = useEnglish
+    ? storedDigest?.title_en || storedDigest?.titleEn
+    : storedDigest?.title;
+  const subtitleValue = useEnglish
+    ? storedDigest?.subtitle_en || storedDigest?.subtitleEn
+    : storedDigest?.subtitle;
+  const title = typeof titleValue === 'string' ? titleValue.trim() : '';
+  const subtitle = typeof subtitleValue === 'string' ? subtitleValue.trim() : '';
 
   if (!title || !subtitle) {
     return fallbackDigest;

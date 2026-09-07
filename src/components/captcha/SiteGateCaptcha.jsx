@@ -1,5 +1,6 @@
 import React from 'react';
 import { Globe2, ShieldCheck, TerminalSquare } from 'lucide-react';
+import { useI18n } from '../../i18n/index.js';
 import { ensureAuthCaptchaProviderScriptLoaded, getAuthCaptchaClientConfig } from '../../services/authCaptchaClient.js';
 import { createAuthPowChallenge } from '../../services/powChallengeService.js';
 import { shouldPreferPowCaptcha } from '../../utils/powChallengeCore.js';
@@ -7,6 +8,8 @@ import OracleCaptchaHub from './OracleCaptchaHub.jsx';
 import TerminalPowCaptcha from './TerminalPowCaptcha.jsx';
 
 function TurnstileGate({ onVerified, onFallbackPow }) {
+  const { isEnglish } = useI18n();
+  const tt = React.useCallback((zh, en) => (isEnglish ? en : zh), [isEnglish]);
   const containerRef = React.useRef(null);
   const widgetIdRef = React.useRef(null);
   const config = React.useMemo(() => getAuthCaptchaClientConfig({
@@ -20,7 +23,7 @@ function TurnstileGate({ onVerified, onFallbackPow }) {
       ].filter(Boolean).join(','),
     },
   }), []);
-  const [message, setMessage] = React.useState('正在连接 Turnstile 验证节点...');
+  const [message, setMessage] = React.useState(() => tt('正在连接 Turnstile 验证节点...', 'Connecting to the Turnstile verification node...'));
 
   React.useEffect(() => {
     let cancelled = false;
@@ -47,13 +50,16 @@ function TurnstileGate({ onVerified, onFallbackPow }) {
           execution: 'render',
           callback: () => {
             if (!cancelled) {
-              setMessage('Turnstile 已确认来访请求。');
+              setMessage(tt('Turnstile 已确认来访请求。', 'Turnstile confirmed the access request.'));
               onVerified();
             }
           },
           'error-callback': (code) => {
             if (!cancelled) {
-              setMessage(`Turnstile 暂不可用：${code || 'unknown'}，正在切换到值守终端。`);
+              setMessage(tt(
+                `Turnstile 暂不可用：${code || 'unknown'}，正在切换到值守终端。`,
+                `Turnstile is unavailable: ${code || 'unknown'}. Switching to the sentry terminal.`,
+              ));
               window.setTimeout(onFallbackPow, 700);
             }
           },
@@ -63,7 +69,7 @@ function TurnstileGate({ onVerified, onFallbackPow }) {
             }
           },
         });
-        setMessage('请完成 Turnstile 来访验证。');
+        setMessage(tt('请完成 Turnstile 来访验证。', 'Complete the Turnstile access check.'));
       })
       .catch(() => {
         if (!cancelled) {
@@ -81,13 +87,13 @@ function TurnstileGate({ onVerified, onFallbackPow }) {
         // Best-effort cleanup only.
       }
     };
-  }, [config, onFallbackPow, onVerified]);
+  }, [config, onFallbackPow, onVerified, tt]);
 
   return (
     <div className="mx-auto w-full max-w-[390px] border border-zinc-700 bg-black p-4 font-mono text-zinc-300">
       <div className="mb-3 flex items-center gap-2 text-xs tracking-[0.16em] text-endfield-yellow">
         <Globe2 className="h-4 w-4" />
-        <span>Turnstile 来访验证</span>
+        <span>{tt('Turnstile 来访验证', 'Turnstile Access Check')}</span>
       </div>
       <p className="mb-4 text-xs leading-5 text-zinc-400">{message}</p>
       <div className="min-h-[70px]">
@@ -98,13 +104,15 @@ function TurnstileGate({ onVerified, onFallbackPow }) {
         onClick={onFallbackPow}
         className="mt-4 border border-zinc-700 px-4 py-2 text-xs tracking-[0.18em] text-zinc-300 transition-colors hover:border-endfield-yellow hover:text-endfield-yellow"
       >
-        改用值守终端
+        {tt('改用值守终端', 'Use Sentry Terminal')}
       </button>
     </div>
   );
 }
 
 function PowGate({ onVerified, isMobile }) {
+  const { isEnglish } = useI18n();
+  const tt = React.useCallback((zh, en) => (isEnglish ? en : zh), [isEnglish]);
   const [challenge, setChallenge] = React.useState(null);
   const [error, setError] = React.useState('');
 
@@ -119,21 +127,21 @@ function PowGate({ onVerified, isMobile }) {
       })
       .catch((reason) => {
         if (!cancelled) {
-          setError(reason?.message || '值守终端挑战签发失败。');
+          setError(reason?.message || tt('值守终端挑战签发失败。', 'Failed to issue a sentry terminal challenge.'));
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [tt]);
 
   if (error) {
     return (
       <div className="mx-auto w-full max-w-[390px] border border-red-800 bg-black p-4 font-mono text-red-300">
         <div className="mb-2 flex items-center gap-2 text-xs tracking-[0.16em]">
           <TerminalSquare className="h-4 w-4" />
-          <span>值守终端离线</span>
+          <span>{tt('值守终端离线', 'Sentry Terminal Offline')}</span>
         </div>
         <p className="text-xs leading-5">{error}</p>
       </div>
@@ -145,9 +153,9 @@ function PowGate({ onVerified, isMobile }) {
       <div className="mx-auto w-full max-w-[390px] border border-zinc-700 bg-black p-4 font-mono text-zinc-400">
         <div className="mb-2 flex items-center gap-2 text-xs tracking-[0.16em] text-endfield-yellow">
           <TerminalSquare className="h-4 w-4" />
-          <span>正在签发值守终端挑战</span>
+          <span>{tt('正在签发值守终端挑战', 'Issuing Sentry Terminal Challenge')}</span>
         </div>
-        <p className="text-xs leading-5">请稍候，终端正在生成本次来访记录。</p>
+        <p className="text-xs leading-5">{tt('请稍候，终端正在生成本次来访记录。', 'Please wait while the terminal creates this access record.')}</p>
       </div>
     );
   }
@@ -164,6 +172,8 @@ function PowGate({ onVerified, isMobile }) {
 }
 
 export default function SiteGateCaptcha({ onVerified, isMobile = false }) {
+  const { isEnglish } = useI18n();
+  const tt = React.useCallback((zh, en) => (isEnglish ? en : zh), [isEnglish]);
   const [mode, setMode] = React.useState(() => (shouldPreferPowCaptcha(import.meta.env) ? 'pow' : 'turnstile'));
   const [showLegacy, setShowLegacy] = React.useState(false);
   const handleFallbackPow = React.useCallback(() => {
@@ -191,14 +201,16 @@ export default function SiteGateCaptcha({ onVerified, isMobile = false }) {
           className="inline-flex items-center gap-2 border border-zinc-700 px-3 py-2 text-[11px] tracking-[0.16em] text-zinc-300 transition-colors hover:border-endfield-yellow hover:text-endfield-yellow"
         >
           <ShieldCheck className="h-3.5 w-3.5" />
-          {mode === 'pow' ? '切换 Turnstile' : '切换 PoW'}
+          {mode === 'pow'
+            ? tt('切换 Turnstile', 'Switch to Turnstile')
+            : tt('切换 PoW', 'Switch to PoW')}
         </button>
         <button
           type="button"
           onClick={() => setShowLegacy(true)}
           className="border border-zinc-700 px-3 py-2 text-[11px] tracking-[0.16em] text-zinc-300 transition-colors hover:border-endfield-yellow hover:text-endfield-yellow"
         >
-          旧版验证
+          {tt('旧版验证', 'Legacy Verification')}
         </button>
       </div>
     </div>

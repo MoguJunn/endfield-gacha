@@ -37,4 +37,13 @@ describe('/api/bootstrap public contract', () => {
     expect(pool).not.toHaveProperty('creator_username');
     expect(pool).not.toHaveProperty('creator_role');
   });
+
+  it('filters pool type sentinel ids from the public bootstrap catalog', () => {
+    expect(__internal.dedupeVisiblePoolRecords([
+      { pool_id: 'limited_character', name: 'limited_character', type: 'limited' },
+      { pool_id: 'special_1_5_1', name: '冬猎', type: 'limited' },
+    ])).toEqual([
+      expect.objectContaining({ pool_id: 'special_1_5_1' }),
+    ]);
+  });
 });

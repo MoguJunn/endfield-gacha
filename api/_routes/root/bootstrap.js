@@ -14,6 +14,7 @@ import {
 import { getCanonicalExtraPoolSubtype } from '../../../shared/extraPoolSubtype.js';
 import { PUBLIC_SITE_CONFIG_KEYS } from '../../../shared/publicSiteConfig.js';
 import { sanitizePublicPoolRecord } from '../../../shared/publicCatalogDto.js';
+import { isReservedPoolTypeId } from '../../../shared/poolIdValidation.js';
 
 const CACHE_TTL = 60 * 1000;
 
@@ -67,7 +68,7 @@ function dedupeVisiblePoolRecords(records) {
 
   (records || []).forEach((record) => {
     const poolId = getPoolRecordId(record);
-    if (!poolId) {
+    if (!poolId || isReservedPoolTypeId(poolId)) {
       return;
     }
 
@@ -237,6 +238,7 @@ export const __internal = {
   PUBLIC_SITE_CONFIG_KEYS,
   cache,
   createEmptyBootstrapPayload,
+  dedupeVisiblePoolRecords,
   fetchSiteConfig,
   formatVisiblePoolRecord,
   mergeBootstrapPayload

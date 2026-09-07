@@ -1202,6 +1202,31 @@ describe('/api/account-gacha-data', () => {
     });
   });
 
+  it('rejects pool type names submitted as globally visible pool ids', async () => {
+    const adminClient = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const req = createRequest({
+      method: 'POST',
+      body: {
+        pools: [{
+          id: 'limited_character',
+          name: 'limited_character',
+          type: 'limited',
+        }],
+      },
+    });
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(req, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: 'invalid_pool_type_id',
+    });
+    expect(adminClient.__state.upsertCalls.some((call) => call.table === 'pools')).toBe(false);
+  });
+
   it('does not overwrite a global pool owned by another user', async () => {
     const adminClient = createAdminClient();
     adminClient.__state.poolRows = [{

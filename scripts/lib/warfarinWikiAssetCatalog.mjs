@@ -2,14 +2,14 @@ import { normalizeEntityNameForMatch } from '../../src/utils/canonicalEntityUtil
 
 const WARFARIN_PAGE_CONFIG = Object.freeze({
   character: {
-    url: 'https://warfarin.wiki/cn/operators',
+    path: 'operators',
     routeKey: 'routes/$lang.operators._index',
     imageUrl: (record) => record?.id
       ? `https://static.warfarin.wiki/v3/charicon/icon_${record.id}.webp`
       : ''
   },
   weapon: {
-    url: 'https://warfarin.wiki/cn/weapons',
+    path: 'weapons',
     routeKey: 'routes/$lang.weapons._index',
     imageUrl: (record) => {
       const iconId = record?.iconId || record?.id;
@@ -19,6 +19,7 @@ const WARFARIN_PAGE_CONFIG = Object.freeze({
 });
 
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+const VALID_LANGUAGES = new Set(['cn', 'en']);
 
 function normalizeRequestedTypes(types = ['character', 'weapon']) {
   return Array.from(new Set(
@@ -156,8 +157,15 @@ function normalizeAssetRecord(itemType, rawRecord) {
   };
 }
 
-export async function loadWarfarinWikiAssetCatalog(types = ['character', 'weapon'], { logger = () => {} } = {}) {
+export async function loadWarfarinWikiAssetCatalog(
+  types = ['character', 'weapon'],
+  { logger = () => {}, language = 'cn' } = {}
+) {
   const requestedTypes = normalizeRequestedTypes(types);
+  const normalizedLanguage = String(language || 'cn').trim().toLowerCase();
+  if (!VALID_LANGUAGES.has(normalizedLanguage)) {
+    throw new Error(`不支持的 warfarin.wiki 语言: ${language}`);
+  }
   const catalog = {
     character: new Map(),
     weapon: new Map()
@@ -165,9 +173,10 @@ export async function loadWarfarinWikiAssetCatalog(types = ['character', 'weapon
 
   for (const itemType of requestedTypes) {
     const config = WARFARIN_PAGE_CONFIG[itemType];
-    logger(`加载 warfarin.wiki ${itemType} 目录: ${config.url}`);
+    const pageUrl = `https://warfarin.wiki/${normalizedLanguage}/${config.path}`;
+    logger(`加载 warfarin.wiki ${itemType} 目录: ${pageUrl}`);
 
-    const response = await fetch(config.url, {
+    const response = await fetch(pageUrl, {
       headers: {
         'User-Agent': DEFAULT_USER_AGENT,
         'Accept': 'text/html,application/xhtml+xml'

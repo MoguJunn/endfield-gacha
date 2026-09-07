@@ -172,8 +172,8 @@ const HomePage = React.memo(() => {
     ))[0] || null
   ), [temporaryAnnouncements, updateAnnouncements]);
   const gameAnnouncementDigest = useMemo(
-    () => resolveGameAnnouncementDigest(storedGameAnnouncementDigest, gameAnnouncements, t),
-    [gameAnnouncements, storedGameAnnouncementDigest, t]
+    () => resolveGameAnnouncementDigest(storedGameAnnouncementDigest, gameAnnouncements, t, locale),
+    [gameAnnouncements, locale, storedGameAnnouncementDigest, t]
   );
   const mostImportantTemporaryAnnouncement = useMemo(
     () => getMostImportantAnnouncement(temporaryAnnouncements),

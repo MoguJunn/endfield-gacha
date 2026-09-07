@@ -10,6 +10,12 @@ const WARFARIN_OPERATOR_PAIRS = [
   ['洛茜', 'Rossi'],
   ['汤汤', 'Tangtang'],
   ['管理员', 'Endministrator'],
+  ['庄方宜', 'Zhuang Fangyi'],
+  ['弭弗', 'Mi Fu'],
+  ['诀', 'Arcane'],
+  ['卡缪', 'Camille'],
+  ['提弗洛斯', 'Typhoeus'],
+  ['梨诺', 'Liino'],
   ['黎风', 'Lifeng'],
   ['余烬', 'Ember'],
   ['洁尔佩塔', 'Gilberta'],
@@ -35,6 +41,13 @@ const WARFARIN_OPERATOR_PAIRS = [
 ];
 
 const WARFARIN_WEAPON_PAIRS = [
+  ['孤舟', 'Lone Barge'],
+  ['四二式·肃阵', 'Type 42: Solemn Phalanx'],
+  ['寒夜幽影', 'Umbra of Frigid Eventide'],
+  ['曜夜的首演', 'Bedazzling Night Debut'],
+  ['镀红祝福', 'Blessing of Lustrous Carmine'],
+  ['赤缨', 'Amaranthine Tassel'],
+  ['十二问', 'Twelve Questions'],
   ['宏愿', 'Grand Vision'],
   ['白夜新星', 'White Night Nova'],
   ['熔铸火焰', 'Forgeborn Scathe'],
@@ -328,12 +341,18 @@ function buildGenericPoolFallback(name, pool, locale) {
     return `${upCharacter} Featured Banner`;
   }
 
+  if (normalizedType === 'limited' || normalizedType === 'limited_character') {
+    return 'Chartered Headhunting';
+  }
+
   if (normalizedType === 'standard') {
-    return 'Standard Banner';
+    return normalizedName === '启程寻访'
+      ? 'New Horizons Headhunting'
+      : 'Basic Headhunting';
   }
 
   if (normalizedType === 'beginner') {
-    return 'Beginner Banner';
+    return 'New Horizons Headhunting';
   }
 
   return isInternalEntityReference(normalizedName) ? '' : normalizedName;

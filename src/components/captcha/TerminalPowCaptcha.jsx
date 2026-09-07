@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Cpu, Loader2, TerminalSquare } from 'lucide-react';
+import { useI18n } from '../../i18n/index.js';
 import { createLocalPowChallenge, getPowWorkConfig } from '../../utils/powChallengeCore.js';
 
 function createSessionId() {
@@ -62,6 +63,8 @@ export default function TerminalPowCaptcha({
   compact = false,
   showFallbackButton = true,
 }) {
+  const { isEnglish } = useI18n();
+  const tt = useCallback((zh, en) => (isEnglish ? en : zh), [isEnglish]);
   const effectiveChallenge = useMemo(() => challenge || createLocalPowChallenge({
     action,
     difficulty: isMobile ? 2 : 3,
@@ -75,9 +78,11 @@ export default function TerminalPowCaptcha({
     });
     return {
       ...workConfig,
-      estimate: isMobile ? '约 3-6 秒' : '约 2-5 秒',
+      estimate: isEnglish
+        ? (isMobile ? 'About 3-6 seconds' : 'About 2-5 seconds')
+        : (isMobile ? '约 3-6 秒' : '约 2-5 秒'),
     };
-  }, [effectiveChallenge.difficulty, effectiveChallenge.totalSteps, isMobile]);
+  }, [effectiveChallenge.difficulty, effectiveChallenge.totalSteps, isEnglish, isMobile]);
 
   const workerRef = useRef(null);
   const workerUrlRef = useRef('');
@@ -125,7 +130,9 @@ export default function TerminalPowCaptcha({
   const startPow = useCallback(() => {
     if (!supportsPow) {
       setStatus('error');
-      setError(compact ? '当前环境无法启动本地校验，请改用网页验证。' : '当前环境无法启动值守终端，可暂时改用 MC 合成验证。');
+      setError(compact
+        ? tt('当前环境无法启动本地校验，请改用网页验证。', 'Local verification is unavailable in this environment. Use web verification instead.')
+        : tt('当前环境无法启动值守终端，可暂时改用 MC 合成验证。', 'The sentry terminal is unavailable in this environment. Use the MC crafting check instead.'));
       return;
     }
 
@@ -176,13 +183,17 @@ export default function TerminalPowCaptcha({
 
       cleanupWorker();
       setStatus('error');
-      setError(compact ? '本地校验未能完成，请重试或改用网页验证。' : '值守终端未能在预期时间内完成核验，请重试或改用 MC 合成验证。');
+      setError(compact
+        ? tt('本地校验未能完成，请重试或改用网页验证。', 'Local verification did not finish. Retry or use web verification.')
+        : tt('值守终端未能在预期时间内完成核验，请重试或改用 MC 合成验证。', 'The sentry terminal did not finish in time. Retry or use the MC crafting check.'));
     };
 
     worker.onerror = () => {
       cleanupWorker();
       setStatus('error');
-      setError(compact ? '本地校验暂时无法响应，请改用网页验证。' : '值守终端暂时无法响应，可改用 MC 合成验证。');
+      setError(compact
+        ? tt('本地校验暂时无法响应，请改用网页验证。', 'Local verification is not responding. Use web verification instead.')
+        : tt('值守终端暂时无法响应，可改用 MC 合成验证。', 'The sentry terminal is not responding. Use the MC crafting check instead.'));
     };
 
     worker.postMessage({
@@ -191,7 +202,7 @@ export default function TerminalPowCaptcha({
       totalSteps: config.totalSteps,
       progressInterval: config.progressInterval,
     });
-  }, [cleanupWorker, compact, config.progressInterval, config.rounds, config.totalSteps, effectiveChallenge, onVerified, supportsPow]);
+  }, [cleanupWorker, compact, config.progressInterval, config.rounds, config.totalSteps, effectiveChallenge, onVerified, supportsPow, tt]);
 
   const handlePrimaryAction = () => {
     if (status === 'running' || status === 'finalizing') {
@@ -212,14 +223,14 @@ export default function TerminalPowCaptcha({
   };
 
   const statusLabel = status === 'idle'
-    ? '待命'
+    ? tt('待命', 'Standby')
     : status === 'running'
-      ? '校验中'
+      ? tt('校验中', 'Verifying')
       : status === 'finalizing'
-        ? '写入回执'
+        ? tt('写入回执', 'Recording receipt')
         : status === 'done'
-        ? '已放行'
-        : '受阻';
+        ? tt('已放行', 'Cleared')
+        : tt('受阻', 'Blocked');
 
   const progressPercent = status === 'done' || status === 'finalizing'
     ? 100
@@ -232,27 +243,31 @@ export default function TerminalPowCaptcha({
       <div className={`flex items-center justify-between gap-2 border border-zinc-700 border-b-0 bg-zinc-900 ${compact ? 'px-2.5 py-1.5' : 'px-3 py-2'}`}>
         <div className="flex items-center gap-2 text-xs tracking-[0.16em] text-endfield-yellow">
           <TerminalSquare className="h-3.5 w-3.5" />
-          <span>{compact ? '本地校验终端' : '边境值守终端'}</span>
+          <span>{compact
+            ? tt('本地校验终端', 'Local Verification Terminal')
+            : tt('边境值守终端', 'Frontier Sentry Terminal')}</span>
         </div>
-        <span className="truncate text-[9px] text-zinc-500 sm:text-[10px]">{compact ? sessionId : `记录 ${sessionId}`}</span>
+        <span className="truncate text-[9px] text-zinc-500 sm:text-[10px]">
+          {compact ? sessionId : tt(`记录 ${sessionId}`, `Record ${sessionId}`)}
+        </span>
       </div>
 
       <div className={`border border-zinc-700 bg-black ${compact ? 'p-2.5 sm:p-3' : 'p-4'}`}>
         <div className={`grid text-xs text-zinc-400 ${compact ? 'gap-2' : 'gap-3'}`}>
           <div className={`grid grid-cols-[88px,1fr] gap-2 ${compact ? 'hidden sm:grid' : ''}`}>
-            <span className="text-zinc-600">当前节点</span>
-            <span className="text-endfield-yellow">外环值守通道</span>
+            <span className="text-zinc-600">{tt('当前节点', 'Current node')}</span>
+            <span className="text-endfield-yellow">{tt('外环值守通道', 'Outer Ring Sentry Route')}</span>
           </div>
           <div className={`grid grid-cols-[88px,1fr] gap-2 ${compact ? 'hidden sm:grid' : ''}`}>
-            <span className="text-zinc-600">登记编号</span>
+            <span className="text-zinc-600">{tt('登记编号', 'Record ID')}</span>
             <span className="text-zinc-300">{sessionId}</span>
           </div>
           <div className="grid grid-cols-[88px,1fr] gap-2">
-            <span className="text-zinc-600">值守回响</span>
+            <span className="text-zinc-600">{tt('值守回响', 'Estimated time')}</span>
             <span className="text-zinc-300">{config.estimate}</span>
           </div>
           <div className="grid grid-cols-[88px,1fr] gap-2">
-            <span className="text-zinc-600">当前状态</span>
+            <span className="text-zinc-600">{tt('当前状态', 'Status')}</span>
             <span className={status === 'done' ? 'text-[#90c50a]' : status === 'error' ? 'text-red-400' : 'text-zinc-300'}>
               {statusLabel}
             </span>
@@ -264,18 +279,22 @@ export default function TerminalPowCaptcha({
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-endfield-yellow">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>{status === 'finalizing' ? '核验完成，正在写入通行回执。' : '值守终端正在核对来访记录，请稍候。'}</span>
+                <span>{status === 'finalizing'
+                  ? tt('核验完成，正在写入通行回执。', 'Verification complete. Recording your access receipt.')
+                  : tt('值守终端正在核对来访记录，请稍候。', 'The sentry terminal is checking your visit. Please wait.')}</span>
               </div>
               <div className={`text-zinc-300 ${compact ? 'hidden sm:block' : ''}`}>
                 {status === 'finalizing'
-                  ? '值守信标已完成最后一次回响，终端会短暂停留后放行。'
-                  : '边境识别程序已展开，值守信标正在逐段回应你的通行请求。'}
+                  ? tt('值守信标已完成最后一次回响，终端会短暂停留后放行。', 'The sentry beacon has completed its final response. Access will open shortly.')
+                  : tt('边境识别程序已展开，值守信标正在逐段回应你的通行请求。', 'Frontier identification is active, and the beacon is processing your access request.')}
               </div>
               <div className="overflow-hidden border border-zinc-800 bg-black/70">
                 <div className="h-1.5 bg-endfield-yellow/70 transition-[width] duration-300" style={{ width: `${progressPercent}%` }} />
               </div>
               <div className="flex justify-between gap-2 text-zinc-500">
-                <span>{compact ? '请保持当前页面。' : '请保持当前界面，等待值守终端完成回执。'}</span>
+                <span>{compact
+                  ? tt('请保持当前页面。', 'Keep this page open.')
+                  : tt('请保持当前界面，等待值守终端完成回执。', 'Keep this page open while the sentry terminal completes its receipt.')}</span>
                 <span>{progressPercent}%</span>
               </div>
             </div>
@@ -283,14 +302,16 @@ export default function TerminalPowCaptcha({
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-[#90c50a]">
                 <Cpu className="h-3.5 w-3.5" />
-                <span>核验完成，通路已开启。</span>
+                <span>{tt('核验完成，通路已开启。', 'Verification complete. Access is open.')}</span>
               </div>
-              <div className="text-zinc-300">值守终端已确认你的来访记录，正在发回通行许可。</div>
-              {!compact && <div className="text-zinc-500">本次值守回执已记入边境档案。</div>}
+              <div className="text-zinc-300">{tt('值守终端已确认你的来访记录，正在发回通行许可。', 'The sentry terminal confirmed your visit and is returning access clearance.')}</div>
+              {!compact && <div className="text-zinc-500">{tt('本次值守回执已记入边境档案。', 'This sentry receipt has been added to the frontier log.')}</div>}
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="text-zinc-300">{compact ? '点击开始后，本机将进行数秒校验；验证数据不会离开当前流程。' : '启动值守终端后，边境识别程序会短暂核对来访记录。通过后将直接放行。'}</div>
+              <div className="text-zinc-300">{compact
+                ? tt('点击开始后，本机将进行数秒校验；验证数据不会离开当前流程。', 'After you start, this device will run a brief local check. Verification data stays within this flow.')
+                : tt('启动值守终端后，边境识别程序会短暂核对来访记录。通过后将直接放行。', 'Start the sentry terminal to run a brief visit check. Access opens automatically after verification.')}</div>
               {error ? <div className="text-red-400">{error}</div> : null}
             </div>
           )}
@@ -303,7 +324,13 @@ export default function TerminalPowCaptcha({
             disabled={status === 'running' || status === 'finalizing'}
             className={`inline-flex min-h-[40px] items-center justify-center gap-2 border border-endfield-yellow px-4 py-2 text-xs font-bold tracking-[0.18em] text-endfield-yellow transition-colors hover:bg-endfield-yellow hover:text-black disabled:cursor-wait disabled:opacity-60 ${compact ? 'w-full sm:w-auto' : ''}`}
           >
-            {status === 'idle' ? '开始校验' : status === 'done' ? '重置终端' : status === 'finalizing' ? '写入回执' : '再次校验'}
+            {status === 'idle'
+              ? tt('开始校验', 'Start Check')
+              : status === 'done'
+                ? tt('重置终端', 'Reset Terminal')
+                : status === 'finalizing'
+                  ? tt('写入回执', 'Recording Receipt')
+                  : tt('再次校验', 'Retry Check')}
             {status === 'idle' ? <ArrowRight className="h-3.5 w-3.5" /> : null}
           </button>
           {showFallbackButton && (
@@ -312,7 +339,7 @@ export default function TerminalPowCaptcha({
               onClick={onUseMinecraft}
               className="border border-zinc-700 px-4 py-2 text-xs tracking-[0.18em] text-zinc-300 transition-colors hover:border-endfield-yellow hover:text-endfield-yellow"
             >
-              改用 MC 合成
+              {tt('改用 MC 合成', 'Use MC Crafting')}
             </button>
           )}
         </div>
@@ -320,8 +347,8 @@ export default function TerminalPowCaptcha({
 
       {!compact && (
         <div className="mt-1 flex justify-between px-1 text-[9px] text-zinc-600">
-          <span>边境值守记录</span>
-          <span>{supportsPow ? '终端在线' : '终端离线'}</span>
+          <span>{tt('边境值守记录', 'Frontier Sentry Log')}</span>
+          <span>{supportsPow ? tt('终端在线', 'Terminal Online') : tt('终端离线', 'Terminal Offline')}</span>
         </div>
       )}
     </div>
