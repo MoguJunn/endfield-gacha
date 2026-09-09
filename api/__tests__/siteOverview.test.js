@@ -129,7 +129,7 @@ describe('fetchSiteOverview', () => {
     expect(overview.next_version).toMatchObject({
       target_at: '2026-06-20T12:00:00+08:00',
       name: '寻遗散记',
-      name_en: 'Lost Heirlooms',
+      name_en: 'Sketches of Lost Heirlooms',
       source: HOME_NEXT_VERSION_TARGET_CONFIG_KEY,
     });
   });
