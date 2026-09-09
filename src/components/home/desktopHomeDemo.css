@@ -1674,7 +1674,7 @@
     padding-inline: 9px;
   }
 }
-/* Extra viewport height belongs to the guidance area; the cards stay compact. */
+/* Guidance expands after the card area has taken its responsive share. */
 @container home-guidance (min-height: 160px) {
   .dh-guidance-layout {
     grid-template-columns: minmax(0, 1fr) minmax(0, 0.96fr);
@@ -1736,6 +1736,65 @@
     line-height: 1.4;
     white-space: normal;
   }
+}
+/* Large desktop home only: share space between guidance and useful content.
+   Keep the 1366 × 768 layout and other desktop workspaces unchanged. */
+@media (min-width: 1920px) {
+  .dp-shell.dh-shell {
+    --desktop-content-width: clamp(1366px, 78vw, 1920px);
+  }
+}
+@media (min-width: 3000px) {
+  .dp-shell.dh-shell {
+    --desktop-content-width: min(74vw, 2560px);
+  }
+}
+@media (min-width: 1920px) and (min-height: 1000px) {
+  .dh-home {
+    --dh-card-area-height: clamp(540px, 54dvh, 1280px);
+    gap: 20px;
+  }
+  .dh-content-grid { gap: 20px 28px; }
+  .dh-guidance-layout { gap: clamp(56px, 4vw, 120px); }
+  .dh-commandbar h1 { font-size: clamp(46px, 2.6vw, 72px); }
+  .dh-guidance-description {
+    max-width: 600px;
+    font-size: clamp(14px, 0.75vw, 18px);
+  }
+  .dh-guidance-links :is(button, a) {
+    min-height: clamp(62px, 5dvh, 88px);
+    font-size: 16px;
+  }
+  .dh-guidance-links small { font-size: 12px; }
+  .dh-section-heading { height: 28px; margin-bottom: 8px; }
+  .dh-section-heading h2 { font-size: 15px; }
+  .dh-pool-card-content { padding: 20px 26px; }
+  .dh-pool-name h3 { font-size: clamp(30px, 1.65vw, 44px); }
+  .dh-avatar {
+    width: clamp(84px, 4.5vw, 120px);
+    height: clamp(84px, 4.5vw, 120px);
+  }
+  .dh-clock b { font-size: clamp(38px, 2.2vw, 60px); }
+  .dh-pool-name p,
+  .dh-pool-period,
+  .dh-pool-timer > span { font-size: 13px; }
+  .dh-version-area > .version-countdown-card { padding: 20px 24px 16px; }
+  .dh-version-area .vc-title h3 { font-size: clamp(24px, 1.3vw, 34px); }
+  .dh-version-area .vc-digits b { font-size: clamp(30px, 1.6vw, 44px); }
+  .dh-version-area .vc-title p,
+  .dh-version-area .vc-date,
+  .dh-version-area .version-countdown-card button { font-size: 13px; }
+}
+@media (min-width: 1920px) and (min-height: 1200px) {
+  .dh-original-event .summer-lottery-banner {
+    grid-template-rows: minmax(64px, 0.45fr) minmax(190px, 1fr);
+  }
+  .dh-original-event .summer-lottery-banner__info { padding: 14px 22px; }
+  .dh-original-event .summer-lottery-banner__info h3 { font-size: clamp(22px, 1.2vw, 32px); }
+  .dh-original-event .summer-lottery-banner__info > p { font-size: 14px; }
+  .dh-original-event .summer-lottery-banner__meta span { font-size: 11px; }
+  .dh-original-event .summer-lottery-banner__action,
+  .dh-original-event .summer-lottery-banner__details { font-size: 13px; min-height: 36px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .dh-home *,
