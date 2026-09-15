@@ -15,6 +15,7 @@ const lotteryAssetDir = resolve(rootDir, 'src', 'assets', 'lottery');
 async function applyLotteryResultsRevisionOverride() {
   const appPath = resolve(lotteryRoot, 'src', 'App.jsx');
   const stylesPath = resolve(lotteryRoot, 'src', 'styles.css');
+  const contractsPath = resolve(lotteryRoot, 'api', '_lib', 'contracts.js');
   let appSource = await readFile(appPath, 'utf8');
 
   if (!appSource.includes('publicInvalidatedWinners')) {
@@ -67,6 +68,33 @@ async function applyLotteryResultsRevisionOverride() {
 .winner-list article.is-invalidated code { text-decoration: line-through; }
 `;
     await writeFile(stylesPath, stylesSource, 'utf8');
+  }
+
+  let contractsSource = await readFile(contractsPath, 'utf8');
+  if (!contractsSource.includes('publicInvalidatedWinners')) {
+    const publicWinnersTarget = `  const publicWinners = Array.isArray(snapshot?.publicWinners)
+    ? snapshot.publicWinners.slice(0, 1000).map((winner) => sanitizeWinner(winner)).filter(Boolean)
+    : [];`;
+    const responseTarget = `    publicWinners,
+    publicCandidateIds,`;
+    if (![publicWinnersTarget, responseTarget].every((target) => contractsSource.includes(target))) {
+      throw new Error('lottery_snapshot_contract_override_target_missing');
+    }
+    contractsSource = contractsSource
+      .replace(publicWinnersTarget, `${publicWinnersTarget}
+  const publicInvalidatedWinners = Array.isArray(snapshot?.publicInvalidatedWinners)
+    ? snapshot.publicInvalidatedWinners.slice(0, 1000).map((winner) => ({
+      ...sanitizeWinner(winner),
+      outcomeStatus: text(winner.outcomeStatus, 40),
+      outcomeReason: text(winner.outcomeReason, 300),
+      drawRevision: finiteNumber(winner.drawRevision),
+      supersededAt: nullableText(winner.supersededAt, 80),
+    })).filter(Boolean)
+    : [];`)
+      .replace(responseTarget, `    publicWinners,
+    publicInvalidatedWinners,
+    publicCandidateIds,`);
+    await writeFile(contractsPath, contractsSource, 'utf8');
   }
 }
 
