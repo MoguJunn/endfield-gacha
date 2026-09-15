@@ -1,4 +1,4 @@
-import { copyFile, mkdir, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
@@ -11,6 +11,64 @@ const archiveTargetDir = resolve(activityRoot, 'archives');
 const fontTargetDir = resolve(activityRoot, 'fonts');
 const fontSourceDir = resolve(rootDir, 'src', 'assets', 'fonts');
 const lotteryAssetDir = resolve(rootDir, 'src', 'assets', 'lottery');
+
+async function applyLotteryResultsRevisionOverride() {
+  const appPath = resolve(lotteryRoot, 'src', 'App.jsx');
+  const stylesPath = resolve(lotteryRoot, 'src', 'styles.css');
+  let appSource = await readFile(appPath, 'utf8');
+
+  if (!appSource.includes('publicInvalidatedWinners')) {
+    const stateTarget = "  const [verification, setVerification] = useState(null);";
+    const waitingTarget = `  if (snapshot?.campaign?.phase !== 'drawn') {
+    return (
+      <div className="waiting-result">
+        <div className="waiting-result__icon"><Trophy /><Sparkles /></div>
+        <div><h3>开奖后在这里公布结果</h3></div>
+      </div>
+    );
+  }`;
+    const winnersTarget = `      <div className="winner-list">
+        {(snapshot.publicWinners || []).map((winner) => (`;
+    if (![stateTarget, waitingTarget, winnersTarget].every((target) => appSource.includes(target))) {
+      throw new Error('lottery_results_revision_override_target_missing');
+    }
+
+    appSource = appSource
+      .replace(stateTarget, `${stateTarget}\n  const invalidatedWinners = snapshot?.publicInvalidatedWinners || [];`)
+      .replace(waitingTarget, `  if (snapshot?.campaign?.phase !== 'drawn') {
+    return (
+      <div className="results-pane">
+        <div className="winner-list">
+          {invalidatedWinners.map((winner) => (
+            <article className="is-invalidated" key={\`invalidated-\${winner.drawRevision}-\${winner.prizeTier}-\${winner.winnerOrder}\`}><Trophy /><span><small>原一等奖 · 资格已取消</small><strong>{winner.displayName}</strong><em>{winner.outcomeReason}</em></span><code>{formatEntryNumber(winner.entryNumber, site.entryPrefix)}</code></article>
+          ))}
+          {!invalidatedWinners.length && <div className="waiting-result"><div className="waiting-result__icon"><Trophy /><Sparkles /></div><div><h3>开奖后在这里公布结果</h3></div></div>}
+        </div>
+        <aside className="verification-card"><ShieldCheck /><strong>活动已重新开放</strong><small>第一次开奖因奖品配置修正而作废；最终结果将在新截止时间后按新承诺与公共随机数完整重抽。</small></aside>
+      </div>
+    );
+  }`)
+      .replace(winnersTarget, `      <div className="winner-list">
+        {invalidatedWinners.map((winner) => (
+          <article className="is-invalidated" key={\`invalidated-\${winner.drawRevision}-\${winner.prizeTier}-\${winner.winnerOrder}\`}><Trophy /><span><small>原一等奖 · 资格已取消</small><strong>{winner.displayName}</strong><em>{winner.outcomeReason}</em></span><code>{formatEntryNumber(winner.entryNumber, site.entryPrefix)}</code></article>
+        ))}
+        {(snapshot.publicWinners || []).map((winner) => (`);
+    await writeFile(appPath, appSource, 'utf8');
+  }
+
+  let stylesSource = await readFile(stylesPath, 'utf8');
+  if (!stylesSource.includes('.winner-list article.is-invalidated')) {
+    stylesSource += `
+
+/* Lottery result revision status */
+.winner-list em { color: var(--orange); font-size: 9px; font-style: normal; font-weight: 700; }
+.winner-list article.is-invalidated { border-color: color-mix(in srgb, var(--orange) 52%, var(--line)); background: color-mix(in srgb, var(--orange) 8%, var(--surface-soft)); }
+.winner-list article.is-invalidated > svg, .winner-list article.is-invalidated small { color: var(--orange); }
+.winner-list article.is-invalidated code { text-decoration: line-through; }
+`;
+    await writeFile(stylesPath, stylesSource, 'utf8');
+  }
+}
 
 const activityAssets = [
   ['summer-gift-package.png', 'summer-gift-package.png'],
@@ -106,6 +164,7 @@ await Promise.all(fonts.map(([source, target]) => (
   copyFile(resolve(fontSourceDir, source), resolve(fontTargetDir, target))
 )));
 await writeFile(resolve(fontTargetDir, 'site-fonts.css'), fontStylesheet, 'utf8');
+await applyLotteryResultsRevisionOverride();
 
 await build({
   root: lotteryRoot,

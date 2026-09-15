@@ -253,6 +253,52 @@ async function loadSnapshot(adminClient, sessionTokenHash = '') {
     }));
   }
 
+  let publicInvalidatedWinners = [];
+  const { data: latestSupersededDraw, error: supersededDrawError } = await adminClient
+    .from('summer_lottery_draw_revisions')
+    .select('id,revision_number,superseded_at')
+    .eq('campaign_id', CAMPAIGN_ID)
+    .eq('status', 'superseded')
+    .order('revision_number', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (supersededDrawError) throw supersededDrawError;
+  if (latestSupersededDraw?.id) {
+    const { data: invalidatedWinners, error: invalidatedWinnersError } = await adminClient
+      .from('summer_lottery_draw_revision_winners')
+      .select('entry_id,user_id,prize_tier,winner_order,outcome_reason')
+      .eq('draw_revision_id', latestSupersededDraw.id)
+      .eq('outcome_status', 'invalidated')
+      .order('prize_tier')
+      .order('winner_order');
+    if (invalidatedWinnersError) throw invalidatedWinnersError;
+    const invalidatedUserIds = (invalidatedWinners || []).map((item) => item.user_id);
+    const invalidatedEntryIds = (invalidatedWinners || []).map((item) => item.entry_id);
+    const [profileResult, entryResult] = await Promise.all([
+      invalidatedUserIds.length
+        ? adminClient.from('profiles').select('id,username').in('id', invalidatedUserIds)
+        : Promise.resolve({ data: [], error: null }),
+      invalidatedEntryIds.length
+        ? adminClient.from('summer_lottery_entries').select('id,public_id,entry_number').in('id', invalidatedEntryIds)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (profileResult.error) throw profileResult.error;
+    if (entryResult.error) throw entryResult.error;
+    const profiles = new Map((profileResult.data || []).map((item) => [item.id, item]));
+    const entries = new Map((entryResult.data || []).map((item) => [item.id, item]));
+    publicInvalidatedWinners = (invalidatedWinners || []).map((winner) => ({
+      prizeTier: winner.prize_tier,
+      winnerOrder: winner.winner_order,
+      entryNumber: entries.get(winner.entry_id)?.entry_number || null,
+      publicId: entries.get(winner.entry_id)?.public_id || null,
+      displayName: maskDisplayName(profiles.get(winner.user_id)?.username),
+      outcomeStatus: 'invalidated',
+      outcomeReason: winner.outcome_reason,
+      drawRevision: latestSupersededDraw.revision_number,
+      supersededAt: latestSupersededDraw.superseded_at,
+    }));
+  }
+
   let publicCandidateIds = [];
   if (campaign.drawn_at) {
     const { data: candidates, error: candidatesError } = await adminClient
@@ -288,6 +334,7 @@ async function loadSnapshot(adminClient, sessionTokenHash = '') {
     entry,
     ownWinner,
     publicWinners,
+    publicInvalidatedWinners,
     publicCandidateIds,
   };
 }
