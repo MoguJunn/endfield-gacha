@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-09-15T14:16:30.366Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/190_add_lottery_draw_revisions.sql
+--   4. 生成时间: 2026-09-16T05:53:25.418Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/191_audit_lottery_contact_exports.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -36131,4 +36131,39 @@ COMMENT ON TABLE public.summer_lottery_draw_revision_winners IS
 NOTIFY pgrst, 'reload schema';
 COMMIT;
 -- <<< END MIGRATION: active/190_add_lottery_draw_revisions.sql
+
+-- >>> BEGIN MIGRATION: active/191_audit_lottery_contact_exports.sql
+BEGIN;
+
+DO $$
+DECLARE
+  v_constraint_name TEXT;
+BEGIN
+  SELECT constraint_row.conname
+  INTO v_constraint_name
+  FROM pg_constraint AS constraint_row
+  WHERE constraint_row.conrelid = 'public.summer_lottery_operation_audit'::REGCLASS
+    AND constraint_row.contype = 'c'
+    AND pg_get_constraintdef(constraint_row.oid) LIKE '%operation%'
+  LIMIT 1;
+
+  IF v_constraint_name IS NOT NULL THEN
+    EXECUTE format(
+      'ALTER TABLE public.summer_lottery_operation_audit DROP CONSTRAINT %I',
+      v_constraint_name
+    );
+  END IF;
+END;
+$$;
+
+ALTER TABLE public.summer_lottery_operation_audit
+  ADD CONSTRAINT summer_lottery_operation_audit_operation_check
+  CHECK (operation IN ('prepare', 'draw', 'contact_export'));
+
+COMMENT ON COLUMN public.summer_lottery_operation_audit.operation IS
+  '受审计的抽奖操作：prepare、draw，或经明确授权的一次性 contact_export。';
+
+NOTIFY pgrst, 'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/191_audit_lottery_contact_exports.sql
 

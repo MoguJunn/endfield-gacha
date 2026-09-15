@@ -9,6 +9,7 @@ import accountProfileHandler from './root/account-profile.js';
 import accountSecurityStateHandler from './root/account-security-state.js';
 import adminHandler from './root/admin.js';
 import adminHistoryAnomaliesHandler from './root/admin-history-anomalies.js';
+import adminSummerLotteryContactExportHandler from './root/admin-summer-lottery-contact-export.js';
 import adminSummerLotteryContactsHandler from './root/admin-summer-lottery-contacts.js';
 import adminSummerLotteryOperationsHandler from './root/admin-summer-lottery-operations.js';
 import adminSummerLotteryPermissionsHandler from './root/admin-summer-lottery-permissions.js';
@@ -117,6 +118,7 @@ export const API_ROUTE_ENTRIES = [
   ['/api/account-security-state', accountSecurityStateHandler],
   ['/api/admin', adminHandler],
   ['/api/admin-history-anomalies', adminHistoryAnomaliesHandler],
+  ['/api/admin-summer-lottery-contact-export', adminSummerLotteryContactExportHandler],
   ['/api/admin-summer-lottery-contacts', adminSummerLotteryContactsHandler],
   ['/api/admin-summer-lottery-operations', adminSummerLotteryOperationsHandler],
   ['/api/admin-summer-lottery-permissions', adminSummerLotteryPermissionsHandler],
