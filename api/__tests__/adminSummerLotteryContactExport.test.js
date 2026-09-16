@@ -40,62 +40,32 @@ function createRequest(token = EXPORT_TOKEN) {
   };
 }
 
-function createQuery(result) {
-  const query = {
-    select: vi.fn(() => query),
-    eq: vi.fn(() => query),
-    order: vi.fn(() => query),
-    range: vi.fn(() => query),
-    limit: vi.fn(() => query),
-    maybeSingle: vi.fn(() => Promise.resolve(result)),
-    insert: vi.fn(() => Promise.resolve(result)),
-    then(resolve, reject) { return Promise.resolve(result).then(resolve, reject); },
-  };
-  return query;
-}
-
 describe('one-time lottery contact export', () => {
-  let queries;
   let adminClient;
 
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.LOTTERY_ONE_TIME_EXPORT_TOKEN = EXPORT_TOKEN;
-    queries = {
-      summer_lottery_campaigns: createQuery({
+    adminClient = {
+      rpc: vi.fn().mockResolvedValue({
         data: {
-          id: CAMPAIGN_ID,
-          contact_retention_until: '2099-10-16T04:00:03.000Z',
-          contacts_cleared_at: null,
+          campaignId: CAMPAIGN_ID,
+          contacts: [{
+            lotteryNumber: 'P3R26-000089',
+            entryNumber: 89,
+            contactType: 'qq',
+            encryptedContact: 'encrypted-contact',
+            notificationConfirmedAt: '2026-09-15T00:00:00.000Z',
+            eligible: true,
+            prizeTier: 'first',
+            winnerOrder: 1,
+            claimStatus: 'pending',
+            enteredAt: '2026-09-01T00:00:00.000Z',
+          }],
         },
         error: null,
       }),
-      profiles: createQuery({ data: [{ id: 'actor-id' }], error: null }),
-      summer_lottery_entries: createQuery({
-        data: [{
-          id: 'entry-id',
-          entry_number: 89,
-          contact_type: 'qq',
-          contact_value: 'encrypted-contact',
-          notification_confirmed_at: '2026-09-15T00:00:00.000Z',
-          eligible: true,
-          created_at: '2026-09-01T00:00:00.000Z',
-        }],
-        count: 1,
-        error: null,
-      }),
-      summer_lottery_winners: createQuery({
-        data: [{
-          entry_id: 'entry-id',
-          prize_tier: 'first',
-          winner_order: 1,
-          claim_status: 'pending',
-        }],
-        error: null,
-      }),
-      summer_lottery_operation_audit: createQuery({ data: null, error: null }),
     };
-    adminClient = { from: vi.fn((table) => queries[table]) };
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     mocks.decryptLotteryContact.mockReturnValue('123456789');
   });
@@ -112,7 +82,7 @@ describe('one-time lottery contact export', () => {
     expect(mocks.getSupabaseAdminClient).not.toHaveBeenCalled();
   });
 
-  it('exports only required fields and writes an immutable audit row', async () => {
+  it('exports only required fields through the audited database RPC', async () => {
     const res = createResponse();
     await handler(createRequest(), res);
     expect(res.statusCode).toBe(200);
@@ -129,10 +99,8 @@ describe('one-time lottery contact export', () => {
       enteredAt: '2026-09-01T00:00:00.000Z',
     }]);
     expect(JSON.stringify(res.body)).not.toContain('encrypted-contact');
-    expect(queries.summer_lottery_operation_audit.insert).toHaveBeenCalledWith({
-      campaign_id: CAMPAIGN_ID,
-      actor_user_id: 'actor-id',
-      operation: 'contact_export',
+    expect(adminClient.rpc).toHaveBeenCalledWith('export_summer_lottery_contacts_once', {
+      p_campaign_id: CAMPAIGN_ID,
     });
   });
 });
