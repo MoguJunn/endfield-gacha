@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-09-16T06:17:56.656Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/192_add_one_time_lottery_contact_export_rpc.sql
+--   4. 生成时间: 2026-09-16T06:23:57.057Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/193_remove_one_time_lottery_contact_export_rpc.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -36289,4 +36289,13 @@ COMMENT ON FUNCTION public.export_summer_lottery_contacts_once(TEXT) IS
 NOTIFY pgrst, 'reload schema';
 COMMIT;
 -- <<< END MIGRATION: active/192_add_one_time_lottery_contact_export_rpc.sql
+
+-- >>> BEGIN MIGRATION: active/193_remove_one_time_lottery_contact_export_rpc.sql
+BEGIN;
+
+DROP FUNCTION IF EXISTS public.export_summer_lottery_contacts_once(TEXT);
+
+NOTIFY pgrst, 'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/193_remove_one_time_lottery_contact_export_rpc.sql
 
