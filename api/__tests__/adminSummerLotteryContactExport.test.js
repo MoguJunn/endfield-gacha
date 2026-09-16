@@ -3,7 +3,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
-  consumeLotteryRateLimit: vi.fn(),
   decryptLotteryContact: vi.fn(),
   getSupabaseAdminClient: vi.fn(),
 }));
@@ -14,10 +13,6 @@ vi.mock('../_lib/authAdmin.js', () => ({
 vi.mock('../_lib/lotteryContactCrypto.js', () => ({
   decryptLotteryContact: mocks.decryptLotteryContact,
 }));
-vi.mock('../_lib/lotteryRateLimit.js', () => ({
-  consumeLotteryRateLimit: mocks.consumeLotteryRateLimit,
-}));
-
 import handler from '../_routes/root/admin-summer-lottery-contact-export.js';
 
 const EXPORT_TOKEN = 'x'.repeat(43);
@@ -66,7 +61,6 @@ describe('one-time lottery contact export', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.LOTTERY_ONE_TIME_EXPORT_TOKEN = EXPORT_TOKEN;
-    process.env.LOTTERY_BACKEND_SECRET = 'backend-secret-for-test-only-and-long-enough';
     queries = {
       summer_lottery_campaigns: createQuery({
         data: {
@@ -103,13 +97,11 @@ describe('one-time lottery contact export', () => {
     };
     adminClient = { from: vi.fn((table) => queries[table]) };
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
-    mocks.consumeLotteryRateLimit.mockResolvedValue({ allowed: true });
     mocks.decryptLotteryContact.mockReturnValue('123456789');
   });
 
   afterEach(() => {
     delete process.env.LOTTERY_ONE_TIME_EXPORT_TOKEN;
-    delete process.env.LOTTERY_BACKEND_SECRET;
   });
 
   it('fails closed without the one-time token', async () => {

@@ -1,7 +1,6 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { getSupabaseAdminClient } from '../../_lib/authAdmin.js';
 import { decryptLotteryContact } from '../../_lib/lotteryContactCrypto.js';
-import { consumeLotteryRateLimit } from '../../_lib/lotteryRateLimit.js';
 
 const CAMPAIGN_ID = 'arknights-p3r-collab-2026';
 const CONFIRMATION = `EXPORT ${CAMPAIGN_ID}`;
@@ -60,17 +59,6 @@ export default async function adminSummerLotteryContactExportHandler(req, res) {
   }
 
   try {
-    const tokenFingerprint = createHash('sha256').update(providedToken).digest('hex');
-    const rateLimit = await consumeLotteryRateLimit(adminClient, {
-      action: 'admin_contact_export',
-      identifiers: [tokenFingerprint],
-      secret: process.env.LOTTERY_BACKEND_SECRET,
-    });
-    if (!rateLimit.allowed) {
-      res.setHeader('Retry-After', String(rateLimit.retryAfter));
-      return sendError(res, 429, '操作过于频繁，请稍后重试', 'rate_limited');
-    }
-
     const [{ data: campaign, error: campaignError }, superAdminResult] = await Promise.all([
       adminClient
         .from('summer_lottery_campaigns')
