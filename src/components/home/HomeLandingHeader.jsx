@@ -36,6 +36,7 @@ import useAuthStore from '../../stores/useAuthStore.js';
 import { buildUsernameHandle } from '../../utils/usernameValidation.js';
 import { STORAGE_KEYS, markAsViewed } from '../../utils/storageUtils.js';
 import LocaleSwitcher from '../common/LocaleSwitcher.jsx';
+import PlatformSwitcher from '../common/PlatformSwitcher.jsx';
 import './homeLandingDemo.css';
 import '../app/desktopPageLayout.css';
 
@@ -237,6 +238,7 @@ export default function HomeLandingHeader({
               </Link>
             );
           })}
+          {group.id === 'help' ? <PlatformSwitcher variant="menu-item" /> : null}
           {group.id === 'account' ? (
             <button
               type="button"

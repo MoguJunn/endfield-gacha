@@ -273,6 +273,7 @@
 }
 .dh-pool-card {
   position: relative;
+  container: home-pool / inline-size;
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--dh-line);
@@ -1795,6 +1796,86 @@
   .dh-original-event .summer-lottery-banner__meta span { font-size: 11px; }
   .dh-original-event .summer-lottery-banner__action,
   .dh-original-event .summer-lottery-banner__details { font-size: 13px; min-height: 36px; }
+}
+/* A single banner may still have a narrow column in a desktop window. */
+@container home-pool (max-width: 550px) {
+  .dh-pool-main {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+  .dh-pool-name { min-width: 0; }
+  .dh-pool-timer {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    border-left: 0;
+    padding-left: 0;
+  }
+  .dh-clock { gap: 10px; }
+  .dh-clock b { font-size: 29px; }
+}
+
+/* Narrow desktop windows scroll naturally instead of squeezing into one screen. */
+@media (max-width: 1180px) {
+  .dh-shell { height: auto; min-height: 100dvh !important; }
+  .dh-shell > .dh-main { flex: none; width: 100%; }
+  .dh-home,
+  .dh-home--compact {
+    height: auto;
+    grid-template-rows: auto;
+    gap: 20px;
+  }
+  .dh-commandbar { container-type: inline-size; }
+  .dh-guidance-layout {
+    height: auto;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 24px;
+  }
+  .dh-commandbar h1 { font-size: 32px; }
+  .dh-guidance-description { display: block; }
+  .dh-guidance-description > span { display: none; }
+  .dh-guidance-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .dh-commandbar .dh-primary { justify-content: center; }
+  .dh-commandbar .dh-exit { justify-content: center; white-space: normal; }
+  .dh-guidance-links {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dh-guidance-links :is(button, a) { white-space: normal; }
+  .dh-home--compact .dh-content-grid { grid-template-rows: auto; align-items: start; }
+  .dh-home--compact .dh-pools { grid-template-columns: minmax(0, 1fr); }
+  .dh-home--compact .dh-pool-card-content { min-height: 235px; padding: 16px; gap: 14px; }
+  .dh-pool-period { flex-wrap: wrap; }
+  .dh-original-event .summer-lottery-banner { flex: none; grid-template-rows: 140px auto; }
+  .dh-original-event .summer-lottery-banner__info { padding: 16px; gap: 6px; }
+  .dh-original-event .summer-lottery-banner__info > p { font-size: 13px; }
+  .dh-original-event .summer-lottery-banner__actions { flex-wrap: wrap; }
+  .dh-original-event :is(.summer-lottery-banner__action, .summer-lottery-banner__details) { min-height: 40px; }
+  .dh-original-rotation .pool-card-rail-scrollbar { min-height: 160px; }
+  .dh-original-rotation > div:first-child > .relative > div:first-child { padding-right: 0; padding-top: 40px; }
+  .dh-utility-rail { flex-wrap: wrap; justify-content: flex-start; }
+  .dh-utility-rail button { flex: 1 1 180px; min-height: 44px; flex-wrap: wrap; }
+  .dh-utility-rail button > svg { flex-shrink: 0; }
+  .dh-shell > footer { margin-top: 16px; padding-bottom: 64px; }
+}
+@media (max-width: 900px) {
+  .dh-content-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .dh-home--compact .dh-original-event { grid-column: 1; grid-row: auto; }
+  .dh-schedule-area { grid-template-columns: minmax(0, 1fr); }
+  .dh-version-area > .version-countdown-card { border-left: 0; border-top: 1px solid var(--dh-line); }
+}
+@media (max-width: 760px) {
+  .dh-guidance-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .dh-guidance-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dh-commandbar .dh-primary { grid-row: 1; padding-inline: 12px; white-space: normal; }
+  .dh-commandbar .dh-exit { grid-column: 2; grid-row: 1; }
+  .dh-guidance-links { grid-column: 1 / -1; }
+  .dh-guidance-links :is(button, a) { justify-content: center; }
+  .dh-workspaces button { min-width: 0; min-height: 40px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .dh-home *,

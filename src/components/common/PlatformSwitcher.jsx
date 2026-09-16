@@ -1,17 +1,16 @@
 import React from 'react';
 import { Monitor, Smartphone } from 'lucide-react';
-import {
-  resolvePlatformPath
-} from '../../constants/appRoutes';
+import { resolvePlatformPath } from '../../constants/appRoutes';
 import { useI18n } from '../../i18n/index.js';
-import { STORAGE_KEYS, writeStorageValue } from '../../utils/storageUtils.js';
+import { useDeviceDetection } from '../../hooks/useDeviceDetection.js';
 
 /**
  * 平台切换器组件
- * 使用 window.location.href 强制刷新，避免 SPA 路由状态不同步
+ * 同时记录当前标签页选择与长期偏好，再刷新目标平台。
  */
-function PlatformSwitcher({ variant = 'button', className = '' }) {
-  const { t } = useI18n();
+function PlatformSwitcher({ variant = 'button', className = '', label }) {
+  const { t, isEnglish } = useI18n();
+  const { isMobile, setPreference } = useDeviceDetection();
   const currentPlatform = window.location.pathname.startsWith('/m') ? 'mobile' : 'desktop';
 
   const resolveTargetPath = (targetPlatform) => {
@@ -19,7 +18,17 @@ function PlatformSwitcher({ variant = 'button', className = '' }) {
   };
 
   const handleSwitch = (targetPlatform) => {
-    writeStorageValue(STORAGE_KEYS.PLATFORM_PREFERENCE, targetPlatform, { raw: true });
+    if (
+      isMobile &&
+      targetPlatform === 'desktop' &&
+      !window.confirm(
+        isEnglish
+          ? 'Phones cannot fully display desktop content. Some charts, tables and controls may require horizontal scrolling. Switch to desktop anyway?'
+          : '手机端无法完整显示桌面端内容，部分图表、表格和操作区域可能需要横向滚动。仍要切换到桌面版吗？'
+      )
+    )
+      return;
+    setPreference(targetPlatform);
     const basePath = window.location.origin;
     const targetPath = resolveTargetPath(targetPlatform);
     const search = window.location.search || '';
@@ -56,12 +65,12 @@ function PlatformSwitcher({ variant = 'button', className = '' }) {
       {currentPlatform === 'mobile' ? (
         <>
           <Monitor className="w-4 h-4" />
-          <span>{t('platform.desktopShort')}</span>
+          <span>{label ?? t('platform.desktopShort')}</span>
         </>
       ) : (
         <>
           <Smartphone className="w-4 h-4" />
-          <span>{t('platform.mobileShort')}</span>
+          <span>{label ?? t('platform.mobileShort')}</span>
         </>
       )}
     </button>
