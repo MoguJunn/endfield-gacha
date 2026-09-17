@@ -41,7 +41,7 @@ async function applyLotteryResultsRevisionOverride() {
       <div className="results-pane">
         <div className="winner-list">
           {invalidatedWinners.map((winner) => (
-            <article className="is-invalidated" key={\`invalidated-\${winner.drawRevision}-\${winner.prizeTier}-\${winner.winnerOrder}\`}><Trophy /><span><small>原一等奖 · 资格已取消</small><strong>{winner.displayName}</strong><em>{winner.outcomeReason}</em></span><code>{formatEntryNumber(winner.entryNumber, site.entryPrefix)}</code></article>
+            <article className="is-invalidated" key={\`invalidated-\${winner.drawRevision}-\${winner.prizeTier}-\${winner.winnerOrder}\`}><Trophy /><span><small>{'原' + (site.prizes.find((prize) => prize.tier === winner.prizeTier)?.title || getPrizeName(winner.prizeTier)) + ' · 资格已取消'}</small><strong>{winner.displayName}</strong><em>{winner.outcomeReason}</em></span><code>{formatEntryNumber(winner.entryNumber, site.entryPrefix)}</code></article>
           ))}
           {!invalidatedWinners.length && <div className="waiting-result"><div className="waiting-result__icon"><Trophy /><Sparkles /></div><div><h3>开奖后在这里公布结果</h3></div></div>}
         </div>
@@ -51,7 +51,7 @@ async function applyLotteryResultsRevisionOverride() {
   }`)
       .replace(winnersTarget, `      <div className="winner-list">
         {invalidatedWinners.map((winner) => (
-          <article className="is-invalidated" key={\`invalidated-\${winner.drawRevision}-\${winner.prizeTier}-\${winner.winnerOrder}\`}><Trophy /><span><small>原一等奖 · 资格已取消</small><strong>{winner.displayName}</strong><em>{winner.outcomeReason}</em></span><code>{formatEntryNumber(winner.entryNumber, site.entryPrefix)}</code></article>
+          <article className="is-invalidated" key={\`invalidated-\${winner.drawRevision}-\${winner.prizeTier}-\${winner.winnerOrder}\`}><Trophy /><span><small>{'原' + (site.prizes.find((prize) => prize.tier === winner.prizeTier)?.title || getPrizeName(winner.prizeTier)) + ' · 资格已取消'}</small><strong>{winner.displayName}</strong><em>{winner.outcomeReason}</em></span><code>{formatEntryNumber(winner.entryNumber, site.entryPrefix)}</code></article>
         ))}
         {(snapshot.publicWinners || []).map((winner) => (`);
     await writeFile(appPath, appSource, 'utf8');
