@@ -5,9 +5,17 @@ import { buildQuotaLedgerFromHistory } from './quotaEconomy.js';
 import { resolveCharacterRecordByName } from './characterUtils.js';
 import { resolvePoolCapabilities } from './poolCapabilities.js';
 import {
+  calculateAveragePullCost,
+  isFreeHistoryRecord,
+  isGiftHistoryRecord,
+  isManuallyMarkedGuaranteedRecord,
+} from './gachaRuleContracts.js';
+import {
   buildPaidTimelinePityMap,
   buildScopedPaidHistoryTimeline,
+  collectForcedUpRecordKeysForPool,
   getHistoryRecordKey,
+  getPoolRuleScopeKey,
   isTargetSixStarHistoryRecord,
 } from './poolScopedHistory.js';
 
@@ -18,11 +26,11 @@ function getBucketFromCapabilities(capabilities) {
 }
 
 function isGuaranteedPull(item) {
-  return item?.specialType === 'guaranteed' || item?.special_type === 'guaranteed';
+  return isManuallyMarkedGuaranteedRecord(item);
 }
 
 function shouldExcludeFromWinRate(item, capabilities) {
-  return capabilities.basePoolType === 'limited' && isGuaranteedPull(item);
+  return capabilities.targetMode === 'single-up' && isGuaranteedPull(item);
 }
 
 function buildPoolFromHistoryRecord(poolId, record) {
@@ -169,6 +177,8 @@ export function buildDashboardOverviewSplitStats({
       poolType: 'limited',
       _allSixStarPulls: [],
       _upCount: 0,
+      _upCountWithSpark: 0,
+      _sparkCount: 0,
       _limitedSixCount: 0,
       _targetScopePulls: 0,
       _limitedScopePulls: 0,
@@ -188,6 +198,8 @@ export function buildDashboardOverviewSplitStats({
       poolType: 'weapon',
       _allSixStarPulls: [],
       _upCount: 0,
+      _upCountWithSpark: 0,
+      _sparkCount: 0,
       _limitedSixCount: 0,
       _targetScopePulls: 0,
       _limitedScopePulls: 0,
@@ -211,6 +223,11 @@ export function buildDashboardOverviewSplitStats({
     pullsByPool[poolId].push(item);
   });
 
+  // 硬保底强制 UP（吃井）记录键：逐池按目标作用域判定后合并（STATS-007A），
+  // 同一目标作用域（如重构系列分期）只判定一次
+  const forcedUpKeys = new Set();
+  const processedTargetScopes = new Set();
+
   // 按池独立处理保底计数，与时间线视图一致
   for (const [poolId, pulls] of Object.entries(pullsByPool)) {
     const sortedPulls = pulls.sort((a, b) => (a?.id ?? 0) - (b?.id ?? 0));
@@ -222,6 +239,19 @@ export function buildDashboardOverviewSplitStats({
       continue;
     }
     const bucket = buckets[bucketKey];
+
+    const targetScopeKey = getPoolRuleScopeKey(sourcePool, 'target');
+    if (!targetScopeKey || !processedTargetScopes.has(targetScopeKey)) {
+      if (targetScopeKey) {
+        processedTargetScopes.add(targetScopeKey);
+      }
+      collectForcedUpRecordKeysForPool({
+        history,
+        pools: selectedPools,
+        pool: sourcePool,
+      }).forEach((key) => forcedUpKeys.add(key));
+    }
+
     const scopedPityMap = buildPaidTimelinePityMap(buildScopedPaidHistoryTimeline({
       history,
       pools: selectedPools,
@@ -236,8 +266,8 @@ export function buildDashboardOverviewSplitStats({
     let tempCounter = 0;
 
     sortedPulls.forEach((item) => {
-      const isGift = item?.specialType === 'gift' || item?.special_type === 'gift';
-      const isFree = item?.isFree === true || item?.is_free === true;
+      const isGift = isGiftHistoryRecord(item);
+      const isFree = isFreeHistoryRecord(item);
       if (isGift) return;
 
       bucket._quotaHistory.push(item);
@@ -268,6 +298,8 @@ export function buildDashboardOverviewSplitStats({
         const isTargetSixStar = isTargetSixStarHistoryRecord(item, sourcePool);
         const isLimitedSixStar = isLimitedCharacterScope(capabilities)
           && (isTargetSixStar || isLimitedCharacterOffrate(item));
+        const recordKey = getHistoryRecordKey(item);
+        const isSpark = recordKey ? forcedUpKeys.has(recordKey) : false;
 
         if (isTargetSixStar) {
           bucket.counts[6] += 1;
@@ -279,11 +311,16 @@ export function buildDashboardOverviewSplitStats({
           bucket._arsenalGainCounts[isTargetSixStar ? 6 : '6_std'] += 1;
         }
 
-        if (!shouldExcludeFromWinRate(item, capabilities)) {
+        // 不歪率与目标均值剔除硬保底强制 UP（真 50/50 口径）
+        if (!isSpark && !shouldExcludeFromWinRate(item, capabilities)) {
           bucket._winRateTotalCount += 1;
           if (isTargetSixStar) {
             bucket._winRateTargetCount += 1;
           }
+        }
+
+        if (isSpark) {
+          bucket._sparkCount += 1;
         }
 
         bucket._allSixStarPulls.push({
@@ -293,8 +330,11 @@ export function buildDashboardOverviewSplitStats({
           isStandard: !isTargetSixStar
         });
 
-        if (isTargetSixStar) bucket._upCount += 1;
-        if (isLimitedSixStar) bucket._limitedSixCount += 1;
+        if (isTargetSixStar) {
+          bucket._upCountWithSpark += 1;
+          if (!isSpark) bucket._upCount += 1;
+        }
+        if (isLimitedSixStar && !isSpark) bucket._limitedSixCount += 1;
 
         if (!isFree) {
           tempCounter = 0;
@@ -325,16 +365,21 @@ export function buildDashboardOverviewSplitStats({
     bucket.winRateTargetCount = bucket._winRateTargetCount;
     bucket.winRateTotalCount = bucket._winRateTotalCount;
 
-    const avgFiveStar = bucket.counts[5] > 0 ? (bucket.total / bucket.counts[5]).toFixed(2) : '0';
-    const avgAllSixStar = bucket.totalSixStar > 0 ? (bucket.total / bucket.totalSixStar).toFixed(2) : '0';
-    const avgTargetSixStar = bucket._upCount > 0 ? ((bucket._targetScopePulls || bucket.total) / bucket._upCount).toFixed(2) : '0';
-    const avgLimitedSixStar = bucket._limitedSixCount > 0 ? ((bucket._limitedScopePulls || bucket.total) / bucket._limitedSixCount).toFixed(2) : '0';
+    const targetScopePulls = bucket._targetScopePulls || bucket.total;
+    const limitedScopePulls = bucket._limitedScopePulls || bucket.total;
+    const avgFiveStar = calculateAveragePullCost(bucket.total, bucket.counts[5]) ?? '0';
+    const avgAllSixStar = calculateAveragePullCost(bucket.total, bucket.totalSixStar) ?? '0';
+    // 「6」为排除硬保底强制 UP 的目标均值，「6_with_spark」为含保底口径
+    const avgTargetSixStar = calculateAveragePullCost(targetScopePulls, bucket._upCount) ?? '0';
+    const avgTargetSixStarWithSpark = calculateAveragePullCost(targetScopePulls, bucket._upCountWithSpark) ?? '0';
+    const avgLimitedSixStar = calculateAveragePullCost(limitedScopePulls, bucket._limitedSixCount) ?? '0';
 
+    bucket.sparkCount = bucket._sparkCount;
     bucket.avgPullCost = {
       6: avgTargetSixStar,
       '6_all': avgAllSixStar,
       '6_limited': avgLimitedSixStar,
-      '6_with_spark': avgTargetSixStar,
+      '6_with_spark': avgTargetSixStarWithSpark,
       5: avgFiveStar
     };
 

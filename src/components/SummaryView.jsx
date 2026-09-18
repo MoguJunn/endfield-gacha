@@ -6,6 +6,7 @@ import { ChartSection, CharacterCatalogView, SummarySidebar } from './summary';
 import ResourceSummaryPanel from './resources/ResourceSummaryPanel';
 import { useThemeDetection, getTooltipStyle, useSummaryViewState } from '../hooks/summary';
 import { getCombinedCharacterAverageDisplay } from '../utils/summaryAverageDisplay.js';
+import { calculateTargetWinRate } from '../utils/gachaRuleContracts.js';
 
 function MetricCard({ icon: Icon, label, value, hint, tone = 'text-slate-900 dark:text-white' }) {
   return (
@@ -106,10 +107,18 @@ function OverviewAllPoolsLegacy({ currentStats, dataSource, ranking, formatCount
 
   const totalCharacterSix = Number(characterStats.six || 0);
   const totalCharacterTargets = Number(characterStats.sixStarLimited ?? characterStats.limitedSix ?? 0);
-  const characterTargetRate = totalCharacterSix > 0 ? (totalCharacterTargets / totalCharacterSix) * 100 : 0;
+  const characterTargetRate = calculateTargetWinRate({
+    targetCount: totalCharacterTargets,
+    sixStarCount: totalCharacterSix,
+    sparkCount: characterStats.sparkCount,
+  });
   const weaponSix = Number(weaponStats.six || 0);
   const weaponTargets = Number(weaponStats.sixStarLimited ?? weaponStats.limitedSix ?? 0);
-  const weaponTargetRate = weaponSix > 0 ? (weaponTargets / weaponSix) * 100 : 0;
+  const weaponTargetRate = calculateTargetWinRate({
+    targetCount: weaponTargets,
+    sixStarCount: weaponSix,
+    sparkCount: weaponStats.sparkCount,
+  });
   const characterSixDisplay = (() => {
     const extraSixTotal = Number(extraStats.six || 0);
     const limitedSixTotal = Number(limitedStats.six || 0);
@@ -390,11 +399,13 @@ function OverviewSinglePool({ currentStats, formatCount, formatPercent, tt }) {
       <MetricCard
         label={tt('summary.metric.targetVsOff', '不歪/歪')}
         value={`${formatCount(currentStats.sixStarLimited || 0)} / ${formatCount(currentStats.sixStarStandard || 0)}`}
-        hint={`${tt('summary.metric.targetRate', '不歪率')}: ${
-          currentStats.sixStar > 0
-            ? formatPercent(((currentStats.sixStarLimited || 0) / currentStats.sixStar) * 100)
-            : formatPercent(0)
-        }`}
+        hint={`${tt('summary.metric.targetRate', '不歪率')}: ${formatPercent(
+          calculateTargetWinRate({
+            targetCount: currentStats.sixStarLimited || 0,
+            sixStarCount: currentStats.sixStar,
+            sparkCount: currentStats.sparkCount,
+          })
+        )}`}
         tone="text-slate-800 dark:text-white"
       />
     </div>

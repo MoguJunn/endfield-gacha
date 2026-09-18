@@ -1,5 +1,12 @@
 import { compareHistoryTimelineAsc } from './historyTimelineSort.js';
 import { resolvePoolCapabilities } from './poolCapabilities.js';
+import {
+  collectForcedUpRecordKeysFromTimeline,
+  getForcedUpFloor,
+  isFreeHistoryRecord,
+  isGiftHistoryRecord,
+  isPaidHistoryRecord,
+} from './gachaRuleContracts.js';
 
 function normalizeText(value) {
   return value == null ? '' : String(value).trim();
@@ -19,21 +26,11 @@ export function getHistoryRecordKey(record) {
 }
 
 export function isPaidHistoryPull(record) {
-  const isGift = record?.specialType === 'gift' || record?.special_type === 'gift';
-  const isFree = record?.isFree === true
-    || record?.is_free === true
-    || record?.isFreePull === true
-    || record?.is_free_pull === true;
-  return !isGift && !isFree;
+  return isPaidHistoryRecord(record);
 }
 
 export function isFreeHistoryPull(record) {
-  const isGift = record?.specialType === 'gift' || record?.special_type === 'gift';
-  const isFree = record?.isFree === true
-    || record?.is_free === true
-    || record?.isFreePull === true
-    || record?.is_free_pull === true;
-  return !isGift && isFree;
+  return !isGiftHistoryRecord(record) && isFreeHistoryRecord(record);
 }
 
 export function getPoolSeriesStateKey(pool) {
@@ -233,8 +230,10 @@ export function isTargetSixStarHistoryRecord(record, pool) {
 }
 
 /**
- * 计算一次性目标保障。目标在阈值前命中后即永久完成；恰好在阈值命中的记录
- * 会进入 guaranteedRecordKeys，供统计排除“不歪率”和继承状态避免重复发放。
+ * 计算一次性目标保障。目标在阈值前命中后即永久完成；
+ * 首个目标命中的累计付费抽数达到硬保底 floor（限定 120 / 武器 71 起）时，
+ * 该记录进入 guaranteedRecordKeys，供统计排除“不歪率”和继承状态避免重复发放。
+ * floor 口径统一来自 gachaRuleContracts.getForcedUpFloor。
  */
 export function buildOneTimeTargetGuaranteeState({
   history = [],
@@ -244,6 +243,7 @@ export function buildOneTimeTargetGuaranteeState({
 } = {}) {
   const capabilities = resolvePoolCapabilities(pool);
   const threshold = Number(capabilities?.rules?.guaranteedLimitedPity || 0);
+  const forcedUpFloor = getForcedUpFloor(capabilities?.rules);
   const supported = Boolean(
     capabilities.isResolved
     && capabilities.targetMode === 'single-up'
@@ -269,6 +269,7 @@ export function buildOneTimeTargetGuaranteeState({
   const poolLookup = buildPoolLookup(pools, pool);
   const guaranteedRecordKeys = new Set();
   let pity = 0;
+  let cumulativePaidPulls = 0;
   let hasReceivedGuaranteedLimited = false;
 
   for (const record of timeline) {
@@ -276,13 +277,14 @@ export function buildOneTimeTargetGuaranteeState({
       break;
     }
 
-    pity = Math.min(pity + 1, threshold);
+    cumulativePaidPulls += 1;
+    pity = Math.min(cumulativePaidPulls, threshold);
     const sourcePool = resolveRecordPool(record, poolLookup, pool) || pool;
     if (!isTargetPull(record, sourcePool)) {
       continue;
     }
 
-    if (pity === threshold) {
+    if (cumulativePaidPulls >= forcedUpFloor) {
       const recordKey = getHistoryRecordKey(record);
       if (recordKey) {
         guaranteedRecordKeys.add(recordKey);
@@ -298,6 +300,80 @@ export function buildOneTimeTargetGuaranteeState({
     guaranteedRecordKeys,
     timeline,
   };
+}
+
+/**
+ * 卡池规则作用域的稳定键。系列作用域按 profile+seriesKey 合并，
+ * 共享作用域按规则集合并，其余按单池；用于跨池去重，避免重复扫描。
+ */
+export function getPoolRuleScopeKey(pool, scopeType = 'pity') {
+  const capabilities = resolvePoolCapabilities(pool);
+  const scopeKind = scopeType === 'reward'
+    ? capabilities.rewardScope
+    : scopeType === 'target'
+      ? capabilities.targetScope
+      : capabilities.pityScope;
+  if (scopeKind === 'series') {
+    const seriesStateKey = getPoolSeriesStateKey(capabilities);
+    return seriesStateKey ? `${scopeType}:series:${seriesStateKey}` : null;
+  }
+  if (scopeKind === 'shared') {
+    return `${scopeType}:shared:${capabilities.rulesKey}`;
+  }
+  const poolId = getPoolRecordId(pool);
+  return poolId ? `${scopeType}:pool:${poolId}` : null;
+}
+
+/**
+ * 收集单个卡池（按其目标作用域）的硬保底强制 UP（吃井）记录键。
+ * 口径统一由 gachaRuleContracts 提供；无硬保底或未解析的池返回空集。
+ */
+export function collectForcedUpRecordKeysForPool({ history = [], pools = [], pool } = {}) {
+  const capabilities = resolvePoolCapabilities(pool);
+  const floor = getForcedUpFloor(capabilities?.rules);
+  if (!capabilities.isResolved || capabilities.targetMode !== 'single-up' || !Number.isFinite(floor)) {
+    return new Set();
+  }
+
+  const timeline = buildScopedPaidHistoryTimeline({
+    history,
+    pools,
+    pool,
+    scopeType: 'target',
+  });
+  const poolLookup = buildPoolLookup(pools, pool);
+  return collectForcedUpRecordKeysFromTimeline(timeline, {
+    floor,
+    isTargetRecord: (record) =>
+      isTargetSixStarHistoryRecord(record, resolveRecordPool(record, poolLookup, pool) || pool),
+  });
+}
+
+/**
+ * 收集一组卡池的硬保底强制 UP 记录键（池组 / 聚合视图使用）。
+ * 逐池按目标作用域判定再合并；共享同一目标作用域的池（如同一系列的分期）
+ * 只判定一次，避免重复或跨期混算。
+ */
+export function collectForcedUpRecordKeysForPools({ history = [], pools = [], targetPools = [] } = {}) {
+  const mergedKeys = new Set();
+  const processedScopes = new Set();
+
+  for (const pool of Array.isArray(targetPools) ? targetPools : []) {
+    if (!pool) {
+      continue;
+    }
+    const scopeKey = getPoolRuleScopeKey(pool, 'target');
+    if (scopeKey) {
+      if (processedScopes.has(scopeKey)) {
+        continue;
+      }
+      processedScopes.add(scopeKey);
+    }
+    collectForcedUpRecordKeysForPool({ history, pools, pool })
+      .forEach((key) => mergedKeys.add(key));
+  }
+
+  return mergedKeys;
 }
 
 export function calculatePaidTimelinePity(timeline = []) {
@@ -348,6 +424,9 @@ export default {
   buildScopedFreeHistoryTimeline,
   buildScopedPaidHistoryTimeline,
   calculatePaidTimelinePity,
+  collectForcedUpRecordKeysForPool,
+  collectForcedUpRecordKeysForPools,
+  getPoolRuleScopeKey,
   getPoolSeriesStateKey,
   isFreeHistoryPull,
   isPaidHistoryPull,

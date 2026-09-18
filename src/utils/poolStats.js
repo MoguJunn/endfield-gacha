@@ -6,31 +6,30 @@ import { buildQuotaLedgerFromHistory } from './quotaEconomy.js';
 import { buildCapabilityAwarePoolResourceSummary, buildPoolResourceSummary } from './resourceEconomy.js';
 import { resolvePoolCapabilities } from './poolCapabilities.js';
 import {
-  buildOneTimeTargetGuaranteeState,
+  calculateAveragePullCost,
+  isFreeHistoryRecord,
+  isGiftHistoryRecord,
+  isManuallyMarkedGuaranteedRecord,
+} from './gachaRuleContracts.js';
+import {
   buildPaidTimelinePityMap,
   buildScopedFreeHistoryTimeline,
   buildScopedPaidHistoryTimeline,
   calculatePaidTimelinePity,
+  collectForcedUpRecordKeysForPools,
 } from './poolScopedHistory.js';
 import { calculateCurrentProbability } from './validators.js';
 
 function isGiftPull(pull) {
-  return pull?.specialType === 'gift' || pull?.special_type === 'gift';
+  return isGiftHistoryRecord(pull);
 }
 
 function isFreePull(pull) {
-  return pull?.isFree === true || pull?.is_free === true || pull?.isFreePull === true || pull?.is_free_pull === true;
+  return isFreeHistoryRecord(pull);
 }
 
 function isGuaranteedPull(pull) {
-  return (
-    pull?.specialType === 'guaranteed' ||
-    pull?.special_type === 'guaranteed' ||
-    pull?.isGuaranteed === true ||
-    pull?.is_guaranteed === true ||
-    pull?.isSpark === true ||
-    pull?.is_spark === true
-  );
+  return isManuallyMarkedGuaranteedRecord(pull);
 }
 
 function getHistoryPoolId(item) {
@@ -193,10 +192,12 @@ export function buildPoolStats({
           })
         : allLimitedHistory.filter((item) => !isGiftPull(item) && isFreePull(item))
       : [];
-  const targetGuaranteeState = buildOneTimeTargetGuaranteeState({
+  // 硬保底强制 UP（吃井）记录键：统一口径逐池按目标作用域判定后合并；
+  // 池组模式也逐期判定，不再直接置空（STATS-007A）
+  const forcedUpRecordKeys = collectForcedUpRecordKeysForPools({
     history: scopedHistorySource.length > 0 ? scopedHistorySource : normalizedCurrentPoolHistory,
     pools: scopePools,
-    pool: currentPool,
+    targetPools: currentPool?.isGroupMode ? scopePools : [currentPool],
   });
   const limitedCrossPoolPityMap =
     usesInheritedPity && scopedPityTimeline.length > 0 ? buildPaidTimelinePityMap(scopedPityTimeline) : null;
@@ -216,7 +217,7 @@ export function buildPoolStats({
 
     return currentPoolCapabilities;
   };
-  const limitedSparkRecordKeys = currentPool?.isGroupMode ? new Set() : targetGuaranteeState.guaranteedRecordKeys;
+  const limitedSparkRecordKeys = forcedUpRecordKeys;
   const paidPullsList = normalizedCurrentPoolHistory.filter((item) => !isGiftPull(item) && !isFreePull(item));
   const quotaPullsList = normalizedCurrentPoolHistory.filter((item) => !isGiftPull(item));
   const validPullsList = quotaPullsList.filter((item) => includeFreePullsInStats || !isFreePull(item));
@@ -422,8 +423,8 @@ export function buildPoolStats({
   const avgPityRecorded =
     pullCounts.length > 0 ? (pullCounts.reduce((a, b) => a + b, 0) / pullCounts.length).toFixed(1) : 0;
 
-  const avgAllSixStar =
-    pullCounts.length > 0 ? (pullCounts.reduce((sum, value) => sum + value, 0) / pullCounts.length).toFixed(2) : '0';
+  // 「平均出货」统一为 total/count（STATS-007A）；区间均值仅保留在 pityStats 分布描述中
+  const avgAllSixStar = calculateAveragePullCost(total, totalSixStar) ?? '0';
 
   const sparkCount = upSixStarHits.filter((p) => p.isSpark).length;
   const upHitCount = upSixStarHits.length;

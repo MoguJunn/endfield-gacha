@@ -5,9 +5,14 @@ import { annotateInfoBookPulls } from './historyInfoBook.js';
 import { classifyGameAccountRegionBucket } from './gameAccountMetadata.js';
 import { resolvePoolCapabilities } from './poolCapabilities.js';
 import {
-  buildOneTimeTargetGuaranteeState,
+  calculateAveragePullCost,
+  isFreeHistoryRecord,
+  isGiftHistoryRecord,
+} from './gachaRuleContracts.js';
+import {
   buildScopedPaidHistoryTimeline,
-  getPoolSeriesStateKey,
+  collectForcedUpRecordKeysForPools,
+  getPoolRuleScopeKey,
   isTargetSixStarHistoryRecord,
 } from './poolScopedHistory.js';
 
@@ -19,11 +24,11 @@ const PITY_LIMITS = {
 };
 
 function isGiftPull(pull) {
-  return pull?.specialType === 'gift' || pull?.special_type === 'gift';
+  return isGiftHistoryRecord(pull);
 }
 
 function isFreePull(pull) {
-  return pull?.isFree === true || pull?.is_free === true;
+  return isFreeHistoryRecord(pull);
 }
 
 function generatePieData(counts) {
@@ -109,24 +114,6 @@ function getPoolRecordId(pool) {
 
 function getHistoryPoolId(record) {
   return record?.poolId || record?.pool_id || null;
-}
-
-function getRuleScopeKey(pool, capabilities, scopeType) {
-  const scopeKind =
-    scopeType === 'reward'
-      ? capabilities.rewardScope
-      : scopeType === 'target'
-        ? capabilities.targetScope
-        : capabilities.pityScope;
-  if (scopeKind === 'series') {
-    const seriesStateKey = getPoolSeriesStateKey(capabilities);
-    return seriesStateKey ? `${scopeType}:series:${seriesStateKey}` : null;
-  }
-  if (scopeKind === 'shared') {
-    return `${scopeType}:shared:${capabilities.rulesKey}`;
-  }
-  const poolId = getPoolRecordId(pool);
-  return poolId ? `${scopeType}:pool:${poolId}` : null;
 }
 
 /**
@@ -305,24 +292,15 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
   }
 
   const upCountByType = { extra: 0, limited: 0, weapon: 0 };
+  const sparkCountByType = { extra: 0, limited: 0, weapon: 0, standard: 0 };
+  const entitySparkCounts = { character: 0, weapon: 0 };
 
   const globalDistBuckets = {};
   const typeDistBuckets = { extra: {}, limited: {}, weapon: {}, standard: {} };
   const typePityLimits = { extra: 0, limited: 0, weapon: 0, standard: 0 };
   const entityDistBuckets = { character: {}, weapon: {} };
   const entityPityLimits = { character: 0, weapon: 0 };
-  const entityPitySums = {
-    character: { sum: 0, count: 0 },
-    weapon: { sum: 0, count: 0 },
-  };
   const entityUpCounts = { character: 0, weapon: 0 };
-
-  const typePitySums = {
-    extra: { sum: 0, count: 0 },
-    limited: { sum: 0, count: 0 },
-    weapon: { sum: 0, count: 0 },
-    standard: { sum: 0, count: 0 },
-  };
   let limitedNonFreeNonSparkSum = 0,
     limitedNonFreeNonSparkCount = 0;
   let limitedNonFreeSum = 0,
@@ -339,13 +317,18 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
 
   const poolIds = Object.keys(pullsByPool);
   const poolsWithHistory = myPools.filter((pool) => pullsByPool[getPoolRecordId(pool)]);
+  // 硬保底强制 UP（吃井）记录键：统一口径逐池按目标作用域判定后合并（STATS-007A）
+  const forcedUpRecordKeys = collectForcedUpRecordKeysForPools({
+    history: normalizedMyHistory,
+    pools: myPools,
+    targetPools: poolsWithHistory,
+  });
   const processedPityScopes = new Set();
   for (let pi = 0; pi < poolIds.length; pi++) {
     const poolId = poolIds[pi];
     const scopePool = poolMap.get(String(poolId || ''));
     if (!scopePool) continue;
-    const scopeCapabilities = resolvePoolCapabilities(scopePool);
-    const pityScopeKey = getRuleScopeKey(scopePool, scopeCapabilities, 'pity');
+    const pityScopeKey = getPoolRuleScopeKey(scopePool, 'pity');
     if (!pityScopeKey || processedPityScopes.has(pityScopeKey)) continue;
     processedPityScopes.add(pityScopeKey);
 
@@ -355,19 +338,6 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
       pool: scopePool,
       scopeType: 'pity',
     });
-    const guaranteedRecordKeys = new Set();
-    poolsWithHistory
-      .filter(
-        (candidatePool) =>
-          getRuleScopeKey(candidatePool, resolvePoolCapabilities(candidatePool), 'pity') === pityScopeKey
-      )
-      .forEach((candidatePool) => {
-        buildOneTimeTargetGuaranteeState({
-          history: normalizedMyHistory,
-          pools: myPools,
-          pool: candidatePool,
-        }).guaranteedRecordKeys.forEach((recordKey) => guaranteedRecordKeys.add(recordKey));
-      });
 
     let tempCounter = 0;
 
@@ -388,7 +358,13 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
       if (pull.rarity === 6) {
         const isUp = isTargetSixStarHistoryRecord(pull, sourcePool);
         const recordKey = pull?.id || pull?.record_id;
-        const isSpark = recordKey != null && guaranteedRecordKeys.has(String(recordKey));
+        const isSpark = recordKey != null && forcedUpRecordKeys.has(String(recordKey));
+        if (isSpark) {
+          sparkCountByType[pullType] += 1;
+          if (entitySparkCounts[entityType] !== undefined) {
+            entitySparkCounts[entityType] += 1;
+          }
+        }
 
         allSixStarPitySum += tempCounter;
         allSixStarPityCount++;
@@ -415,8 +391,6 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
           }
           if (isUp) entityDistBuckets[entityType][bucketIdx].limited++;
           else entityDistBuckets[entityType][bucketIdx].standard++;
-          entityPitySums[entityType].sum += tempCounter;
-          entityPitySums[entityType].count++;
           entityBuckets[entityType].pityList.push({
             count: tempCounter,
             isStandard: !isUp,
@@ -426,9 +400,6 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
           });
           if (isUp) entityUpCounts[entityType]++;
         }
-
-        typePitySums[pullType].sum += tempCounter;
-        typePitySums[pullType].count++;
 
         if (pullType === 'limited') {
           if (!isSpark) {
@@ -457,7 +428,7 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
   const processedRewardScopes = new Set();
   for (const scopePool of poolsWithHistory) {
     const capabilities = resolvePoolCapabilities(scopePool);
-    const rewardScopeKey = getRuleScopeKey(scopePool, capabilities, 'reward');
+    const rewardScopeKey = getPoolRuleScopeKey(scopePool, 'reward');
     if (!rewardScopeKey || processedRewardScopes.has(rewardScopeKey)) continue;
     processedRewardScopes.add(rewardScopeKey);
 
@@ -493,8 +464,11 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
   ['extra', 'limited', 'weapon', 'standard'].forEach((t) => {
     data.byType[t].distribution = buildDistFromBuckets(typeDistBuckets[t], typePityLimits[t] || PITY_LIMITS[t]);
     data.byType[t].chartData = generatePieData(data.byType[t].counts);
-    if (typePitySums[t].count > 0) {
-      data.byType[t].avgPity = (typePitySums[t].sum / typePitySums[t].count).toFixed(1);
+    data.byType[t].sparkCount = sparkCountByType[t];
+    // 「平均出货」统一为 total/count（STATS-007A），区间均值仅保留在分布描述中
+    const avgPity = calculateAveragePullCost(data.byType[t].total, data.byType[t].six, 1);
+    if (avgPity !== null) {
+      data.byType[t].avgPity = avgPity;
     }
     if (t === 'limited') {
       if (limitedNonFreeNonSparkCount > 0) {
@@ -525,9 +499,6 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
   const limitedPityListExcludingFree = characterPityList.filter((pull) => pull.isTargetCapable && !pull.isFree);
   const characterPityListExcludingFree = characterPityList.filter((p) => !p.isFree && !p.isSpark);
 
-  const charPitySum = entityPitySums.character.sum;
-  const charPityCount = entityPitySums.character.count;
-
   let charExclFreePitySum = 0,
     charExclFreePityCount = 0;
   for (let i = 0; i < characterPityListExcludingFree.length; i++) {
@@ -539,12 +510,13 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
     total: entityBuckets.character.total,
     six: entityBuckets.character.six,
     limitedSix: entityBuckets.character.limitedSix,
+    sparkCount: entitySparkCounts.character,
     counts: characterCounts,
     pityList: characterPityList,
     pityListExcludingFree: characterPityListExcludingFree,
     distribution: buildDistFromBuckets(entityDistBuckets.character, entityPityLimits.character || PITY_LIMITS.limited),
     chartData: generatePieData(characterCounts),
-    avgPity: charPityCount > 0 ? (charPitySum / charPityCount).toFixed(1) : '-',
+    avgPity: calculateAveragePullCost(entityBuckets.character.total, entityBuckets.character.six, 1) ?? '-',
     avgPityUp: (() => {
       return entityUpCounts.character > 0
         ? (entityBuckets.character.targetScopeTotal / entityUpCounts.character).toFixed(1)
@@ -563,12 +535,12 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
     total: entityBuckets.weapon.total,
     six: entityBuckets.weapon.six,
     limitedSix: entityBuckets.weapon.limitedSix,
+    sparkCount: entitySparkCounts.weapon,
     counts: entityBuckets.weapon.counts,
     pityList: entityBuckets.weapon.pityList,
     distribution: buildDistFromBuckets(entityDistBuckets.weapon, entityPityLimits.weapon || PITY_LIMITS.weapon),
     chartData: generatePieData(entityBuckets.weapon.counts),
-    avgPity:
-      entityPitySums.weapon.count > 0 ? (entityPitySums.weapon.sum / entityPitySums.weapon.count).toFixed(1) : null,
+    avgPity: calculateAveragePullCost(entityBuckets.weapon.total, entityBuckets.weapon.six, 1),
     avgPityUp:
       entityUpCounts.weapon > 0 ? (entityBuckets.weapon.targetScopeTotal / entityUpCounts.weapon).toFixed(1) : null,
     avgPityTarget:

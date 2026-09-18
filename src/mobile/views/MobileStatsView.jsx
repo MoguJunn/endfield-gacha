@@ -9,6 +9,7 @@ import { CharacterCatalogView, ChartSection } from '../../components/summary';
 import { getTooltipStyle, useSummaryViewState, useThemeDetection } from '../../hooks/summary';
 import { useI18n } from '../../i18n/index.js';
 import { useHorizontalWheelScroll } from '../../hooks/useHorizontalWheelScroll.js';
+import { calculateTargetWinRate } from '../../utils/gachaRuleContracts.js';
 
 function StatCard({ icon: Icon, label, value, hint, tone = 'text-slate-900 dark:text-white' }) {
   return (
@@ -311,7 +312,11 @@ function MobileStatsView() {
                     avgPity={formatAverageValue(getPoolAverageSixValue(characterStats))}
                     avgPityUp={formatAverageValue(characterStats.avgPityUp || characterStats.avgPityTarget)}
                     targetVsOff={<><span className="text-emerald-500">{formatCount(characterStats.limitedSix ?? characterStats.sixStarLimited ?? 0)}</span><span className="mx-1 text-zinc-400">/</span><span className="text-rose-500">{formatCount(Math.max(Number(characterStats.six || 0) - Number(characterStats.limitedSix ?? characterStats.sixStarLimited ?? 0), 0))}</span></>}
-                    targetRate={formatPercent(Number(characterStats.six || 0) > 0 ? (Number(characterStats.limitedSix ?? characterStats.sixStarLimited ?? 0) / Number(characterStats.six || 0)) * 100 : 0)}
+                    targetRate={formatPercent(calculateTargetWinRate({
+                      targetCount: Number(characterStats.limitedSix ?? characterStats.sixStarLimited ?? 0),
+                      sixStarCount: Number(characterStats.six || 0),
+                      sparkCount: characterStats.sparkCount,
+                    }))}
                     breakdownLines={[
                       { colorClass: 'bg-cyan-500/60', label: t('summary.scope.extra', {}, '附加寻访'), total: `${formatCount(extraStats.total || 0)} ${t('summary.metric.pullsUnit', {}, '抽')}`, avg: `${formatAverageValue(getPoolAverageSixValue(extraStats))} ${t('summary.metric.averageShort', {}, '平均')}` },
                       { colorClass: 'bg-emerald-500/60', label: t('summary.scope.limited', {}, '限定角色池'), total: `${formatCount(limitedStats.total || 0)} ${t('summary.metric.pullsUnit', {}, '抽')}`, avg: `${formatAverageValue(getPoolAverageSixValue(limitedStats))} ${t('summary.metric.averageShort', {}, '平均')}` },
@@ -325,7 +330,11 @@ function MobileStatsView() {
                     avgPity={formatAverageValue(getPoolAverageSixValue(weaponStats))}
                     avgPityUp={formatAverageValue(weaponStats.avgPityUp || weaponStats.avgPityTarget)}
                     targetVsOff={<><span className="text-emerald-500">{formatCount(weaponStats.limitedSix ?? weaponStats.sixStarLimited ?? 0)}</span><span className="mx-1 text-zinc-400">/</span><span className="text-rose-500">{formatCount(Math.max(Number(weaponStats.six || 0) - Number(weaponStats.limitedSix ?? weaponStats.sixStarLimited ?? 0), 0))}</span></>}
-                    targetRate={formatPercent(Number(weaponStats.six || 0) > 0 ? (Number(weaponStats.limitedSix ?? weaponStats.sixStarLimited ?? 0) / Number(weaponStats.six || 0)) * 100 : 0)}
+                    targetRate={formatPercent(calculateTargetWinRate({
+                      targetCount: Number(weaponStats.limitedSix ?? weaponStats.sixStarLimited ?? 0),
+                      sixStarCount: Number(weaponStats.six || 0),
+                      sparkCount: weaponStats.sparkCount,
+                    }))}
                   />
                 </div>
 
@@ -348,7 +357,11 @@ function MobileStatsView() {
                   avgPity={formatAverageValue(getPoolAverageSixValue(currentStats?.byType?.[poolTypeFilter]))}
                   avgPityUp={formatAverageValue(currentStats?.byType?.[poolTypeFilter]?.avgPityUp)}
                   targetVsOff={<><span className="text-emerald-500">{formatCount(currentStats?.byType?.[poolTypeFilter]?.limitedSix ?? currentStats?.byType?.[poolTypeFilter]?.sixStarLimited ?? 0)}</span><span className="mx-1 text-zinc-400">/</span><span className="text-rose-500">{formatCount(Math.max(Number(currentStats?.byType?.[poolTypeFilter]?.six || 0) - Number(currentStats?.byType?.[poolTypeFilter]?.limitedSix ?? currentStats?.byType?.[poolTypeFilter]?.sixStarLimited ?? 0), 0))}</span></>}
-                  targetRate={formatPercent(Number(currentStats?.byType?.[poolTypeFilter]?.six || 0) > 0 ? (Number(currentStats?.byType?.[poolTypeFilter]?.limitedSix ?? currentStats?.byType?.[poolTypeFilter]?.sixStarLimited ?? 0) / Number(currentStats?.byType?.[poolTypeFilter]?.six || 0)) * 100 : 0)}
+                  targetRate={formatPercent(calculateTargetWinRate({
+                    targetCount: Number(currentStats?.byType?.[poolTypeFilter]?.limitedSix ?? currentStats?.byType?.[poolTypeFilter]?.sixStarLimited ?? 0),
+                    sixStarCount: Number(currentStats?.byType?.[poolTypeFilter]?.six || 0),
+                    sparkCount: currentStats?.byType?.[poolTypeFilter]?.sparkCount,
+                  }))}
                 />
                 {currentStats?.resources && (
                   <ResourceSummaryPanel

@@ -295,4 +295,54 @@ describe('useSummaryStats', () => {
       bondQuotaDirect: 2,
     });
   });
+
+  it('reports sparkCount for limited hard-pity forced UP and weapon claim-8 forced UP', () => {
+    const user = { id: 'user-spark' };
+    const limitedPool = { id: 'spark-limited', type: 'limited', up_character: '限定目标' };
+    const weaponPool = { id: 'spark-weapon', type: 'weapon', up_character: '目标武器' };
+    const history = [
+      // 限定池：第 120 付费抽首次命中目标 → 吃井
+      ...Array.from({ length: 119 }, (_, index) => ({
+        id: `l-${index + 1}`,
+        user_id: user.id,
+        pool_id: limitedPool.id,
+        rarity: 4,
+        item_name: `四星-${index}`,
+        timestamp: `2026-01-01T00:00:${String(index).padStart(2, '0')}.${String(index).padStart(3, '0')}Z`,
+      })),
+      {
+        id: 'l-120',
+        user_id: user.id,
+        pool_id: limitedPool.id,
+        rarity: 6,
+        item_name: '限定目标',
+        timestamp: '2026-01-01T00:02:00.000Z',
+      },
+      // 武器池：第 75 付费抽（第 8 次申领区间内）首次命中目标 → 吃井
+      ...Array.from({ length: 74 }, (_, index) => ({
+        id: `w-${index + 1}`,
+        user_id: user.id,
+        pool_id: weaponPool.id,
+        rarity: 4,
+        item_name: `武器-${index}`,
+        timestamp: `2026-01-02T00:00:${String(index).padStart(2, '0')}.${String(index).padStart(3, '0')}Z`,
+      })),
+      {
+        id: 'w-75',
+        user_id: user.id,
+        pool_id: weaponPool.id,
+        rarity: 6,
+        item_name: '目标武器',
+        timestamp: '2026-01-02T00:02:00.000Z',
+      },
+    ];
+
+    const { result } = renderHook(() => useSummaryStats(history, [limitedPool, weaponPool], user));
+
+    expect(result.current.byType.limited.sparkCount).toBe(1);
+    expect(result.current.byType.weapon.sparkCount).toBe(1);
+    expect(result.current.byType.character.sparkCount).toBe(1);
+    expect(result.current.byType.limited.pityList.find((pull) => pull.isSpark)?.count).toBe(120);
+    expect(result.current.byType.weapon.pityList.find((pull) => pull.isSpark)?.count).toBe(75);
+  });
 });

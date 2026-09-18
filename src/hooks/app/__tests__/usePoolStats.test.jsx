@@ -411,6 +411,48 @@ describe('usePoolStats', () => {
     expect(result.current.stats.avgPullCost['6_limited']).toBe('2.00');
   });
 
+  it('detects hard-pity forced UP per pool in group mode instead of skipping spark detection', () => {
+    // 池组模式：两个限定池各自第 120 付费抽首次命中目标 → 两池各记一次吃井
+    const poolA = { id: 'pool_limited_a', type: 'limited' };
+    const poolB = { id: 'pool_limited_b', type: 'limited' };
+    const makePoolHistory = (poolId, prefix) => [
+      ...Array.from({ length: 119 }, (_, index) => ({
+        id: `${prefix}-${index + 1}`,
+        rarity: 4,
+        poolId,
+        timestamp: index + 1,
+      })),
+      {
+        id: `${prefix}-120`,
+        rarity: 6,
+        isStandard: false,
+        poolId,
+        timestamp: 120,
+      },
+    ];
+    const normalizedCurrentPoolHistory = [
+      ...makePoolHistory(poolA.id, 'a'),
+      ...makePoolHistory(poolB.id, 'b'),
+    ];
+
+    const { result } = renderHook(() =>
+      usePoolStats({
+        normalizedCurrentPoolHistory,
+        currentPool: {
+          id: '__group_limited',
+          type: 'limited',
+          isGroupMode: true,
+        },
+        selectedPools: [poolA, poolB],
+      })
+    );
+
+    expect(result.current.stats.sparkCount).toBe(2);
+    expect(result.current.stats.winRate).toBe(0);
+    expect(result.current.stats.sixStarCount).toBe(0);
+    expect(result.current.stats.upSixStarCount).toBe(0);
+  });
+
   it('includes off-rate limited characters in limited six-star averages', () => {
     const normalizedCurrentPoolHistory = [
       {

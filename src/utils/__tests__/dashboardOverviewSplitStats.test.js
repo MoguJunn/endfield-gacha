@@ -176,7 +176,7 @@ describe('buildDashboardOverviewSplitStats', () => {
     });
   });
 
-  it('keeps limited guarantee hits in six-star counts but out of win-rate stats', () => {
+  it('keeps guarantee hits in six-star counts but out of win-rate stats for both pool types', () => {
     const stats = buildDashboardOverviewSplitStats({
       selectedPools: [
         { id: 'pool_limited', type: 'limited' },
@@ -198,8 +198,60 @@ describe('buildDashboardOverviewSplitStats', () => {
     expect(stats.character.winRate).toBe('50.0');
     expect(stats.character.winRateTargetCount).toBe(1);
     expect(stats.character.winRateTotalCount).toBe(2);
-    expect(stats.weapon.winRate).toBe('100.0');
-    expect(stats.weapon.winRateTargetCount).toBe(1);
-    expect(stats.weapon.winRateTotalCount).toBe(1);
+    // 统一口径：武器池手工保底标记同样剔除出不歪率（STATS-007A）
+    expect(stats.weapon.winRate).toBe('0.0');
+    expect(stats.weapon.winRateTargetCount).toBe(0);
+    expect(stats.weapon.winRateTotalCount).toBe(0);
+  });
+
+  it('excludes weapon hard-pity forced UP (claim 8, pulls 71~80) from win rate', () => {
+    // 75 付费抽：处于第 8 次申领区间（71~80），首个 UP 落在 75 → 判定为吃井
+    const history = [
+      ...Array.from({ length: 74 }, (_, index) => ({
+        id: index + 1,
+        poolId: 'pool_weapon',
+        rarity: 4,
+      })),
+      { id: 75, poolId: 'pool_weapon', rarity: 6, isStandard: false, item_name: 'UP武器' },
+    ];
+
+    const stats = buildDashboardOverviewSplitStats({
+      selectedPools: [{ id: 'pool_weapon', type: 'weapon', up_character: 'UP武器' }],
+      history,
+    });
+
+    expect(stats.weapon.sparkCount).toBe(1);
+    expect(stats.weapon.counts[6]).toBe(1);
+    expect(stats.weapon.winRateTotalCount).toBe(0);
+    expect(stats.weapon.winRate).toBe('0.0');
+    expect(stats.weapon.avgPullCost[6]).toBe('0');
+    expect(stats.weapon.avgPullCost['6_with_spark']).toBe('75.00');
+  });
+
+  it('does not mark later hits as spark after a natural first UP', () => {
+    // 首个 UP 第 10 付费抽自然命中；第 130 抽的第二个 UP 不再视为吃井
+    const history = [
+      ...Array.from({ length: 9 }, (_, index) => ({
+        id: index + 1,
+        poolId: 'pool_limited',
+        rarity: 4,
+      })),
+      { id: 10, poolId: 'pool_limited', rarity: 6, isStandard: false },
+      ...Array.from({ length: 119 }, (_, index) => ({
+        id: index + 11,
+        poolId: 'pool_limited',
+        rarity: 4,
+      })),
+      { id: 130, poolId: 'pool_limited', rarity: 6, isStandard: false },
+    ];
+
+    const stats = buildDashboardOverviewSplitStats({
+      selectedPools: [{ id: 'pool_limited', type: 'limited' }],
+      history,
+    });
+
+    expect(stats.character.sparkCount).toBe(0);
+    expect(stats.character.winRate).toBe('100.0');
+    expect(stats.character.winRateTargetCount).toBe(2);
   });
 });
