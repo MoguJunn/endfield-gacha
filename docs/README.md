@@ -9,6 +9,7 @@
 - `docs/PROJECT_GUIDE.md`：部署、环境变量、数据库维护、静态资源和 changelog 摘要
 - `docs/CODEMAP.md`：代码入口和主要模块索引
 - `docs/DESKTOP_HOME_DEMO.md`：默认新版桌面主页与经典版切换、1366×768 布局、个人与全服统计拆分、统一消息弹窗及独立版本主题接口
+- `docs/MOBILE_HOME_PLAN.md`：手机首页 P1 改版任务、内容顺序、触摸滚动与正式启用验收标准
 - `docs/RELEASE_4.6.0.md`：v4.6.0 交付范围、贡献署名、版本验证及运行时配置同步
 - `docs/RELEASE_4.6.2.md`：本轮五类合池、十图、旧指标迁移、全页宽度、已有验证与生产启用门禁
 - `docs/STATS_OBSERVATION_CONTRACT.md`：单池／合池首次样本、去重账号覆盖、旧指标与资源口径、理论边界
