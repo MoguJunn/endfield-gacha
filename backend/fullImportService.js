@@ -20,6 +20,7 @@ import {
   resolveAliasValue,
   resolveCharacterAliasMap,
   resolvePoolAliasMap,
+  upsertPoolAliases,
 } from './lib/idAliasService.js';
 import { fetchWithNetworkRetry } from './lib/networkFetch.js';
 import {
@@ -42,6 +43,7 @@ import {
 } from '../shared/officialImportRecordNormalizer.js';
 import { calculateHistoryPity } from '../shared/historyPity.js';
 import { getCanonicalExtraPoolMetadata } from '../shared/extraPoolSubtype.js';
+import { getOfficialRerunProfile, resolveRerunPoolIdentity } from '../shared/officialRerunPools.js';
 import {
   confirmOfficialImportTask,
   getOfficialImportReview,
@@ -578,6 +580,7 @@ const POOL_TYPE_MAP = {
 };
 
 const POOL_TYPE_ENUM_MAP = {
+  E_CharacterGachaPoolType_Rerun: 'extra',
   E_CharacterGachaPoolType_Joint: 'extra',
   E_CharacterGachaPoolType_Special: 'limited',
   E_CharacterGachaPoolType_Standard: 'standard',
@@ -595,10 +598,14 @@ function getFallbackPoolId(type, poolType) {
 }
 
 function getOfficialPoolId(record, type, poolType) {
+  if (getOfficialRerunProfile(record, { type, poolType })) {
+    return normalizeString(record.poolId || record.pool_id, 200);
+  }
   return String(record.poolId || record.pool_id || getFallbackPoolId(type, poolType));
 }
 
 function getPoolTypeFromId(poolId, type, poolType) {
+  if (getOfficialRerunProfile({}, { type, poolType })) return 'extra';
   if (poolId) {
     const prefix = String(poolId).split('_')[0].toLowerCase();
     if (POOL_TYPE_MAP[prefix]) {
@@ -682,8 +689,26 @@ async function hydrateOfficialImportPools(supabase, pools = []) {
   const existingById = new Map(
     (Array.isArray(existingRows) ? existingRows : []).map((pool) => [String(pool.pool_id), pool])
   );
+  const hasRerunPools = inputPools.some((pool) => pool.extra_rule_profile?.startsWith('reconstruction_'));
+  const rerunCatalog = [];
+  if (hasRerunPools) {
+    const { data, error: catalogError } = await supabase.from('pools')
+      .select('pool_id,name,type,extra_subtype,extra_rule_profile,extra_series_key,extra_series_phase,start_time,end_time,up_character,featured_characters')
+      .eq('type', 'extra');
+    if (catalogError) throw catalogError;
+    rerunCatalog.push(...(data || []));
+  }
   const hydratedById = new Map();
-  canonicalPools.forEach((pool) => {
+  canonicalPools.forEach((pool, index) => {
+    if (pool.extra_rule_profile?.startsWith('reconstruction_')) {
+      const resolved = resolveRerunPoolIdentity(pool, rerunCatalog);
+      rerunCatalog.push(...(rerunCatalog.some((item) => item.pool_id === resolved.pool_id) ? [] : [resolved]));
+      hydratedById.set(String(inputPools[index].pool_id), {
+        ...resolved,
+        official_pool_id: inputPools[index].pool_id,
+      });
+      return;
+    }
     const existingPool = existingById.get(String(pool.pool_id)) || null;
     const type = existingPool?.type || pool.type;
     hydratedById.set(String(pool.pool_id), {
@@ -1270,7 +1295,7 @@ async function getExistingSeqIds(userId, gameUid, serverId = '') {
   while (true) {
     let query = supabase
       .from('history')
-      .select('seq_id, pool_id, server_id')
+      .select('seq_id, pool_id, server_id, pool_version')
       .eq('user_id', userId)
       .eq('game_uid', gameUid);
 
@@ -1294,12 +1319,15 @@ async function getExistingSeqIds(userId, gameUid, serverId = '') {
   console.log(`[FullImportService] 已有记录: ${allData.length} 条`);
 
   // 使用 game_uid:server_id:pool_id:seq_id 组合作为唯一标识，避免不同区服互相跳过。
-  return new Set(allData.map(r => buildOfficialImportRecordKey({
+  const entries = allData.map(r => [buildOfficialImportRecordKey({
     gameUid,
     serverId: r.server_id || normalizedServerId,
     poolId: r.pool_id,
     seqId: r.seq_id,
-  })).filter(Boolean));
+  }), r.pool_version ?? null]).filter(([key]) => key);
+  const existing = new Set(entries.map(([key]) => key));
+  existing.poolVersions = new Map(entries);
+  return existing;
 }
 
 /**
@@ -1616,7 +1644,8 @@ async function refreshPublicAnalyticsAfterImport(supabase, {
  *   isFree -> is_free
  *   isNew -> is_new
  */
-async function processRecords(rawRecords, account, _userId, existingSeqIds, source = 'cn', accountServerContext = null) {
+async function processRecords(rawRecords, account, _userId, existingSeqIds, source = 'cn', accountServerContext = null, importPools = []) {
+  const importPoolById = new Map(importPools.map((pool) => [String(pool.official_pool_id || pool.pool_id), pool]));
   const { gameUid, nickName } = account;
   const fallbackContext = accountServerContext || {
     serverId: inferImportServerIdFromSignals(account, source),
@@ -1684,12 +1713,15 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
       const seqRaw = record.seqId || record.seq_id;
       const seqId = seqRaw !== undefined && seqRaw !== null ? String(seqRaw) : null;
       const rawPoolId = normalized.poolId;
-      const poolId = resolveAliasValue(poolAliasMap, rawPoolId);
+      const importPool = importPoolById.get(String(rawPoolId));
+      const poolId = importPool?.pool_id || resolveAliasValue(poolAliasMap, rawPoolId);
       const poolHash = simpleStringHash(poolId || 'unknown');
       const recordId = /^\d+$/.test(seqId || '')
         ? (BigInt(poolHash) * 10000000n + BigInt(seqId)).toString()
         : `${poolHash}:${seqId || index}`;
-      const normalizedPoolType = getPoolTypeFromId(poolId, type, poolType);
+      const rerunProfile = getOfficialRerunProfile(record, { type, poolType });
+      const normalizedPoolType = rerunProfile === 'reconstruction_weapon_v1' ? 'weapon'
+        : rerunProfile === 'reconstruction_character_v1' ? 'limited' : getPoolTypeFromId(poolId, type, poolType);
       const uniqueKey = buildOfficialImportRecordKey({
         gameUid,
         serverId: resolvedServerId,
@@ -1703,7 +1735,8 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
       );
 
       // 去重
-      if (uniqueKey && existingSeqIds.has(uniqueKey)) {
+      if (uniqueKey && existingSeqIds.has(uniqueKey)
+        && (!normalized.poolVersion || existingSeqIds.poolVersions?.get(uniqueKey) === normalized.poolVersion)) {
         continue;
       }
 
@@ -1718,7 +1751,7 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
       };
 
       // 归一化 isStandard
-      const isStandard = normalizeIsStandard(normalizedRecord, normalizedPoolType, currentUpCharacter);
+      const isStandard = normalizeIsStandard(normalizedRecord, normalizedPoolType, importPool?.up_character || currentUpCharacter);
       
       // 获取时间戳（API 原始字段是 gachaTs，是毫秒级字符串）
       const timestamp = normalized.timestamp;
@@ -1738,6 +1771,7 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
         record_id: recordId,
         pool_id: poolId,
         seq_id: seqId,
+        pool_version: normalized.poolVersion ?? null,
         game_uid: gameUid,
         nick_name: nickName,
         
@@ -1793,6 +1827,7 @@ function sanitizeStagedHistoryRecord(record = {}) {
     'record_id',
     'pool_id',
     'seq_id',
+    'pool_version',
     'game_uid',
     'nick_name',
     'rarity',
@@ -1928,8 +1963,25 @@ async function commitStagedOfficialImport({ task, rows }) {
     : historyRecords.length;
   let poolReconciliation = { ok: true };
   try {
+    const rerunAliases = normalizedEntries.flatMap((entry) => {
+      const profile = entry.pool?.extra_rule_profile;
+      const rawPoolId = entry.normalized?.poolId;
+      const canonicalPoolId = entry.history?.pool_id;
+      return profile?.startsWith('reconstruction_') && rawPoolId && canonicalPoolId && rawPoolId !== canonicalPoolId
+        ? [{ source: 'official_api', alias_id: rawPoolId, pool_id: canonicalPoolId, is_primary: false,
+            note: '同名重构卡池跨期官方 ID 映射，期次保存在 history.pool_version' }]
+        : [];
+    });
+    if (rerunAliases.length > 0) {
+      await upsertPoolAliases(supabase, Array.from(new Map(rerunAliases.map((row) => [row.alias_id, row])).values()));
+    }
     if (pools.length > 0) {
-      await reconcileOfficialPoolIds(supabase, pools, {
+      const reconciliationPools = pools.map((pool) => {
+        if (!pool.extra_rule_profile?.startsWith('reconstruction_') || !pool.pool_id.includes('_manual_')) return pool;
+        const entry = normalizedEntries.find((row) => row.history?.pool_id === pool.pool_id);
+        return { ...pool, pool_id: entry?.normalized?.poolId || pool.pool_id };
+      });
+      await reconcileOfficialPoolIds(supabase, reconciliationPools, {
         userId: task.user_id,
         allowUnknownOfficialIds: true,
       });
@@ -2216,6 +2268,7 @@ export async function executeFullImport({
           pool_id: poolId,
           name: record.poolName || record.pool_name || getDefaultPoolName(poolId, normalizedPoolType),
           type: normalizedPoolType,
+          extra_rule_profile: getOfficialRerunProfile(record, { type, poolType }),
           start_time: null,
           end_time: null,
           up_character: currentUpCharacter || null
@@ -2236,7 +2289,8 @@ export async function executeFullImport({
       userId,
       existingSeqIds,
       source,
-      accountServerContext
+      accountServerContext,
+      pools
     );
     const processedRecords = processedResult.records;
 

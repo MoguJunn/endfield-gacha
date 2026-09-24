@@ -3,6 +3,7 @@ import { Star, Trash2, ChevronDown, User } from 'lucide-react';
 import { characterCache } from '../utils/characterUtils';
 import { useI18n } from '../i18n/index.js';
 import { localizeHistoryItemName } from '../utils/gameDataI18n.js';
+import { getRecordPoolVersion } from '../../shared/poolVersion.js';
 
 const POOL_TYPE_LABEL_CLASSES = {
   limited: 'text-orange-600 dark:text-orange-300',
@@ -152,7 +153,7 @@ const BatchCard = React.memo(({ group, onEdit, onDeleteGroup, poolType, canEdit,
                 // 确定边框颜色
                 let borderColor = 'border-purple-300 dark:border-purple-700';
                 let avatarBg = 'bg-purple-100 dark:bg-purple-900/50';
-                
+
                 if (item.rarity === 6) {
                   if (isLimitedUp) {
                     borderColor = 'rainbow-border border-transparent'; // 使用 rainbow-border
@@ -171,7 +172,7 @@ const BatchCard = React.memo(({ group, onEdit, onDeleteGroup, poolType, canEdit,
                     key={item.id}
                     onClick={canEdit ? (e) => { e.stopPropagation(); onEdit(item); } : undefined}
                     className={`
-                      relative w-10 h-10 border-2 transition-all group
+                      relative w-10 h-10 border-2 transition-all group ${getRecordPoolVersion(item) ? 'mb-4' : ''}
                       ${canEdit ? 'cursor-pointer hover:scale-105' : 'cursor-default'}
                       ${borderColor}
                       ${isFree && !isGift ? 'ring-2 ring-blue-300 dark:ring-blue-700 ring-offset-1 dark:ring-offset-black' : ''}
@@ -225,7 +226,7 @@ const BatchCard = React.memo(({ group, onEdit, onDeleteGroup, poolType, canEdit,
                         {isGift ? '赠' : isLimitedUp ? 'UP' : '歪'}
                       </div>
                     )}
-                    
+
                     {/* 免费标记 */}
                     {isInfoBook && !isGift && !isFree && (
                        <div className="absolute -bottom-1 -left-1 px-1 h-2.5 flex items-center justify-center rounded-sm text-[6px] font-bold bg-amber-500 text-white z-10">
@@ -236,6 +237,11 @@ const BatchCard = React.memo(({ group, onEdit, onDeleteGroup, poolType, canEdit,
                        <div className="absolute -bottom-1 -left-1 px-1 h-2.5 flex items-center justify-center rounded-sm text-[6px] font-bold bg-blue-500 text-white z-10">
                          免
                        </div>
+                    )}
+                    {getRecordPoolVersion(item) && (
+                      <span className="absolute top-full left-0 w-full text-center text-[10px] text-slate-500 dark:text-zinc-400">
+                        #{getRecordPoolVersion(item)}
+                      </span>
                     )}
                   </div>
                 );
@@ -325,6 +331,9 @@ const BatchCard = React.memo(({ group, onEdit, onDeleteGroup, poolType, canEdit,
                   <div className={`text-[10px] font-bold ${textColor} text-center truncate w-full`}>
                     {localizedName}
                   </div>
+                  {getRecordPoolVersion(item) && (
+                    <div className="text-[10px] text-slate-500 dark:text-zinc-400">#{getRecordPoolVersion(item)}</div>
+                  )}
 
                   {/* 稀有度星星 */}
                   <div className="flex items-center gap-0.5 mt-1">

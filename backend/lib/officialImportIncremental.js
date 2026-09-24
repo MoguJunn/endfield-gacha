@@ -57,7 +57,10 @@ export function analyzeIncrementalPage({
     }
 
     checked++;
-    if (keySet.has(key)) {
+    const incomingVersion = Number(record.poolVersion ?? record.pool_version);
+    const needsVersionUpdate = incomingVersion > 0 && keySet.poolVersions instanceof Map
+      && keySet.poolVersions.get(key) !== incomingVersion;
+    if (keySet.has(key) && !needsVersionUpdate) {
       existing++;
     }
   }

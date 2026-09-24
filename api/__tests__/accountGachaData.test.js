@@ -811,6 +811,7 @@ describe('/api/account-gacha-data', () => {
 
   it('returns an owner-scoped bounded history page without changing the legacy GET contract', async () => {
     const adminClient = createAdminClient();
+    adminClient.__state.historyRows[0].pool_version = 2;
     adminClient.__state.historyRows.push({
       ...adminClient.__state.historyRows[0],
       id: 1,
@@ -857,6 +858,8 @@ describe('/api/account-gacha-data', () => {
       expect.objectContaining({
         id: 'record-1',
         poolId: 'special_official_001',
+        poolVersion: 2,
+        pool_version: 2,
         character_id: 'char_official_001',
       }),
     ]);
@@ -865,6 +868,7 @@ describe('/api/account-gacha-data', () => {
     const historyRead = adminClient.__state.selectCalls.find((call) => (
       call.table === 'history' && call.selectOptions?.count === 'exact'
     ));
+    expect(historyRead.selection.split(',')).toContain('pool_version');
     expect(historyRead).toMatchObject({
       from: 0,
       to: 1,

@@ -1,3 +1,5 @@
+import { normalizePoolVersion } from './poolVersion.js';
+
 const ISSUE_SEVERITIES = new Set(['blocking', 'review', 'info']);
 const ACTIONABLE_IDENTITY_ISSUE_CODES = new Set(['MISSING_ITEM_ID_AND_NAME', 'MISSING_ITEM_ID', 'MISSING_ITEM_NAME']);
 const NON_PULL_RECORD_KINDS = new Set(['gift_intel_book']);
@@ -91,6 +93,8 @@ export function normalizeOfficialImportRecord(record = {}, context = {}) {
   );
   const itemName = normalizeText(
     firstDefined(
+      record.nameText,
+      record.name_text,
       record.charName,
       record.weaponName,
       record.itemName,
@@ -101,6 +105,8 @@ export function normalizeOfficialImportRecord(record = {}, context = {}) {
   );
   const poolId = normalizeText(firstDefined(record.poolId, record.pool_id, context.poolId, context.pool_id));
   const poolName = normalizeText(firstDefined(record.poolName, record.pool_name, context.poolName, context.pool_name));
+  const rawPoolVersion = firstDefined(record.poolVersion, record.pool_version);
+  const poolVersion = normalizePoolVersion(rawPoolVersion);
   const itemType = normalizeItemType(
     firstDefined(record.itemType, record.item_type),
     record.weaponId || context.poolType === 'weapon' || context.type === 'weapon'
@@ -119,6 +125,12 @@ export function normalizeOfficialImportRecord(record = {}, context = {}) {
   const serverId = normalizeText(firstDefined(record.serverId, record.server_id, context.serverId, context.server_id));
   const region = normalizeText(firstDefined(record.region, context.region));
   const issues = [];
+
+  if (rawPoolVersion !== undefined && poolVersion === null) {
+    issues.push(createIssue('INVALID_POOL_VERSION', 'blocking', '这条记录的卡池期次必须为正整数。', {
+      fields: ['poolVersion'], value: rawPoolVersion,
+    }));
+  }
 
   if (!rawItemId && !itemName) {
     issues.push(
@@ -201,6 +213,7 @@ export function normalizeOfficialImportRecord(record = {}, context = {}) {
     quality,
     poolId: poolId || null,
     poolName: poolName || null,
+    poolVersion,
     seqId: seqId || null,
     timestamp,
     isFree: record.isFree === true || record.is_free === true,
@@ -219,6 +232,7 @@ export function normalizeOfficialImportRecord(record = {}, context = {}) {
       quality,
       poolId: poolId || null,
       poolName: poolName || null,
+      poolVersion: rawPoolVersion ?? null,
       seqId: seqId || null,
       timestamp: sourceTimestamp ?? null,
       isInfoBook: record.isInfoBook === true || record.is_info_book === true,

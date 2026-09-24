@@ -1,5 +1,22 @@
 import { clampHistoryPity } from './historyRecordUtils';
 import { calculateHistoryPity } from '../../shared/historyPity.js';
+import { getRecordPoolVersion } from '../../shared/poolVersion.js';
+import { filterOfficialImportPullRecords } from '../../shared/officialImportRecordNormalizer.js';
+import {
+  OFFICIAL_CHARACTER_POOL_TYPES,
+  annotateOfficialGachaRecord,
+} from '../../shared/officialGachaRecordTypes.js';
+
+/**
+ * 取第一个非空文本
+ * 官方记录可能只返回 nameText/itemId（如重构申领与赠礼事件），不能只认 charName/weaponName。
+ * @param {...(string|undefined|null)} values
+ * @returns {string}
+ */
+function firstNonEmptyText(...values) {
+  const matched = values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
+  return matched === undefined ? '' : String(matched).trim();
+}
 
 /**
  * 终末地抽卡记录导入适配器
@@ -24,12 +41,7 @@ export const ENDFIELD_API = {
   },
 
   // 角色卡池类型
-  CHARACTER_POOL_TYPES: {
-    SPECIAL: 'E_CharacterGachaPoolType_Special',   // 限定池（特许寻访）
-    JOINT: 'E_CharacterGachaPoolType_Joint',       // 附加寻访（辉光庆典）
-    STANDARD: 'E_CharacterGachaPoolType_Standard', // 常驻池（基础寻访）
-    BEGINNER: 'E_CharacterGachaPoolType_Beginner'  // 新手池（启程寻访）
-  },
+  CHARACTER_POOL_TYPES: OFFICIAL_CHARACTER_POOL_TYPES,
 
   // 默认参数
   DEFAULT_PARAMS: {
@@ -172,12 +184,28 @@ export function convertRecord(apiRecord, recordType = 'character') {
     seqId
   } = apiRecord;
 
-  // 确定名称和ID（角色或武器）
-  const itemName = charName || weaponName || '未知';
-  const itemId = charId || weaponId || '';
+  // 确定名称和ID（角色或武器）；官方部分记录只给 nameText/itemId，此时不能退回“未知”。
+  const itemName = firstNonEmptyText(
+    charName,
+    weaponName,
+    apiRecord.nameText,
+    apiRecord.name_text,
+    apiRecord.itemName,
+    apiRecord.item_name,
+    apiRecord.eventName,
+    apiRecord.event_name,
+    apiRecord.name
+  ) || '未知';
+  const itemId = firstNonEmptyText(charId, weaponId, apiRecord.itemId, apiRecord.item_id, apiRecord.character_id);
 
-  // 确定卡池类型
-  const localPoolType = mapPoolType(poolId);
+  // 官方来源优先于历史 poolId 前缀；重构寻访与重构申领不猜测 ID 命名。
+  const annotatedRecord = annotateOfficialGachaRecord(apiRecord, {
+    type: recordType === 'weapon' ? 'weapon' : 'char',
+    poolType: apiRecord.sourcePoolType ?? apiRecord.poolType,
+  });
+  const localPoolType = annotatedRecord._poolType !== 'unknown'
+    ? annotatedRecord._poolType
+    : apiRecord._poolType || mapPoolType(poolId);
 
   // 判断是否限定
   const isLimited = localPoolType === 'extra' ||
@@ -200,6 +228,9 @@ export function convertRecord(apiRecord, recordType = 'character') {
     pool: localPoolType,
     pool_id: poolId,
     pool_name: poolName,
+    sourcePoolType: annotatedRecord.sourcePoolType,
+    // 官方 poolVersion 是独立期次整数，可能以 pool_version 返回，统一走 shared 规范化（非法值归零为 null）。
+    poolVersion: getRecordPoolVersion(apiRecord),
 
     // 状态标记
     isNew: isNew || false,
@@ -225,7 +256,8 @@ export function convertRecords(apiRecords, recordType = 'character') {
     return [];
   }
 
-  return apiRecords.map(record => convertRecord(record, recordType));
+  // 赠礼、情报书补发等非抽卡事件沿用 shared 规范化器的既有判定，不再重复维护匹配规则。
+  return filterOfficialImportPullRecords(apiRecords).map(record => convertRecord(record, recordType));
 }
 
 /**
@@ -376,6 +408,8 @@ export function toDbFormat(records, userId) {
     is_limited: record.isLimited,
     seq_id: record.seqId,
     record_type: record.recordType,
+    // history.pool_version 为独立期次列（迁移 194），非法或缺失一律写 NULL。
+    pool_version: getRecordPoolVersion(record),
     created_at: new Date().toISOString()
   }));
 }
