@@ -129,6 +129,7 @@ function buildPreviewRecords(records, userInfo, t) {
       pool: poolType,
       pool_id: normalized.poolId,
       pool_name: normalized.poolName,
+      poolVersion: normalized.poolVersion,
       isNew: normalized.isNew,
       isFree: normalized.isFree,
       isInfoBook: normalized.isInfoBook,

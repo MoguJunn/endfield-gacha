@@ -12,6 +12,7 @@ import {
   summarizeOfficialImportIssues,
 } from '../../../shared/officialImportRecordNormalizer.js';
 import { getCanonicalExtraPoolMetadata } from '../../../shared/extraPoolSubtype.js';
+import { getOfficialRerunProfile, resolveRerunPoolIdentity } from '../../../shared/officialRerunPools.js';
 
 function resolveAliasValue(aliasMap, inputValue) {
   const normalized = typeof inputValue === 'string' ? inputValue.trim() : String(inputValue || '').trim();
@@ -142,6 +143,17 @@ function buildCanonicalPoolEntries(records, poolAliasMap = {}, pools = []) {
 
     const existingPool = catalogById.get(canonicalPoolId) || catalogById.get(rawPoolId) || null;
     const type = existingPool?.type || inferPoolTypeFromId(canonicalPoolId);
+    const profile = getOfficialRerunProfile(record);
+    if (profile) {
+      const resolved = resolveRerunPoolIdentity({
+        pool_id: canonicalPoolId,
+        name: normalized.poolName,
+        extra_rule_profile: profile,
+      }, [...pools, ...entryMap.values()]);
+      poolAliasMap[rawPoolId] = resolved.pool_id;
+      entryMap.set(resolved.pool_id, { ...resolved, id: resolved.pool_id });
+      return;
+    }
 
     entryMap.set(canonicalPoolId, {
       id: canonicalPoolId,
@@ -196,11 +208,15 @@ function buildImportedHistoryRecords({
       || poolTypeMap.get(canonicalPoolId)
       || inferPoolTypeFromId(canonicalPoolId || rawPoolId);
     const upCharacter = poolUpCharacterMap.get(rawPoolId) || poolUpCharacterMap.get(canonicalPoolId);
-    const isStandard = normalizeIsStandard(record, poolType, upCharacter);
+    const profile = getOfficialRerunProfile(record);
+    const mechanicsType = profile === 'reconstruction_weapon_v1' ? 'weapon'
+      : profile === 'reconstruction_character_v1' ? 'limited' : poolType;
+    const isStandard = normalizeIsStandard(record, mechanicsType, upCharacter);
 
     return {
       id: recordId,
       poolId: canonicalPoolId,
+      poolVersion: normalized.poolVersion,
       name: normalized.itemName,
       character_name: normalized.itemName,
       item_name: normalized.itemName,
@@ -245,7 +261,7 @@ export async function prepareOfficialImportPersistenceData({
   poolAliases = null,
   characterAliases = null,
 }) {
-  const resolvedPoolAliasMap = poolAliasMap || poolAliases || {};
+  const resolvedPoolAliasMap = { ...(poolAliasMap || poolAliases || {}) };
   const resolvedCharacterAliasMap = characterAliasMap || characterAliases || {};
   const currentGameUid = userInfo?.gameUid || userInfo?.hgUid || null;
   const currentServerId = normalizeGameAccountServerId(userInfo) || null;
@@ -266,7 +282,8 @@ export async function prepareOfficialImportPersistenceData({
     };
   }
 
-  const { poolUpCharacterMap, poolTypeMap } = buildPoolLookups(pools);
+  const poolEntries = buildCanonicalPoolEntries(records, resolvedPoolAliasMap, pools);
+  const { poolUpCharacterMap, poolTypeMap } = buildPoolLookups([...(pools || []), ...poolEntries]);
   const normalizedRecords = records.map((record) => normalizeOfficialImportRecord(record, {
     gameUid: currentGameUid,
     serverId: currentServerId,
@@ -278,7 +295,7 @@ export async function prepareOfficialImportPersistenceData({
   return {
     currentGameUid,
     currentAccountKey,
-    poolEntries: buildCanonicalPoolEntries(records, resolvedPoolAliasMap, pools),
+    poolEntries,
     historyRecords: buildImportedHistoryRecords({
       records,
       userInfo,

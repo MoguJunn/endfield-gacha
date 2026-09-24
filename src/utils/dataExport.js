@@ -17,6 +17,7 @@ import {
 } from './canonicalEntityUtils.js';
 import { getDataFormatById } from './dataFormatRegistry.js';
 import { getCanonicalExtraPoolSubtype } from '../../shared/extraPoolSubtype.js';
+import { getRecordPoolVersion } from '../../shared/poolVersion.js';
 
 export const EXPORT_SCHEMA_VERSION = '3.0.0';
 export const EXPORT_FORMAT_ID = 'internal_json_v3';
@@ -206,6 +207,7 @@ function serializeInternalJsonHistoryRecord(record) {
     specialType: normalizeSpecialType(record),
     timestamp: record?.timestamp,
     poolId: getHistoryPoolId(record),
+    poolVersion: getRecordPoolVersion(record),
     name: itemName,
     character_id: getHistoryRecordItemId(record),
     batchId: record?.batchId || record?.batch_id,
@@ -717,7 +719,8 @@ export function buildExportCsvContent(payload) {
       normalizeIsNew(record) ? '是' : '否',
       payload.pityMap.get(pityKey) ?? '',
       isoTime || '',
-      formatLocalTime(isoTime)
+      formatLocalTime(isoTime),
+      getRecordPoolVersion(record) ?? ''
     ].map(escapeCsvValue).join(',');
   });
 
@@ -740,7 +743,8 @@ export function buildExportCsvContent(payload) {
     'is_new',
     'pity_at_pull',
     'timestamp_iso',
-    'timestamp_local'
+    'timestamp_local',
+    'pool_version'
   ];
 
   return `\uFEFF${[headers.join(','), ...rows].join('\r\n')}`;

@@ -128,6 +128,7 @@ function normalizeStagedRecord(record = {}, ordinal, poolById) {
         isFree: normalized.isFree === true,
         isInfoBook: normalized.isInfoBook === true,
         isNew: normalized.isNew === true,
+        poolVersion: normalized.poolVersion ?? null,
         gameUid: normalized.gameUid || historyRecord.game_uid || null,
         serverId: normalized.serverId || historyRecord.server_id || null,
         region: normalized.region || historyRecord.region || null,

@@ -406,6 +406,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
       rarity: 6,
       character_name: `六星-${index}`,
       character_id: `char-${index}`,
+      poolVersion: index < 4 ? 1 : 2,
       timestamp: `2026-01-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`
     }));
 
@@ -418,6 +419,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
 
     expect(recent).toHaveLength(6);
     expect(recent[0].id).toBe('six-7');
+    expect(recent[0].poolVersion).toBe(2);
     expect(Object.keys(recent[0]).sort()).toEqual([
       'character_id',
       'id',
@@ -425,6 +427,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
       'name',
       'pity',
       'poolId',
+      'poolVersion',
       'rarity',
       'timestamp'
     ]);

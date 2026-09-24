@@ -1,5 +1,6 @@
 import { resolveAliasValue } from '../../shared/idAliasService.js';
 import { clampHistoryPity } from './historyRecordUtils.js';
+import { getRecordPoolVersion } from '../../shared/poolVersion.js';
 
 /**
  * Convert private history database rows into the shared browser/worker model.
@@ -17,6 +18,8 @@ export function formatAccountGachaHistoryRows(
     specialType: row.special_type,
     timestamp: row.timestamp,
     poolId: resolveAliasValue(poolAliasMap, row.pool_id),
+    poolVersion: getRecordPoolVersion(row),
+    pool_version: getRecordPoolVersion(row),
     user_id: row.user_id,
     name: row.character_name || row.item_name,
     character_name: row.character_name,

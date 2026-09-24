@@ -30,6 +30,7 @@ import { buildOverviewTimelineSections, buildSinglePoolTimelineSection } from '.
 import { buildOverviewPoolAnalysisPityMap, getPoolAnalysisPityState } from './poolAnalysisPity.js';
 import { getOverviewPoolBucket } from './dashboardOverviewPoolFilters.js';
 import { buildInheritedSimulatorSnapshot } from '../features/simulator/simulatorInheritance.js';
+import { getRecordPoolVersion } from '../../shared/poolVersion.js';
 
 const LEGACY_ACCOUNT_KEY = 'legacy';
 const GROUP_TYPES = ['all', 'extra', 'limited', 'standard', 'weapon_limited', 'weapon_standard', 'beginner'];
@@ -819,6 +820,7 @@ function buildRecentSixStars(history, poolManifest, resolveCharacter) {
       return {
         id: record?.id ?? record?.record_id ?? null,
         poolId,
+        poolVersion: getRecordPoolVersion(record),
         timestamp: cloneJsonData(record?.timestamp ?? record?.gacha_time ?? record?.created_at ?? null),
         rarity: Number(record.rarity),
         isStandard:

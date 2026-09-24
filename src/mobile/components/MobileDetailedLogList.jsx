@@ -6,6 +6,7 @@ import { useScopedHistoryPages } from '../../hooks/app/useScopedHistoryPages.js'
 import { compareHistoryTimelineDesc } from '../../utils/historyTimelineSort.js';
 import { localizeHistoryItemName } from '../../utils/gameDataI18n.js';
 import { resolveMobileDetailedLogAvatarUrl } from '../../utils/mobileDetailedLogAvatar.js';
+import { getRecordPoolVersion } from '../../../shared/poolVersion.js';
 
 function buildMobileDetailedLogEntries(history, { locale, t, formatDateTime }) {
   return [...(Array.isArray(history) ? history : [])]
@@ -16,6 +17,7 @@ function buildMobileDetailedLogEntries(history, { locale, t, formatDateTime }) {
       name: localizeHistoryItemName(item, { locale, fallback: t('common.unknown') }),
       avatarUrl: resolveMobileDetailedLogAvatarUrl(item),
       rarity: Number(item.rarity || 0),
+      poolVersion: getRecordPoolVersion(item),
       dateLabel: formatDateTime(
         item.timestamp || item.created_at,
         { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', includeYear: false },
@@ -65,6 +67,7 @@ function DetailedLogRow({ index, style, ariaAttributes, entries, onEdit, t }) {
           <div className="truncate text-sm font-bold text-slate-900 dark:text-white">{entry.name}</div>
           <div className="mt-0.5 flex flex-wrap items-center gap-2 font-mono text-[10px] text-slate-500 dark:text-zinc-500">
             <span>{entry.dateLabel}</span>
+            {entry.poolVersion ? <span>#{entry.poolVersion}</span> : null}
             {entry.pity !== null ? <span>{t('dashboard.analysis.currentPity', { count: entry.pity })}</span> : null}
             {entry.isFree ? <span className="text-blue-600 dark:text-blue-400">{t('dashboard.timeline.badge.free')}</span> : null}
             {!entry.isFree && entry.rarity >= 6 ? (
