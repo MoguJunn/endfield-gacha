@@ -5,7 +5,7 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-09-24T07:29:51.561Z
+--   4. 生成时间: 2026-09-24T09:05:22.041Z
 --   5. 覆盖范围: archive/001_init_tables.sql -> active/2026092401_group_statistics_snapshots.sql
 -- ============================================
 
@@ -36596,6 +36596,41 @@ END;
 $migration$;
 NOTIFY pgrst, 'reload schema';
 -- <<< END MIGRATION: active/197_fix_statistics_catalog_safe_update.sql
+
+-- >>> BEGIN MIGRATION: active/198_promote_official_rerun_character_pool.sql
+-- Promote the observed official character rerun ID while preserving the
+-- temporary catalog's history, roster, aliases and version bindings.
+DO $migration$
+DECLARE
+  v_previous_role TEXT := current_setting('request.jwt.claim.role', TRUE);
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM public.pools
+    WHERE pool_id = 'joint_manual_extra_reconstruction_yvonne_p1'
+      AND type = 'extra'
+      AND extra_rule_profile = 'reconstruction_character_v1'
+  ) AND EXISTS (
+    SELECT 1 FROM public.pool_id_aliases
+    WHERE source = 'official_api' AND alias_id = 'rerun_chr_yvonne'
+      AND pool_id = 'joint_manual_extra_reconstruction_yvonne_p1'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM public.pools WHERE pool_id = 'rerun_chr_yvonne'
+  ) THEN
+    PERFORM set_config('request.jwt.claim.role', 'service_role', TRUE);
+    PERFORM public.promote_manual_pool_to_official_id(
+      'joint_manual_extra_reconstruction_yvonne_p1',
+      jsonb_build_object(
+        'pool_id', 'rerun_chr_yvonne',
+        'name', '绚丽异彩'
+      )
+    );
+    PERFORM set_config('request.jwt.claim.role', COALESCE(v_previous_role, ''), TRUE);
+  END IF;
+END;
+$migration$;
+
+NOTIFY pgrst, 'reload schema';
+-- <<< END MIGRATION: active/198_promote_official_rerun_character_pool.sql
 
 -- >>> BEGIN MIGRATION: active/2026092201_schedule_statistics_snapshots.sql
 -- Persistent, adaptive statistics. Public payloads contain aggregates only;
