@@ -4,7 +4,6 @@ import {
   resolveSupabaseUrl,
 } from './supabaseEnv.js';
 import { getCanonicalExtraPoolSubtype } from '../../shared/extraPoolSubtype.js';
-import { readScheduledStatistic } from './scheduledStatistics.js';
 
 function getSupabaseClient() {
   const supabaseUrl = resolveSupabaseUrl();
@@ -507,8 +506,12 @@ export async function fetchGlobalSummary(supabase = getSupabaseClient()) {
     throw new Error('Supabase client not configured');
   }
 
-  const { payload, meta } = await readScheduledStatistic(supabase, 'global_summary');
-  return payload ? { ...payload, meta: { ...payload.meta, ...meta } } : null;
+  const { data, error } = await supabase.rpc('get_global_stats_cached');
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
 }
 
 export async function fetchCharacterRanking(supabase = getSupabaseClient()) {
@@ -516,8 +519,12 @@ export async function fetchCharacterRanking(supabase = getSupabaseClient()) {
     throw new Error('Supabase client not configured');
   }
 
-  const { payload, meta } = await readScheduledStatistic(supabase, 'character_ranking');
-  return payload ? { ...payload, meta: { ...payload.meta, ...meta } } : null;
+  const { data, error } = await supabase.rpc('get_character_ranking_stats_cached');
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
 }
 
 export default {

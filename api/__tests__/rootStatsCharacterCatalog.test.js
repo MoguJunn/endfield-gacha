@@ -32,7 +32,6 @@ vi.mock('../_lib/serverLogger.js', () => ({
 }));
 
 import statsHandler from '../_routes/root/stats.js';
-import { STATISTICS_SNAPSHOT_VERSION } from '../../shared/statisticsRefreshPolicy.js';
 
 function createJsonResponseRecorder() {
   return {
@@ -94,11 +93,6 @@ describe('/api/stats character_catalog privacy', () => {
     mocks.from.mockReset();
     mocks.rpc.mockResolvedValue({
       data: {
-        schema_version: STATISTICS_SNAPSHOT_VERSION,
-        computed_at: '2026-09-22T00:00:00Z',
-        next_refresh_at: '2099-01-01T00:00:00Z',
-        refresh_minutes: 30,
-        payload: {
         totalContributors: 1,
         summary: {
           totalCharacters: 1,
@@ -124,7 +118,6 @@ describe('/api/stats character_catalog privacy', () => {
             record_id: 'private-record',
           },
         ],
-        },
       },
       error: null,
     });
@@ -150,16 +143,41 @@ describe('/api/stats character_catalog privacy', () => {
         },
       },
       meta: {
-        source: 'scheduled-snapshot',
+        source: 'origin',
+        partial: false,
         stale: false,
-        refreshMinutes: 30,
+        cacheKey: 'stats:character_catalog:v0',
+        cacheVersion: '0',
       },
     });
-    expect(mocks.rpc).toHaveBeenCalledWith('read_statistics_snapshot', { p_scope: 'character_catalog' });
+    expect(mocks.rpc).toHaveBeenCalledWith('get_character_catalog_stats_cached');
     expectNoPrivateIdentifiers(res.body);
   });
 
-  it('returns an error without calculating a new catalog when snapshot storage fails', async () => {
+  it('falls back to a lightweight character catalog when the aggregate RPC fails', async () => {
+    const order = vi.fn(async () => ({
+      data: [
+        {
+          id: 'chr_0031_mifu',
+          name: '弭弗',
+          avatar_url: '/avatars/characters/chr_0031_mifu.png',
+          rarity: 6,
+          type: 'character',
+          is_limited: true,
+          release_date: '2026-06-05',
+        },
+        {
+          id: 'wpn_funnel_0015',
+          name: '焰羽火燎',
+          avatar_url: '/avatars/weapons/wpn_funnel_0015.png',
+          rarity: 6,
+          type: 'weapon',
+        },
+      ],
+      error: null,
+    }));
+    const select = vi.fn(() => ({ order }));
+    mocks.from.mockReturnValue({ select });
     mocks.rpc.mockResolvedValueOnce({
       data: null,
       error: new Error('aggregate timeout'),
@@ -167,33 +185,59 @@ describe('/api/stats character_catalog privacy', () => {
 
     const res = await call({ type: 'character_catalog', v: 'fallback-test' });
 
-    expect(res.statusCode).toBe(503);
-    expect(res.body.success).toBe(false);
-    expect(mocks.from).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      partial: true,
+      data: {
+        characterCatalog: {
+          totalContributors: 0,
+          summary: {
+            totalCharacters: 1,
+            ownedCharacters: 0,
+          },
+          characters: [
+            {
+              id: 'chr_0031_mifu',
+              name: '弭弗',
+              avatarUrl: '/avatars/characters/chr_0031_mifu.webp',
+              ownerUsers: 0,
+            },
+          ],
+        },
+      },
+      meta: {
+        source: 'character-table-fallback',
+        partial: true,
+      },
+    });
+    expect(select).toHaveBeenCalledWith('id, name, avatar_url, rarity, type, aliases, is_limited, release_date, created_at, updated_at, pool_config');
+    expect(order).toHaveBeenCalledWith('name');
     expectNoPrivateIdentifiers(res.body);
   });
 
-  it('returns a pending response when the first ranking snapshot is unavailable', async () => {
+  it('returns a partial response when character ranking aggregation is unavailable', async () => {
     mocks.rpc.mockResolvedValueOnce({
       data: null,
-      error: null,
+      error: new Error('ranking timeout'),
     });
 
     const res = await call({ type: 'character_ranking', v: 'ranking-timeout-test' });
 
-    expect(res.statusCode).toBe(202);
+    expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({
       success: true,
-      cached: true,
+      cached: false,
       partial: true,
       data: {
         characterRanking: null,
       },
       meta: {
-        availability: 'building',
+        source: 'origin-timeout',
+        partial: true,
       },
     });
-    expect(mocks.rpc).toHaveBeenCalledWith('read_statistics_snapshot', { p_scope: 'character_ranking' });
+    expect(mocks.rpc).toHaveBeenCalledWith('get_character_ranking_stats_cached');
     expectNoPrivateIdentifiers(res.body);
   });
 });

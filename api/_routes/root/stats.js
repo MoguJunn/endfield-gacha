@@ -19,9 +19,6 @@ import {
   sanitizePublicPoolRecord,
 } from '../../../shared/publicCatalogDto.js';
 import { isReservedPoolTypeId } from '../../../shared/poolIdValidation.js';
-import { handlePoolObservations } from '../../_lib/poolObservations.js';
-import { handleGroupStatistics } from '../../_lib/groupStatistics.js';
-import { handlePersonalStatistics, handleScheduledStatistics, handleStatisticsPoolCounts, readScheduledStatistic } from '../../_lib/scheduledStatistics.js';
 
 // 内存缓存
 const cache = {
@@ -281,21 +278,29 @@ function buildCharacterCatalogFallback(characters = []) {
 }
 
 async function fetchCharacterCatalogStatsCached(supabase) {
-  const { payload } = await withServerTimeout(
-    readScheduledStatistic(supabase, 'character_catalog'),
+  const { data, error } = await withServerTimeout(
+    supabase.rpc('get_character_catalog_stats_cached'),
     CHARACTER_CATALOG_RPC_TIMEOUT_MS,
     'get_character_catalog_stats_cached'
   );
-  return normalizeCharacterCatalogAvatars(payload);
+  if (error) {
+    throw error;
+  }
+
+  return normalizeCharacterCatalogAvatars(data);
 }
 
 async function fetchCharacterRankingStatsCached(supabase) {
-  const { payload } = await withServerTimeout(
-    readScheduledStatistic(supabase, 'character_ranking'),
+  const { data, error } = await withServerTimeout(
+    supabase.rpc('get_character_ranking_stats_cached'),
     CHARACTER_RANKING_RPC_TIMEOUT_MS,
     'get_character_ranking_stats_cached'
   );
-  return payload ?? null;
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
 }
 
 async function fetchCharacterCatalogForStats(supabase) {
@@ -473,14 +478,8 @@ export default async function handler(req, res) {
   }
 
   const { type } = req.query;
-  if (type === 'personal_statistics') return handlePersonalStatistics(req, res);
   const now = Date.now();
   const supabase = getSupabaseClient();
-  if (type === 'pool_observations') return handlePoolObservations(req, res, supabase);
-  if (type === 'group_statistics') return handleGroupStatistics(req, res, supabase);
-  if (type === 'pool_counts') return handleStatisticsPoolCounts(req, res, supabase);
-  if (['global_summary', 'character_ranking', 'character_catalog'].includes(type)) return handleScheduledStatistics(req, res, supabase, type,
-    type === 'character_catalog' ? (value) => sanitizeCharacterCatalog(normalizeCharacterCatalogAvatars(value)) : undefined);
   const cacheVersion = await resolvePublicCacheVersion(supabase, {
     requestVersion: readRequestCacheVersion(req),
   });
@@ -780,7 +779,10 @@ async function handleGlobalSummary(supabase, res, now, context) {
     });
   }
 
-  const { payload: data } = await readScheduledStatistic(supabase, 'global_summary');
+  const { data, error } = await supabase.rpc('get_global_stats_cached');
+  if (error) {
+    throw error;
+  }
 
   cache.globalSummary = data ?? null;
   cache.globalSummaryLastFetch = now;
@@ -892,7 +894,7 @@ async function handleAll(supabase, res, now, context) {
     fetchVisiblePools(supabase),
     fetchPoolCatalog(supabase),
     fetchCharactersTable(supabase),
-    readScheduledStatistic(supabase, 'global_summary').then(({ payload, meta }) => ({ data: payload ? { ...payload, meta: { ...payload.meta, ...meta } } : null })),
+    supabase.rpc('get_global_stats_cached'),
     fetchCharacterRankingStatsCached(supabase),
     fetchCharacterCatalogForStats(supabase),
   ]);

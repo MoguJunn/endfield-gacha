@@ -72,7 +72,7 @@ export default function AppHeader({
       {/* 背景装饰网格 */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.02)_1px,transparent_1px)] dark:bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none"></div>
 
-      <div className="dp-header-inner w-full max-w-[1600px] mx-auto h-14 sm:h-16 flex items-center justify-between relative z-10 px-3 sm:px-4">
+      <div className="w-full max-w-[1600px] mx-auto h-14 sm:h-16 flex items-center justify-between relative z-10 px-3 sm:px-4">
 
         {/* 左侧：Logo + 标题 */}
         <div className="flex items-center h-full shrink-0">

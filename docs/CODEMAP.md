@@ -2,8 +2,6 @@
 
 这份文件只保留“从哪里开始读代码”的索引。系统边界、数据流、缓存和数据库分层详见 [ARCHITECTURE.md](ARCHITECTURE.md)；部署、环境变量和维护命令详见 [PROJECT_GUIDE.md](PROJECT_GUIDE.md)。
 
-当前索引对应 `v4.6.2` 候选；生产统计迁移、Worker 与 v4 预热尚未执行，发布状态见 [RELEASE_4.6.2.md](RELEASE_4.6.2.md)。
-
 ## 前端入口
 
 | 范围 | 文件 |
@@ -19,20 +17,19 @@
 
 | 页面 | 桌面端 | 移动端 |
 |------|--------|--------|
-| 首页 | `src/components/home/DesktopHomeDemo.jsx`（默认） / `HomePage.jsx`（经典） | `src/mobile/views/MobileHomePageView.jsx` |
-| 全服统计 | `src/components/SummaryView.jsx` | `src/mobile/views/MobileStatsView.jsx` |
+| 首页 | `src/components/home/HomePage.jsx` | `src/mobile/views/MobileHomePageView.jsx` |
+| 全服统计 | `src/components/SummaryView.jsx` | `src/mobile/views/MobileSummaryView.jsx` |
 | 卡池详情 | `src/components/app/DesktopDashboardWorkspace.jsx` | `src/mobile/views/MobileDashboardView.jsx` |
 | 模拟器 | `src/features/simulator/GachaSimulator.jsx` | `src/mobile/views/MobileSimulatorView.jsx` |
 | 设置 | `src/components/SettingsPanel.jsx` | `src/mobile/views/MobileSettingsView.jsx` |
 | 工单 | `src/components/TicketPanel.jsx` | `src/mobile/views/MobileTicketView.jsx` |
 | 后台 | `src/components/AdminPanel.jsx` | `src/mobile/views/MobileAdminView.jsx` |
 
-### 新版桌面入口与主页偏好
+### 本地桌面 Demo 入口
 
-以下新版桌面入口已作为生产默认发布，经典主页可通过按钮切换。旧 `home-demo=unified` 链接继续兼容；布局、路由和数据合同详见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
+以下桌面 Demo 入口随 `v4.6.0` 纳入主线，仅在 Vite DEV 且 `home-demo=unified` 时激活。原页面入口继续保留；布局、路由和数据合同详见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
 
-- 主页选择与消息接线：`src/GachaAnalyzer.jsx`、`src/components/app/DesktopAppRoutes.jsx`。
-- 偏好解析与旧查询参数清理：`src/utils/homeExperience.js`；存储键：`src/utils/storageUtils.js`；测试：`src/utils/__tests__/homeExperience.test.js`。
+- 预览选择与消息接线：`src/GachaAnalyzer.jsx`、`src/components/app/DesktopAppRoutes.jsx`。
 - 桌面首页、卡池与日程适配：`src/components/home/DesktopHomeDemo.jsx`、`desktopHomeDemo.css`、`desktopHomeData.js`。
 - 顶栏、独立工单 / 管理入口、身份与主题菜单：`src/components/home/HomeLandingHeader.jsx`、`homeLandingDemo.css`。
 - 原生轮换与活动卡：`src/components/home/RotationScheduleCard.jsx`、`SummerLotteryBanner.jsx`。
@@ -40,16 +37,6 @@
 - 四类消息 / 公告模型与统一弹窗：`src/components/home/DesktopMessageCenter.jsx`、`desktopMessageModel.js`、`DesktopHomeDialog.jsx`；组件测试：`src/components/home/__tests__/DesktopMessageCenter.test.jsx`。
 - 个人概览 / 卡池分析二级菜单与持久化收起：`src/components/app/DesktopPersonalWorkspace.jsx`；共享宽度 / 外置菜单：`desktopPageLayout.css`。
 - 路由入场与滚动重置：`src/components/app/DesktopPageMotion.jsx`；统计来源锁定：`src/components/SummaryView.jsx`、`src/hooks/summary/useSummaryViewState.js`、`src/components/summary/CharacterCatalogView.jsx`。
-
-### 分池、五类合池与开发指南
-
-- 单池／合池工作区、十图与对象选择：`src/components/summary/PoolStatisticsWorkspace.jsx`、`PoolObservationCharts.jsx`、`StatisticsPoolList.jsx`。
-- 首次样本、保存记录适配与读数：`src/utils/poolObservationStats.js`、`storedPoolObservations.js`、`observationInsights.js`；五类范围白名单：`shared/statisticsScopes.js`。
-- 公共与个人快照读取：`api/_routes/root/stats.js`、`api/_lib/scheduledStatistics.js`、`personalStatisticsSnapshot.js`、`src/services/scheduledStatisticsService.js`。
-- 定时计算与失效策略：`api/_lib/statisticsWorker.js`、`shared/statisticsRefreshPolicy.js`、`scripts/run-statistics-worker.mjs`、`scripts/systemd/endfield-statistics.*`。
-- 本地只读数据准备及验证：`scripts/prepare-statistics-local-preview.mjs`、`verify-statistics-schedule-sql.mjs`、`verify-pool-statistics-live.mjs`。
-- 指南与构造样例仅供 Vite DEV：`statistics-preview.html`、`src/dev/StatisticsExperiencePreview.jsx`、`statisticsPreviewData.js`；真实业务动作待接入。
-- 全桌面页面宽度与动效：`src/components/app/desktopPageLayout.css`、`DesktopPageMotion.jsx`，共用首页响应式尺度。
 
 ## 状态与数据
 
@@ -126,14 +113,13 @@
 | 历史 v4.5.3 运行时版本与缓存失效 | `supabase/migrations/156_bump_site_version_453.sql` |
 | 官方非寻访事件旧占位精确修复 RPC | `supabase/migrations/157_repair_official_non_pull_artifact.sql` |
 | 历史 v4.5.4 运行时版本与缓存失效 | `supabase/migrations/158_bump_site_version_454.sql` |
-| v4.6.2 候选包版本与运行时版本核对 | `package.json`、`src/constants/appMeta.js`、`docs/RELEASE_4.6.2.md` |
+| v4.6.0 包版本与运行时版本同步 | `package.json`、`src/constants/appMeta.js`、`docs/RELEASE_4.6.0.md` |
 | 认证 Phase A/B | `supabase/migrations/166_harden_admin_profile_and_oauth_transactions.sql` |
 | 认证 Phase C/D | `supabase/migrations/167_harden_account_credentials_and_identity_keys.sql` |
 | 认证审查与旧邮箱空壳修复 | `supabase/migrations/168_close_auth_review_findings.sql`–`172_quarantine_oauth_email_artifact_atomically.sql` |
 | 个人分析 revision / 快照 / 活跃队列 | `supabase/migrations/173_add_personal_analysis_scope_revisions.sql`–`177_prioritize_active_personal_analysis_jobs.sql` |
 | 个人分析 `pg_cron + pg_net` 调度与即时派发 | `supabase/migrations/178_schedule_personal_analysis_worker_with_pg_cron.sql`–`180_prioritize_immediate_personal_analysis_dispatch.sql` |
 | 附加寻访、重构寻访与重构申领 | `supabase/migrations/181_add_extra_pool_subtypes.sql`–`183_split_reconstruction_claim_subtype.sql` |
-| 统计队列与五类合池 v4 快照 | `supabase/migrations/2026092201_schedule_statistics_snapshots.sql`、`2026092401_group_statistics_snapshots.sql` |
 | 静态头像 | `public/avatars/` |
 | 版本日历静态图 | `public/game-calendar/` |
 
