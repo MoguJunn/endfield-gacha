@@ -18,7 +18,9 @@ cp .env.contributor.example .env.local
 
 该模板只包含浏览器端公开变量。`VITE_SUPABASE_PUBLISHABLE_KEY` 需要由维护者提供低权限公开 key，或改用贡献者自己的本地 Supabase。不要把 service role、JWT secret、SMTP 密码、OAuth Client Secret、BOT token、Cron secret 或 CAPTCHA secret 写入 `.env.local` 后提交。
 
-当前本地桌面 Demo 可在开发服务器的 `/?home-demo=unified` 查看，已验收并保存于本地主题分支，尚未推送或发布。界面预览开关与贡献者数据沙盒是两层配置；调整首页、顶栏、统计入口或共享组件前，请对齐 [桌面 Demo 合同](docs/DESKTOP_HOME_DEMO.md)，保留 1366×768 基线、独立版本主题接口、原入口默认行为与移动端边界。
+新版桌面首页已在 v4.6.0 成为默认入口，`/?home-demo=unified` 保留兼容。当前 v4.6.2 候选统一各桌面页与首页的响应式宽度，并更新统计工作区；生产迁移、Worker 和 v4 快照预热尚未执行。调整首页、顶栏、统计入口或共享组件前，请对齐 [桌面界面合同](docs/DESKTOP_HOME_DEMO.md) 和 [统计口径合同](docs/STATS_OBSERVATION_CONTRACT.md)，保留 1366×768 基线、独立版本主题接口及移动端边界。
+
+指南样例位于开发服务器的 `/statistics-preview.html`，仅在 Vite DEV 中渲染，未接入真实登录、导入或备份动作。它与贡献者数据沙盒是独立入口；真实统计的只读本地预览按 [统计调度说明](docs/STATISTICS_SCHEDULING.md) 准备，不代表生产 Worker 已启用。
 
 ## 最低验证
 
