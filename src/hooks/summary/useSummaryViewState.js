@@ -94,6 +94,7 @@ export function useSummaryViewState({
   variant: _variant = 'desktop',
   initialDataSource = 'global',
   lockedDataSource = null,
+  scheduledSummary,
   initialPoolTypeFilter = 'all'
 }) {
   const { t } = useI18n();
@@ -128,10 +129,10 @@ export function useSummaryViewState({
   const isGlobalSource = dataSource === 'global';
 
   const { characterRanking, rankingLoading, userRanking, userRankingLoading } = useRankingData(dataSource, user);
-  const computedLocalStats = useSummaryStats(history, pools, user);
+  const computedLocalStats = useSummaryStats(history, pools, user, isGlobalSource ? null : scheduledSummary);
   const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
   const analysisSummary = usePersonalAnalysisStore((state) => state.owner?.summary || null);
-  const localStats = ['ready', 'stale', 'empty'].includes(analysisAvailability) && analysisSummary
+  const localStats = scheduledSummary !== undefined ? scheduledSummary : ['ready', 'stale', 'empty'].includes(analysisAvailability) && analysisSummary
     ? analysisSummary
     : computedLocalStats;
 

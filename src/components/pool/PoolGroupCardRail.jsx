@@ -10,6 +10,7 @@ import { useI18n } from '../../i18n/index.js';
 import { getCharacterAvatarUrl } from '../../utils/characterUtils.js';
 import { useHorizontalWheelScroll } from '../../hooks/useHorizontalWheelScroll.js';
 import { isPoolSelectorGroupCollapsed } from './poolGroupCardRailState.js';
+import './poolGroupCardRail.css';
 
 const TYPE_CONFIG = {
   extra: { icon: Star, color: 'text-cyan-600 dark:text-cyan-400', bg: 'bg-cyan-100 dark:bg-cyan-900/20' },
@@ -38,7 +39,8 @@ function GroupLabel({ groupType, label, collapsed, onToggle, t }) {
     <button
       type="button"
       onClick={onToggle}
-      className="flex-shrink-0 flex flex-col items-center justify-end h-full pb-3 group opacity-70 hover:opacity-100 transition-opacity duration-200"
+      className="pool-rail-group-label flex-shrink-0 flex flex-col items-center justify-end h-full pb-3 group opacity-70 hover:opacity-100 transition-opacity duration-200"
+      aria-expanded={!collapsed}
       title={collapsed ? t('pool.card.groupToggleExpand', { label }) : t('pool.card.groupToggleCollapse', { label })}
     >
       <div className="flex flex-col items-center gap-2" style={{ writingMode: 'vertical-rl' }}>
@@ -227,7 +229,7 @@ function PoolCard({ pool, isSelected, onClick, locale, t }) {
   const TypeIcon = config.icon;
   const isActive = pool.selectorTiming?.isActive;
   const remainingLabel = pool.selectorTiming?.remainingLabel;
-  const formattedPullCount = new Intl.NumberFormat(locale).format(pool.pullCount || 0);
+  const formattedPullCount = pool.selectorHidePullCount ? '—' : new Intl.NumberFormat(locale).format(pool.pullCount || 0);
   const featuredCharacterNames =
     Array.isArray(pool.displayFeaturedCharacters) && pool.displayFeaturedCharacters.length > 0
       ? pool.displayFeaturedCharacters
@@ -261,7 +263,18 @@ function PoolCard({ pool, isSelected, onClick, locale, t }) {
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={poolName}
+      aria-pressed={isSelected}
+      data-pool-id={pool.id}
       onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick?.();
+        }
+      }}
       className={`
         relative flex-shrink-0 w-36 min-h-[192px] flex flex-col p-0 cursor-pointer transition-all duration-300 ease-out overflow-hidden group
         ${
@@ -405,6 +418,7 @@ const PoolGroupCardRail = ({
   showGroupOverviewCards = true,
   collapseLimit = 5,
   collapsibleTypes = ['limited'],
+  orientation = 'horizontal',
   className = '',
 }) => {
   const { t, locale } = useI18n();
@@ -468,9 +482,9 @@ const PoolGroupCardRail = ({
   }
 
   return (
-    <div className={`relative border-t border-zinc-100 dark:border-zinc-800 pt-4 ${className}`}>
+    <div className={`pool-card-rail relative border-t border-zinc-100 dark:border-zinc-800 pt-4 ${className}`} data-orientation={orientation}>
       <div
-        ref={railRef}
+        ref={orientation === 'horizontal' ? railRef : undefined}
         className="pool-card-rail-scrollbar flex flex-nowrap items-end gap-2 overflow-x-scroll overflow-y-hidden pb-2 -mx-1 px-1"
       >
         {leadingOverview && showGroupOverviewCards ? (
@@ -546,7 +560,7 @@ const PoolGroupCardRail = ({
           };
 
           return (
-            <div key={group.type} className="flex flex-nowrap items-end gap-2">
+            <div key={group.type} className="pool-rail-group flex flex-nowrap items-end gap-2">
               <GroupLabel
                 groupType={group.type}
                 label={group.label}
@@ -575,7 +589,7 @@ const PoolGroupCardRail = ({
               {!isGroupCollapsed &&
                 hasSubgroups &&
                 group.subgroups.map((subgroup) => (
-                  <div key={subgroup.groupId} className="flex flex-nowrap items-end gap-2">
+                  <div key={subgroup.groupId} className="pool-rail-subgroup flex flex-nowrap items-end gap-2">
                     <GroupLabel
                       groupType="extra"
                       label={subgroup.label}

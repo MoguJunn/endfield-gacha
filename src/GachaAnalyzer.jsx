@@ -7,6 +7,7 @@ import { useAuthStore, useAppStore, usePoolStore, useUIStore } from './stores';
 import { getDesktopPathForTab, getDesktopTabFromPath, normalizeAppTab } from './constants/appRoutes';
 import AppHeader from './components/layout/AppHeader';
 import DesktopAppRoutes from './components/app/DesktopAppRoutes';
+import './components/app/desktopPageLayout.css';
 import { extractDrawerFromPoolName } from './utils';
 import { getPoolGroupType, isPoolGroupId } from './stores/usePoolStore';
 import { getPreferredPool } from './utils/poolSelectionUtils';
@@ -428,7 +429,7 @@ export default function GachaAnalyzer() {
   // --- 组件 ---
 
   return (
-    <div data-testid="desktop-app-shell" className={`min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-800 dark:text-zinc-100 font-sans pb-20 md:pb-10 relative ${latestHome ? 'dp-shell' : ''} ${isLatestDesktopHome ? 'dh-shell' : ''}`}>
+    <div data-testid="desktop-app-shell" className={`dp-shell min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-800 dark:text-zinc-100 font-sans pb-20 md:pb-10 relative ${isLatestDesktopHome ? 'dh-shell' : ''}`}>
       {/* 全局加载进度条 */}
       <LoadingBar isLoading={syncing || globalStatsLoading} />
 
@@ -451,7 +452,7 @@ export default function GachaAnalyzer() {
 
       <ContributorDemoBanner />
 
-      <main className={latestHome ? `dp-main ${isLatestDesktopHome ? 'dh-main' : ''}` : 'w-full max-w-[1440px] mx-auto px-4 py-8'}>
+      <main className={`dp-main ${isLatestDesktopHome ? 'dh-main' : ''}`}>
         {isDesktopHome && !latestHome ? (
           <button
             type="button"

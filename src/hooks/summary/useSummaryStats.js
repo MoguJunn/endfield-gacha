@@ -11,16 +11,16 @@ import { buildSummaryStats } from '../../utils/summaryStats.js';
  * @param {Object|null} user - 当前用户
  * @returns {Object} 统计数据
  */
-export function useSummaryStats(history, pools, user) {
+export function useSummaryStats(history, pools, user, precomputed) {
   return useMemo(
     () =>
-      buildSummaryStats({
+      precomputed !== undefined ? precomputed : buildSummaryStats({
         history,
         pools,
         user,
         characters: characterCache.getAll(),
       }),
-    [history, pools, user]
+    [history, pools, user, precomputed]
   );
 }
 

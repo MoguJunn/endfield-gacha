@@ -3,6 +3,7 @@ import { Navigate, Routes, Route } from 'react-router-dom';
 import DeviceRedirectGuard from './components/guards/DeviceRedirectGuard';
 import { useI18n } from './i18n/index.js';
 import { isContributorDemoModeEnabled } from './dev/contributorDemoMode.js';
+import './components/app/desktopPageLayout.css';
 
 // 懒加载桌面端入口，避免移动端与独立页面首包提前带入完整桌面壳层
 const App = lazy(() => import('./App'));
@@ -59,7 +60,7 @@ function AppRouter() {
           path="/status"
           element={
             <Suspense fallback={<MobileLoadingFallback />}>
-              <SiteStatusPage />
+              <div className="dp-standalone"><SiteStatusPage /></div>
             </Suspense>
           }
         />
@@ -67,7 +68,7 @@ function AppRouter() {
           path="/privacy"
           element={
             <Suspense fallback={<MobileLoadingFallback />}>
-              <PrivacyPolicy />
+              <div className="dp-standalone"><PrivacyPolicy /></div>
             </Suspense>
           }
         />
@@ -75,7 +76,7 @@ function AppRouter() {
           path="/terms"
           element={
             <Suspense fallback={<MobileLoadingFallback />}>
-              <TermsOfService />
+              <div className="dp-standalone"><TermsOfService /></div>
             </Suspense>
           }
         />
@@ -83,7 +84,7 @@ function AppRouter() {
           path="/donations"
           element={
             <Suspense fallback={<MobileLoadingFallback />}>
-              <DonationThanksPage />
+              <div className="dp-standalone"><DonationThanksPage /></div>
             </Suspense>
           }
         />

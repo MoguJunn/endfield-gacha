@@ -6,6 +6,7 @@ import { ChartSection, CharacterCatalogView, SummarySidebar } from './summary';
 import ResourceSummaryPanel from './resources/ResourceSummaryPanel';
 import { useThemeDetection, getTooltipStyle, useSummaryViewState } from '../hooks/summary';
 import { getCombinedCharacterAverageDisplay } from '../utils/summaryAverageDisplay.js';
+import PoolStatisticsWorkspace from './summary/PoolStatisticsWorkspace.jsx';
 
 function MetricCard({ icon: Icon, label, value, hint, tone = 'text-slate-900 dark:text-white' }) {
   return (
@@ -520,7 +521,7 @@ function SummaryOverviewContent({
   );
 }
 
-const SummaryView = React.memo(({ lockedDataSource = null }) => {
+const SummaryView = React.memo(({ lockedDataSource = null, scheduledSummary, scheduledCatalogs }) => {
   const { t, isEnglish, formatNumber } = useI18n();
   const tt = (key, fallback, params = {}) => t(key, params, fallback);
   const formatCount = (value) => formatNumber(Number(value) || 0);
@@ -558,6 +559,7 @@ const SummaryView = React.memo(({ lockedDataSource = null }) => {
     fetchGlobalStats,
     variant: 'desktop',
     lockedDataSource,
+    scheduledSummary,
   });
 
   const globalStatsMeta = dataSource === 'global' ? currentStats?.meta : null;
@@ -627,7 +629,8 @@ const SummaryView = React.memo(({ lockedDataSource = null }) => {
           )}
           <div key={activePage} className={lockedDataSource ? 'dp-view-motion' : undefined}>
           {activePage === 'catalog' ? (
-            <CharacterCatalogView
+          <CharacterCatalogView
+            scheduledCatalogs={scheduledCatalogs}
               dataSource={dataSource}
               setDataSource={setDataSource}
               history={history}
@@ -667,4 +670,7 @@ const SummaryView = React.memo(({ lockedDataSource = null }) => {
   );
 });
 
-export default SummaryView;
+export default function SummaryWorkspace({ lockedDataSource = null }) {
+  return <PoolStatisticsWorkspace lockedDataSource={lockedDataSource} overview={(source, snapshot) => <SummaryView lockedDataSource={source}
+    scheduledSummary={source === 'local' ? snapshot?.summary ?? null : undefined} scheduledCatalogs={source === 'local' ? snapshot?.catalogs ?? null : undefined} />} />;
+}
