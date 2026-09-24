@@ -1,6 +1,6 @@
 # Architecture
 
-本文档描述 `v4.6.2` 候选代码架构，包括默认新版桌面主页与经典主页切换、分池／合池统计快照。生产统计迁移与 Worker 尚未执行，须先预热 v4 结果再启用页面；当前发布准备见 [RELEASE_4.6.2.md](RELEASE_4.6.2.md)。历史计划和退役部署方式不再作为主路径记录；独立 CN / INTL 后端仅保留官方数据获取、规范化、内部暂存与原子写入职责。
+本文档描述 `v4.6.0` 主线架构，并单独标明仅在开发模式可用的桌面 Demo。历史计划和退役部署方式不再作为主路径记录；独立 CN / INTL 后端仅保留官方数据获取、规范化、内部暂存与原子写入职责。
 
 ## 1. 系统边界
 
@@ -56,23 +56,15 @@ flowchart LR
 - `SIM-004`：模拟器控制器仍承担过多 UI、资源、继承和分享状态。
 - `ARCH-021`：桌面 / 移动端 dashboard、settings 仍有重复控制器逻辑。
 
-### 2.1 新版桌面主页与经典主页切换
+### 2.1 本地桌面 Demo（随 v4.6.0 纳入主线，保留 DEV 限制）
 
-`GachaAnalyzer` 通过 `src/utils/homeExperience.js` 解析浏览器偏好，默认选择新顶栏、`DesktopHomeDemo`、统一消息中心、个人工作区和页面动效，并把选择传入 `DesktopAppRoutes`。组件使用生产可用的懒加载；`gacha_home_experience_v1` 保存 `latest / classic`，旧 `home-demo=unified` 链接显式选择新版，切换时清理旧参数。共享 `SummaryView`、图鉴和原生卡片继续兼容经典入口，移动布局保持原行为。主页偏好不替代贡献者沙盒的数据隔离或现有认证权限。
+`GachaAnalyzer` 与 `DesktopAppRoutes` 仅在 Vite DEV 且 `home-demo=unified` 时选择新顶栏、`DesktopHomeDemo`、统一消息中心、个人工作区和页面动效。预览专用入口采用 DEV 条件懒加载，共享 `SummaryView`、图鉴和原生卡片继续兼容未传新增参数的原入口；移动布局保持原行为。界面预览开关不替代贡献者沙盒的数据隔离或现有认证权限。
 
-`DesktopPersonalWorkspace` 把 `/dashboard` 分为个人概览与卡池分析：前者在 `PersonalDataBoundary` 内复用 `SummaryView lockedDataSource="local"`，后者保留原卡池工作区。新版 `/summary` 直接使用 `lockedDataSource="global"`，不受个人读取状态阻塞。图鉴同样锁定来源，个人概览不再等待无关全服加载；v4.6.0 的桌面拆分本身未改变统计计算，v4.6.2 新统计链路见下一节。
+`DesktopPersonalWorkspace` 把 `/dashboard` 分为个人概览与卡池分析：前者在 `PersonalDataBoundary` 内复用 `SummaryView lockedDataSource="local"`，后者保留原卡池工作区。预览 `/summary` 直接使用 `lockedDataSource="global"`，不受个人读取状态阻塞。图鉴同样锁定来源，个人概览不再等待无关全服加载；这里没有新增统计计算器、修改 schema v2 或重新开放跨账号汇总。
 
-`desktopPageLayout.css` 将首页响应式宽度统一到各桌面路由、顶栏与底栏：常规上限 1366px，1920px 以上为 `clamp(1366px, 78vw, 1920px)`，3000px 以上为 `min(74vw, 2560px)`；经典入口和长内容页使用同一壳层尺度。首页通过固定卡片区与可伸展引导区适配 1366×768，较小容器使用分区页签。`DesktopPageMotion` 以路径和个人 `view` 管理入场 / 滚动重置，其他查询参数不触发整页重挂载，并尊重减少动态效果。
+`desktopPageLayout.css` 统一预览壳层的 1366px 最大宽度、个人菜单和减少动态效果；首页通过固定卡片区与可伸展引导区适配 1366×768，较小容器使用分区页签。`DesktopPageMotion` 以路径和个人 `view` 管理入场 / 滚动重置，其他查询参数不触发整页重挂载。
 
 `DesktopMessageCenter` 与 `desktopMessageModel` 统一四类公告 / 通知呈现，继续使用现有持久通知数据及业务回调。`VersionCountdownCard` 只接收日期、名称和动作，通过独立 `--vc-*` 主题变量适配视觉，不与版本宣传素材或宿主 Store 耦合。详细合同与验证边界见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
-
-### 2.2 分池与合池统计（v4.6.2 候选）
-
-`SummaryView` 和移动统计入口复用 `PoolStatisticsWorkspace`，提供单池及限定角色、限定武器、常驻武器、重构寻访、重构申领五类范围。十图、头像选择、分类排序与旧指标／资源读取同一选择范围。合池先逐账号、逐期、逐对象计算首次，再按当期身份汇总类别；账号覆盖跨期去重，不能相加各池账号数。
-
-`statistics_jobs`、`statistics_snapshots` 与 `statistics_activity` 由常驻 `statisticsWorker` 按 5/30/60 分钟策略处理。公共与认证后的个人读取仅返回 `public-statistics-v4` 快照；GET 不扫描历史、不触发重算。目录成员或目标签名变化、租约与修订冲突、分页不完整均阻止发布不完整结果。旧 `metrics` / `resources` 随范围迁入快照，资源次序仍读取完整相关账号上下文；已有 owner/account 个人分析 Worker 保持独立职责。
-
-详情见 [统计合同](STATS_OBSERVATION_CONTRACT.md) 与 [调度说明](STATISTICS_SCHEDULING.md)。指南仅存在于 Vite DEV 的 `/statistics-preview.html`，不属于生产业务路由。
 
 ## 3. API 层
 

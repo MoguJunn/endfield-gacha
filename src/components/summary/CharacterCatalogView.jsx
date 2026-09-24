@@ -1030,7 +1030,6 @@ export default function CharacterCatalogView({
   ranking = null,
   isRankingLoading = false,
   lockedDataSource = null,
-  scheduledCatalogs,
   mobile = false
 }) {
   const navigate = useNavigate();
@@ -1080,7 +1079,7 @@ export default function CharacterCatalogView({
   React.useEffect(() => {
     let cancelled = false;
 
-    if (scheduledCatalogs !== undefined || activeDataSource !== 'local' || !user?.id || !selectedGameAccount) {
+    if (activeDataSource !== 'local' || !user?.id || !selectedGameAccount) {
       setLoadedLocalHistory(null);
       setLocalHistoryLoading(false);
       setLocalHistoryError(null);
@@ -1115,7 +1114,7 @@ export default function CharacterCatalogView({
     return () => {
       cancelled = true;
     };
-  }, [activeDataSource, localHistoryReloadKey, selectedGameAccount, user?.id, scheduledCatalogs]);
+  }, [activeDataSource, localHistoryReloadKey, selectedGameAccount, user?.id]);
   const manualOverrideScopeKey = React.useMemo(() => getManualOverrideScopeKey(user, effectiveGameUid), [effectiveGameUid, user]);
   React.useEffect(() => {
     const stored = getStorageItem(STORAGE_KEYS.CHARACTER_CATALOG_MANUAL_OVERRIDES, {});
@@ -1128,8 +1127,8 @@ export default function CharacterCatalogView({
   }, [currentGameUid, effectiveGameUid, switchGameAccount]);
   const localHistorySource = Array.isArray(loadedLocalHistory) ? loadedLocalHistory : history;
   const localHistory = React.useMemo(
-    () => scheduledCatalogs !== undefined || activeDataSource !== 'local' ? [] : normalizeHistoryForUser(localHistorySource, user, effectiveGameUid),
-    [effectiveGameUid, localHistorySource, user, scheduledCatalogs, activeDataSource]
+    () => normalizeHistoryForUser(localHistorySource, user, effectiveGameUid),
+    [effectiveGameUid, localHistorySource, user]
   );
   const localTimelineHistory = React.useMemo(() => {
     const poolById = new Map();
@@ -1176,14 +1175,14 @@ export default function CharacterCatalogView({
     });
   }, [localTimelineHistory, locale, pools]);
   const localCatalogBase = React.useMemo(() => (
-    activeDataSource !== 'local' ? null : scheduledCatalogs !== undefined ? scheduledCatalogs?.[effectiveGameUid]?.[locale] || null : buildCharacterCatalogRows({
+    buildCharacterCatalogRows({
       history: localTimelineHistory,
       pools,
       characters,
       ranking,
       acquisitionIndex: localTimelineAcquisitionIndex
     })
-  ), [characters, localTimelineAcquisitionIndex, localTimelineHistory, pools, ranking, activeDataSource, scheduledCatalogs, effectiveGameUid, locale]);
+  ), [characters, localTimelineAcquisitionIndex, localTimelineHistory, pools, ranking]);
   const localCatalog = React.useMemo(() => (
     applyManualOverridesToCatalog(localCatalogBase, manualOverrides)
   ), [localCatalogBase, manualOverrides]);

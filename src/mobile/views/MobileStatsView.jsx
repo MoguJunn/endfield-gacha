@@ -9,7 +9,6 @@ import { CharacterCatalogView, ChartSection } from '../../components/summary';
 import { getTooltipStyle, useSummaryViewState, useThemeDetection } from '../../hooks/summary';
 import { useI18n } from '../../i18n/index.js';
 import { useHorizontalWheelScroll } from '../../hooks/useHorizontalWheelScroll.js';
-import PoolStatisticsWorkspace from '../../components/summary/PoolStatisticsWorkspace.jsx';
 
 function StatCard({ icon: Icon, label, value, hint, tone = 'text-slate-900 dark:text-white' }) {
   return (
@@ -87,7 +86,7 @@ function formatPercentValue(formatNumber, value, digits = 1) {
   })}%`;
 }
 
-function MobileStatsView({ lockedDataSource = null, scheduledSummary, scheduledCatalogs }) {
+function MobileStatsView() {
   const user = useAuthStore((state) => state.user);
   const pools = usePoolStore((state) => state.pools);
   const history = useHistoryStore((state) => state.history);
@@ -120,8 +119,6 @@ function MobileStatsView({ lockedDataSource = null, scheduledSummary, scheduledC
     fetchGlobalStats,
     variant: 'mobile',
     initialDataSource: 'global',
-    lockedDataSource,
-    scheduledSummary,
     initialPoolTypeFilter: 'all'
   });
 
@@ -247,7 +244,6 @@ function MobileStatsView({ lockedDataSource = null, scheduledSummary, scheduledC
       <div className="flex-1 overflow-y-auto px-3 pb-6 pt-3">
         {activePage === 'catalog' ? (
           <CharacterCatalogView
-            scheduledCatalogs={scheduledCatalogs}
             dataSource={dataSource}
             setDataSource={setDataSource}
             history={history}
@@ -374,7 +370,4 @@ function MobileStatsView({ lockedDataSource = null, scheduledSummary, scheduledC
   );
 }
 
-export default function MobileStatisticsWorkspace() {
-  return <PoolStatisticsWorkspace mobile overview={(source, snapshot) => <MobileStatsView lockedDataSource={source}
-    scheduledSummary={source === 'local' ? snapshot?.summary ?? null : undefined} scheduledCatalogs={source === 'local' ? snapshot?.catalogs ?? null : undefined} />} />;
-}
+export default MobileStatsView;

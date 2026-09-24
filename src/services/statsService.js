@@ -1,9 +1,16 @@
+import { supabase } from '../supabaseClient.js';
 import { RARITY_CONFIG, EXTRA_POOL_RULES, LIMITED_POOL_RULES, WEAPON_POOL_RULES } from '../constants/index.js';
 import { buildResourceSummaryFromAggregates, buildWeaponQuotaSummaryFromCounts } from '../utils/resourceEconomy.js';
 import { normalizeGlobalCharacterCatalog } from '../utils/quotaEconomy.js';
-import { isRetryableSupabaseError } from './supabaseRequest.js';
-import { fetchPublicApiJson } from './publicResourceClient.js';
-import { loadPersonalStatistics } from './scheduledStatisticsService.js';
+import {
+  SUPABASE_RPC_TIMEOUT_MS,
+  executeSupabaseRpc,
+  isRetryableSupabaseError,
+} from './supabaseRequest.js';
+import {
+  fetchPublicApiJson,
+  shouldAllowPublicSupabaseFallback,
+} from './publicResourceClient.js';
 import { appLogger } from '../utils/appLogger.js';
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from '../utils/storageUtils.js';
 import { isContributorDemoModeEnabled } from '../dev/contributorDemoMode.js';
@@ -16,8 +23,8 @@ import { sanitizePublicResourceUrl } from '../utils/publicResourceUrl.js';
 /**
  * 统计服务
  * 架构说明：
- * - 公共和个人统计均从同源接口读取后台定时计算结果。
- * - 页面请求失败时可保留已读取结果，不触发数据库重算。
+ * - 公共全服数据：Stats API -> Supabase RPC -> localStorage
+ * - 个人数据：Supabase RPC -> localStorage
  */
 
 const GLOBAL_STATS_CACHE_TTL = 120 * 1000;
@@ -49,6 +56,7 @@ export function sanitizeGlobalSummaryMedia(summary) {
   };
 }
 
+const EXPECTED_LIMITED_UP_DISPLAY_COUNT = 6;
 const globalStatsRequestState = {
   data: null,
   fetchedAt: 0,
@@ -206,6 +214,84 @@ async function fetchStatsApi(type) {
   return result?.data || null;
 }
 
+async function fetchGlobalSummaryDirect() {
+  if (!supabase) {
+    return null;
+  }
+
+  const { data, error } = await runRpcWithTimeout('get_global_stats_cached');
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
+}
+
+async function fetchCharacterCatalogDirect() {
+  if (!supabase) {
+    return null;
+  }
+
+  const { data, error } = await runRpcWithTimeout('get_character_catalog_stats_cached');
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
+}
+
+async function fetchCharacterCatalogUncached() {
+  if (!supabase) {
+    return null;
+  }
+
+  const { data, error } = await runRpcWithTimeout('get_character_catalog_stats');
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
+}
+
+async function fetchCharacterRankingDirect() {
+  if (!supabase) {
+    return null;
+  }
+
+  const { data, error } = await runRpcWithTimeout('get_character_ranking_stats_cached');
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
+}
+
+async function fetchCharacterRankingUncached() {
+  if (!supabase) {
+    return null;
+  }
+
+  const { data, error } = await runRpcWithTimeout('get_character_ranking_stats');
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
+}
+
+async function fetchUserRankingUncached(userId) {
+  if (!supabase || !userId) {
+    return null;
+  }
+
+  const { data, error } = await runRpcWithTimeout('get_user_ranking_stats', { p_user_id: userId });
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
+}
+
 function createEmptyTypeStats() {
   return {
     total: 0,
@@ -223,6 +309,15 @@ function createEmptyTypeStats() {
     chartData: [],
     resources: buildResourceSummaryFromAggregates()
   };
+}
+
+function getLimitedUpRankingLength(ranking) {
+  const entries = ranking?.limited?.sixStarUp || ranking?.limited?.sixStar || [];
+  return Array.isArray(entries) ? entries.length : 0;
+}
+
+function shouldBypassRankingCache(ranking) {
+  return getLimitedUpRankingLength(ranking) === EXPECTED_LIMITED_UP_DISPLAY_COUNT - 1;
 }
 
 export function createEmptyGlobalSummaryStats(meta = {}) {
@@ -296,6 +391,16 @@ async function runCachedRequest(state, fetcher, { cacheTtl = 0, forceRefresh = f
   } finally {
     state.promise = null;
   }
+}
+
+async function runRpcWithTimeout(rpcName, params = {}, timeoutMs = SUPABASE_RPC_TIMEOUT_MS) {
+  return executeSupabaseRpc(
+    () => supabase.rpc(rpcName, params),
+    {
+      label: rpcName,
+      timeoutMs,
+    }
+  );
 }
 
 function generateChartData(counts) {
@@ -554,8 +659,7 @@ export function normalizeGlobalStats(rpcData) {
     meta: {
       status: 'ready',
       source: 'rpc',
-      fetchedAt: Date.now(),
-      ...rpcData.meta,
+      fetchedAt: Date.now()
     }
   };
 
@@ -696,12 +800,30 @@ export async function getGlobalSummaryStats(forceRefresh = false) {
               catalogPayload
             ),
             {
-            source: apiPayload.globalSummary.meta?.source || 'api',
+            source: 'api',
             fetchedAt: Date.now()
             }
           ));
           writePersistedSnapshot(STORAGE_KEYS.GLOBAL_SUMMARY_STATS_SNAPSHOT, normalizedFromApi);
           return normalizedFromApi;
+        }
+
+        if (shouldAllowPublicSupabaseFallback()) {
+          const directSummary = await fetchGlobalSummaryDirect().catch(() => null);
+          if (directSummary) {
+            const normalizedFromDirect = sanitizeGlobalSummaryMedia(withStatsMeta(
+              mergeCatalogQuotaIntoSummary(
+                normalizeGlobalStats(directSummary),
+                catalogPayload
+              ),
+              {
+              source: 'supabase-direct',
+              fetchedAt: Date.now()
+              }
+            ));
+            writePersistedSnapshot(STORAGE_KEYS.GLOBAL_SUMMARY_STATS_SNAPSHOT, normalizedFromDirect);
+            return normalizedFromDirect;
+          }
         }
 
         const persistedSnapshot = sanitizeGlobalSummaryMedia(
@@ -770,6 +892,26 @@ export async function getCharacterCatalogStats(forceRefresh = false) {
           return normalizedFromApi;
         }
 
+        if (shouldAllowPublicSupabaseFallback()) {
+          const directCatalog = await fetchCharacterCatalogDirect().catch(() => null);
+          if (directCatalog) {
+            const normalizedFromDirect = sanitizeCharacterCatalogMedia(
+              normalizeGlobalCharacterCatalog(directCatalog)
+            );
+            writePersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT, normalizedFromDirect);
+            return normalizedFromDirect;
+          }
+
+          const uncachedCatalog = await fetchCharacterCatalogUncached().catch(() => null);
+          if (uncachedCatalog) {
+            const normalizedFromUncached = sanitizeCharacterCatalogMedia(
+              normalizeGlobalCharacterCatalog(uncachedCatalog)
+            );
+            writePersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT, normalizedFromUncached);
+            return normalizedFromUncached;
+          }
+        }
+
         const persisted = sanitizeCharacterCatalogMedia(
           readPersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT)
         );
@@ -801,9 +943,23 @@ export async function getCharacterRankingStats(forceRefresh = false) {
       characterRankingRequestState,
       async () => {
         const apiPayload = await fetchStatsApi('character_ranking').catch(() => null);
-        if (apiPayload?.characterRanking) {
+        if (apiPayload?.characterRanking && !shouldBypassRankingCache(apiPayload.characterRanking)) {
           writePersistedSnapshot(STORAGE_KEYS.CHARACTER_RANKING_SNAPSHOT, apiPayload.characterRanking);
           return apiPayload.characterRanking;
+        }
+
+        if (shouldAllowPublicSupabaseFallback()) {
+          const directRanking = await fetchCharacterRankingDirect().catch(() => null);
+          if (directRanking && !shouldBypassRankingCache(directRanking)) {
+            writePersistedSnapshot(STORAGE_KEYS.CHARACTER_RANKING_SNAPSHOT, directRanking);
+            return directRanking;
+          }
+
+          const uncachedRanking = await fetchCharacterRankingUncached().catch(() => null);
+          if (uncachedRanking) {
+            writePersistedSnapshot(STORAGE_KEYS.CHARACTER_RANKING_SNAPSHOT, uncachedRanking);
+            return uncachedRanking;
+          }
         }
 
         return readPersistedSnapshot(STORAGE_KEYS.CHARACTER_RANKING_SNAPSHOT);
@@ -827,6 +983,11 @@ export async function getUserRankingStats(userId) {
     return buildContributorSandboxRanking();
   }
   try {
+    if (!supabase) {
+      appLogger.warn('[statsService] Supabase 未配置，无法获取用户排名');
+      return readPersistedSnapshot(`${STORAGE_KEYS.USER_RANKING_SNAPSHOT_PREFIX}${userId}`);
+    }
+
     if (!userId) {
       appLogger.warn('[statsService] 未提供用户ID');
       return null;
@@ -837,13 +998,26 @@ export async function getUserRankingStats(userId) {
     return await runCachedRequest(
       requestState,
       async () => {
-        const { data, meta } = await loadPersonalStatistics();
-        if (meta?.ownerId !== userId) throw new Error('Personal statistics owner mismatch');
-        return data?.ranking || null;
+        const { data, error } = await runRpcWithTimeout('get_user_ranking_stats_cached', { p_user_id: userId });
+
+        if (error) {
+          throw error;
+        }
+
+        if (shouldBypassRankingCache(data)) {
+          const uncachedRanking = await fetchUserRankingUncached(userId).catch(() => null);
+          if (uncachedRanking) {
+            writePersistedSnapshot(`${STORAGE_KEYS.USER_RANKING_SNAPSHOT_PREFIX}${userId}`, uncachedRanking);
+            return uncachedRanking;
+          }
+        }
+
+        writePersistedSnapshot(`${STORAGE_KEYS.USER_RANKING_SNAPSHOT_PREFIX}${userId}`, data);
+        return data;
       }
     );
   } catch (error) {
     logStatsFailure('获取用户排名', error);
-    return null;
+    return getUserRankingRequestState(userId).data || readPersistedSnapshot(`${STORAGE_KEYS.USER_RANKING_SNAPSHOT_PREFIX}${userId}`) || null;
   }
 }

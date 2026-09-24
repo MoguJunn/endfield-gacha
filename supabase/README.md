@@ -30,9 +30,7 @@
 
 2026-08-01 的真实本地 Supabase/PostgreSQL 17 空库导入已补齐两项此前静态检查未覆盖的边界：`archive/004_tickets_system.sql` 必须在表不存在时也能执行清理；Phase A/B 必须显式授予 `service_role` 访问 `profiles` 与私有 Session 撤销状态所需的 DML 权限，同时保持 `anon/authenticated` 对私有撤销状态的拒绝。`test:supabase-baseline:smoke` 与 `test:auth-hardening-phase-a` 已加入对应回归断言。
 
-v4.6.2 候选 baseline 已纳入 `2026092201_schedule_statistics_snapshots.sql` 和 `2026092401_group_statistics_snapshots.sql`，本地验证覆盖 186 个迁移；准确覆盖范围以 baseline 头部为准。不要再把已包含在 baseline 中的标准迁移重复叠加到同版本新环境。迁移 173–177 提供个人分析 owner/scope revision、安全租约、快照持久化、目录失效与活跃用户优先队列；迁移 178 在支持相应扩展的自建 Supabase 中通过 Vault、`pg_net` 与 `pg_cron` 每分钟触发一次 Worker；迁移 179/180 增加受节流保护的活跃用户即时派发，并避免入队前的 cron 调度错误阻塞新用户；迁移 181–183 增加附加寻访分类、首组重构寻访与重构申领数据，以及独立的重构申领产品子类。GitHub `workflow_dispatch` 仅作为人工应急入口。
-
-新增统计迁移提供 `statistics_jobs / statistics_snapshots / statistics_activity`、受影响范围失效、租约与修订保护，以及限定角色、限定武器、常驻武器、重构寻访、重构申领五类任务。生产统计迁移与常驻 Worker 尚未执行；须先完成公开单池、五类合池、旧统计及个人 `public-statistics-v4` 快照预热，再启用前端／API。运行顺序见 [统计调度说明](../docs/STATISTICS_SCHEDULING.md)，发布状态见 [v4.6.2 发布准备](../docs/RELEASE_4.6.2.md)。
+当前 baseline 覆盖到 `active/183_split_reconstruction_claim_subtype.sql`。不要再把已包含在 baseline 中的标准迁移重复叠加到同版本新环境。迁移 173–177 提供个人分析 owner/scope revision、安全租约、快照持久化、目录失效与活跃用户优先队列；迁移 178 在支持相应扩展的自建 Supabase 中通过 Vault、`pg_net` 与 `pg_cron` 每分钟触发一次 Worker；迁移 179/180 增加受节流保护的活跃用户即时派发，并避免入队前的 cron 调度错误阻塞新用户；迁移 181–183 增加附加寻访分类、首组重构寻访与重构申领数据，以及独立的重构申领产品子类。GitHub `workflow_dispatch` 仅作为人工应急入口。
 
 ### migration 编号说明
 
@@ -50,7 +48,7 @@ v4.6.2 候选 baseline 已纳入 `2026092201_schedule_statistics_snapshots.sql` 
 `AUTH-HARDEN-001` Phase A–D、生产迁移 166/167/168、主线合入和 API/前端部署已经完成。迁移 169 及配套自助修复流程作为后续修复独立发布；LinuxDo provider 不新增数据库迁移，其实现保持在独立分支，真实浏览器验收前保持关闭且不阻塞本修复。
 
 `site_config.public_cache_epoch` 是公共数据缓存版本源；公共 API / 首屏不应回退成浏览器直连 Supabase 读写。
-旧公共卡池统计缓存为 `public_pool_analytics_cache` 和 `public_pool_trend_cache`。v4.6.2 统计迁移后，`refresh_public_analytics_cache()` 只排队；内部 Worker 计算旧缓存并与 v4 快照在同一事务发布，页面只读持久结果，请求期不扫描原始 `history` 生成趋势点。
+公共卡池统计读取 `public_pool_analytics_cache` 和 `public_pool_trend_cache`；受控刷新入口是 `refresh_public_analytics_cache()`，请求期不应扫描原始 `history` 生成趋势点。
 认证安全审计写入私有 `auth_security_events`；表内只保存请求者 / 邮箱 hash、风险桶、CAPTCHA 摘要和脱敏 metadata，不保存原始邮箱、密码、验证码 token、`game_uid` 或用户私密标识。
 邮件 outbox 入队入口是 `enqueue_mail_outbox_event()`；该函数只授权给 `service_role`，用于原子检查预算桶、写入脱敏 `mail_outbox` 行并递增 `mail_abuse_budget_counters`，不负责真实发信。
 邮件登录使用 `email_login` 事件类型；该类型由 `123_add_email_login_mail_event_type.sql` 加入 `mail_outbox` 和 `mail_abuse_budget_config` 约束及默认预算。

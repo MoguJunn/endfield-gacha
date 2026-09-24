@@ -1738,8 +1738,18 @@
     white-space: normal;
   }
 }
-/* Content width is shared by all desktop routes in desktopPageLayout.css.
-   Home-specific card heights and typography continue to follow viewport size. */
+/* Large desktop home only: share space between guidance and useful content.
+   Keep the 1366 × 768 layout and other desktop workspaces unchanged. */
+@media (min-width: 1920px) {
+  .dp-shell.dh-shell {
+    --desktop-content-width: clamp(1366px, 78vw, 1920px);
+  }
+}
+@media (min-width: 3000px) {
+  .dp-shell.dh-shell {
+    --desktop-content-width: min(74vw, 2560px);
+  }
+}
 @media (min-width: 1920px) and (min-height: 1000px) {
   .dh-home {
     --dh-card-area-height: clamp(540px, 54dvh, 1280px);
