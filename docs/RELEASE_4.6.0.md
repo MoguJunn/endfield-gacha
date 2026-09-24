@@ -1,6 +1,6 @@
 # v4.6.0 发布说明
 
-本次将已验收的桌面前端预览纳入主线，主站版本统一为 `4.6.0`。首次使用教程与首页指南优化已登记为 `ONBOARDING-GUIDE-001`，仍待开始。
+本次将已验收的桌面前端纳入主线，主站版本统一为 `4.6.0`；PR #32 随后完成默认新版主页与新旧切换。首次使用教程与首页指南优化已登记为 `ONBOARDING-GUIDE-001`，仍待开始。
 
 ## 交付范围
 
@@ -9,7 +9,13 @@
 - 个人概览、卡池分析与全服统计分离，菜单可收起，增加页面动效与减少动态效果支持。
 - 主站 `package.json`、锁文件、版本默认值、沙盒版本及当前文档同步；历史标签、历史迁移及独立后端版本保留各自含义。
 
-这些桌面入口仍同时要求 Vite DEV 和 `home-demo=unified`，生产默认首页与移动端原入口保持原行为。验收合同见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
+新版为桌面生产默认入口，无有效偏好时直接启用；首页提供“切换至经典主页 / 切换至新版主页”，选择保存在当前浏览器的 `gacha_home_experience_v1`。旧 `home-demo=unified` 链接继续打开新版，移动端保持原行为。验收合同见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
+
+## 发布结果
+
+- [PR #31](https://github.com/MoguJunn/endfield-gacha/pull/31) 合并提交为 `9babb6c3`，标签 `v4.6.0` 保留在该提交。
+- [PR #32](https://github.com/MoguJunn/endfield-gacha/pull/32) 将主页切换修复合并至 `fca9314b`，本地 main 与 origin/main 已同步。修复分支经祖先关系核验后已删除本地与远端引用。
+- 两轮 PR 与主线 CI 均通过，GitHub 自动触发的生产部署已 Ready，正式域名已核对指向 PR #32 部署。标签没有随修复移动。
 
 ## 共同贡献
 
@@ -21,7 +27,7 @@ Co-authored-by: Neptune-520 <69883987+Neptune-520@users.noreply.github.com>
 
 ## 验证
 
-在从已提交代码建立的隔离工作树中完成：
+PR #31 在从已提交代码建立的隔离工作树中完成：
 
 - ESLint 通过。
 - `npm test` 公共验证链通过，包含 baseline 内容与覆盖范围检查。
@@ -31,10 +37,12 @@ Co-authored-by: Neptune-520 <69883987+Neptune-520@users.noreply.github.com>
 
 原工作区中未提交的英文同步、验证码和旧文档候选不属于本次发布。之前混合工作树的英文名断言失败不出现在本次隔离测试中。GitHub CI、合并提交与部署证据在发布 PR 及工作区交接文档中追踪，不用历史结果冒充当前线上验证。
 
+PR #32 另通过主页偏好与消息中心 8 项定向测试、完整 lint、包含抽奖子应用的完整构建及 CI。生产构建浏览器验证覆盖默认新版、切换、刷新保持及旧链接兼容；正式站点验证默认新版、双向切换和经典偏好刷新保持。浏览器测试在临时上下文中预设启动校验的有效时间，仅验证进入站点后的页面交互，不作为真实验证码验证证据。
+
 ## 运行时版本同步
 
-页面优先读取后台 `site_config.site_version`，包版本仅为缺省值。生产只读核验仍为 `v4.5.4` / `Build 2026.06.04`；更新 Git 不会自动修改这两项配置。
+页面优先读取后台 `site_config.site_version`，包版本仅为缺省值；更新 Git 不会自动修改这两项配置。
 
-生产配置同步需在 v4.6.0 部署 Ready 后，按已有后台站点配置入口将 `site_version` 改为 `v4.6.0`、`build_info` 改为 `Build 2026.09.05`，再刷新 `public_cache_epoch` 并核对公开 bootstrap。此操作只更新发布元数据，不涉及 schema 迁移或用户数据；执行授权与 Git 合并分别记录。
+生产部署 Ready 后，已按用户单独确认，在事务中将 `site_version` 更新为 `v4.6.0`、`build_info` 更新为 `Build 2026.09.05`，并刷新 `public_cache_epoch`。当次公开 bootstrap 核验返回正确版本，缓存版本为 `1788625791811`，partial / stale 均为 false；该缓存值为版本同步时快照，后续内容发布可继续更新。此操作仅更新发布元数据，不涉及 schema 迁移或用户数据。
 
 新安装环境执行现有 baseline 后也应通过后台设置当前站点版本。迁移 158 与 baseline 中的历史版本记录用于重建既有迁移链，不修改其历史内容。

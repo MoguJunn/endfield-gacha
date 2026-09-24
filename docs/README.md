@@ -2,13 +2,19 @@
 
 仓库内的补充文档统一收口到 `docs/`：
 
+当前准备版本为 `v4.6.2`：本地实现已准备，生产迁移、Worker、v4 快照预热及发布证据仍待完成。历史版本文档保留当时事实。
+
 - `docs/ARCHITECTURE.md`：整体架构、公共 / 私有 / admin 边界、缓存、自动化和数据库分层
 - `docs/AUTH_SECURITY_HARDENING.md`：Phase A–D 本地候选、认证不变量、迁移重编号、真实浏览器回归和发布门禁
 - `docs/PROJECT_GUIDE.md`：部署、环境变量、数据库维护、静态资源和 changelog 摘要
 - `docs/CODEMAP.md`：代码入口和主要模块索引
-- `docs/DESKTOP_HOME_DEMO.md`：随 v4.6.0 纳入主线的桌面首页 / 导航预览、1366×768 布局、个人与全服统计拆分、统一消息弹窗、独立版本主题接口及 DEV 限制
+- `docs/DESKTOP_HOME_DEMO.md`：默认新版桌面主页与经典版切换、1366×768 布局、个人与全服统计拆分、统一消息弹窗及独立版本主题接口
 - `docs/RELEASE_4.6.0.md`：v4.6.0 交付范围、贡献署名、版本验证及运行时配置同步
-- `docs/ONBOARDING_GUIDE_PLAN.md`：首次使用教程与首页指南优化任务，记录目标、与 UX-011 的分工和验收；待开始
+- `docs/RELEASE_4.6.2.md`：本轮五类合池、十图、旧指标迁移、全页宽度、已有验证与生产启用门禁
+- `docs/STATS_OBSERVATION_CONTRACT.md`：单池／合池首次样本、去重账号覆盖、旧指标与资源口径、理论边界
+- `docs/STATISTICS_SCHEDULING.md`：v4 快照、5/30/60 分钟调度、生产迁移和预热顺序、只读本地预览
+- `docs/STATS_BRANCH_SCOPE.md`：统计与指南实现范围、阶段提交和未完成边界
+- `docs/ONBOARDING_GUIDE_PLAN.md`：首次使用教程与首页指南优化任务；已有开发预览，真实业务动作待接入
 - `docs/PERSONAL_ANALYSIS_WORKER.md`：个人分析快照队列、Supabase `pg_cron + pg_net` 调度、应急入口与生产核验
 - `docs/CLOSEOUT_LEDGER.md`：已上线但仍依赖 placeholder / fallback / 隐藏入口的功能收口总账
 - `docs/ACCOUNT_ALL_CLOSEOUT.md`：全部账号汇总的保留、关闭和重新开放条件
@@ -29,7 +35,7 @@
 - 整体架构、公共缓存、自动化和数据库边界放在 `docs/ARCHITECTURE.md`
 - 认证目标架构、候选验证证据、GitHub 回归和生产边界放在 `docs/AUTH_SECURITY_HARDENING.md`
 - `supabase/README.md` 负责数据库迁移链、baseline 与手工脚本说明
-- 桌面 Demo 的布局、路由、交互与验收维护在 `docs/DESKTOP_HOME_DEMO.md`；主文档只给出入口和边界，明确区分本地验收与正式发布，不用预览截图替换正式站展示
+- 新版桌面的布局、路由、主页偏好与验收维护在 `docs/DESKTOP_HOME_DEMO.md`；本轮发布提交、CI 与生产验证维护在 `docs/RELEASE_4.6.2.md`，`docs/RELEASE_4.6.0.md` 与早期预览截图保留历史含义
 - 与当前运行状态冲突的“历史计划 / 旧部署方式”不要继续保留在主文档正文里
 - 认证文档必须区分本地候选、真实浏览器回归、授权后集成与生产部署；候选 migration 文件名不等于最终生产编号
 - 新增迁移、CI、Serverless 路由、字体链、公告采集链或公共缓存版本后，应同步更新对应专题文档，而不是把细节塞回根 README
