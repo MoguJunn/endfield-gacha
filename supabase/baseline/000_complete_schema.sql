@@ -5,7 +5,7 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-09-24T06:24:17.577Z
+--   4. 生成时间: 2026-09-24T07:29:51.561Z
 --   5. 覆盖范围: archive/001_init_tables.sql -> active/2026092401_group_statistics_snapshots.sql
 -- ============================================
 
@@ -36537,6 +36537,66 @@ NOTIFY pgrst, 'reload schema';
 COMMIT;
 -- <<< END MIGRATION: active/195_reconcile_official_rerun_weapon_pool.sql
 
+-- >>> BEGIN MIGRATION: active/196_skip_existing_import_pool_insert.sql
+-- An INSERT ... ON CONFLICT DO NOTHING still fires statement-level catalog
+-- triggers when every pool exists. Avoid that statement entirely on reimports.
+-- Preserve the deployed atomic history/task and pool-version contracts.
+DO $migration$
+DECLARE
+  v_definition TEXT;
+  v_original TEXT := '  INSERT INTO public.pools (';
+  v_guard TEXT := $guard$  IF EXISTS (
+    SELECT 1 FROM jsonb_array_elements(v_pools) AS candidate(value)
+    WHERE NULLIF(btrim(candidate.value->>'pool_id'), '') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM public.pools AS existing
+        WHERE existing.pool_id = candidate.value->>'pool_id'
+      )
+  ) THEN
+  INSERT INTO public.pools ($guard$;
+BEGIN
+  v_definition := pg_get_functiondef('public.commit_official_import_records(uuid,uuid,jsonb,jsonb)'::REGPROCEDURE);
+  IF position('FROM jsonb_array_elements(v_pools) AS candidate(value)' IN v_definition) > 0 THEN
+    RETURN;
+  END IF;
+  IF position(v_original IN v_definition) = 0
+    OR position('  GET DIAGNOSTICS v_pool_count = ROW_COUNT;' IN v_definition) = 0 THEN
+    RAISE EXCEPTION 'official import pool insertion contract unrecognized';
+  END IF;
+  v_definition := replace(v_definition, v_original, v_guard);
+  v_definition := replace(v_definition,
+    '  GET DIAGNOSTICS v_pool_count = ROW_COUNT;',
+    E'  GET DIAGNOSTICS v_pool_count = ROW_COUNT;\n  END IF;');
+  EXECUTE v_definition;
+END;
+$migration$;
+
+NOTIFY pgrst, 'reload schema';
+-- <<< END MIGRATION: active/196_skip_existing_import_pool_insert.sql
+
+-- >>> BEGIN MIGRATION: active/197_fix_statistics_catalog_safe_update.sql
+-- The optional statistics rollout can remain deployed after the application
+-- rollback. Its catalog trigger must work under PostgREST's safeupdate library.
+DO $migration$
+DECLARE
+  v_function REGPROCEDURE := to_regprocedure('public.invalidate_statistics_catalog()');
+  v_definition TEXT;
+  v_old TEXT := 'UPDATE public.statistics_jobs SET revision=revision+1;';
+  v_new TEXT := 'UPDATE public.statistics_jobs SET revision=revision+1 WHERE scope_key IS NOT NULL;';
+BEGIN
+  IF v_function IS NULL THEN RETURN; END IF;
+  v_definition := pg_get_functiondef(v_function);
+  IF position(v_new IN v_definition) > 0 THEN RETURN; END IF;
+  IF position(v_old IN v_definition) = 0 THEN
+    RAISE EXCEPTION 'statistics catalog revision update contract unrecognized';
+  END IF;
+  -- scope_key is the non-null primary key: every job is still invalidated.
+  EXECUTE replace(v_definition, v_old, v_new);
+END;
+$migration$;
+NOTIFY pgrst, 'reload schema';
+-- <<< END MIGRATION: active/197_fix_statistics_catalog_safe_update.sql
+
 -- >>> BEGIN MIGRATION: active/2026092201_schedule_statistics_snapshots.sql
 -- Persistent, adaptive statistics. Public payloads contain aggregates only;
 -- owner payloads are private and readable exclusively through authenticated server routes.
@@ -36612,7 +36672,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 BEGIN
   INSERT INTO public.statistics_jobs(scope_key) SELECT DISTINCT 'pool:'||pool_id FROM public.get_app_visible_pools()
     WHERE nullif(pool_id,'') IS NOT NULL ON CONFLICT DO NOTHING;
-  UPDATE public.statistics_jobs SET revision=revision+1;
+  UPDATE public.statistics_jobs SET revision=revision+1 WHERE scope_key IS NOT NULL;
   RETURN NULL;
 END $$;
 CREATE TRIGGER statistics_pool_catalog AFTER INSERT OR UPDATE OR DELETE ON public.pools FOR EACH STATEMENT EXECUTE FUNCTION public.invalidate_statistics_catalog();
@@ -36838,7 +36898,7 @@ BEGIN
     LEFT JOIN public.statistics_group_members() m ON m.scope_key=g.scope_key
     LEFT JOIN public.history h ON h.pool_id=m.pool_id GROUP BY g.scope_key
     ON CONFLICT(scope_key) DO UPDATE SET total_pulls=EXCLUDED.total_pulls;
-  UPDATE public.statistics_jobs SET revision=revision+1;
+  UPDATE public.statistics_jobs SET revision=revision+1 WHERE scope_key IS NOT NULL;
   RETURN NULL;
 END $$;
 

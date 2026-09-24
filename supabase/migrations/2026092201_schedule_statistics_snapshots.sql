@@ -72,7 +72,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 BEGIN
   INSERT INTO public.statistics_jobs(scope_key) SELECT DISTINCT 'pool:'||pool_id FROM public.get_app_visible_pools()
     WHERE nullif(pool_id,'') IS NOT NULL ON CONFLICT DO NOTHING;
-  UPDATE public.statistics_jobs SET revision=revision+1;
+  UPDATE public.statistics_jobs SET revision=revision+1 WHERE scope_key IS NOT NULL;
   RETURN NULL;
 END $$;
 CREATE TRIGGER statistics_pool_catalog AFTER INSERT OR UPDATE OR DELETE ON public.pools FOR EACH STATEMENT EXECUTE FUNCTION public.invalidate_statistics_catalog();

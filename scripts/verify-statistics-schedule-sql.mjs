@@ -115,6 +115,11 @@ await db.exec(`
   UPDATE pools SET extra_series_key='rc1',extra_series_phase=1 WHERE pool_id='rc';
 `);
 await db.exec(await readFile(new URL('../supabase/migrations/2026092401_group_statistics_snapshots.sql', import.meta.url), 'utf8'));
+// Migration 197 sorts before the optional date-named statistics migrations.
+// Installing those later must preserve the safeupdate-compatible definition.
+const catalogDefinition = (await db.query("SELECT pg_get_functiondef('public.invalidate_statistics_catalog()'::regprocedure) AS source")).rows[0].source;
+assert.ok(catalogDefinition.includes('revision=revision+1 WHERE scope_key IS NOT NULL;'));
+await db.exec(await readFile(new URL('../supabase/migrations/197_fix_statistics_catalog_safe_update.sql', import.meta.url), 'utf8'));
 // The snapshot-version upgrade must mark every pre-existing scope dirty and
 // immediately claimable so pool (legacy section), owner (groups section), group
 // and legacy payloads are rebuilt exactly once.

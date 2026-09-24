@@ -53,7 +53,7 @@ BEGIN
     LEFT JOIN public.statistics_group_members() m ON m.scope_key=g.scope_key
     LEFT JOIN public.history h ON h.pool_id=m.pool_id GROUP BY g.scope_key
     ON CONFLICT(scope_key) DO UPDATE SET total_pulls=EXCLUDED.total_pulls;
-  UPDATE public.statistics_jobs SET revision=revision+1;
+  UPDATE public.statistics_jobs SET revision=revision+1 WHERE scope_key IS NOT NULL;
   RETURN NULL;
 END $$;
 
