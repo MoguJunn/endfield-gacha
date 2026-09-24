@@ -68,14 +68,18 @@ function appendAuthDiagnostic(errorMessage, err) {
   return `${errorMessage}（诊断：${readable} / ${reason}）`;
 }
 
-function normalizeImportError(err, t) {
+export function normalizeImportError(err, t) {
   let errorMessage = err.message || t('import.error.unknown');
 
   if (err instanceof ServerConnectionError) {
     errorMessage = t('import.error.serverConnection', { message: err.message });
   } else if (err instanceof RiskControlError) {
     errorMessage = t('import.error.riskControl');
-  } else if (err instanceof AuthChainError) {
+  } else if (err instanceof AuthChainError && (
+    ['auth', 'session', 'grant', 'bindings', 'u8token'].includes(err.step)
+    || err.data?.code === 'AUTH_SESSION_INVALID'
+    || err.data?.auth?.reason
+  )) {
     errorMessage = t('import.error.authFailed', { message: err.message });
   }
 

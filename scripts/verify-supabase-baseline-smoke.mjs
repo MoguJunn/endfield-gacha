@@ -1743,7 +1743,7 @@ async function main() {
       /-- >>> BEGIN MIGRATION: ([^\n]+)\n[\s\S]*?-- <<< END MIGRATION: \1/g,
       (block, name) => {
         const number = Number(path.basename(name).match(/^\d+/)?.[0]);
-        return number >= 190 && number !== 194 && number !== 195 ? '' : block;
+        return number >= 190 && ![194, 195, 196, 197].includes(number) ? '' : block;
       }
     );
   }
@@ -1790,6 +1790,12 @@ async function main() {
         { input: `INSERT INTO auth.users (id, email) VALUES ('00000000-0000-0000-0000-000000000001', 'period@example.com');\n${buildOfficialImportCommitFixtureSql()}\n${periodSql}` }
       );
       console.log('- migration 194 period contract: OK');
+      const existingPoolSql = await readFile(path.join(projectRoot, 'supabase', 'tests', 'official-import-existing-pools.sql'), 'utf8');
+      await run('docker',
+        ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName],
+        { input: existingPoolSql }
+      );
+      console.log('- migration 196 existing/new/empty pool statement triggers: OK');
 
       const promotionSql = await readFile(path.join(projectRoot, 'supabase', 'tests', 'reconstruction-rerun-promotion.sql'), 'utf8');
       const promotionVerification = await run('docker',
@@ -1827,7 +1833,7 @@ async function main() {
         );
       }
       console.log('- migration 195 second run idempotency: OK');
-      console.log('[verify-history-pool-version] PostgreSQL contract OK (baseline through 189 + migrations 194/195)');
+      console.log('[verify-history-pool-version] PostgreSQL contract OK (baseline through 189 + migrations 194–197; optional statistics absent)');
       return;
     }
 
