@@ -17,7 +17,7 @@
 
 | 页面 | 桌面端 | 移动端 |
 |------|--------|--------|
-| 首页 | `src/components/home/HomePage.jsx` | `src/mobile/views/MobileHomePageView.jsx` |
+| 首页 | `src/components/home/DesktopHomeDemo.jsx`（默认） / `HomePage.jsx`（经典） | `src/mobile/views/MobileHomePageView.jsx` |
 | 全服统计 | `src/components/SummaryView.jsx` | `src/mobile/views/MobileSummaryView.jsx` |
 | 卡池详情 | `src/components/app/DesktopDashboardWorkspace.jsx` | `src/mobile/views/MobileDashboardView.jsx` |
 | 模拟器 | `src/features/simulator/GachaSimulator.jsx` | `src/mobile/views/MobileSimulatorView.jsx` |
@@ -25,11 +25,12 @@
 | 工单 | `src/components/TicketPanel.jsx` | `src/mobile/views/MobileTicketView.jsx` |
 | 后台 | `src/components/AdminPanel.jsx` | `src/mobile/views/MobileAdminView.jsx` |
 
-### 本地桌面 Demo 入口
+### 新版桌面入口与主页偏好
 
-以下桌面 Demo 入口随 `v4.6.0` 纳入主线，仅在 Vite DEV 且 `home-demo=unified` 时激活。原页面入口继续保留；布局、路由和数据合同详见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
+以下新版桌面入口已作为生产默认发布，经典主页可通过按钮切换。旧 `home-demo=unified` 链接继续兼容；布局、路由和数据合同详见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
 
-- 预览选择与消息接线：`src/GachaAnalyzer.jsx`、`src/components/app/DesktopAppRoutes.jsx`。
+- 主页选择与消息接线：`src/GachaAnalyzer.jsx`、`src/components/app/DesktopAppRoutes.jsx`。
+- 偏好解析与旧查询参数清理：`src/utils/homeExperience.js`；存储键：`src/utils/storageUtils.js`；测试：`src/utils/__tests__/homeExperience.test.js`。
 - 桌面首页、卡池与日程适配：`src/components/home/DesktopHomeDemo.jsx`、`desktopHomeDemo.css`、`desktopHomeData.js`。
 - 顶栏、独立工单 / 管理入口、身份与主题菜单：`src/components/home/HomeLandingHeader.jsx`、`homeLandingDemo.css`。
 - 原生轮换与活动卡：`src/components/home/RotationScheduleCard.jsx`、`SummerLotteryBanner.jsx`。
