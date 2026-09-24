@@ -4,7 +4,7 @@ import { resolvePoolCapabilities } from '../../src/utils/poolCapabilities.js';
 import { readScheduledStatistic } from './scheduledStatistics.js';
 
 const PAGE_SIZE = 1000;
-const HISTORY_FIELDS = 'id,record_id,user_id,game_uid,server_scope,server_id,region,pool_id,character_id,character_name,rarity,timestamp,seq_id,is_new,is_free,is_info_book,special_type';
+const HISTORY_FIELDS = 'id,record_id,user_id,game_uid,server_scope,server_id,region,pool_id,pool_version,character_id,character_name,rarity,timestamp,seq_id,is_new,is_free,is_info_book,special_type';
 
 export async function readPoolObservationAggregate(supabase, poolId, { maxRows = Infinity, signal } = {}) {
   const { data: pool, error: poolError } = await supabase.from('pools')
