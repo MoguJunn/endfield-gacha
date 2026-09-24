@@ -5,17 +5,18 @@
 export const OBSERVATION_RULE_VERSION = 'pool-observation-v3';
 const KINDS = new Set(['pull', 'free', 'infoBook', 'gift']);
 
-function summarizeCosts(samples) {
-  const frequencies = new Map();
-  for (const cost of samples) frequencies.set(cost, (frequencies.get(cost) || 0) + 1);
+function summarizeCosts(frequencies) {
+  let sampleCount = 0;
+  let sum = 0;
+  for (const [cost, count] of frequencies) { sampleCount += count; sum += cost * count; }
   let cumulative = 0;
   const points = [...frequencies].sort(([a], [b]) => a - b).map(([cost, count]) => {
     cumulative += count;
-    return { cost, count, cumulativeRate: cumulative / samples.length };
+    return { cost, count, cumulativeRate: cumulative / sampleCount };
   });
   return {
-    sampleCount: samples.length,
-    mean: samples.length ? samples.reduce((sum, value) => sum + value, 0) / samples.length : null,
+    sampleCount,
+    mean: sampleCount ? sum / sampleCount : null,
     points,
   };
 }
@@ -34,7 +35,7 @@ export function buildPoolObservations({
   if (!['verified-prefix', 'stored-period'].includes(firstBasis)) throw new Error('Invalid first acquisition basis');
   const complete = new Set(completeAccounts);
   const byAccount = new Map();
-  const seen = new Set();
+  const seen = new Map();
   for (const record of records) {
     if (!record.accountKey || !record.poolId || (!record.itemId && record.itemId !== null) || !record.id
       || !KINDS.has(record.kind) || !Number.isFinite(record.timestamp)
@@ -42,16 +43,18 @@ export function buildPoolObservations({
       || ![true, false, null].includes(record.newItem)) {
       throw new Error('Observation records must have normalized identity, order and kind');
     }
-    const key = JSON.stringify([record.accountKey, record.id]);
-    if (seen.has(key)) throw new Error('Duplicate observation record');
-    seen.add(key);
+    if (!seen.has(record.accountKey)) seen.set(record.accountKey, new Set());
+    const accountSeen = seen.get(record.accountKey);
+    if (accountSeen.has(record.id)) throw new Error('Duplicate observation record');
+    accountSeen.add(record.id);
     if (accountKey !== null && record.accountKey !== accountKey) continue;
     if (!byAccount.has(record.accountKey)) byAccount.set(record.accountKey, []);
     byAccount.get(record.accountKey).push(record);
   }
 
   const items = new Map();
-  const accountHits = [];
+  seen.clear();
+  const obtainingAccounts = new Map();
   const rarityCounts = new Map();
   let total = 0;
   let free = 0;
@@ -62,14 +65,15 @@ export function buildPoolObservations({
   const ensureItem = (record) => {
     if (!items.has(record.itemId)) items.set(record.itemId, {
       itemId: record.itemId, rarity: record.rarity, count: 0,
-      first: [], repeat: [], unknownClassification: 0, unknownCost: 0,
+      first: new Map(), repeat: new Map(), unknownClassification: 0, unknownCost: 0,
       repeatUnfinished: 0,
     });
     return items.get(record.itemId);
   };
 
   for (const [key, accountRecords] of byAccount) {
-    const timeline = [...accountRecords].sort((a, b) => a.timestamp - b.timestamp || a.sequence - b.sequence);
+    // Buckets are owned by this calculation; sorting them does not mutate input.
+    const timeline = accountRecords.sort((a, b) => a.timestamp - b.timestamp || a.sequence - b.sequence);
     const hasPoolRecords = timeline.some((row) => row.poolId === poolId && row.kind !== 'gift');
     if (!hasPoolRecords) continue;
     participatingAccounts++;
@@ -99,14 +103,17 @@ export function buildPoolObservations({
         const cost = last !== undefined ? unknownBefore > last ? null : pullCount - last : canStart ? pullCount : null;
         if (isFirst === null) item.unknownClassification++;
         else if (cost === null) item.unknownCost++;
-        else item[isFirst ? 'first' : 'repeat'].push(cost);
+        else {
+          const frequencies = item[isFirst ? 'first' : 'repeat'];
+          frequencies.set(cost, (frequencies.get(cost) || 0) + 1);
+        }
         previous.set(record.itemId, pullCount);
       }
     }
     for (const [itemId, last] of previous) {
       if (last < pullCount) items.get(itemId).repeatUnfinished++;
+      obtainingAccounts.set(itemId, (obtainingAccounts.get(itemId) || 0) + 1);
     }
-    accountHits.push(new Set(previous.keys()));
   }
 
   return {
@@ -117,7 +124,7 @@ export function buildPoolObservations({
       .map(([rarity, count]) => ({ rarity, count, rate: count / total })),
     items: [...items.values()].map((item) => ({
       ...item, rate: item.count / total,
-      nonObtainingAccounts: accountHits.filter((hits) => !hits.has(item.itemId)).length,
+      nonObtainingAccounts: participatingAccounts - obtainingAccounts.get(item.itemId),
       first: summarizeCosts(item.first), repeat: summarizeCosts(item.repeat),
     })).sort((a, b) => b.rarity - a.rarity || b.count - a.count || a.itemId.localeCompare(b.itemId)),
   };

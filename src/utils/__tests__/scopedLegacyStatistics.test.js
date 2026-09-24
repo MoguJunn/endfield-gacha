@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildScopedLegacyStatistics } from '../scopedLegacyStatistics.js';
+import { buildScopedLegacyStatistics, prepareScopedLegacyStatistics } from '../scopedLegacyStatistics.js';
 import { storedAccountKey } from '../storedPoolObservations.js';
 import { buildScopedPaidHistoryTimeline } from '../poolScopedHistory.js';
 
@@ -31,6 +31,27 @@ const run = (history, memberPoolIds = ['new'], extra = {}) =>
   buildScopedLegacyStatistics({ history, pools, characters, memberPoolIds, ...extra });
 
 describe('buildScopedLegacyStatistics', () => {
+  it('reuses compressed contributions while preserving inherited pity and invalid-only accounts', () => {
+    const history = [row(1, 'old', { rarity: 6, character_name: 'Alpha' }), row(2, 'old'),
+      row(3, 'new', { rarity: 6, character_name: 'Beta' }),
+      row(4, 'new', { game_uid: 'invalid-only', gacha_time: 'invalid' })];
+    const original = structuredClone(history);
+    const prepared = prepareScopedLegacyStatistics({ history, pools, characters });
+    const args = { memberPoolIds: ['new'] };
+    const expected = prepared.build(args);
+    expect(expected).toMatchObject({ regularTotal: 1, targetCount: 1, avgSixStarInterval: 2,
+      meta: { participatingAccounts: 1, exclusions: { invalidTime: 1 } } });
+    expect(prepared.build({ ...args, accountKey: storedAccountKey(history[3]) })).toMatchObject({
+      regularTotal: 0, meta: { participatingAccounts: 0, exclusions: { invalidTime: 1 } } });
+    expect(history).toEqual(original);
+    history.length = 0;
+    const altered = prepared.build(args);
+    altered.intervalDistribution.length = 0;
+    altered.resources.jadeSpent = -1;
+    expect(prepared.build(args)).toEqual(expected);
+    expect(prepared.build({ memberPoolIds: ['old', 'new'] })).toMatchObject({ regularTotal: 3,
+      avgSixStarInterval: 1.5, meta: { intervalCount: 2, boundaryIntervalCount: 1 } });
+  });
   it('returns finite empty resources and explicit unknown interval boundaries', () => {
     expect(run([])).toMatchObject({
       regularTotal: 0, sixStarCount: 0, sixStarRate: 0, targetCount: 0, offTargetCount: 0,

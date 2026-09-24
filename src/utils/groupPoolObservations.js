@@ -1,5 +1,4 @@
-import { buildStoredPoolObservations, storedAccountKey } from './storedPoolObservations.js';
-import { compareHistoryTimelineAsc, getHistoryTimelineTimestampMs } from './historyTimelineSort.js';
+import { prepareStoredPoolObservations, createStoredObservationDirectory, storedAccountKey } from './storedPoolObservations.js';
 import { getStatisticsGroup, getStatisticsGroupPools, statisticsCategoryDefinitions, statisticsItemCategory, statisticsMemberSignature } from '../../shared/statisticsScopes.js';
 
 function summarize(frequencies) {
@@ -22,23 +21,25 @@ export function buildGroupPoolObservations({ history, pools, groupKey, directory
   const members = getStatisticsGroupPools(pools, groupKey);
   const memberById = new Map(members.map((pool) => [pool.id, pool]));
   const directoryById = new Map(directory.map((item) => [String(item.id), item]));
-  const timelines = new Map();
-  const seen = new Set();
-  let duplicate = 0;
-  for (const row of history.slice().sort(compareHistoryTimelineAsc)) {
+  const byAccount = new Map();
+  for (const row of history) {
     const poolId = String(row.poolId ?? row.pool_id ?? '');
     if (!memberById.has(poolId)) continue;
     const key = storedAccountKey(row);
     if (accountKey && key !== accountKey) continue;
-    const id = String(row.record_id ?? row.id ?? '');
-    if (key && id && getHistoryTimelineTimestampMs(row) && [4, 5, 6].includes(Number(row.rarity))) {
-      const identity = JSON.stringify([key, id]);
-      if (seen.has(identity)) { duplicate++; continue; }
-      seen.add(identity);
+    if (!byAccount.has(key)) byAccount.set(key, { rows: [], poolIds: new Set() });
+    byAccount.get(key).rows.push(row);
+    byAccount.get(key).poolIds.add(poolId);
+  }
+  const directoryIndex = createStoredObservationDirectory({ directory, entityType: group.entityType });
+  function* timelines() {
+    for (const [key, account] of byAccount) {
+      // Sort/deduplicate once per account; release normalized rows before moving
+      // to the next account. Only frequencies and counters survive aggregation.
+      const read = prepareStoredPoolObservations({ history: account.rows, directory, entityType: group.entityType, directoryIndex });
+      for (const poolId of account.poolIds) yield { key, poolId, stats: read(poolId) };
+      byAccount.delete(key);
     }
-    const timelineKey = JSON.stringify([key, poolId]);
-    if (!timelines.has(timelineKey)) timelines.set(timelineKey, { key, poolId, rows: [] });
-    timelines.get(timelineKey).rows.push(row);
   }
   const categories = new Map(statisticsCategoryDefinitions(group.entityType).map((item) => [item.itemId, {
     ...item, rarity: 6, count: 0, first: new Map(), repeat: new Map(), accounts: new Set(),
@@ -47,15 +48,15 @@ export function buildGroupPoolObservations({ history, pools, groupKey, directory
   const accounts = new Set();
   const rarityCounts = new Map();
   const memberCounts = new Map(members.map((pool) => [pool.id, 0]));
-  const meta = { excludedRecords: duplicate, exclusions: { missingIdentity: 0, invalidTime: 0, invalidRarity: 0, duplicate },
+  const meta = { excludedRecords: 0, exclusions: { missingIdentity: 0, invalidTime: 0, invalidRarity: 0, duplicate: 0 },
     matchedByName: 0, unidentifiedRecords: 0, unidentifiedByRarity: { 4: 0, 5: 0, 6: 0 },
     prefixVerified: false, firstBasis: 'stored-period', costBasis: 'stored-results',
     firstRecordAt: null, lastRecordAt: null, sampleBasis: 'account-period-item', coverageBasis: 'distinct-account',
     memberSignature: statisticsMemberSignature(members) };
   let total = 0; let free = 0; let infoBook = 0; let resources = 0;
-  for (const timeline of timelines.values()) {
+  for (const timeline of timelines()) {
     const pool = memberById.get(timeline.poolId);
-    const stats = buildStoredPoolObservations({ history: timeline.rows, poolId: pool.id, directory, entityType: group.entityType });
+    const stats = timeline.stats;
     total += stats.total; free += stats.free; infoBook += stats.infoBook; resources += stats.resources;
     memberCounts.set(pool.id, memberCounts.get(pool.id) + stats.total);
     if (stats.total) accounts.add(timeline.key);

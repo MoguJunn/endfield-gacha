@@ -15,7 +15,7 @@ import {
   createEmptyQuotaSummary,
   QUOTA_RULES,
 } from './quotaEconomy.js';
-import { buildCapabilityAwarePoolResourceSummary } from './resourceEconomy.js';
+import { buildResourceSummaryFromAggregates, DEFAULT_RESOURCE_RULES } from './resourceEconomy.js';
 import { statisticsTargetReferences } from '../../shared/statisticsScopes.js';
 
 // 与 storedPoolObservations 相同的有效稀有度集合，invalid 记录一律不进入统计。
@@ -180,25 +180,23 @@ function createPoolResolver() {
   };
 }
 
-/**
- * 仅用于完整保存历史（不可传 UI 分页或已过滤切片）。账号隔离与
- * 有效性校验（id、时间、4/5/6、按账号 record_id 去重）与
- * storedPoolObservations 保持一致；比率是 0~1 的小数，无样本的平均值为 null。
- * 每个账号的保底时间线从保存起点开始，meta 明确该边界不是完整游戏历史。
- * 输出只有聚合值，不含账号键与原始记录。
- */
-export function buildScopedLegacyStatistics({
-  history = [], pools = [], characters = [], memberPoolIds = [], accountKey = null,
-} = {}) {
-  const poolLookup = new Map();
+function buildPoolLookup(pools) {
+  const lookup = new Map();
   for (const pool of pools) {
     for (const alias of [pool?.id, pool?.pool_id]) {
       if (alias != null) {
-        poolLookup.set(String(alias), pool);
+        lookup.set(String(alias), pool);
       }
     }
   }
+  return lookup;
+}
 
+/**
+ * memberPoolIds 允许传池别名：成员集合同时包含传入值与这些池的规范 id，
+ * 与旧的 buildScopedLegacyStatistics 完全一致。
+ */
+function resolveMemberPoolIds(poolLookup, memberPoolIds) {
   const members = new Set();
   for (const memberId of memberPoolIds) {
     const id = String(memberId);
@@ -212,262 +210,493 @@ export function buildScopedLegacyStatistics({
       }
     }
   }
+  return members;
+}
 
-  const isSelected = (record) => {
-    const rawPoolId = String(getHistoryPoolId(record) ?? '');
-    if (members.has(rawPoolId)) {
-      return true;
-    }
-    const pool = poolLookup.get(rawPoolId);
-    return Boolean(pool) && members.has(String(getPoolRecordId(pool)));
+function createEmptyResourceAggregate() {
+  return {
+    characterPulls: 0,
+    weaponPulls: 0,
+    chargedCharacterPulls: 0,
+    chargedWeaponPulls: 0,
+    characterCounts: { 6: 0, '6_std': 0, 5: 0, 4: 0 },
   };
+}
 
+/**
+ * 逐池贡献保存的是「可加计数」而不是比率：同一任务内换范围时按成员池
+ * 求和后再算比率，避免对已经平均过的比率再平均。
+ */
+function createPoolContribution() {
+  return {
+    regularTotal: 0,
+    sixStarCount: 0,
+    targetCount: 0,
+    offTargetCount: 0,
+    unknownTargetCount: 0,
+    giftCount: 0,
+    missingSeriesSixStarCount: 0,
+    quota: createEmptyQuotaSummary(),
+    resourceAggregate: createEmptyResourceAggregate(),
+  };
+}
+
+function addResourceAggregate(target, addition) {
+  target.characterPulls += addition.characterPulls;
+  target.weaponPulls += addition.weaponPulls;
+  target.chargedCharacterPulls += addition.chargedCharacterPulls;
+  target.chargedWeaponPulls += addition.chargedWeaponPulls;
+  target.characterCounts[6] += addition.characterCounts[6];
+  target.characterCounts['6_std'] += addition.characterCounts['6_std'];
+  target.characterCounts[5] += addition.characterCounts[5];
+  target.characterCounts[4] += addition.characterCounts[4];
+}
+
+// 与 resourceEconomy 的记录判定保持一致：免费记录、赠送记录与信息书
+// 在池资源聚合里的处理必须逐字段复刻，避免两份规则漂移。
+function isResourceFreeRecord(record) {
+  return record?.isFree === true
+    || record?.is_free === true
+    || record?.isFreePull === true
+    || record?.is_free_pull === true;
+}
+
+function isResourceInfoBookRecord(record) {
+  return isInfoBookHistoryPull(record)
+    || record?.isInfoBookPull === true
+    || record?.is_info_book_pull === true
+    || record?.specialType === 'info_book'
+    || record?.special_type === 'info_book';
+}
+
+/**
+ * 与 buildCapabilityAwarePoolResourceSummary 的逐记录聚合完全等价：
+ * 赠送跳过、免费跳过（includeFreePulls=false）、武器只计抽数、
+ * 角色按 isStandard 拆分六星计数，聚合值可跨池相加。
+ */
+function addRecordResourceAggregate(aggregate, record, capabilities) {
+  if (isGiftHistoryPull(record)) {
+    return;
+  }
+  if (isResourceFreeRecord(record)) {
+    return;
+  }
+
+  const isWeapon = capabilities.entityType === 'weapon' || capabilities.basePoolType === 'weapon';
+  const isCharged = !isResourceInfoBookRecord(record);
+
+  if (isWeapon) {
+    aggregate.weaponPulls += 1;
+    if (isCharged) {
+      aggregate.chargedWeaponPulls += 1;
+    }
+    return;
+  }
+
+  aggregate.characterPulls += 1;
+  if (isCharged) {
+    aggregate.chargedCharacterPulls += 1;
+  }
+
+  const rarity = Number(record?.rarity) || 0;
+  if (rarity >= 6) {
+    aggregate.characterCounts[record?.isStandard ? '6_std' : 6] += 1;
+  } else if (rarity === 5) {
+    aggregate.characterCounts[5] += 1;
+  } else if (rarity > 0) {
+    aggregate.characterCounts[4] += 1;
+  }
+}
+
+function addExclusionCount(exclusionCountsByAccount, account, reason, rawPoolId, canonicalPoolId) {
+  let exclusionCounts = exclusionCountsByAccount.get(account);
+  if (!exclusionCounts) {
+    exclusionCounts = new Map();
+    exclusionCountsByAccount.set(account, exclusionCounts);
+  }
+
+  // 排除记录的统计范围只能在 build 时判断，因此按 (原因, 原始池 id, 规范池 id)
+  // 先聚合计数，范围确定后再决定是否计入 meta.exclusions。
+  const entryKey = JSON.stringify([reason, rawPoolId, canonicalPoolId]);
+  const entry = exclusionCounts.get(entryKey);
+  if (entry) {
+    entry.count += 1;
+    return;
+  }
+  exclusionCounts.set(entryKey, { reason, rawPoolId, canonicalPoolId, count: 1 });
+}
+
+/**
+ * 同一任务内复用：准备阶段只做与统计范围无关的工作（有效性校验、逐账号
+ * 时间线、信息书推断、拷贝顺序、保底分桶、资源与配额增量），并按账号 +
+ * 规范池 id 保存可加贡献。之后任意组合同一任务内多次调用 build，
+ * 不会再次复制历史、重排时间线或重复计算保底。
+ *
+ * 生命周期仅限本次计算：返回对象不持有原始/规范化历史记录，也不做跨任务缓存。
+ */
+export function prepareScopedLegacyStatistics({ history = [], pools = [], characters = [] } = {}) {
+  const poolLookup = buildPoolLookup(pools);
   const catalogIndex = buildCatalogIndex(characters);
   const resolvePool = createPoolResolver();
-  const accounts = new Map();
-  const seenRecordKeys = new Set();
-  const exclusions = {
-    missingIdentity: 0,
-    invalidTime: 0,
-    invalidRarity: 0,
-    duplicate: 0,
-    missingPool: 0,
-    unresolvedPool: 0,
-  };
+  const recordsByAccount = new Map();
+  const seenRecordKeysByAccount = new Map();
+  const exclusionEntriesByAccount = new Map();
 
   for (const original of history) {
     const account = storedAccountKey(original);
-    if (accountKey !== null && account !== accountKey) {
-      continue;
-    }
-
-    const rawPoolId = getHistoryPoolId(original);
+    const rawPoolId = String(getHistoryPoolId(original) ?? '');
     const recordKey = String(original.record_id ?? original.id ?? '');
     const timelineMs = getHistoryTimelineTimestampMs(original);
-    const pool = poolLookup.get(String(rawPoolId ?? ''));
-    const reason = !account || !rawPoolId || !recordKey
-      ? 'missingIdentity'
-      : !timelineMs
-        ? 'invalidTime'
-        : !VALID_RARITIES.includes(Number(original.rarity))
-          ? 'invalidRarity'
-          : !pool
-            ? 'missingPool'
-            : !resolvePool(pool).capabilities.isResolved
-              ? 'unresolvedPool'
-              : seenRecordKeys.has(JSON.stringify([account, recordKey]))
-                ? 'duplicate'
-                : null;
+    const pool = poolLookup.get(rawPoolId);
+    const canonicalPoolId = pool ? String(getPoolRecordId(pool)) : null;
+    const seenRecordKeys = account ? seenRecordKeysByAccount.get(account) : null;
+
+    let reason = null;
+    if (!account || !rawPoolId || !recordKey) {
+      reason = 'missingIdentity';
+    } else if (!timelineMs) {
+      reason = 'invalidTime';
+    } else if (!VALID_RARITIES.includes(Number(original.rarity))) {
+      reason = 'invalidRarity';
+    } else if (!pool) {
+      reason = 'missingPool';
+    } else if (!resolvePool(pool).capabilities.isResolved) {
+      reason = 'unresolvedPool';
+    } else if (seenRecordKeys?.has(recordKey)) {
+      reason = 'duplicate';
+    }
 
     if (reason) {
-      if (isSelected(original)) {
-        exclusions[reason] += 1;
-      }
+      addExclusionCount(exclusionEntriesByAccount, account, reason, rawPoolId, canonicalPoolId);
       continue;
     }
 
-    seenRecordKeys.add(JSON.stringify([account, recordKey]));
-    const normalized = {
-      ...original,
-      poolId: String(getPoolRecordId(pool)),
-      rarity: Number(original.rarity),
-      isInfoBookPull: isInfoBookHistoryPull(original)
-        || original?.isInfoBookPull === true
-        || original?.is_info_book_pull === true
-        || original?.specialType === 'info_book'
-        || original?.special_type === 'info_book',
-    };
-    // 数十万记录时，时间线排序的字符串日期解析是热点；只把合理量级的
-    // 已解析毫秒值回写成数值时间戳，排序结果与逐次解析完全一致。
-    if (timelineMs >= 1e12) {
-      normalized.timestamp = timelineMs;
+    if (seenRecordKeys) {
+      seenRecordKeys.add(recordKey);
+    } else {
+      seenRecordKeysByAccount.set(account, new Set([recordKey]));
     }
-    if (!accounts.has(account)) {
-      accounts.set(account, []);
+
+    const accountRecords = recordsByAccount.get(account);
+    if (accountRecords) {
+      accountRecords.push(original);
+    } else {
+      recordsByAccount.set(account, [original]);
     }
-    accounts.get(account).push(normalized);
   }
 
-  let regularTotal = 0;
-  let sixStarCount = 0;
-  let targetCount = 0;
-  let offTargetCount = 0;
-  let unknownTargetCount = 0;
-  let giftCount = 0;
-  let intervalSum = 0;
-  let intervalCount = 0;
-  let boundaryIntervalCount = 0;
-  let missingSeriesIntervalCount = 0;
-  let participatingAccounts = 0;
-  const distribution = new Map();
-  const quota = createEmptyQuotaSummary();
-  const selectedHistory = [];
+  seenRecordKeysByAccount.clear();
+  const accounts = new Map();
 
-  for (const accountHistory of accounts.values()) {
+  for (const [account, accountRecords] of recordsByAccount) {
+    // 只复制当前账号的记录，完成贡献压缩后即可释放，避免同时保留全量副本。
+    const normalized = accountRecords.map((original) => {
+      const pool = poolLookup.get(String(getHistoryPoolId(original)));
+      const row = { ...original, poolId: String(getPoolRecordId(pool)), rarity: Number(original.rarity),
+        isInfoBookPull: isResourceInfoBookRecord(original) };
+      const timelineMs = getHistoryTimelineTimestampMs(original);
+      if (timelineMs >= 1e12) row.timestamp = timelineMs;
+      return row;
+    });
+    recordsByAccount.delete(account);
     // 情报书抵扣与拷贝顺序都建立在完整账号历史上，不能被范围过滤或分页重置。
-    const timeline = annotateInfoBookPulls(accountHistory, pools).sort(compareHistoryTimelineAsc);
-    const copies = new Map();
-    const poolTimelines = new Map();
+    const timeline = annotateInfoBookPulls(normalized, pools).sort(compareHistoryTimelineAsc);
+    const contributions = new Map();
+    const poolBuckets = new Map();
     const sharedScopePools = new Map();
-    let hasSelectedRows = false;
+    const copies = new Map();
 
     for (const row of timeline) {
       const pool = poolLookup.get(String(getHistoryPoolId(row)));
       const { capabilities, scopeKey, scopeKind, targetReferences } = resolvePool(pool);
-      const selected = isSelected(row);
+      const canonicalPoolId = String(getPoolRecordId(pool));
+      let contribution = contributions.get(canonicalPoolId);
+      if (!contribution) {
+        contribution = createPoolContribution();
+        contributions.set(canonicalPoolId, contribution);
+      }
+
       const gift = isGiftHistoryPull(row);
       const paid = isPaidHistoryPull(row);
 
-      if (selected) {
-        hasSelectedRows = true;
-        selectedHistory.push(row);
-        if (gift) {
-          giftCount += 1;
-        }
-        if (paid) {
-          regularTotal += 1;
-          if (row.rarity === 6) {
-            sixStarCount += 1;
-            const classification = classifySixStarTarget(row, capabilities, targetReferences, catalogIndex);
-            if (classification === 'target') {
-              targetCount += 1;
-            } else if (classification === 'offTarget') {
-              offTargetCount += 1;
-            } else if (classification === 'unknown') {
-              unknownTargetCount += 1;
-            }
+      if (paid) {
+        contribution.regularTotal += 1;
+        if (row.rarity === 6) {
+          contribution.sixStarCount += 1;
+          const classification = classifySixStarTarget(row, capabilities, targetReferences, catalogIndex);
+          if (classification === 'target') {
+            contribution.targetCount += 1;
+          } else if (classification === 'offTarget') {
+            contribution.offTargetCount += 1;
+          } else if (classification === 'unknown') {
+            contribution.unknownTargetCount += 1;
           }
         }
       }
+      if (gift) {
+        contribution.giftCount += 1;
+      }
 
       // 免费抽同样产生配额；赠送只推进持有顺序，不产生任何资源。
-      if (selected && !gift && capabilities.bondQuotaPerPull
+      if (!gift && capabilities.bondQuotaPerPull
         && !row.isInfoBookPull && !isInfoBookHistoryPull(row)) {
-        quota.bondQuotaDirect += QUOTA_RULES.extraPullBondQuota;
+        contribution.quota.bondQuotaDirect += QUOTA_RULES.extraPullBondQuota;
       }
 
       // 付费时间线只分组一次：per-pool 按时间顺序入桶，shared/series 交给既有 helper
       // 复用同一套作用域规则，避免对每个池重复过滤和排序整段账号历史。
       if (paid) {
         if (!scopeKey) {
-          if (selected && row.rarity === 6) {
-            missingSeriesIntervalCount += 1;
+          if (row.rarity === 6) {
+            contribution.missingSeriesSixStarCount += 1;
           }
         } else if (scopeKind === 'pool') {
-          const bucket = poolTimelines.get(scopeKey);
+          const bucket = poolBuckets.get(scopeKey);
           if (bucket) {
             bucket.push(row);
           } else {
-            poolTimelines.set(scopeKey, [row]);
+            poolBuckets.set(scopeKey, [row]);
           }
         } else if (!sharedScopePools.has(scopeKey)) {
           sharedScopePools.set(scopeKey, pool);
         }
       }
 
+      addRecordResourceAggregate(contribution.resourceAggregate, row, capabilities);
+
       const identity = resolveCopyIdentity(row, catalogIndex, readEntityType(capabilities));
       if (!identity.key) {
         continue;
       }
       if (capabilities.entityType === 'weapon' || identity.item?.type === 'weapon') {
-        if (selected && !gift) {
-          addQuota(quota, calculateWeaponQuotaForCopy({ rarity: row.rarity }));
+        if (!gift) {
+          addQuota(contribution.quota, calculateWeaponQuotaForCopy({ rarity: row.rarity }));
         }
         continue;
       }
 
       const copyNumber = (copies.get(identity.key) || 0) + 1;
       copies.set(identity.key, copyNumber);
-      if (selected && !gift) {
-        addQuota(quota, calculateCharacterQuotaForCopy({ rarity: row.rarity, copyNumber }));
+      if (!gift) {
+        addQuota(contribution.quota, calculateCharacterQuotaForCopy({ rarity: row.rarity, copyNumber }));
       }
     }
 
-    if (!hasSelectedRows) {
-      continue;
-    }
-    participatingAccounts += 1;
-
-    const paidTimelines = [...poolTimelines.values()];
-    sharedScopePools.forEach((pool) => {
-      paidTimelines.push(buildScopedPaidHistoryTimeline({ history: timeline, pools, pool }));
-    });
-
-    for (const paid of paidTimelines) {
+    // 保底间隔只依赖桶内付费记录序列，与统计范围无关：这里把每个桶压缩成
+    // 六星条目（间隔、是否桶内首个六星、目标分类），build 时无需重排时间线。
+    const bucketEntries = [];
+    const appendBucketEntries = (paidTimeline) => {
       let interval = 0;
-      let hasPreviousSixStar = false;
-
-      for (const row of paid) {
+      let isBucketLead = true;
+      for (const row of paidTimeline) {
         interval += 1;
         if (row.rarity !== 6) {
           continue;
         }
-
-        if (isSelected(row)) {
-          intervalSum += interval;
-          intervalCount += 1;
-          if (!hasPreviousSixStar) {
-            boundaryIntervalCount += 1;
-          }
-
-          const from = Math.floor((interval - 1) / 10) * 10 + 1;
-          if (!distribution.has(from)) {
-            distribution.set(from, { from, to: from + 9, target: 0, offTarget: 0, unknown: 0, count: 0 });
-          }
-
-          const bin = distribution.get(from);
-          bin.count += 1;
-          const sourcePool = poolLookup.get(String(getHistoryPoolId(row)));
-          const source = resolvePool(sourcePool);
-          const classification = classifySixStarTarget(
-            row,
-            source.capabilities,
-            source.targetReferences,
-            catalogIndex
-          );
-          if (classification === 'target') {
-            bin.target += 1;
-          } else if (classification === 'offTarget') {
-            bin.offTarget += 1;
-          } else if (classification === 'unknown') {
-            bin.unknown += 1;
-          }
-        }
-
+        const pool = poolLookup.get(String(getHistoryPoolId(row)));
+        const { capabilities, targetReferences } = resolvePool(pool);
+        bucketEntries.push({
+          canonicalPoolId: String(getPoolRecordId(pool)),
+          interval,
+          isBucketLead,
+          classification: classifySixStarTarget(row, capabilities, targetReferences, catalogIndex),
+        });
         interval = 0;
-        hasPreviousSixStar = true;
+        isBucketLead = false;
       }
+    };
+
+    for (const bucket of poolBuckets.values()) {
+      appendBucketEntries(bucket);
+    }
+    sharedScopePools.forEach((pool) => {
+      appendBucketEntries(buildScopedPaidHistoryTimeline({ history: timeline, pools, pool }));
+    });
+
+    const exclusionEntries = exclusionEntriesByAccount.get(account);
+    accounts.set(account, {
+      contributions,
+      bucketEntries,
+      exclusions: exclusionEntries ? [...exclusionEntries.values()] : [],
+    });
+  }
+
+  // 逐池贡献构建完成后不再需要历史记录：避免把整份历史留在缓存里。
+  recordsByAccount.clear();
+  seenRecordKeysByAccount.clear();
+  // 只有无效记录的账号也必须保留排除计数，但不能算作参与账号。
+  for (const [account, entries] of exclusionEntriesByAccount) {
+    if (account !== null && !accounts.has(account)) {
+      accounts.set(account, { contributions: new Map(), bucketEntries: [], exclusions: [...entries.values()] });
     }
   }
 
-  return {
-    regularTotal,
-    sixStarCount,
-    sixStarRate: regularTotal ? sixStarCount / regularTotal : 0,
-    targetCount,
-    offTargetCount,
-    unknownTargetCount,
-    targetRate: targetCount + offTargetCount ? targetCount / (targetCount + offTargetCount) : null,
-    avgSixStarInterval: intervalCount ? intervalSum / intervalCount : null,
-    resultsPerTarget: targetCount ? regularTotal / targetCount : null,
-    giftCount,
-    intervalDistribution: [...distribution.values()].sort((left, right) => left.from - right.from),
-    resources: buildCapabilityAwarePoolResourceSummary({ history: selectedHistory, pools, quotaLedger: { quota } }),
-    meta: {
-      schemaVersion: 'scoped-legacy-statistics-v3',
-      prefixVerified: false,
-      firstBasis: 'stored-history',
-      costBasis: 'stored-results',
-      resourceBasis: 'stored-account-history',
-      targetBasis: 'statisticsTargetReferences-exact',
-      participatingAccounts,
-      intervalCount,
-      boundaryIntervalCount,
-      missingSeriesIntervalCount,
-      excludedRecords: Object.values(exclusions).reduce((sum, count) => sum + count, 0),
-      exclusions,
-    },
+  const build = ({ memberPoolIds = [], accountKey = null } = {}) => {
+    const members = resolveMemberPoolIds(poolLookup, memberPoolIds);
+    const exclusions = {
+      missingIdentity: 0,
+      invalidTime: 0,
+      invalidRarity: 0,
+      duplicate: 0,
+      missingPool: 0,
+      unresolvedPool: 0,
+    };
+    const quota = createEmptyQuotaSummary();
+    const resourceAggregate = createEmptyResourceAggregate();
+    const distribution = new Map();
+
+    let regularTotal = 0;
+    let sixStarCount = 0;
+    let targetCount = 0;
+    let offTargetCount = 0;
+    let unknownTargetCount = 0;
+    let giftCount = 0;
+    let intervalSum = 0;
+    let intervalCount = 0;
+    let boundaryIntervalCount = 0;
+    let missingSeriesIntervalCount = 0;
+    let participatingAccounts = 0;
+
+    // accountKey 指定时只合并该账号；未指定时合并全部账号。范围只影响合并，
+    // 因此同一份准备结果可以安全地服务同一任务内的任意多个范围。
+    const accountEntries = accountKey === null
+      ? accounts.values()
+      : (accounts.has(accountKey) ? [accounts.get(accountKey)] : []);
+
+    for (const account of accountEntries) {
+      let accountParticipates = false;
+      for (const poolId of account.contributions.keys()) {
+        if (members.has(poolId)) {
+          accountParticipates = true;
+          break;
+        }
+      }
+      if (accountParticipates) {
+        participatingAccounts += 1;
+      }
+
+      for (const [poolId, contribution] of account.contributions) {
+        if (!members.has(poolId)) {
+          continue;
+        }
+        regularTotal += contribution.regularTotal;
+        sixStarCount += contribution.sixStarCount;
+        targetCount += contribution.targetCount;
+        offTargetCount += contribution.offTargetCount;
+        unknownTargetCount += contribution.unknownTargetCount;
+        giftCount += contribution.giftCount;
+        missingSeriesIntervalCount += contribution.missingSeriesSixStarCount;
+        addQuota(quota, contribution.quota);
+        addResourceAggregate(resourceAggregate, contribution.resourceAggregate);
+      }
+
+      for (const entry of account.exclusions) {
+        const selectedInScope = members.has(entry.rawPoolId)
+          || (entry.canonicalPoolId !== null && members.has(entry.canonicalPoolId));
+        if (selectedInScope) {
+          exclusions[entry.reason] += entry.count;
+        }
+      }
+
+      for (const entry of account.bucketEntries) {
+        if (!members.has(entry.canonicalPoolId)) {
+          continue;
+        }
+
+        intervalSum += entry.interval;
+        intervalCount += 1;
+        if (entry.isBucketLead) {
+          boundaryIntervalCount += 1;
+        }
+
+        const from = Math.floor((entry.interval - 1) / 10) * 10 + 1;
+        let bin = distribution.get(from);
+        if (!bin) {
+          bin = { from, to: from + 9, target: 0, offTarget: 0, unknown: 0, count: 0 };
+          distribution.set(from, bin);
+        }
+        bin.count += 1;
+        if (entry.classification === 'target') {
+          bin.target += 1;
+        } else if (entry.classification === 'offTarget') {
+          bin.offTarget += 1;
+        } else if (entry.classification === 'unknown') {
+          bin.unknown += 1;
+        }
+      }
+    }
+
+    // 无账号身份（game_uid 为空）的排除记录只在全账号口径下计数，
+    // 指定 accountKey 时旧实现会先跳过它们。
+    if (accountKey === null) {
+      const unassignedExclusionEntries = exclusionEntriesByAccount.get(null);
+      if (unassignedExclusionEntries) {
+        for (const entry of unassignedExclusionEntries.values()) {
+          const selectedInScope = members.has(entry.rawPoolId)
+            || (entry.canonicalPoolId !== null && members.has(entry.canonicalPoolId));
+          if (selectedInScope) {
+            exclusions[entry.reason] += entry.count;
+          }
+        }
+      }
+    }
+
+    return {
+      regularTotal,
+      sixStarCount,
+      sixStarRate: regularTotal ? sixStarCount / regularTotal : 0,
+      targetCount,
+      offTargetCount,
+      unknownTargetCount,
+      targetRate: targetCount + offTargetCount ? targetCount / (targetCount + offTargetCount) : null,
+      avgSixStarInterval: intervalCount ? intervalSum / intervalCount : null,
+      resultsPerTarget: targetCount ? regularTotal / targetCount : null,
+      giftCount,
+      intervalDistribution: [...distribution.values()].sort((left, right) => left.from - right.from),
+      resources: buildResourceSummaryFromAggregates({
+        characterPulls: resourceAggregate.characterPulls,
+        weaponPulls: resourceAggregate.weaponPulls,
+        chargedCharacterPulls: resourceAggregate.chargedCharacterPulls,
+        chargedWeaponPulls: resourceAggregate.chargedWeaponPulls,
+        counts: resourceAggregate.characterCounts,
+        arsenalGainCounts: resourceAggregate.characterCounts,
+        quotaLedger: { quota },
+        settings: DEFAULT_RESOURCE_RULES,
+      }),
+      meta: {
+        schemaVersion: 'scoped-legacy-statistics-v3',
+        prefixVerified: false,
+        firstBasis: 'stored-history',
+        costBasis: 'stored-results',
+        resourceBasis: 'stored-account-history',
+        targetBasis: 'statisticsTargetReferences-exact',
+        participatingAccounts,
+        intervalCount,
+        boundaryIntervalCount,
+        missingSeriesIntervalCount,
+        excludedRecords: Object.values(exclusions).reduce((sum, count) => sum + count, 0),
+        exclusions,
+      },
+    };
   };
+
+  return { build };
+}
+
+/**
+ * 仅用于完整保存历史（不可传 UI 分页或已过滤切片）。账号隔离与
+ * 有效性校验（id、时间、4/5/6、按账号 record_id 去重）与
+ * storedPoolObservations 保持一致；比率是 0~1 的小数，无样本的平均值为 null。
+ * 每个账号的保底时间线从保存起点开始，meta 明确该边界不是完整游戏历史。
+ * 输出只有聚合值，不含账号键与原始记录。
+ *
+ * 单次调用等价于 prepareScopedLegacyStatistics(...).build(...)；需要同一任务内
+ * 多个范围复用逐池贡献时，先 prepare 再多次 build。
+ */
+export function buildScopedLegacyStatistics({
+  history = [], pools = [], characters = [], memberPoolIds = [], accountKey = null,
+} = {}) {
+  return prepareScopedLegacyStatistics({ history, pools, characters }).build({ memberPoolIds, accountKey });
 }
 
 export default buildScopedLegacyStatistics;

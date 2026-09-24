@@ -23,38 +23,60 @@ export function getStoredObservationAccounts(history) {
 }
 
 /** The input must include all stored rows for this scope; never pass a UI history page. */
-export function buildStoredPoolObservations({ history, poolId, accountKey = null, catalog = [], directory = null, entityType = null }) {
-  const records = [];
+export function buildStoredPoolObservations({ history, poolId, accountKey = null, catalog = [], directory = null, entityType = null, directoryIndex = null }) {
+  return prepareStoredPoolObservations({ history, catalog, directory, entityType, accountKey, directoryIndex })(poolId, accountKey);
+}
+
+export function createStoredObservationDirectory({ catalog = [], directory = null, entityType = null }) {
   const names = new Map([...(directory || []), ...catalog].map((item) => [String(item.id ?? item.character_id), item]));
   const nameIndex = new Map();
   for (const item of directory || catalog) {
     if (entityType && item.type !== entityType) continue;
     for (const label of new Set([item.name, ...(item.aliases || [])].filter(Boolean))) {
       const key = JSON.stringify([label.trim(), Number(item.rarity)]);
-      nameIndex.set(key, [...(nameIndex.get(key) || []), String(item.id)]);
+      if (!nameIndex.has(key)) nameIndex.set(key, []);
+      nameIndex.get(key).push(String(item.id));
     }
   }
-  const exclusions = { missingIdentity: 0, invalidTime: 0, invalidRarity: 0, duplicate: 0 };
-  let matchedByName = 0;
-  const unidentifiedByRarity = { 4: 0, 5: 0, 6: 0 };
-  const seen = new Set();
-  const scoped = history.filter((row) => !accountKey || storedAccountKey(row) === accountKey).slice().sort(compareHistoryTimelineAsc);
+  return { names, nameIndex };
+}
+
+/** Task-local reader: normalize and order once, then visit only the requested
+ * pool/account buckets. Nothing is retained globally or after this reader dies. */
+export function prepareStoredPoolObservations({ history, catalog = [], directory = null, entityType = null, accountKey = null, directoryIndex = null }) {
+  const buckets = new Map();
+  const getBucket = (poolId, account) => {
+    if (!buckets.has(poolId)) buckets.set(poolId, new Map());
+    const accounts = buckets.get(poolId);
+    if (!accounts.has(account)) accounts.set(account, { accountKey: account, records: [], matchedByName: 0,
+      exclusions: { missingIdentity: 0, invalidTime: 0, invalidRarity: 0, duplicate: 0 },
+      unidentifiedByRarity: { 4: 0, 5: 0, 6: 0 }, firstTimestamp: Infinity, lastTimestamp: -Infinity });
+    return accounts.get(account);
+  };
+  const index = directoryIndex || createStoredObservationDirectory({ catalog, directory, entityType });
+  const names = directory ? index.names : new Map(index.names);
+  const nameIndex = index.nameIndex;
+  const namesByAccount = new Map();
+  const seen = new Map();
+  const scoped = (accountKey ? history.filter((row) => storedAccountKey(row) === accountKey) : history.slice()).sort(compareHistoryTimelineAsc);
   for (const [sequence, row] of scoped.entries()) {
     const account = storedAccountKey(row);
     const recordPool = String(row.poolId ?? row.pool_id ?? '');
+    const bucket = getBucket(recordPool, account);
     const rawItemId = String(row.character_id ?? row.characterId ?? row.item_id ?? '');
     const id = String(row.record_id ?? row.id ?? '');
     const timestamp = getHistoryTimelineTimestampMs(row);
     const rarity = Number(row.rarity);
-    const key = JSON.stringify([account, id]);
+    if (!seen.has(account)) seen.set(account, new Set());
+    const accountSeen = seen.get(account);
     const reason = !account || !recordPool || !id ? 'missingIdentity'
       : !timestamp ? 'invalidTime' : ![4, 5, 6].includes(rarity) ? 'invalidRarity'
-        : seen.has(key) ? 'duplicate' : null;
+        : accountSeen.has(id) ? 'duplicate' : null;
     if (reason) {
-      if (recordPool === poolId) exclusions[reason]++;
+      bucket.exclusions[reason]++;
       continue;
     }
-    seen.add(key);
+    accountSeen.add(id);
     const canonical = names.get(rawItemId);
     // A conflicting rarity/type cannot share the same item's cost timeline.
     // Retain the recorded result as unidentified at its recorded rarity.
@@ -65,25 +87,54 @@ export function buildStoredPoolObservations({ history, poolId, accountKey = null
       const matches = nameIndex.get(JSON.stringify([label, rarity]));
       if (matches?.length === 1) {
         itemId = matches[0];
-        if (recordPool === poolId && !isGiftHistoryPull(row)) matchedByName++;
+        if (!isGiftHistoryPull(row)) bucket.matchedByName++;
       }
     }
-    if (itemId && !names.has(itemId)) names.set(itemId, { id: itemId, name: row.character_name || row.item_name || row.name || itemId, rarity });
-    if (!itemId && recordPool === poolId && !isGiftHistoryPull(row)) unidentifiedByRarity[rarity]++;
-    records.push({ id, accountKey: account, poolId: recordPool, itemId, rarity, timestamp, sequence,
+    if (itemId && !index.names.has(itemId)) {
+      if (!namesByAccount.has(account)) namesByAccount.set(account, new Map());
+      const accountNames = namesByAccount.get(account);
+      const fallback = { id: itemId, name: row.character_name || row.item_name || row.name || itemId, rarity };
+      if (!accountNames.has(itemId)) accountNames.set(itemId, fallback);
+      if (!names.has(itemId)) names.set(itemId, fallback);
+    }
+    if (!isGiftHistoryPull(row)) {
+      if (!itemId) bucket.unidentifiedByRarity[rarity]++;
+      bucket.firstTimestamp = Math.min(bucket.firstTimestamp, timestamp);
+      bucket.lastTimestamp = Math.max(bucket.lastTimestamp, timestamp);
+    }
+    bucket.records.push({ id, accountKey: bucket.accountKey, poolId: recordPool, itemId, rarity, timestamp, sequence,
       kind: isGiftHistoryPull(row) ? 'gift' : isFreeHistoryPull(row) ? 'free' : isInfoBookHistoryPull(row) ? 'infoBook' : 'pull',
       // Old imports defaulted missing isNew to false. Only a positive flag is proof;
       // a prior observed acquisition still proves repeat ownership.
       newItem: (row.is_new ?? row.isNew) === true ? true : null });
   }
+  seen.clear();
+  return (poolId, selectedAccount = null) => readPreparedPool({ buckets, names, catalog, poolId, accountKey: selectedAccount,
+    accountNames: namesByAccount.get(selectedAccount) });
+}
+
+function readPreparedPool({ buckets, names, catalog, poolId, accountKey, accountNames }) {
+  const accounts = buckets.get(poolId);
+  const selected = accountKey ? [accounts?.get(accountKey)].filter(Boolean) : [...(accounts?.values() || [])];
+  // Stream the normalized buckets rather than allocating a second flat history.
+  function* records() { for (const bucket of selected) yield* bucket.records; }
+  const exclusions = { missingIdentity: 0, invalidTime: 0, invalidRarity: 0, duplicate: 0 };
+  const unidentifiedByRarity = { 4: 0, 5: 0, 6: 0 };
+  let matchedByName = 0;
+  let firstTimestamp = Infinity;
+  let lastTimestamp = -Infinity;
+  for (const bucket of selected) {
+    for (const key of Object.keys(exclusions)) exclusions[key] += bucket.exclusions[key];
+    for (const rarity of [4, 5, 6]) unidentifiedByRarity[rarity] += bucket.unidentifiedByRarity[rarity];
+    matchedByName += bucket.matchedByName;
+    firstTimestamp = Math.min(firstTimestamp, bucket.firstTimestamp);
+    lastTimestamp = Math.max(lastTimestamp, bucket.lastTimestamp);
+  }
   // First means first occurrence in this account's stored banner period.
   // This is a recorded-result metric, not a claim of complete in-game history.
-  const stats = buildPoolObservations({ records, poolId, accountKey, firstBasis: 'stored-period' });
-  const selected = records.filter((row) => row.poolId === poolId && row.kind !== 'gift');
-  const firstTimestamp = selected.reduce((value, row) => Math.min(value, row.timestamp), Infinity);
-  const lastTimestamp = selected.reduce((value, row) => Math.max(value, row.timestamp), -Infinity);
+  const stats = buildPoolObservations({ records: records(), poolId, accountKey, firstBasis: 'stored-period' });
   const items = stats.items.map((item) => ({ ...item,
-    name: names.get(item.itemId)?.name || item.itemId,
+    name: accountNames?.get(item.itemId)?.name || names.get(item.itemId)?.name || item.itemId,
     nameEn: names.get(item.itemId)?.name_en || null }));
   for (const item of catalog) {
     const id = String(item.id ?? item.character_id ?? '');
@@ -97,6 +148,6 @@ export function buildStoredPoolObservations({ history, poolId, accountKey = null
     meta: { schemaVersion: STORED_OBSERVATION_VERSION, excludedRecords: Object.values(exclusions).reduce((sum, value) => sum + value, 0), exclusions,
       matchedByName, unidentifiedRecords: Object.values(unidentifiedByRarity).reduce((sum, value) => sum + value, 0), unidentifiedByRarity,
       prefixVerified: false, firstBasis: 'stored-period', costBasis: 'stored-results',
-      firstRecordAt: selected.length ? new Date(firstTimestamp).toISOString() : null,
-      lastRecordAt: selected.length ? new Date(lastTimestamp).toISOString() : null } };
+      firstRecordAt: stats.total ? new Date(firstTimestamp).toISOString() : null,
+      lastRecordAt: stats.total ? new Date(lastTimestamp).toISOString() : null } };
 }

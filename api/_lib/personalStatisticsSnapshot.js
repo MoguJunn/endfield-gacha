@@ -1,4 +1,4 @@
-import { buildStoredPoolObservations, getStoredObservationAccounts } from '../../src/utils/storedPoolObservations.js';
+import { prepareStoredPoolObservations, getStoredObservationAccounts, storedAccountKey } from '../../src/utils/storedPoolObservations.js';
 import { buildSummaryStats } from '../../src/utils/summaryStats.js';
 import { resolvePoolCapabilities } from '../../src/utils/poolCapabilities.js';
 import { formatAccountGachaHistoryRows } from '../../src/utils/accountGachaHistoryFormat.js';
@@ -9,7 +9,7 @@ import { annotateInfoBookPulls } from '../../src/utils/historyInfoBook.js';
 import { normalizeIsStandard } from '../../src/utils/poolUtils.js';
 import { buildLimitedCrossPoolPityMap, buildTimelineAcquisitionIndex } from '../../src/utils/poolTimelineView.js';
 import { buildGroupPoolObservations } from '../../src/utils/groupPoolObservations.js';
-import { buildScopedLegacyStatistics } from '../../src/utils/scopedLegacyStatistics.js';
+import { prepareScopedLegacyStatistics } from '../../src/utils/scopedLegacyStatistics.js';
 import { STATISTICS_GROUPS, getStatisticsGroupPools, normalizeStatisticsPool } from '../../shared/statisticsScopes.js';
 
 export async function buildPersonalStatisticsSnapshot(db, userId, { signal } = {}) {
@@ -26,6 +26,7 @@ export async function buildPersonalStatisticsSnapshot(db, userId, { signal } = {
     resolvePoolAliasMap(db, rows.map((row) => row.pool_id)), resolveCharacterAliasMap(db, rows.map((row) => row.character_id)),
   ]);
   const history = formatAccountGachaHistoryRows(rows, { poolAliasMap, characterAliasMap });
+  rows.length = 0;
   const ids = [...new Set(history.map((row) => row.poolId))];
   const { data: visiblePools, error: visibleError } = await db.rpc('get_app_visible_pools').abortSignal(signal);
   const { data: poolRows, error: poolError } = ids.length ? await db.from('pools').select('*').in('pool_id', ids).abortSignal(signal) : { data: [] };
@@ -38,14 +39,22 @@ export async function buildPersonalStatisticsSnapshot(db, userId, { signal } = {
   const scopes = {};
   const groupScopes = {};
   const legacyScopes = {};
-  for (const key of ['', ...accounts.map((account) => account.key)]) {
-    scopes[key] = Object.fromEntries(pools.map((pool) => [pool.id, buildStoredPoolObservations({ history, poolId: pool.id,
-      accountKey: key || null, directory: characters, entityType: resolvePoolCapabilities(pool).entityType })]));
-    legacyScopes[key] = Object.fromEntries(pools.map((pool) => [pool.id, buildScopedLegacyStatistics({ history, pools, characters, memberPoolIds: [pool.id], accountKey: key || null })]));
+  const accountKeys = ['', ...accounts.map((account) => account.key)];
+  const accountHistories = Map.groupBy(history, storedAccountKey);
+  for (const key of accountKeys) scopes[key] = {};
+  // Normalize once per entity type, not once per pool × account. Each reader is
+  // discarded before creating the next; only the public DTOs are retained.
+  for (const [entityType, typePools] of Map.groupBy(pools, (pool) => resolvePoolCapabilities(pool).entityType)) {
+    const read = prepareStoredPoolObservations({ history, directory: characters, entityType });
+    for (const key of accountKeys) for (const pool of typePools) scopes[key][pool.id] = read(pool.id, key || null);
+  }
+  const legacy = prepareScopedLegacyStatistics({ history, pools, characters });
+  for (const key of accountKeys) {
+    legacyScopes[key] = Object.fromEntries(pools.map((pool) => [pool.id, legacy.build({ memberPoolIds: [pool.id], accountKey: key || null })]));
     groupScopes[key] = Object.fromEntries(STATISTICS_GROUPS.map((group) => {
       const members = getStatisticsGroupPools(pools, group.key);
-      return [group.key, { observations: buildGroupPoolObservations({ history, pools, groupKey: group.key, directory: characters, accountKey: key || null }),
-        legacy: buildScopedLegacyStatistics({ history, pools, characters, memberPoolIds: members.map((pool) => pool.id), accountKey: key || null }) }];
+      return [group.key, { observations: buildGroupPoolObservations({ history: key ? accountHistories.get(key) || [] : history, pools, groupKey: group.key, directory: characters, accountKey: key || null }),
+        legacy: legacy.build({ memberPoolIds: members.map((pool) => pool.id), accountKey: key || null }) }];
     }));
   }
   const poolById = new Map(pools.map((pool) => [pool.id, pool]));

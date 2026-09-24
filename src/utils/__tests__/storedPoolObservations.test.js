@@ -1,10 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { buildStoredPoolObservations, getStoredObservationAccounts, storedAccountKey } from '../storedPoolObservations.js';
+import { buildStoredPoolObservations, prepareStoredPoolObservations, getStoredObservationAccounts, storedAccountKey } from '../storedPoolObservations.js';
 
 const row = (id, extra = {}) => ({ id, record_id: id, user_id: 'owner', game_uid: 'uid', server_scope: 'cn',
   pool_id: 'p', character_id: 'a', rarity: 6, timestamp: 1700000000000 + id * 1000, seq_id: String(id), is_new: false, ...extra });
 
 describe('stored observation adapter', () => {
+  it('reuses sorted buckets without losing cross-pool duplicate precedence or account isolation', () => {
+    const history = [row(5), row(4, { pool_id: 'q', record_id: 1 }), row(3, { server_scope: 'intl' }),
+      row(2, { timestamp: 'invalid' }), row(1), row(6, { pool_id: 'q', character_id: 'low', rarity: 4 }),
+      row(7, { pool_id: 'q' }), row(8, { pool_id: 'q', special_type: 'gift' })];
+    const before = structuredClone(history);
+    const read = prepareStoredPoolObservations({ history });
+    const cn = storedAccountKey(history[0]);
+    expect(read('p')).toMatchObject({ total: 3, participatingAccounts: 2, meta: { exclusions: { invalidTime: 1 } } });
+    expect(read('p', cn).items[0]).toMatchObject({ first: { mean: 1, sampleCount: 1 }, repeat: { mean: 1, sampleCount: 1 } });
+    expect(read('q')).toMatchObject({ total: 2, participatingAccounts: 1, meta: { exclusions: { duplicate: 1 } } });
+    expect(read('q').items.find((item) => item.itemId === 'a').first.mean).toBe(2);
+    expect(read('missing')).toMatchObject({ total: 0, items: [], meta: { firstRecordAt: null } });
+    const first = read('q');
+    first.items[0].first.points.length = 0;
+    expect(read('q').items[0].first.points).not.toHaveLength(0);
+    expect(history).toEqual(before);
+  });
   it('computes first and repeat costs within imported banner records without claiming complete history', () => {
     const stats = buildStoredPoolObservations({ poolId: 'p', history: [row(1, { is_new: true }), row(2, { character_id: 'b', rarity: 4 }), row(3)] });
     const a = stats.items.find((item) => item.itemId === 'a');
@@ -26,6 +43,12 @@ describe('stored observation adapter', () => {
     expect(getStoredObservationAccounts(history)).toHaveLength(3);
     expect(buildStoredPoolObservations({ history, poolId: 'p', accountKey: storedAccountKey(history[0]) }).total).toBe(2);
     expect(buildStoredPoolObservations({ history, poolId: 'p' }).participatingAccounts).toBe(3);
+  });
+  it('keeps record-derived names local to the selected account when no directory exists', () => {
+    const history = [row(1, { character_name: 'CN name' }), row(2, { server_scope: 'intl', character_name: 'Global name' })];
+    const read = prepareStoredPoolObservations({ history });
+    expect(read('p').items[0].name).toBe('CN name');
+    expect(read('p', storedAccountKey(history[1])).items[0].name).toBe('Global name');
   });
   it('reports excluded rows and includes known catalog items with zero hits', () => {
     const stats = buildStoredPoolObservations({ poolId: 'p', history: [row(1), row(2, { character_id: '' }), row(3, { game_uid: '' })],

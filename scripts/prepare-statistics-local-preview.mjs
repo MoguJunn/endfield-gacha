@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
+import { isDeepStrictEqual } from 'node:util';
 import { resolveSupabaseUrl, resolveSupabaseServerKey } from '../api/_lib/supabaseEnv.js';
 import { readStatisticsScopeAggregate, readStatisticsPreviewDataset } from '../api/_lib/statisticsScopeAggregate.js';
 import { STATISTICS_GROUPS } from '../shared/statisticsScopes.js';
@@ -42,6 +43,15 @@ async function save() {
 const wrap = (payload, computedAt = new Date().toISOString()) => ({ schema_version: STATISTICS_SNAPSHOT_VERSION, payload,
   computed_at: computedAt, next_refresh_at: new Date(Date.parse(computedAt) + 3600000).toISOString(), refresh_minutes: 60 });
 const selected = process.argv.slice(2);
+function verifyExisting(scope, payload) {
+  if (!selected.includes('--verify-existing')) return;
+  const previous = snapshots[scope]?.payload;
+  if (!previous) throw new Error(`Missing comparison snapshot: ${scope}`);
+  for (const field of ['observations', 'legacy', 'memberIds', 'memberSignature']) {
+    if (!isDeepStrictEqual(previous[field], payload[field])) throw new Error(`Snapshot differs (${scope}, ${field}); check source changes before treating this as an algorithm regression`);
+  }
+  console.log(JSON.stringify({ scope, comparison: 'equal' }));
+}
 const dataset = selected.includes('--all') || selected.includes('--missing') ? await readStatisticsPreviewDataset(db, { signal: AbortSignal.timeout(180000) }) : null;
 if (dataset) console.log(JSON.stringify({ phase: 'preview-context-ready', rows: dataset.history.length }));
 for (const pool of pools) {
@@ -50,6 +60,7 @@ for (const pool of pools) {
   if (!selected.includes('--all') && !selected.includes('--missing') && !selected.includes(pool.pool_id) && poolCounts[pool.pool_id] > 0) continue;
   const started = performance.now();
   const payload = await readStatisticsScopeAggregate(db, `pool:${pool.pool_id}`, { signal: AbortSignal.timeout(180000), dataset });
+  verifyExisting(`pool:${pool.pool_id}`, payload);
   snapshots[`pool:${pool.pool_id}`] = wrap(payload);
   poolCounts[pool.pool_id] = payload.observations.total;
   await save();
@@ -62,10 +73,12 @@ for (const group of STATISTICS_GROUPS) {
   const started = performance.now();
   const payload = await readStatisticsScopeAggregate(db, `group:${group.key}`, { signal: AbortSignal.timeout(180000), dataset,
     onProgress: (progress) => console.log(JSON.stringify({ group: group.key, ...progress, elapsedMs: Math.round(performance.now() - started) })) });
+  verifyExisting(`group:${group.key}`, payload);
   snapshots[`group:${group.key}`] = wrap(payload);
   await save();
   console.log(JSON.stringify({ group: group.key, total: payload.observations.total, accounts: payload.observations.participatingAccounts,
-    contextRows: payload.meta.contextRows, elapsedMs: Math.round(performance.now() - started), bytes: Buffer.byteLength(JSON.stringify(payload)), rssMiB: Math.round(process.memoryUsage().rss / 1048576) }));
+    contextRows: payload.meta.contextRows, elapsedMs: Math.round(performance.now() - started), bytes: Buffer.byteLength(JSON.stringify(payload)), rssMiB: Math.round(process.memoryUsage().rss / 1048576),
+    peakRssMiB: Math.round(process.resourceUsage().maxRSS / 1024) }));
 }
 const { data: caches, error: cacheError } = await db.from('stats_cache').select('cache_key,cached_data,computed_at')
   .or('cache_key.like.global_stats%,cache_key.like.character_ranking%,cache_key.like.character_catalog%').order('computed_at', { ascending: false });
