@@ -13,7 +13,13 @@
 
 `DESKTOP-HOME-001` 已通过 PR #31 / #32 发布。成果包括 1366×768 首页、共享桌面宽度、工单 / 身份 / 主题 / 管理入口、个人与全服统计分离、外置可收起个人菜单、统一公告通知、独立版本倒计时及自适应引导区。新版已成为桌面生产默认，支持新旧主页双向切换及浏览器偏好持久化；旧预览链接继续兼容。详细证据见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md) 和 [发布说明](RELEASE_4.6.0.md)。
 
-本阶段归属“桌面主页与切换已上线”；全站设计 token / 动画 / 可访问性、移动壳层、剩余通知采纳、统计口径说明和运营位配置化继续保留为原任务。首次教程优化仍待开始。顶栏工单未读提示不等于内部备注 / 管理队列完成，版本组件独立也不等于活动运营配置化完成；抽奖展示不改变实际开奖或履约状态。
+本阶段归属“桌面主页与切换已上线”；全站设计 token / 动画 / 可访问性、移动壳层、剩余通知采纳、统计口径说明和运营位配置化继续保留为原任务。首次教程在后续 v4.6.2 候选中已有开发预览，真实业务接入仍待完成。顶栏工单未读提示不等于内部备注 / 管理队列完成，版本组件独立也不等于活动运营配置化完成；抽奖展示不改变实际开奖或履约状态。
+
+## v4.6.2 本地候选（2026-09-24）
+
+统计已接入单池和五类合池、十图、头像选择与排序、深色及减少动态效果；旧指标／资源迁入所选范围的 v4 快照。首获保持逐账号逐期逐对象后再类别汇总，账号覆盖跨期去重。各桌面页面统一沿用首页响应式宽度。已有验证见 [RELEASE_4.6.2.md](RELEASE_4.6.2.md)。
+
+该阶段属于“本地实现与最终验证已完成，等待发布”：生产迁移、常驻 Worker 和 v4 预热尚未执行（2026-09-24 SSH 只读已确认生产库无统计表与 Worker，现站仍为 `v4.6.0`），且现有主机容量不足。发布 PR 待创建并通过 CI；合入 main 仍受维护者审查限制，仓库目前仅 `MoguJunn` 一个管理员账号，作者无法批准自己的 PR。须先预热公开单池、五类合池、旧统计及个人范围，再启用对应前端／API。指南仅为 DEV 构造样例，真实登录、导入、备份和完成状态待接入；全站动画生命周期等任务不能据此关闭。
 
 ## 收口地图
 
@@ -22,7 +28,7 @@
 | 个人分析快照 | owner/account revision、持久快照、活跃用户 FIFO、`pg_cron + pg_net` 即时派发、45 秒多批 Worker、渐进检查与同 owner Session 保护已由 PR #23–#25 合入并完成生产 E2E；含冒号 viewKey 已有回归测试和生产 HTTP 200 证据。 | `完成`。后续只做 dispatch / HTTP 2xx 和生产 Web Vitals 低频观察；出现具体回归再拆 BUG，不重新打开旧 PERF 候选。 | `PERF-013 / UX-FLOW-001 / PROD-OBS-001` |
 | 附加寻访子类型 | migrations 181–183、管理写入、官方导入、版本绑定、个人分析、模拟器和桌面 / 移动展示均区分 `reconstruction`、`reconstruction_claim`、`special`；生产最终字段、约束、触发器、受限晋升 RPC、种子卡池与绑定已只读核验。 | `完成`。保留 `type=extra` 作为粗粒度兼容；未来增加新规则模板时必须扩展统一 capability / profile 合同，不能只按 ID 前缀猜测。 | `EXTRA-POOL-SUBTYPE-001 / PROD-OBS-001` |
 | 官方 ID 回填 | `src/utils/canonicalEntityUtils.js` 仍将 `char_manual_*`、`weapon_manual_*` 和 `*_manual_*` 卡池 ID 归类为 `manual_placeholder`；admin 卡池测试仍创建 `special_manual_*` alias。 | 先提供非破坏性审计，再把 placeholder 映射到官方 ID，保留 alias，更新外键，校验导出兼容，并产出回滚报告。 | `DATA-NEW-017` |
-| 公共卡池分析 | 已新增 `public_pool_analytics_cache` / `public_pool_trend_cache` 与 `refresh_public_analytics_cache()`；`api/_lib/publicAnalytics.js` 优先读取预聚合缓存，单池指标和趋势点都带 `analyticsMeta.partial / cacheKey / cacheVersion / warning`。缺表或缺行时，趋势端点返回空 `points`，单池端点只降级为 bounded count。 | 后续补生产迁移应用、真实 refresh 耗时观测、长期 source/meta 看板，以及更多安全 admin/ops 写入点接线；继续避免请求期扫描原始 history。 | `API-003 / STATS-004` |
+| 公共卡池分析与合池 | v4.6.2 候选已将单池、五类合池与旧统计纳入持久队列；公共／个人只读 v4 快照，目录成员签名与租约／修订冲突阻止不完整发布。最大限定角色范围本地约 70 秒，1,009,281 个结果、2,675 个去重账号。 | 完成生产迁移、Worker、全范围 v4 预热及真实队列耗时观察后再启用页面；继续避免请求期扫描原始 history。本地观测不替代生产验收。 | `API-003 / STATS-004 / STATS-007 / STATS-007A` |
 | 开发者 API 审核 | admin 路由支持 `reviewNote`，设置页展示 `review_note`；`DeveloperApiPanel.jsx` 审核、拒绝、撤销和重新启用时会提示填写备注。审核结果通知已能在 `DEVELOPER_API_REVIEW_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时写入邮件 outbox，且邮件入队失败不会阻断审核。 | 后续补用户设置页更明确的下一步动作、历史审核记录、管理员风险提示和更完整责任链；邮件真实投递仍受队列处理器、演练模式、紧急停发开关和投递监控保护。 | `DEVAPI-004` |
 | 工单闭环 | 桌面和移动工单已支持创建、回复和状态变更；回复写入已从前端直连 Supabase 改为同源 `/api/tickets/reply`，服务端校验 owner / admin / super_admin 权限，staff 回复可在 `TICKET_REPLY_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时写入 `ticket.reply` outbox。schema 有 `is_internal`，但 UI 还没有完整未读、内部备注、最后回复人和管理员待处理队列。 | 补齐未读状态、最后回复人、内部备注、管理员队列、移动端失败反馈和私有数据边界；真实邮件投递仍必须经过队列处理器、演练模式、紧急停发开关、预算和投递监控。 | `SUPPORT-001` |
 | 移动模拟器 | `src/mobile/views/MobileSimulatorView.jsx` 仍只是切换到桌面端的提示页。 | 明确选择轻量移动模拟器或规划型只读模式，至少能查看目标、预算和继承状态，不能长期只保留跳转提示。 | `MOBILE-004 / SIM-005` |
