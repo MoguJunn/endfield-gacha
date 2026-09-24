@@ -52,7 +52,9 @@ function run(command, args, options = {}) {
 
 async function waitForPostgres() {
   for (let i = 0; i < 30; i += 1) {
-    const result = await run('docker', ['exec', containerName, 'pg_isready', '-U', 'postgres'], { allowFailure: true });
+    // The image starts a temporary socket-only server during initialization.
+    // Wait for TCP so readiness cannot succeed just before that server exits.
+    const result = await run('docker', ['exec', containerName, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres'], { allowFailure: true });
     if (result.code === 0) {
       return;
     }
