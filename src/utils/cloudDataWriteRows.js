@@ -5,6 +5,7 @@ import {
   normalizeGameAccountServerId,
 } from './gameAccountMetadata.js';
 import { getCanonicalExtraPoolMetadata } from '../../shared/extraPoolSubtype.js';
+import { getRecordPoolVersion } from '../../shared/poolVersion.js';
 
 function resolveOwnerId(explicitUserId, currentUserId) {
   return explicitUserId || currentUserId || null;
@@ -87,11 +88,17 @@ export function serializeHistoryForUpsert(
   resolvedCharacterId = null
 ) {
   const serverId = normalizeGameAccountServerId(record);
+  const poolVersion = getRecordPoolVersion(record);
+  const rawPoolVersion = record.poolVersion ?? record.pool_version;
+  if (rawPoolVersion != null && rawPoolVersion !== '' && poolVersion === null) {
+    throw new Error('卡池期次必须为正整数');
+  }
 
   return {
     user_id: resolveOwnerId(record.user_id, currentUserId),
     record_id: normalizeRecordId(record),
     pool_id: String(resolvedPoolId || record.poolId || record.pool_id),
+    pool_version: poolVersion,
     rarity: typeof record.rarity === 'number' ? record.rarity : parseInt(record.rarity, 10) || 4,
     is_standard: Boolean(record.isStandard || record.is_standard),
     special_type: record.specialType || record.special_type || null,

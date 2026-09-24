@@ -31,6 +31,7 @@ const HISTORY_READ_COLUMNS = [
   'user_id',
   'record_id',
   'pool_id',
+  'pool_version',
   'rarity',
   'is_standard',
   'special_type',

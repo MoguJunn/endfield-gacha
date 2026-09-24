@@ -52,7 +52,9 @@ function run(command, args, options = {}) {
 
 async function waitForPostgres() {
   for (let i = 0; i < 30; i += 1) {
-    const result = await run('docker', ['exec', containerName, 'pg_isready', '-U', 'postgres'], { allowFailure: true });
+    // The image starts a temporary socket-only server during initialization.
+    // Wait for TCP so readiness cannot succeed just before that server exits.
+    const result = await run('docker', ['exec', containerName, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres'], { allowFailure: true });
     if (result.code === 0) {
       return;
     }
@@ -121,13 +123,18 @@ AS $$
   SELECT NULL::UUID
 $$;
 
+-- Mirror the real Supabase helper: the role comes from the request JWT claim,
+-- so migrations and fixtures that set request.jwt.claim.role behave like production.
 CREATE OR REPLACE FUNCTION auth.role()
 RETURNS TEXT
 LANGUAGE sql
 STABLE
-AS $$
-  SELECT 'authenticated'::TEXT
-$$;
+AS $q$
+  SELECT COALESCE(
+    NULLIF(current_setting('request.jwt.claim.role', TRUE), ''),
+    NULLIF(current_setting('request.jwt.claims', TRUE), '')::JSONB ->> 'role'
+  )::TEXT
+$q$;
 `.trim();
 }
 
@@ -974,6 +981,7 @@ BEGIN
     jsonb_build_array(jsonb_build_object(
       'record_id', 'rpc-record-1',
       'pool_id', 'rpc_pool',
+      'pool_version', 1,
       'seq_id', 'rpc-seq-1',
       'game_uid', 'rpc-game-1',
       'nick_name', 'RPC fixture user',
@@ -1009,6 +1017,7 @@ BEGIN
       AND pool_id = 'rpc_pool'
       AND seq_id = 'rpc-seq-1'
       AND record_id = 'rpc-record-1'
+      AND pool_version = 1
       AND nick_name = 'RPC fixture user'
       AND character_name = 'RPC fixture character'
       AND character_id = 'rpc-character-1'
@@ -1062,6 +1071,7 @@ BEGIN
     jsonb_build_array(jsonb_build_object(
       'record_id', 'rpc-record-2',
       'pool_id', 'rpc_pool',
+      'pool_version', 2,
       'seq_id', 'rpc-seq-1',
       'game_uid', 'rpc-game-1',
       'nick_name', 'RPC fixture updated',
@@ -1101,6 +1111,7 @@ BEGIN
       AND pool_id = 'rpc_pool'
       AND seq_id = 'rpc-seq-1'
       AND record_id = 'rpc-record-2'
+      AND pool_version = 2
       AND nick_name = 'RPC fixture updated'
       AND character_name = 'RPC fixture updated character'
       AND character_id = 'rpc-character-2'
@@ -1722,7 +1733,20 @@ SELECT 'reconstruction_promotion_contract=ok';
 }
 
 async function main() {
-  const baselineSql = await readFile(baselinePath, 'utf8');
+  const historyPeriodOnly = process.argv.includes('--history-pool-version');
+  let baselineSql = await readFile(baselinePath, 'utf8');
+  if (historyPeriodOnly) {
+    // Lottery migrations depend on a separate schema not shipped in this baseline.
+    // Keep the real history schema through 189 plus the period and rerun promotion
+    // migrations under test; nothing below depends on 190-193.
+    baselineSql = baselineSql.replace(
+      /-- >>> BEGIN MIGRATION: ([^\n]+)\n[\s\S]*?-- <<< END MIGRATION: \1/g,
+      (block, name) => {
+        const number = Number(path.basename(name).match(/^\d+/)?.[0]);
+        return number >= 190 && number !== 194 && number !== 195 ? '' : block;
+      }
+    );
+  }
 
   const dockerVersion = await run('docker', ['version', '--format', '{{.Server.Version}}'], { allowFailure: true });
   if (dockerVersion.code !== 0) {
@@ -1758,6 +1782,54 @@ async function main() {
       ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName],
       { input: baselineSql }
     );
+
+    if (historyPeriodOnly) {
+      const periodSql = await readFile(path.join(projectRoot, 'supabase', 'tests', 'history-pool-version.sql'), 'utf8');
+      await run('docker',
+        ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName],
+        { input: `INSERT INTO auth.users (id, email) VALUES ('00000000-0000-0000-0000-000000000001', 'period@example.com');\n${buildOfficialImportCommitFixtureSql()}\n${periodSql}` }
+      );
+      console.log('- migration 194 period contract: OK');
+
+      const promotionSql = await readFile(path.join(projectRoot, 'supabase', 'tests', 'reconstruction-rerun-promotion.sql'), 'utf8');
+      const promotionVerification = await run('docker',
+        ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName, '-At'],
+        { input: promotionSql }
+      );
+      if (!promotionVerification.stdout.includes('reconstruction_rerun_promotion=ok')) {
+        throw new Error(
+          `Rerun promotion contract returned incomplete output:\n${promotionVerification.stdout}`
+        );
+      }
+      console.log('- migration 195 rerun promotion contract: OK');
+
+      // Running the promotion migration a second time must be a harmless no-op.
+      const promotionMigrationSql = await readFile(
+        path.join(projectRoot, 'supabase', 'migrations', '195_reconcile_official_rerun_weapon_pool.sql'),
+        'utf8'
+      );
+      await run('docker',
+        ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName],
+        { input: promotionMigrationSql }
+      );
+
+      const afterRerunSql = await readFile(
+        path.join(projectRoot, 'supabase', 'tests', 'reconstruction-rerun-promotion-after-rerun.sql'),
+        'utf8'
+      );
+      const afterRerunVerification = await run('docker',
+        ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName, '-At'],
+        { input: afterRerunSql }
+      );
+      if (!afterRerunVerification.stdout.includes('reconstruction_rerun_promotion_idempotent=ok')) {
+        throw new Error(
+          `Rerun promotion idempotency returned incomplete output:\n${afterRerunVerification.stdout}`
+        );
+      }
+      console.log('- migration 195 second run idempotency: OK');
+      console.log('[verify-history-pool-version] PostgreSQL contract OK (baseline through 189 + migrations 194/195)');
+      return;
+    }
 
     await run(
       'docker',
@@ -1812,6 +1884,14 @@ async function main() {
         `Official import RPC verification returned incomplete output:\n${officialImportVerification.stdout}`
       );
     }
+
+    const poolVersionSql = await readFile(path.join(projectRoot, 'supabase', 'tests', 'history-pool-version.sql'), 'utf8');
+    await run(
+      'docker',
+      ['exec', '-i', containerName, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', databaseName],
+      { input: poolVersionSql }
+    );
+    console.log('- history pool_version SQL contract: OK');
 
     const extraPoolSubtypeVerification = await run(
       'docker',

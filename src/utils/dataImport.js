@@ -2,6 +2,7 @@ import { clampHistoryPity } from './historyRecordUtils.js';
 import { normalizeGameAccountMetadata } from './gameAccountMetadata.js';
 import { detectImportFormat, prepareImportPayload } from './dataFormatRegistry.js';
 import { canonicalizeExtraPoolSubtype } from '../../shared/extraPoolSubtype.js';
+import { getRecordPoolVersion } from '../../shared/poolVersion.js';
 
 const MAX_IMPORT_ERRORS = 10;
 const VALID_POOL_TYPES = new Set([
@@ -230,6 +231,8 @@ function normalizeImportedHistoryRecord(record, context) {
   const timestamp = normalizeTimestamp(record?.timestamp || record?.created_at || record?.createdAt);
   const seqId = normalizeString(record?.seqId || record?.seq_id);
   const explicitIsStandard = normalizeBoolean(record?.isStandard ?? record?.is_standard);
+  const poolVersion = getRecordPoolVersion(record);
+  const rawPoolVersion = record?.poolVersion ?? record?.pool_version;
 
   let isStandard = explicitIsStandard;
   if (isStandard === null) {
@@ -237,6 +240,10 @@ function normalizeImportedHistoryRecord(record, context) {
   }
 
   const errors = [];
+
+  if (rawPoolVersion != null && rawPoolVersion !== '' && poolVersion === null) {
+    errors.push('poolVersion / pool_version 应为正整数');
+  }
 
   if (recordId === null) {
     errors.push('缺少有效的 id');
@@ -268,6 +275,8 @@ function normalizeImportedHistoryRecord(record, context) {
       user_id: context.currentUserId || null,
       poolId,
       pool_id: poolId,
+      poolVersion,
+      pool_version: poolVersion,
       rarity,
       isStandard,
       is_standard: isStandard,

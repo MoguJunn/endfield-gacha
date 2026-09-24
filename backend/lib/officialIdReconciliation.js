@@ -348,7 +348,7 @@ function isPromotionRpcMissing(error) {
 
 function requiresAtomicPoolPromotion(pool) {
   return normalizePoolType(pool?.type) === 'extra'
-    && normalizeText(pool?.extra_subtype) === 'reconstruction'
+    && ['reconstruction', 'reconstruction_claim'].includes(getCanonicalExtraPoolSubtype(pool))
     && new Set(['reconstruction_character_v1', 'reconstruction_weapon_v1']).has(
       normalizeText(pool?.extra_rule_profile)
     );

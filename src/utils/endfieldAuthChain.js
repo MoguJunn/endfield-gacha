@@ -19,6 +19,12 @@ import { queuedFetch } from './requestQueue.js';
 import { appLogger } from './appLogger.js';
 import { getSupabaseAccessToken } from '../services/authFetchService.js';
 import { fetchWithTimeout } from '../services/supabaseRequest.js';
+import {
+  OFFICIAL_CHARACTER_POOL_TYPES,
+  DEFAULT_OFFICIAL_RECORD_REQUESTS,
+  annotateOfficialGachaRecord,
+  getOfficialRecordRequestLabel,
+} from '../../shared/officialGachaRecordTypes.js';
 
 function normalizeImportSource(source) {
   return source === 'intl' ? 'intl' : 'cn';
@@ -49,12 +55,7 @@ appLogger.info('[AuthChain] VITE_PROXY_URL:', import.meta.env.VITE_PROXY_URL);
 
 // 卡池类型
 export const POOL_TYPES = {
-  CHARACTER: {
-    SPECIAL: 'E_CharacterGachaPoolType_Special',   // 限定池（特许寻访）
-    JOINT: 'E_CharacterGachaPoolType_Joint',       // 附加寻访（辉光庆典）
-    STANDARD: 'E_CharacterGachaPoolType_Standard', // 常驻池（基础寻访）
-    BEGINNER: 'E_CharacterGachaPoolType_Beginner'  // 新手池（启程寻访）
-  }
+  CHARACTER: OFFICIAL_CHARACTER_POOL_TYPES
 };
 
 /**
@@ -814,13 +815,7 @@ export async function fetchAllGachaRecordsConcurrent(u8Token, serverId = '1', on
       u8Token,
       serverId,
       source: normalizeImportSource(source),
-      pools: [
-        { type: 'char', poolType: POOL_TYPES.CHARACTER.SPECIAL },   // 限定角色池
-        { type: 'char', poolType: POOL_TYPES.CHARACTER.JOINT },     // 附加寻访
-        { type: 'char', poolType: POOL_TYPES.CHARACTER.STANDARD },  // 常驻角色池
-        { type: 'char', poolType: POOL_TYPES.CHARACTER.BEGINNER },  // 新手池
-        { type: 'weapon' }  // 武器池
-      ],
+      pools: DEFAULT_OFFICIAL_RECORD_REQUESTS,
       // 传递元数据用于队列显示
       gameUid: metadata.gameUid,
       nickName: metadata.nickName
@@ -874,38 +869,16 @@ export async function fetchAllGachaRecordsConcurrent(u8Token, serverId = '1', on
 function processRecordsBatchResult(result, onProgress) {
   // 处理所有卡池结果
   const allRecords = [];
-  const poolTypeMap = {
-    [POOL_TYPES.CHARACTER.SPECIAL]: 'limited_character',
-    [POOL_TYPES.CHARACTER.JOINT]: 'extra',
-    [POOL_TYPES.CHARACTER.STANDARD]: 'standard',
-    [POOL_TYPES.CHARACTER.BEGINNER]: 'beginner',
-    'weapon': 'limited_weapon',
-    'undefined': 'limited_weapon'  // 武器池没有 poolType
-  };
 
   result.data.results.forEach(poolResult => {
-    // 武器池的 poolType 是 undefined，需要通过 type 判断
-    let poolType;
-    if (poolResult.type === 'weapon') {
-      poolType = 'limited_weapon';
-    } else {
-      poolType = poolTypeMap[poolResult.poolType] || 'unknown';
-    }
-    const records = poolResult.records.map(r => ({ ...r, _poolType: poolType }));
+    const records = poolResult.records.map(r => annotateOfficialGachaRecord(r, poolResult));
     allRecords.push(...records);
   });
 
   // 检查是否有失败的卡池
   const failedPools = result.data.failed || [];
   if (failedPools.length > 0) {
-    const failedNames = failedPools.map(f => {
-      if (f.type === 'weapon') return '武器池';
-      if (f.poolType?.includes('Special')) return '限定角色池';
-      if (f.poolType?.includes('Joint')) return '附加寻访';
-      if (f.poolType?.includes('Standard')) return '常驻角色池';
-      if (f.poolType?.includes('Beginner')) return '新手池';
-      return f.type || '未知卡池';
-    }).join('、');
+    const failedNames = failedPools.map(getOfficialRecordRequestLabel).join('、');
 
     if (onProgress) onProgress(`部分卡池获取失败: ${failedNames}，已获取 ${allRecords.length} 条记录`);
 
@@ -927,58 +900,16 @@ function processRecordsBatchResult(result, onProgress) {
 export async function fetchAllGachaRecords(u8Token, onProgress, source = 'cn', serverId = '1') {
   const allRecords = [];
 
-  // 1. 限定角色池（特许寻访）
-  if (onProgress) onProgress('正在获取限定角色池记录...');
-  const specialRecords = await fetchAllPoolRecords(u8Token, {
-    type: 'char',
-    poolType: POOL_TYPES.CHARACTER.SPECIAL,
-    source,
-    serverId
-  }, onProgress);
-  allRecords.push(...specialRecords.map(r => ({ ...r, _poolType: 'limited_character' })));
-
-  // 2. 附加寻访
-  if (onProgress) onProgress('正在获取附加寻访记录...');
-  await delay(1500 + Math.random() * 1000);
-  const jointRecords = await fetchAllPoolRecords(u8Token, {
-    type: 'char',
-    poolType: POOL_TYPES.CHARACTER.JOINT,
-    source,
-    serverId
-  }, onProgress);
-  allRecords.push(...jointRecords.map(r => ({ ...r, _poolType: 'extra' })));
-
-  // 3. 常驻角色池（基础寻访）
-  if (onProgress) onProgress('正在获取常驻角色池记录...');
-  await delay(1500 + Math.random() * 1000);
-  const standardRecords = await fetchAllPoolRecords(u8Token, {
-    type: 'char',
-    poolType: POOL_TYPES.CHARACTER.STANDARD,
-    source,
-    serverId
-  }, onProgress);
-  allRecords.push(...standardRecords.map(r => ({ ...r, _poolType: 'standard' })));
-
-  // 4. 新手池（启程寻访）
-  if (onProgress) onProgress('正在获取新手池记录...');
-  await delay(1500 + Math.random() * 1000);
-  const beginnerRecords = await fetchAllPoolRecords(u8Token, {
-    type: 'char',
-    poolType: POOL_TYPES.CHARACTER.BEGINNER,
-    source,
-    serverId
-  }, onProgress);
-  allRecords.push(...beginnerRecords.map(r => ({ ...r, _poolType: 'beginner' })));
-
-  // 5. 武器池
-  if (onProgress) onProgress('正在获取武器池记录...');
-  await delay(2000 + Math.random() * 1000);
-  const weaponRecords = await fetchAllPoolRecords(u8Token, {
-    type: 'weapon',
-    source,
-    serverId
-  }, onProgress);
-  allRecords.push(...weaponRecords.map(r => ({ ...r, _poolType: 'limited_weapon' })));
+  for (const [index, request] of DEFAULT_OFFICIAL_RECORD_REQUESTS.entries()) {
+    if (onProgress) onProgress(`正在获取${getOfficialRecordRequestLabel(request)}记录...`);
+    if (index > 0) {
+      // eslint-disable-next-line no-await-in-loop -- anti-abuse pacing between pools is intentionally sequential
+      await delay((request.type === 'weapon' ? 2000 : 1500) + Math.random() * 1000);
+    }
+    // eslint-disable-next-line no-await-in-loop -- fallback fetches one pool at a time
+    const records = await fetchAllPoolRecords(u8Token, { ...request, source, serverId }, onProgress);
+    allRecords.push(...records.map(record => annotateOfficialGachaRecord(record, request)));
+  }
 
   return allRecords;
 }
