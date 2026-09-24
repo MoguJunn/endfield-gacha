@@ -38,7 +38,7 @@ import { localizeEntityName } from '../../utils/gameDataI18n.js';
 import { getCharacterAvatarUrl } from '../../utils/characterUtils.js';
 import { DONATION_LEDGER, DONATION_TOTALS } from '../../constants/donations.js';
 import RotationScheduleCard from './RotationScheduleCard.jsx';
-import SummerLotteryBanner from './SummerLotteryBanner.jsx';
+import CommunityActivityPanel from './CommunityActivityPanel.jsx';
 import VersionCountdownCard from './VersionCountdownCard.jsx';
 import { getDesktopMessageId } from './desktopMessageModel.js';
 import { getConfiguredVersionTarget } from './desktopHomeData.js';
@@ -418,7 +418,7 @@ export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages, onUse
           <header className="dh-section-heading">
             <h2><Gamepad2 size={16} />{tt('社区活动', 'Community event')}</h2>
           </header>
-          <SummerLotteryBanner onOpenDetails={() => openPanel('lottery')} />
+          <CommunityActivityPanel onOpenCommunity={() => openPanel('support')} />
         </section>
       </div>
 

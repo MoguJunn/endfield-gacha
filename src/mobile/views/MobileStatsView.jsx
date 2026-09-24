@@ -375,6 +375,10 @@ function MobileStatsView({ lockedDataSource = null, scheduledSummary, scheduledC
 }
 
 export default function MobileStatisticsWorkspace() {
-  return <PoolStatisticsWorkspace mobile overview={(source, snapshot) => <MobileStatsView lockedDataSource={source}
-    scheduledSummary={source === 'local' ? snapshot?.summary ?? null : undefined} scheduledCatalogs={source === 'local' ? snapshot?.catalogs ?? null : undefined} />} />;
+  return (
+    <div data-testid="mobile-statistics-scroll" className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden pb-[calc(5rem+env(safe-area-inset-bottom))]">
+      <PoolStatisticsWorkspace mobile overview={(source, snapshot) => <MobileStatsView lockedDataSource={source}
+        scheduledSummary={source === 'local' ? snapshot?.summary ?? null : undefined} scheduledCatalogs={source === 'local' ? snapshot?.catalogs ?? null : undefined} />} />
+    </div>
+  );
 }

@@ -1,0 +1,69 @@
+.community-activity-panel {
+  --community-ink: #f8fbff;
+  --community-muted: #b7c6d9;
+  --community-line: #ffffff2b;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(148px, .85fr);
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  color: var(--community-ink);
+}
+.community-activity-panel__feature {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  padding: 13px 15px;
+  border: 1px solid #6685a84d;
+  background: radial-gradient(circle at 84% 12%, #52bde055, transparent 28%), linear-gradient(135deg, #102d4a 0%, #071a2d 57%, #142642 100%);
+  box-shadow: inset 0 1px #ffffff14, 0 8px 24px #0b26401f;
+}
+.community-activity-panel__feature::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background-image: linear-gradient(#ffffff0b 1px, transparent 1px), linear-gradient(90deg, #ffffff0b 1px, transparent 1px);
+  background-size: 22px 22px;
+  content: '';
+  mask-image: linear-gradient(135deg, #000, transparent 70%);
+}
+.community-activity-panel__feature::after {
+  position: absolute;
+  z-index: -1;
+  right: -31px;
+  bottom: -66px;
+  width: 155px;
+  height: 155px;
+  border: 1px solid #f4c95a55;
+  border-radius: 50%;
+  box-shadow: 0 0 0 18px #f4c95a0c, 0 0 0 36px #f4c95a08;
+  content: '';
+}
+.community-activity-panel__ghost-number { position: absolute; right: 11px; top: 21px; color: #ffffff0b; font-family: var(--font-number, ui-monospace, monospace); font-size: 74px; font-weight: 900; letter-spacing: -.12em; line-height: .7; pointer-events: none; }
+.community-activity-panel__eyebrow { display: flex; align-items: center; gap: 6px; color: #c5d6e9; font-size: 9px; font-weight: 700; letter-spacing: .1em; white-space: nowrap; }
+.community-activity-panel__eyebrow span { margin-left: auto; border: 1px solid #ffffff3d; padding: 3px 6px; color: #f8d66f; font-size: 8px; letter-spacing: .06em; }
+.community-activity-panel__feature-copy { max-width: 280px; margin-top: 8px; }
+.community-activity-panel__feature-copy h3 { font-size: clamp(17px, 1.5vw, 23px); font-weight: 800; line-height: 1.15; }
+.community-activity-panel__feature-copy p { margin-top: 6px; color: var(--community-muted); font-size: 10px; line-height: 1.55; }
+.community-activity-panel__archive-link { display: inline-flex; align-items: center; align-self: flex-start; gap: 6px; min-height: 27px; margin-top: 8px; border-bottom: 1px solid #f4c95a88; color: #f8d66f; font-size: 10px; font-weight: 800; }
+.community-activity-panel__links { display: grid; grid-template-rows: 1fr 1fr; gap: 8px; min-width: 0; }
+.community-activity-panel__links > :is(a, button) { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 0; padding: 10px; border: 1px solid var(--community-line); background: #102b46e8; color: var(--community-ink); text-align: left; transition: background-color 160ms, border-color 160ms, transform 160ms; }
+.community-activity-panel__links > :is(a, button):hover { border-color: #f4c95a99; background: #173957; color: #fff; transform: translateX(2px); }
+.community-activity-panel__links > :is(a, button):focus-visible { outline: 2px solid #f4c95a; outline-offset: 2px; }
+.community-activity-panel__link-icon { display: grid; flex-shrink: 0; width: 29px; height: 29px; place-items: center; border: 1px solid #75d3f655; color: #79d9f0; }
+.community-activity-panel__link-icon--warm { border-color: #f4c95a66; color: #f4c95a; }
+.community-activity-panel__links > :is(a, button) > span:nth-child(2) { flex: 1; min-width: 0; }
+.community-activity-panel__links strong { display: block; font-size: 11px; line-height: 1.3; }
+.community-activity-panel__links small { display: block; margin-top: 3px; color: var(--community-muted); font-size: 9px; line-height: 1.35; }
+.community-activity-panel__links > :is(a, button) > svg { flex-shrink: 0; color: #a9bad0; }
+
+@media (max-width: 700px) {
+  .community-activity-panel { grid-template-columns: 1fr; }
+  .community-activity-panel__feature { min-height: 180px; }
+  .community-activity-panel__links { min-height: 112px; }
+}
