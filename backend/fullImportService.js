@@ -682,7 +682,7 @@ async function hydrateOfficialImportPools(supabase, pools = []) {
   const canonicalPoolIds = [...new Set(canonicalPools.map((pool) => pool.pool_id).filter(Boolean))];
   const { data: existingRows, error } = await supabase
     .from('pools')
-    .select('pool_id, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase')
+    .select('pool_id, type, up_character, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase')
     .in('pool_id', canonicalPoolIds);
   if (error) throw error;
 
@@ -714,6 +714,7 @@ async function hydrateOfficialImportPools(supabase, pools = []) {
     hydratedById.set(String(pool.pool_id), {
       ...pool,
       type,
+      up_character: existingPool?.up_character || pool.up_character,
       ...resolveOfficialExtraPoolMetadata(pool.pool_id, type, existingPool),
     });
   });
@@ -1688,17 +1689,21 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
 
     // 计算 pity
     const recordsWithPity = calculatePity(pullRecords.map((record) => {
+      const officialPoolId = getOfficialPoolId(record, type, poolType);
+      const recordPool = importPoolById.get(String(officialPoolId));
       const normalized = normalizeOfficialImportRecord(record, {
         gameUid,
         serverId: resolvedServerId,
         region: resolvedRegion,
         type,
-        poolType,
-        poolId: getOfficialPoolId(record, type, poolType),
+        poolType: recordPool?.type || poolType,
+        poolId: officialPoolId,
+        upCharacter: recordPool?.up_character || currentUpCharacter,
       });
       return {
         ...record,
         rarity: normalized.quality,
+        specialType: normalized.specialType,
         itemName: normalized.itemName,
         itemId: normalized.rawItemId,
         itemType: normalized.itemType,
@@ -1740,7 +1745,7 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
         continue;
       }
 
-      const characterName = normalized.itemName;
+      const characterName = normalized.giftCharacterName || normalized.itemName;
       const rarity = resolveOfficialImportStorageQuality(normalized);
       const normalizedRecord = {
         ...record,
@@ -1778,7 +1783,7 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
         // 数据库必需字段（与前端 ImportManager.jsx 保持一致）
         rarity,
         character_name: characterName,
-        item_name: characterName,
+        item_name: normalized.itemName,
         character_id: characterId,
         timestamp: timestamp,
         
@@ -1795,7 +1800,7 @@ async function processRecords(rawRecords, account, _userId, existingSeqIds, sour
 
         // 其他可选字段
         batch_id: null,
-        special_type: null,
+        special_type: normalized.specialType,
         
         // 时间戳
         created_at: new Date().toISOString(),

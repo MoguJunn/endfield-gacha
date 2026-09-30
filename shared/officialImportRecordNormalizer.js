@@ -115,9 +115,18 @@ export function normalizeOfficialImportRecord(record = {}, context = {}) {
         ? 'character'
         : context.itemType || context.type
   );
-  const quality = normalizeQuality(
+  const sourceQuality = normalizeQuality(
     firstDefined(record.rarity, record.quality, record.qualityLevel, record.quality_level)
   );
+  // A limited banner's named token is a reward, not an unknown four-star pull.
+  // Match the catalog UP exactly; never classify arbitrary missing-ID items.
+  const targetName = normalizeText(context.upCharacter);
+  const isTrustTokenGift = context.poolType === 'limited'
+    && targetName !== ''
+    && itemName === `${targetName}的信物`
+    && !rawItemId
+    && sourceQuality === null;
+  const quality = isTrustTokenGift ? 6 : sourceQuality;
   const seqId = normalizeText(firstDefined(record.seqId, record.seq_id));
   const sourceTimestamp = firstDefined(record.gachaTs, record.timestamp, record.gacha_ts);
   const timestamp = normalizeTimestamp(sourceTimestamp);
@@ -138,7 +147,7 @@ export function normalizeOfficialImportRecord(record = {}, context = {}) {
         fields: ['itemId', 'itemName'],
       })
     );
-  } else if (!rawItemId) {
+  } else if (!rawItemId && !isTrustTokenGift) {
     issues.push(
       createIssue('MISSING_ITEM_ID', 'review', `“${itemName}”缺少物品 ID，需要确认后再导入。`, { fields: ['itemId'] })
     );
@@ -211,6 +220,8 @@ export function normalizeOfficialImportRecord(record = {}, context = {}) {
     itemName: itemName || null,
     itemType,
     quality,
+    specialType: isTrustTokenGift ? 'gift' : null,
+    giftCharacterName: isTrustTokenGift ? targetName : null,
     poolId: poolId || null,
     poolName: poolName || null,
     poolVersion,
@@ -229,7 +240,7 @@ export function normalizeOfficialImportRecord(record = {}, context = {}) {
       itemId: rawItemId || null,
       itemName: itemName || null,
       itemType,
-      quality,
+      quality: sourceQuality,
       poolId: poolId || null,
       poolName: poolName || null,
       poolVersion: rawPoolVersion ?? null,
