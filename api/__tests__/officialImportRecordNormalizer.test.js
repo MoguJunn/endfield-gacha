@@ -13,6 +13,30 @@ import {
 } from '../../shared/officialImportRecordNormalizer.js';
 
 describe('officialImportRecordNormalizer', () => {
+  it('preserves the named UP token as a gift without unknown-item issues', () => {
+    const record = { nameText: '提弗洛斯的信物', poolId: 'special_1_5_1', seqId: '241', gachaTs: '1780000000000' };
+    const context = { gameUid: 'synthetic', serverId: '1', poolType: 'limited', upCharacter: '提弗洛斯' };
+    const result = normalizeOfficialImportRecord(record, context);
+    expect(result).toMatchObject({ specialType: 'gift', giftCharacterName: '提弗洛斯', quality: 6, issues: [], blocked: false });
+    expect(result.rawMin).toMatchObject({ itemName: '提弗洛斯的信物', itemId: null, quality: null });
+    expect(filterOfficialImportPullRecords([record])).toEqual([record]);
+    expect(normalizeOfficialImportRecord({ ...record, seqId: '' }, context).blocked).toBe(true);
+  });
+
+  it.each([
+    { poolType: 'weapon', upCharacter: '提弗洛斯' },
+    { poolType: 'standard', upCharacter: '提弗洛斯' },
+    { poolType: 'limited', upCharacter: '其他角色' },
+    { poolType: 'limited' },
+  ])('does not classify unknown items as tokens outside the exact limited UP context: %j', (context) => {
+    const result = normalizeOfficialImportRecord(
+      { nameText: '提弗洛斯的信物', poolId: 'special_1_5_1', seqId: '241', gachaTs: '1780000000000' },
+      { gameUid: 'synthetic', serverId: '1', ...context }
+    );
+    expect(result.specialType).toBeNull();
+    expect(result.issues.map((issue) => issue.code)).toContain('MISSING_QUALITY');
+  });
+
   it('normalizes legacy character fields', () => {
     const result = normalizeOfficialImportRecord(
       {
