@@ -1,10 +1,8 @@
 import React from 'react';
 import { AlertTriangle, Clipboard, RefreshCw, RotateCcw } from 'lucide-react';
 import appLogger from '../utils/appLogger.js';
-import {
-  buildCrashDiagnostic,
-  isLikelyFatalRuntimeError,
-} from '../utils/appCrashFallback.js';
+import { isModuleLoadError, recoverModuleLoad, reloadModulePage } from '../utils/moduleLoadRecovery.js';
+import { buildCrashDiagnostic, isLikelyFatalRuntimeError } from '../utils/appCrashFallback.js';
 
 const isDev = import.meta.env.DEV;
 
@@ -26,14 +24,20 @@ class ErrorBoundary extends React.Component {
   componentDidCatch(error, errorInfo) {
     appLogger.error('ErrorBoundary caught an error:', error, errorInfo);
     this.setState({ errorInfo });
+    recoverModuleLoad(error);
   }
 
   handleReset = () => {
+    if (isModuleLoadError(this.state.error)) {
+      this.handleReload();
+      return;
+    }
     this.setState({ hasError: false, error: null, errorInfo: null, copied: false });
   };
 
   handleReload = () => {
-    window.location.reload();
+    if (isModuleLoadError(this.state.error)) reloadModulePage();
+    else window.location.reload();
   };
 
   handleCopyDiagnostic = async () => {
@@ -64,6 +68,7 @@ class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       const diagnostic = buildCrashDiagnostic(this.state.error, { phase: 'react-boundary' });
       const likelyFatal = isLikelyFatalRuntimeError(this.state.error);
+      const moduleLoadFailed = isModuleLoadError(this.state.error);
 
       return (
         <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-4">
@@ -75,10 +80,12 @@ class ErrorBoundary extends React.Component {
 
             {/* 标题 */}
             <h1 className="text-xl font-bold text-zinc-100 mb-2">
-              {likelyFatal ? '页面渲染被阻断' : '应用发生错误'}
+              {moduleLoadFailed ? '页面资源加载失败' : likelyFatal ? '页面渲染被阻断' : '应用发生错误'}
             </h1>
             <p className="text-zinc-500 text-sm mb-6">
-              当前页面遇到了会影响渲染的异常。下面是诊断信息；如果错误来自旧构建资源，请先尝试刷新页面。
+              {moduleLoadFailed
+                ? '页面所需的代码未能加载，可能与网络中断或版本更新有关。请确认网络后刷新页面；已保存的抽卡记录不会被清除。'
+                : '当前页面遇到了会影响渲染的异常。下面是诊断信息；如果错误来自旧构建资源，请先尝试刷新页面。'}
             </p>
 
             <dl className="bg-zinc-950 border border-zinc-800 rounded-none p-4 mb-6 grid grid-cols-[120px_1fr] gap-x-4 gap-y-2 text-left text-xs">
@@ -89,7 +96,9 @@ class ErrorBoundary extends React.Component {
               <dt className="text-zinc-600 font-bold">来源文件</dt>
               <dd className="text-zinc-300 break-all m-0">{diagnostic.filename || '未提供'}</dd>
               <dt className="text-zinc-600 font-bold">版本信息</dt>
-              <dd className="text-zinc-300 m-0">{diagnostic.appVersion} / {diagnostic.buildInfo}</dd>
+              <dd className="text-zinc-300 m-0">
+                {diagnostic.appVersion} / {diagnostic.buildInfo}
+              </dd>
               <dt className="text-zinc-600 font-bold">发生时间</dt>
               <dd className="text-zinc-300 m-0">{diagnostic.generatedAt}</dd>
             </dl>
@@ -102,13 +111,15 @@ class ErrorBoundary extends React.Component {
 
             {/* 操作按钮 */}
             <div className="flex flex-wrap gap-3">
-              <button
-                onClick={this.handleReset}
-                className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 border border-zinc-700 rounded-none transition-colors flex items-center gap-2"
-              >
-                <RotateCcw size={16} />
-                重置状态
-              </button>
+              {!moduleLoadFailed && (
+                <button
+                  onClick={this.handleReset}
+                  className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 border border-zinc-700 rounded-none transition-colors flex items-center gap-2"
+                >
+                  <RotateCcw size={16} />
+                  重置状态
+                </button>
+              )}
               <button
                 onClick={this.handleReload}
                 className="px-4 py-2 text-sm font-bold text-black bg-endfield-yellow hover:bg-yellow-400 rounded-none transition-colors flex items-center gap-2"
