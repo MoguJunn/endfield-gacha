@@ -1,12 +1,12 @@
 /* Standalone version theme. Override --vc-* on the card to theme it separately. */
 .version-countdown-card {
-  --vc-surface: #fff;
-  --vc-text: #1e293b;
-  --vc-muted: #64748b;
-  --vc-accent: #0369a1;
-  --vc-line: #7dd3fc70;
-  --vc-edge: #38bdf8;
-  --vc-tint: #0ea5e90c;
+  --vc-surface: #fffdf5;
+  --vc-text: #24231f;
+  --vc-muted: #756b56;
+  --vc-accent: #2044cb;
+  --vc-line: #cbb16e70;
+  --vc-edge: #b79745;
+  --vc-tint: #cbb16e14;
   position: relative;
   min-width: 0;
   min-height: 0;
@@ -22,10 +22,13 @@
   gap: 10px;
 }
 .dark .version-countdown-card {
-  --vc-surface: #18181b;
-  --vc-text: #f4f4f5;
-  --vc-muted: #a1a1aa;
-  --vc-accent: #7dd3fc;
+  --vc-surface: #1e1c17;
+  --vc-text: #faf5e5;
+  --vc-muted: #bdb39a;
+  --vc-accent: #a4b7ff;
+  --vc-line: #cbb16e50;
+  --vc-edge: #ddc788;
+  --vc-tint: #cbb16e0c;
 }
 .vc-topline, .vc-topline > span, .vc-date, .version-countdown-card footer,
 .version-countdown-card button {

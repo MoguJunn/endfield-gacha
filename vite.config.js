@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 import { getApiRouteEntries } from './api/_routes/index.js';
+import { createModuleRecoveryPlugin } from './scripts/lib/moduleRecoveryPlugin.mjs';
 
 const LOCAL_SERVER_ENV_PREFERRED_KEYS = new Set([
   'QQBOT_POOL_PUSH_ENABLED',
@@ -157,7 +158,7 @@ export default defineConfig(({ mode }) => {
     // VITE_* is the normal public env namespace. These Supabase key names are
     // also safe to expose because they are publishable/anon browser keys.
     envPrefix: ['VITE_', 'SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_ANON_KEY', 'PUBLISHABLE_KEY'],
-    plugins: [react(), createDevApiPlugin()],
+    plugins: [react(), createDevApiPlugin(), createModuleRecoveryPlugin()],
     // The app is deployed at the domain root, so generated asset and SW URLs
     // must stay absolute across nested SPA routes like /m/summary.
     base: '/',
