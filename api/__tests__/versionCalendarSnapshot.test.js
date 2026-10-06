@@ -83,6 +83,8 @@ describe('version calendar snapshot', () => {
       type: 'extra',
       extra_subtype: 'reconstruction_claim',
       extra_rule_profile: 'reconstruction_weapon_v1',
+      extra_series_key: 'reconstruction_six',
+      extra_series_phase: 1,
       up_character: '艺术暴君',
       start_time: '2026-09-24T04:00:00+00:00',
     }]);
@@ -92,8 +94,22 @@ describe('version calendar snapshot', () => {
         poolId: 'reclaim_9_0_2',
         name: '点绘申领',
         type: 'arsenal',
+        poolKind: 'reconstruction',
+        extraSubtype: 'reconstruction_claim',
+        extraSeriesKey: 'reconstruction_six',
+        extraSeriesPhase: 1,
       }),
     ]);
+  });
+
+  it('preserves reconstruction operator phase without depending on manual IDs or names', () => {
+    expect(sanitizeVersionCalendarPool({ pool_id: 'joint_manual_extra_pool_cf4379',
+      name: '祖泉的新流（前瞻）', type: 'extra', extra_subtype: 'reconstruction',
+      extra_rule_profile: 'reconstruction_character_v1', extra_series_phase: 2,
+    })).toMatchObject({ type: 'operator', poolKind: 'reconstruction', extraSeriesPhase: 2 });
+    expect(sanitizeVersionCalendarPool({ pool_id: 'standard', name: '常驻', type: 'standard',
+      extra_series_phase: 0,
+    })).toMatchObject({ poolKind: 'standard', extraSeriesPhase: null });
   });
 
   it('uses the UP character artwork for operator and matching weapon pools', () => {

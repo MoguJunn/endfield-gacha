@@ -1,4 +1,5 @@
 import { sanitizePublicCatalogResourceUrl } from '../../shared/publicCatalogDto.js';
+import { getCanonicalExtraPoolMetadata } from '../../shared/extraPoolSubtype.js';
 
 const POOL_MAINTENANCE_SUFFIX = /\s*（前瞻(?:，[^）]*)?）\s*$/u;
 
@@ -134,11 +135,17 @@ export function sanitizeVersionCalendarPool(row, backgroundCharacter = null) {
   }
 
   const typeHint = `${row.type || ''} ${poolId} ${name}`;
+  const extra = getCanonicalExtraPoolMetadata(row);
+  const isReconstruction = ['reconstruction', 'reconstruction_claim'].includes(extra.extra_subtype);
   return {
     poolId,
     name,
     nameEn: row.name_en || null,
-    type: WEAPON_POOL_PATTERN.test(typeHint) ? 'arsenal' : 'operator',
+    type: extra.extra_subtype === 'reconstruction_claim' || WEAPON_POOL_PATTERN.test(typeHint) ? 'arsenal' : 'operator',
+    poolKind: isReconstruction ? 'reconstruction' : 'standard',
+    extraSubtype: extra.extra_subtype,
+    extraSeriesKey: extra.extra_series_key,
+    extraSeriesPhase: isReconstruction && extra.extra_series_phase > 0 ? extra.extra_series_phase : null,
     startsAt: row.start_time || null,
     endsAt: row.end_time || null,
     bannerUrl: sanitizePublicCatalogResourceUrl(row.banner_url),
