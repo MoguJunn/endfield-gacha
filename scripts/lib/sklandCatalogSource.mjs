@@ -52,10 +52,11 @@ async function extractFromPage(page, itemType) {
       if (typeof node.name === 'string' && typeof node.brief?.cover === 'string') {
         const row = {
           itemId: node.itemId || null,
-          name: node.name,
+          name: node.name.trim(),
           cover: node.brief.cover,
           associateId: node.brief?.associate?.id || null,
-          associateType: node.brief?.associate?.type || null
+          associateType: node.brief?.associate?.type || null,
+          sourceLabel: node.brief.dotType || null,
         };
 
         const key = [row.itemId || '', row.name, row.cover].join('::');

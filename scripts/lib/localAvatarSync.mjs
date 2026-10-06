@@ -60,12 +60,15 @@ export function printLocalAvatarSyncHelp(commandName = 'sync-local-avatars') {
   --full                            重新按当前最高优先级来源刷新全部头像
   --dry-run                         演练模式：只计算队列，不下载、不写数据库
   --no-write-db                     下载到 public/avatars，但不更新 characters.avatar_url
-  --output <file>                   写出源站提取记录，便于人工审计
+  --output <file>                   写出已匹配实体的图片候选，不包含未匹配词条
   --no-skland                       跳过森空岛主源
   --no-warfarin                     跳过 warfarin.wiki 兜底
   --no-team-stardust                跳过 Team Stardust 兜底
   --no-legacy-bucket                跳过旧 Supabase avatars bucket 兜底
   --help                            显示帮助
+
+如 PowerShell 下 npm 未透传参数，可直接运行：
+  node scripts/${commandName === 'fetch:skland-images' ? 'fetch-skland-images' : 'sync-local-avatars'}.mjs --dry-run
 
 来源优先级:
   森空岛官方 Wiki > warfarin.wiki > Team Stardust > 旧 avatars bucket`);
@@ -416,11 +419,9 @@ function buildDbLookup(dbItems) {
   return { byId, byName, duplicateNames };
 }
 
-function matchAssetRecordsToDb(records, dbItems, itemType, source) {
+export function matchAssetRecordsToDb(records, dbItems, itemType, source) {
   const lookup = buildDbLookup(dbItems);
   const matched = [];
-  const unmatched = [];
-  const ambiguous = [];
 
   for (const record of records) {
     const sourceId = String(record?.sourceId || record?.associateId || record?.itemId || record?.id || '').trim();
@@ -428,7 +429,6 @@ function matchAssetRecordsToDb(records, dbItems, itemType, source) {
     const sourceUrl = String(record?.imageUrl || record?.cover || record?.avatar_url || '').trim();
 
     if (!sourceName || !sourceUrl) {
-      unmatched.push(record);
       continue;
     }
 
@@ -436,12 +436,10 @@ function matchAssetRecordsToDb(records, dbItems, itemType, source) {
     if (!dbItem) {
       const key = normalizeName(sourceName);
       if (!key) {
-        unmatched.push(record);
         continue;
       }
 
       if (lookup.duplicateNames.has(key)) {
-        ambiguous.push(record);
         continue;
       }
 
@@ -460,7 +458,6 @@ function matchAssetRecordsToDb(records, dbItems, itemType, source) {
     }
 
     if (!dbItem) {
-      unmatched.push(record);
       continue;
     }
 
@@ -477,7 +474,7 @@ function matchAssetRecordsToDb(records, dbItems, itemType, source) {
     );
   }
 
-  return { matched, unmatched, ambiguous };
+  return { matched };
 }
 
 function addPriorityItems(merged, candidateChains, items, sourceCounts) {
@@ -663,8 +660,10 @@ function writeSourceOutput(outputPath, sourceRecords) {
     type: record.type,
     id: record.id || record.itemId || null,
     name: record.name,
-    cover: record.cover || record.imageUrl || record.avatar_url || null,
-    raw: record.raw || undefined,
+    cover: record.remoteUrl || null,
+    localUrl: record.localUrl,
+    sourceId: record.sourceId,
+    sourceName: record.sourceName,
   }));
 
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -697,9 +696,8 @@ export async function runLocalAvatarSync(options) {
   const merged = new Map();
   const candidateChains = new Map();
   const sourceCounts = {};
-  const sourceRecords = [];
 
-  logger('开始同步站点本地头像资源');
+  logger('开始为已有角色和武器同步本地图片');
   logger(`类型: ${requestedTypes.join(', ')}`);
   logger(
     `模式: ${options.mode === 'full' ? '全量刷新' : '增量更新'}${options.dryRun ? ' / 演练模式' : ''}${options.writeDb ? '' : ' / 不写数据库'}`
@@ -718,17 +716,14 @@ export async function runLocalAvatarSync(options) {
         source: 'skland',
         type: itemType,
       }));
-      sourceRecords.push(...records);
-
-      const { matched, unmatched, ambiguous } = matchAssetRecordsToDb(records, dbItems, itemType, 'skland');
+      const { matched } = matchAssetRecordsToDb(records, dbItems, itemType, 'skland');
       addPriorityItems(merged, candidateChains, matched, sourceCounts);
       logger(
-        `森空岛 ${itemType} 命中 ${matched.length} 条，歧义 ${ambiguous.length} 条，未匹配源项 ${unmatched.length} 条`
+        `森空岛 ${itemType}: 为 ${new Set(matched.map((item) => item.id)).size} 个已有实体找到图片候选（非下载数量）`
       );
     }
   }
 
-  const getUncoveredRecords = () => scopedExistingCharacters.filter((record) => !merged.has(record.id));
   const getRecordsNeedingFallback = () =>
     scopedExistingCharacters.filter((record) => {
       const candidates = candidateChains.get(record.id) || [];
@@ -755,15 +750,6 @@ export async function runLocalAvatarSync(options) {
         if (item) {
           matched.push(item);
         }
-      }
-
-      for (const itemType of requestedTypes) {
-        const records = Array.from((warfarinCatalog[itemType] || new Map()).values()).map((record) => ({
-          ...record,
-          source: 'warfarin',
-          type: itemType,
-        }));
-        sourceRecords.push(...records);
       }
 
       addPriorityItems(merged, candidateChains, matched, sourceCounts);
@@ -832,22 +818,19 @@ export async function runLocalAvatarSync(options) {
     addPriorityItems(merged, candidateChains, existingLocalItems, sourceCounts);
   }
 
-  writeSourceOutput(options.output, sourceRecords);
+  const selectedItems = Array.from(merged.values());
+  writeSourceOutput(options.output, selectedItems);
   if (options.output) {
-    logger(`源站提取记录已写入 ${options.output}`);
+    logger(`已匹配实体的图片候选已写入 ${options.output}`);
   }
 
-  const selectedItems = Array.from(merged.values());
-  const unresolvedRecords = getUncoveredRecords();
   const readyItems = [];
   const acquireGroups = [];
   let unchangedCount = 0;
 
-  for (const record of scopedExistingCharacters) {
-    const candidates = candidateChains.get(record.id) || [];
-    if (candidates.length === 0) {
-      continue;
-    }
+  for (const selectedItem of selectedItems) {
+    const record = dbById.get(selectedItem.id);
+    const candidates = candidateChains.get(record.id);
 
     const readyItem = options.mode === 'incremental' ? candidates.find((item) => fs.existsSync(item.outputPath)) : null;
     const dbAlreadyLocal = readyItem
@@ -866,12 +849,9 @@ export async function runLocalAvatarSync(options) {
     }
   }
 
-  logger(`覆盖 ${selectedItems.length}/${scopedExistingCharacters.length} 条，未覆盖 ${unresolvedRecords.length} 条`);
-  if (unresolvedRecords.length > 0) {
-    logger(`仍未覆盖: ${unresolvedRecords.map((record) => `${record.type}:${record.id}(${record.name})`).join(', ')}`);
-  }
+  logger(`已匹配图片候选 ${selectedItems.length} 个已有实体`);
   logger(
-    `来源命中: ${
+    `优先来源候选: ${
       Object.entries(sourceCounts)
         .map(([source, count]) => `${source}=${count}`)
         .join(', ') || '无'
@@ -889,7 +869,7 @@ export async function runLocalAvatarSync(options) {
   if (options.dryRun) {
     logger(`演练结果: 本地文件已存在待写库 ${readyItems.length} 条，待获取资源 ${acquireGroups.length} 条`);
     for (const { record, candidates } of acquireGroups) {
-      logger(`候选 ${record.type}:${record.id}: ${candidates.map((item) => item.source).join(' -> ')}`);
+      logger(`候选 ${record.type}:${record.id}(${record.name}): ${candidates.map((item) => item.source).join(' -> ')}`);
     }
   } else {
     for (let index = 0; index < acquireGroups.length; index += 1) {
@@ -943,7 +923,6 @@ export async function runLocalAvatarSync(options) {
 
   return {
     selectedItems,
-    unresolvedRecords,
     sourceCounts,
     unchangedCount,
     readyCount: readyItems.length,
