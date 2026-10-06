@@ -5,7 +5,7 @@ const STRONG_CALENDAR_HINT_RE = /版本\s*日历|活动\s*日历|version\s*calen
 const SECONDARY_CALENDAR_HINT_RE = /日程|日历|schedule/iu;
 const NON_CALENDAR_TITLE_RE = /寻访|补给|更新说明|系列更新|衍生品|共贺|故障|修复|维护|封禁|导引|礼包/iu;
 const IMAGE_MARKDOWN_RE = /!\[[^\]]*\]\(([^)\s]+)\)/giu;
-const IMAGE_TAG_RE = /<img\b[^>]*\ssrc=(["'])(.*?)\1/giu;
+const IMAGE_TAG_RE = /<img\b[^>]*\ssrc=(["'])(.*?)\1[^>]*>/giu;
 const ALT_ATTRIBUTE_RE = /\salt=(["'])(.*?)\1/iu;
 
 export const STATIC_GAME_CALENDAR_IMAGE = Object.freeze({
