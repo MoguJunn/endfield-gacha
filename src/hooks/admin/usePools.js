@@ -7,6 +7,7 @@ import * as poolService from '../../services/admin/poolService';
 import { invalidatePublicCache } from '../../services/admin/publicCacheService';
 import { useAuthStore } from '../../stores';
 import { characterCache } from '../../utils/characterUtils';
+import { identifyWeaponCharacterPool } from '../../../shared/weaponPoolSchedule.js';
 import {
   canonicalizeExtraPoolSubtype,
   getExpectedExtraPoolSubtype,
@@ -27,6 +28,7 @@ export const INITIAL_POOL_FORM = {
   description: '',
   start_time: '',
   end_time: '',
+  character_pool_id: '',
   is_limited_weapon: true,
   locked: false,
 };
@@ -164,7 +166,7 @@ export function normalizeDraftPoolCharacters(
   return Array.from(dedupedRows.values());
 }
 
-export function buildPoolDataFromForm(poolForm = {}) {
+export function buildPoolDataFromForm(poolForm = {}, pools = []) {
   const normalizedPoolType = normalizePoolType(poolForm.type);
   const extraRuleProfile = normalizedPoolType === 'extra'
     ? normalizeText(poolForm.extra_rule_profile)
@@ -212,6 +214,9 @@ export function buildPoolDataFromForm(poolForm = {}) {
       description: normalizeNullableText(poolForm.description),
       start_time: normalizeDateInput(poolForm.start_time),
       end_time: normalizeDateInput(poolForm.end_time),
+      character_pool_id: normalizedPoolType === 'weapon' && poolForm.is_limited_weapon
+        ? normalizeNullableText(poolForm.character_pool_id) || identifyWeaponCharacterPool(poolForm, pools)
+        : null,
       is_limited_weapon: normalizedPoolType === 'weapon' ? Boolean(poolForm.is_limited_weapon) : null,
       locked: Boolean(poolForm.locked),
     },
@@ -290,8 +295,9 @@ export function buildPoolDraftDiff({
   editingPoolCharacters = [],
   originalPoolCharacters = [],
   characters = [],
+  pools = [],
 } = {}) {
-  const { normalizedPoolType, featuredCharacters, upCharacterName, poolData } = buildPoolDataFromForm(poolForm);
+  const { normalizedPoolType, featuredCharacters, upCharacterName, poolData } = buildPoolDataFromForm(poolForm, pools);
   const featuredNamesForSave = normalizedPoolType === 'extra' ? featuredCharacters : [upCharacterName].filter(Boolean);
   const normalizedCurrentRows = normalizeDraftPoolCharacters(
     editingPoolCharacters,
@@ -326,6 +332,7 @@ export function buildPoolDraftDiff({
     description: '描述',
     start_time: '开始时间',
     end_time: '结束时间',
+    character_pool_id: '同期限定角色池',
     is_limited_weapon: '限定武器',
   };
   const fieldChanges = [];
@@ -353,6 +360,7 @@ export function buildPoolDraftDiff({
       'featured_characters',
       'start_time',
       'end_time',
+      'character_pool_id',
     ].forEach((key) => {
       const value = normalizeComparableValue(poolData[key]);
       if (value !== null && !(Array.isArray(value) && value.length === 0)) {
@@ -545,6 +553,7 @@ export const usePools = (showToast, {
       description: pool.description || '',
       start_time: formatDateTimeLocal(pool.start_time),
       end_time: formatDateTimeLocal(pool.end_time),
+      character_pool_id: pool.character_pool_id || '',
       is_limited_weapon: pool.is_limited_weapon !== false,
       locked: pool.locked || false,
     });
@@ -568,8 +577,9 @@ export const usePools = (showToast, {
         editingPoolCharacters,
         originalPoolCharacters: editingPoolOriginalCharacters,
         characters,
+        pools,
       }),
-    [editingPool, poolForm, editingPoolCharacters, editingPoolOriginalCharacters, characters]
+    [editingPool, poolForm, editingPoolCharacters, editingPoolOriginalCharacters, characters, pools]
   );
 
   // 保存卡池
@@ -585,7 +595,7 @@ export const usePools = (showToast, {
 
     try {
       const { normalizedPoolType, expectedCharacterType, featuredCharacters, upCharacterName } =
-        buildPoolDataFromForm(poolForm);
+        buildPoolDataFromForm(poolForm, pools);
 
       if (normalizedPoolType === 'extra') {
         if (!['reconstruction_character_v1', 'reconstruction_weapon_v1', 'brilliance_festival_v1'].includes(
@@ -692,7 +702,7 @@ export const usePools = (showToast, {
         poolForm.extra_rule_profile
       );
 
-      const { poolData } = buildPoolDataFromForm(poolForm);
+      const { poolData } = buildPoolDataFromForm(poolForm, pools);
 
       const result = await service.savePool(poolData, editingPool, charactersForSave, editingPoolCharactersForSave);
 
@@ -720,6 +730,7 @@ export const usePools = (showToast, {
     }
   }, [
     poolForm,
+    pools,
     editingPool,
     editingPoolCharacters,
     characters,

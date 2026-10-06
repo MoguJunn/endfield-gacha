@@ -16,6 +16,7 @@ import {
 import DateTimePicker from '../../common/DateTimePicker';
 import { PanelToolbarButton } from '../panels/shared/PanelUi.jsx';
 import { getPoolFeaturedNames } from '../../../utils/poolFeaturedResolver.js';
+import { getLimitedCharacterTimeline, identifyWeaponCharacterPool, resolveWeaponPoolSchedule } from '../../../../shared/weaponPoolSchedule.js';
 
 const FIELD_INPUT_CLASS =
   'w-full border bg-white px-3 py-1.5 text-xs text-slate-700 outline-none transition-colors focus:border-amber-500 dark:bg-zinc-900 dark:text-zinc-300 dark:focus:border-endfield-yellow';
@@ -262,6 +263,7 @@ const PoolEditDialog = ({
   poolForm,
   setPoolForm,
   characters,
+  pools = [],
   editingPoolCharacters,
   poolDraftDiff,
   actionLoading,
@@ -303,6 +305,7 @@ const PoolEditDialog = ({
     setPoolForm((prev) => ({
       ...prev,
       type: nextType,
+      character_pool_id: '',
       extra_subtype: '',
       extra_rule_profile: '',
       extra_series_key: '',
@@ -339,6 +342,9 @@ const PoolEditDialog = ({
         ? 'weapon'
         : poolForm.type;
   const isExtraPool = poolType === 'extra';
+  const weaponSchedule = resolveWeaponPoolSchedule(poolForm, pools);
+  const inferredCharacterPool = identifyWeaponCharacterPool(poolForm, pools);
+  const limitedTimeline = getLimitedCharacterTimeline(pools);
   const extraRuleProfile = poolForm.extra_rule_profile || '';
   const isBrillianceFestival = isExtraPool && extraRuleProfile === 'brilliance_festival_v1';
   const isReconstruction = isExtraPool
@@ -641,6 +647,25 @@ const PoolEditDialog = ({
                 )}
 
                 {/* 时间范围 */}
+                {poolType === 'weapon' && poolForm.is_limited_weapon && (
+                  <div className="space-y-2 border border-amber-200 bg-amber-50 p-3 text-xs dark:border-amber-900 dark:bg-amber-950/20">
+                    <label className={FIELD_LABEL_CLASS} htmlFor="weapon-character-pool">同期开启的限定角色池</label>
+                    <select id="weapon-character-pool" className={`${FIELD_INPUT_CLASS} ${FIELD_BORDER_CLASS}`}
+                      value={poolForm.character_pool_id || ''}
+                      onChange={event => setPoolForm(prev => ({ ...prev, character_pool_id: event.target.value }))}>
+                      <option value="">自动识别{inferredCharacterPool ? `：${limitedTimeline.find(pool => (pool.pool_id || pool.id) === inferredCharacterPool)?.name}` : '（请先设置开始时间）'}</option>
+                      {limitedTimeline.map(pool => <option key={pool.pool_id || pool.id} value={pool.pool_id || pool.id}>{pool.name}</option>)}
+                    </select>
+                    <p className="text-slate-500 dark:text-zinc-400">从同期池起计三期：{weaponSchedule.periods.map(pool => pool.name).join(' → ') || '尚未识别'}{weaponSchedule.estimated && ' → 后续未公布期次按每期 21 天估算'}。</p>
+                    <PanelToolbarButton type="button" disabled={!weaponSchedule.endsAt} onClick={() => {
+                      const date = new Date(weaponSchedule.endsAt);
+                      const part = value => String(value).padStart(2, '0');
+                      setPoolForm(prev => ({ ...prev, character_pool_id: weaponSchedule.characterPoolId,
+                        end_time: `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())}T${part(date.getHours())}:${part(date.getMinutes())}` }));
+                    }}>一键填入第三期截止时间{weaponSchedule.estimated ? '（估算）' : ''}</PanelToolbarButton>
+                    {weaponSchedule.endsAt && <p className="text-slate-500 dark:text-zinc-400">建议截止：{formatDiffValue(weaponSchedule.endsAt)}。填入后仍可手动调整，点击保存后生效。</p>}
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <DateTimePicker
                     label="开始时间"

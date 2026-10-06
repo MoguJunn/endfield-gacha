@@ -2,7 +2,9 @@
 
 这份文件只保留“从哪里开始读代码”的索引。系统边界、数据流、缓存和数据库分层详见 [ARCHITECTURE.md](ARCHITECTURE.md)；部署、环境变量和维护命令详见 [PROJECT_GUIDE.md](PROJECT_GUIDE.md)。
 
-当前索引对应 `v4.6.2` 候选；生产统计迁移、Worker 与 v4 预热尚未执行，发布状态见 [RELEASE_4.6.2.md](RELEASE_4.6.2.md)。
+当前索引对应 `v4.6.3` 主线，发布状态见 [RELEASE_4.6.3.md](RELEASE_4.6.3.md)。
+
+武器池时间管理入口：`shared/weaponPoolSchedule.js`（自动识别／三期截止预览）、`src/components/admin/pools/PoolEditDialog.jsx`（关联选择及一键填入）、`src/hooks/admin/usePools.js`（草稿和保存）、`supabase/migrations/2026100701_weapon_character_pool_schedule.sql`（持久关联与 RPC）。独立日历数据库时间优先规则位于 `endfield-version-calendar/lib/calendar-core.js`；说明见 [卡池时间管理](POOL_SCHEDULE_MANAGEMENT.md)。
 
 ## 前端入口
 

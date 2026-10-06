@@ -519,6 +519,7 @@ const PoolManagement = ({ showToast, service = null, configAdapter = null, sandb
             poolForm={poolForm}
             setPoolForm={setPoolForm}
             characters={characters}
+            pools={pools}
             editingPoolCharacters={editingPoolCharacters}
             poolDraftDiff={poolDraftDiff}
             actionLoading={actionLoading}

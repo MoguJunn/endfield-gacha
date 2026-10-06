@@ -2,7 +2,7 @@
 
 仓库内的补充文档统一收口到 `docs/`：
 
-当前准备版本为 `v4.6.2`：本地实现已准备，生产迁移、Worker、v4 快照预热及发布证据仍待完成。历史版本文档保留当时事实。
+当前发布为 `v4.6.3`，PR #43 及导览原图直连修复已上线；发布事实见 `docs/RELEASE_4.6.3.md`，历史版本文档保留当时事实。
 
 - `docs/ARCHITECTURE.md`：整体架构、公共 / 私有 / admin 边界、缓存、自动化和数据库分层
 - `docs/AUTH_SECURITY_HARDENING.md`：Phase A–D 本地候选、认证不变量、迁移重编号、真实浏览器回归和发布门禁
@@ -12,6 +12,8 @@
 - `docs/MOBILE_HOME_PLAN.md`：手机首页 P1 改版任务、内容顺序、触摸滚动与正式启用验收标准
 - `docs/RELEASE_4.6.0.md`：v4.6.0 交付范围、贡献署名、版本验证及运行时配置同步
 - `docs/RELEASE_4.6.2.md`：本轮五类合池、十图、旧指标迁移、全页宽度、已有验证与生产启用门禁
+- `docs/RELEASE_4.6.3.md`：v4.6.3 发布及后续独立维护记录
+- `docs/POOL_SCHEDULE_MANAGEMENT.md`：限定武器池同期角色关联、三期截止时间填入及独立版本日历数据库同步
 - `docs/STATS_OBSERVATION_CONTRACT.md`：单池／合池首次样本、去重账号覆盖、旧指标与资源口径、理论边界
 - `docs/STATISTICS_SCHEDULING.md`：v4 快照、5/30/60 分钟调度、生产迁移和预热顺序、只读本地预览
 - `docs/STATS_BRANCH_SCOPE.md`：统计与指南实现范围、阶段提交和未完成边界
@@ -36,7 +38,7 @@
 - 整体架构、公共缓存、自动化和数据库边界放在 `docs/ARCHITECTURE.md`
 - 认证目标架构、候选验证证据、GitHub 回归和生产边界放在 `docs/AUTH_SECURITY_HARDENING.md`
 - `supabase/README.md` 负责数据库迁移链、baseline 与手工脚本说明
-- 新版桌面的布局、路由、主页偏好与验收维护在 `docs/DESKTOP_HOME_DEMO.md`；本轮发布提交、CI 与生产验证维护在 `docs/RELEASE_4.6.2.md`，`docs/RELEASE_4.6.0.md` 与早期预览截图保留历史含义
+- 新版桌面的布局、路由、主页偏好与验收维护在 `docs/DESKTOP_HOME_DEMO.md`；当前发布提交、CI 与生产验证维护在 `docs/RELEASE_4.6.3.md`，旧发布文档与早期预览截图保留历史含义
 - 与当前运行状态冲突的“历史计划 / 旧部署方式”不要继续保留在主文档正文里
 - 认证文档必须区分本地候选、真实浏览器回归、授权后集成与生产部署；候选 migration 文件名不等于最终生产编号
 - 新增迁移、CI、Serverless 路由、字体链、公告采集链或公共缓存版本后，应同步更新对应专题文档，而不是把细节塞回根 README

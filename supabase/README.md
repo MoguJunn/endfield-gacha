@@ -1,5 +1,7 @@
 # Supabase Schema Guide
 
+2026-10-07：`2026100701_weapon_character_pool_schedule.sql` 已在生产备份及事务回滚验证后应用，新增 `pools.character_pool_id`，保留原后台 RPC 的认证与原子保存边界，回填 15 个限定武器池的唯一同期角色池关联，不改写截止日期。当前生成 baseline 包含 193 个迁移，覆盖到该文件；此前的迁移数量描述是历史验证记录。操作与验证见 [武器池时间管理](../docs/POOL_SCHEDULE_MANAGEMENT.md)。
+
 `supabase/` 按“可重复前向部署”和“仅手工执行”分层维护：
 
 - `baseline/`
