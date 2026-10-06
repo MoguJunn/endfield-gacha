@@ -5,6 +5,7 @@ import { loadTickets } from '../../services/ticketService.js';
 import { useAuthStore, useAppStore } from '../../stores';
 import { STORAGE_KEYS, hasNewContent, getStorageItem } from '../../utils';
 import { findGameAnnouncementCalendarImage } from '../../utils/gameAnnouncementCalendar.js';
+import { appendVersionBriefingRecords, isOfficialVersionBriefing } from '../../utils/versionBriefing.js';
 import { isContributorDemoModeEnabled } from '../../dev/contributorDemoMode.js';
 
 const GAME_ANNOUNCEMENT_VISIBLE_DAYS = 7;
@@ -221,7 +222,7 @@ async function loadOfficialAnnouncementsFeed({
     latestRecords: records,
     cutoffIso,
   });
-  return appendPinnedGameCalendarRecord(displayRecords, records);
+  return appendVersionBriefingRecords(appendPinnedGameCalendarRecord(displayRecords, records), records);
 }
 
 export function useNotificationBadges() {
@@ -298,17 +299,26 @@ export function useNotificationBadges() {
         latestRecords: latestDbGameRecords,
         cutoffIso,
       });
+      gameRecords = appendVersionBriefingRecords(gameRecords, [
+        ...dbGameRecords,
+        ...latestDbGameRecords,
+        ...(apiPayload?.versionBriefingAnnouncements || []),
+      ]);
 
       const sourceGroups = new Set(gameRecords.map(getAnnouncementSourceGroup));
       const hasGameCalendarCandidate = Boolean(findGameAnnouncementCalendarImage(gameRecords));
+      const hasBriefingCover = gameRecords.some(record => isOfficialVersionBriefing(record)
+        && /新版本导览封面/u.test(record.content || ''));
 
       if (
         gameRecords.length < GAME_ANNOUNCEMENT_HISTORY_FALLBACK_LIMIT * GAME_ANNOUNCEMENT_SOURCE_GROUPS.length
         || GAME_ANNOUNCEMENT_SOURCE_GROUPS.some(group => !sourceGroups.has(group))
         || !hasGameCalendarCandidate
+        || !hasBriefingCover
       ) {
         try {
           const feedRecords = await loadOfficialAnnouncementsFeed({ cutoffIso });
+          const briefingCandidates = [...feedRecords, ...gameRecords];
           gameRecords = buildGameAnnouncementDisplaySet({
             recentRecords: gameRecords.filter(record => !record?.is_recent_history_fallback),
             // Prefer the live feed when DB still contains an older generated summary for the same source_id.
@@ -316,6 +326,7 @@ export function useNotificationBadges() {
             cutoffIso,
           });
           gameRecords = appendPinnedGameCalendarRecord(gameRecords, [...feedRecords, ...gameRecords]);
+          gameRecords = appendVersionBriefingRecords(gameRecords, briefingCandidates);
         } catch {
           // keep database-derived records
         }

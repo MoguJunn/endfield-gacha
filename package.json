@@ -2,7 +2,7 @@
   "name": "endfield-gacha-analyzer",
   "description": "终末地抽卡分析器 - 《明日方舟：终末地》抽卡记录分析工具",
   "private": true,
-  "version": "4.6.2",
+  "version": "4.6.3",
   "type": "module",
   "packageManager": "npm@11.2.0",
   "engines": {
@@ -50,6 +50,7 @@
     "test:supabase-baseline": "node scripts/verify-supabase-baseline.mjs",
     "test:supabase-baseline:smoke": "node scripts/verify-supabase-baseline-smoke.mjs",
     "test:personal-analysis-queue": "node scripts/verify-personal-analysis-queue-sql.mjs",
+    "test:supabase-auth-lock:ui": "node scripts/verify-supabase-auth-lock-playwright.mjs",
     "test:auth-hardening-phase-a": "node scripts/verify-auth-hardening-phase-a.mjs",
     "test:auth-hardening-phase-cd": "node scripts/verify-auth-hardening-phase-cd.mjs",
     "test:history-batch-delete-guard": "node scripts/verify-history-batch-delete-guard.mjs",

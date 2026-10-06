@@ -167,7 +167,12 @@ export async function buildOfficialAnnouncementSourceRecords(pageSize = DEFAULT_
     const normalizedSummary = typeof detail.brief === 'string' && detail.brief.trim()
       ? detail.brief.trim()
       : null;
-    const rawContent = normalizeOfficialHtml(detail.data || '', sourceUrl);
+    // Briefing artwork is the list cover; the first body image is only a banner.
+    // Keep the cover in content too so the persisted announcement retains it.
+    const coverHtml = /新版本导览/u.test(detail.title || '') && detail.cover
+      ? `<img src="${String(detail.cover).replace(/"/gu, '&quot;')}" alt="新版本导览封面">`
+      : '';
+    const rawContent = normalizeOfficialHtml(`${coverHtml}${detail.data || ''}`, sourceUrl);
 
     return {
       source_id: String(detail.cid),
@@ -204,12 +209,17 @@ export async function buildOfficialAnnouncementRecordsFromSources(sourceRecords 
       bypassLlmCache,
       allowHeuristicSummary,
     });
+    const briefingCover = /新版本导览/u.test(detail.title || '')
+      && /alt="新版本导览封面"/u.test(presentation.rawContent)
+      && !/新版本导览封面/u.test(presentation.content)
+      ? `![新版本导览封面](${presentation.imageUrls[0]})\n\n`
+      : '';
 
     return {
       source_id: detail.source_id,
       title: detail.title,
       summary: presentation.summaryText || detail.summary,
-      content: presentation.content,
+      content: `${briefingCover}${presentation.content}`,
       raw_content: presentation.rawContent,
       image_urls: presentation.imageUrls,
       summary_mode: presentation.summaryMode,

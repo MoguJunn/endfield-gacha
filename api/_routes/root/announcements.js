@@ -85,6 +85,7 @@ function createEmptyPayload() {
     siteAnnouncements: [],
     recentGameAnnouncements: [],
     latestGameAnnouncements: [],
+    versionBriefingAnnouncements: [],
     gameAnnouncementDigest: null
   };
 }
@@ -152,6 +153,7 @@ function mergePayload(previousPayload, nextPartialPayload) {
     siteAnnouncements: next.siteAnnouncements ?? previous.siteAnnouncements ?? [],
     recentGameAnnouncements: next.recentGameAnnouncements ?? previous.recentGameAnnouncements ?? [],
     latestGameAnnouncements: next.latestGameAnnouncements ?? previous.latestGameAnnouncements ?? [],
+    versionBriefingAnnouncements: next.versionBriefingAnnouncements ?? previous.versionBriefingAnnouncements ?? [],
     gameAnnouncementDigest: next.gameAnnouncementDigest ?? previous.gameAnnouncementDigest ?? null
   };
 }
@@ -214,29 +216,44 @@ async function fetchLatestGameAnnouncements(supabase, limit) {
     .order('published_at', { ascending: false })
     .limit(limit);
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
+  return decorateAnnouncementRecords(data || []);
+}
 
+async function fetchVersionBriefingAnnouncements(supabase) {
+  const { data, error } = await supabase
+      .from('announcements')
+      .select(ANNOUNCEMENT_COLUMNS)
+      .eq('is_active', true)
+      .not('source_id', 'is', null)
+      .neq('source_id', '')
+      .ilike('title', '%新版本导览%')
+      .like('source_url', 'https://endfield.hypergryph.com/news/%')
+      .order('published_at', { ascending: false })
+      .limit(DEFAULT_GAME_LIMIT);
+
+  if (error) throw error;
   return decorateAnnouncementRecords(data || []);
 }
 
 async function fetchAnnouncementsPayload(supabase, query, previousPayload) {
-  const [siteResult, recentGameResult, latestGameResult, digestResult] = await Promise.allSettled([
+  const [siteResult, recentGameResult, latestGameResult, digestResult, briefingResult] = await Promise.allSettled([
     fetchSiteAnnouncements(supabase),
     fetchRecentGameAnnouncements(supabase, query.cutoffIso),
     fetchLatestGameAnnouncements(supabase, query.limit),
-    getStoredGameAnnouncementDigest(supabase)
+    getStoredGameAnnouncementDigest(supabase),
+    fetchVersionBriefingAnnouncements(supabase)
   ]);
 
   const payload = mergePayload(previousPayload, {
     siteAnnouncements: siteResult.status === 'fulfilled' ? siteResult.value : undefined,
     recentGameAnnouncements: recentGameResult.status === 'fulfilled' ? recentGameResult.value : undefined,
     latestGameAnnouncements: latestGameResult.status === 'fulfilled' ? latestGameResult.value : undefined,
+    versionBriefingAnnouncements: briefingResult.status === 'fulfilled' ? briefingResult.value : undefined,
     gameAnnouncementDigest: digestResult.status === 'fulfilled' ? digestResult.value : undefined
   });
 
-  const partial = [siteResult, recentGameResult, latestGameResult, digestResult]
+  const partial = [siteResult, recentGameResult, latestGameResult, digestResult, briefingResult]
     .some((result) => result.status === 'rejected');
 
   return {

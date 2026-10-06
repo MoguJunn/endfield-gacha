@@ -67,6 +67,10 @@ function matchesFilters(row, filters = []) {
     if (filter.op === 'not' && filter.operator === 'is') return (row?.[filter.column] ?? null) !== filter.value;
     if (filter.op === 'neq') return row?.[filter.column] !== filter.value;
     if (filter.op === 'gte') return String(row?.[filter.column] || '') >= String(filter.value);
+    if (filter.op === 'like' || filter.op === 'ilike') {
+      const pattern = new RegExp(`^${filter.value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace(/%/gu, '.*')}$`, filter.op === 'ilike' ? 'iu' : 'u');
+      return pattern.test(String(row?.[filter.column] || ''));
+    }
     return true;
   });
 }
@@ -104,6 +108,16 @@ class PublicAnnouncementQuery {
 
   gte(column, value) {
     this.filters.push({ op: 'gte', column, value });
+    return this;
+  }
+
+  like(column, value) {
+    this.filters.push({ op: 'like', column, value });
+    return this;
+  }
+
+  ilike(column, value) {
+    this.filters.push({ op: 'ilike', column, value });
     return this;
   }
 
@@ -190,5 +204,26 @@ describe('/api/announcements', () => {
     expect(res.body.data.siteAnnouncements.map(item => item.id)).toEqual(['manual-null', 'manual-empty']);
     expect(res.body.data.recentGameAnnouncements.map(item => item.id)).toEqual(['game-real']);
     expect(res.body.data.latestGameAnnouncements.map(item => item.id)).toEqual(['game-real']);
+    expect(res.body.partial).toBe(false);
+  });
+
+  it('returns official briefing records even after they fall outside recent and latest announcement windows', async () => {
+    const recent = Array.from({ length: 5 }, (_, index) => ({
+      id: `recent-${index}`, source_id: `recent-${index}`, title: '普通公告',
+      is_active: true, published_at: '2026-11-01T00:00:00Z',
+    }));
+    const old = { id: 'briefing', source_id: '4774', title: '「丹青渡」新版本导览上线',
+      source_url: 'https://endfield.hypergryph.com/news/4774', is_active: true,
+      published_at: '2026-10-06T12:00:00Z', content: '![新版本导览封面](/cover.png)' };
+    mocks.createClient.mockReturnValue(createSupabaseClient([...recent, old,
+      { ...old, id: 'inactive', source_id: 'inactive', is_active: false },
+      { ...old, id: 'unofficial', source_id: 'unofficial', source_url: 'https://other.test/news/1' },
+    ]));
+    const res = createJsonResponseRecorder();
+    await announcementsHandler(createRequest('https://example.com/api/announcements?limit=5&cutoffIso=2026-10-25T00:00:00Z'), res);
+    expect(res.body.data.latestGameAnnouncements).toHaveLength(5);
+    expect(res.body.data.recentGameAnnouncements).toHaveLength(5);
+    expect(res.body.data.versionBriefingAnnouncements.map(item => item.id)).toEqual(['briefing']);
+    expect(res.body.partial).toBe(false);
   });
 });
