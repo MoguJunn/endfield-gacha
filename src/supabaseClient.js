@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import appLogger from './utils/appLogger.js';
 import { isContributorDemoModeEnabled } from './dev/contributorDemoMode.js';
+import { getBrowserAuthLock } from './utils/supabaseAuthLock.js';
 
 function normalizeEnvValue(value) {
   return typeof value === 'string' ? value.trim() : ''
@@ -32,6 +33,7 @@ export const supabase = !isContributorDemoModeEnabled() && supabaseUrl && supaba
   ? createClient(supabaseUrl, supabasePublishableKey, {
     auth: {
       flowType: 'pkce',
+      lock: getBrowserAuthLock(),
     },
   })
   : null
