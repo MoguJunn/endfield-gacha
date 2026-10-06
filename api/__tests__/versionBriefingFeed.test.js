@@ -16,7 +16,7 @@ describe('official briefing cover ingestion', () => {
     const [record] = await buildOfficialAnnouncementRecords(30, { fetchImpl, env: {} });
     const persisted = { ...record, raw_content: undefined, image_urls: undefined };
     const briefing = findVersionBriefing([persisted], { versions: [{ name: '丹青渡' }] }, new Date('2026-11-01').getTime());
-    expect(briefing.imageUrl).toContain(encodeURIComponent(cover));
+    expect(briefing.imageUrl).toBe(cover);
     expect(briefing.imageUrl).not.toContain('banner');
     expect(record.summary_mode).toBe(mode === 'short' ? 'raw' : 'heuristic');
   });

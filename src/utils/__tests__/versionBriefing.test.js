@@ -3,18 +3,22 @@ import { appendVersionBriefingRecords, findVersionBriefing } from '../versionBri
 
 const plan = { versions: [{ name: '丹青渡', nameEn: 'Sanctuary of Ink' }, { name: '下期版本' }] };
 const now = new Date('2026-11-01T00:00:00Z').getTime();
+const coverUrl = 'https://web.hycdn.cn/upload/image/20260930/edd8254d71b1feeb662f5eade79e9f84.png';
+const proxyUrl = `/api/official-announcement-image?url=${encodeURIComponent(coverUrl)}`;
 const briefing = {
   source_id: '4774',
   title: '「丹青渡」新版本导览上线，浏览领嵌晶玉！',
   source_url: 'https://endfield.hypergryph.com/news/4774',
   published_at: '2026-10-06T12:00:00Z',
-  content: '<img src="/api/official-announcement-image?url=cover" alt="新版本导览封面"><img src="/banner.png">',
-  image_urls: ['/api/official-announcement-image?url=cover', '/banner.png'],
+  content: `<img src="${proxyUrl}" alt="新版本导览封面"><img src="/banner.png">`,
+  image_urls: [proxyUrl, '/banner.png'],
 };
 
 describe('version briefing selection', () => {
   it('uses the official cover instead of the body banner, including persisted markdown summaries', () => {
-    expect(findVersionBriefing([briefing], plan, now).imageUrl).toBe('/api/official-announcement-image?url=cover');
+    expect(findVersionBriefing([briefing], plan, now).imageUrl).toBe(coverUrl);
+    expect(findVersionBriefing([{ ...briefing, content: `![新版本导览封面](https://ef-gacha.mogujun.icu${proxyUrl})` }], plan, now).imageUrl).toBe(coverUrl);
+    expect(findVersionBriefing([{ ...briefing, content: `![新版本导览封面](${coverUrl})` }], plan, now).imageUrl).toBe(coverUrl);
     expect(findVersionBriefing([{ ...briefing, content: '![新版本导览封面](/cover.png)\n![公告配图 2](/banner.png)' }], plan, now).imageUrl).toBe('/cover.png');
   });
 

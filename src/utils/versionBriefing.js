@@ -1,5 +1,13 @@
 import { extractGameAnnouncementImageEntries } from './gameAnnouncementCalendar.js';
 
+function getOriginalBriefingImageUrl(imageUrl) {
+  if (!imageUrl) return null;
+  const url = new URL(imageUrl, 'https://endfield.hypergryph.com');
+  return url.pathname === '/api/official-announcement-image'
+    ? url.searchParams.get('url') || imageUrl
+    : imageUrl;
+}
+
 export function isOfficialVersionBriefing(announcement) {
   if (announcement?.is_active === false || !/新版本导览/u.test(announcement?.title || '')) return false;
   try {
@@ -26,7 +34,7 @@ export function findVersionBriefing(announcements = [], versionPlan, now = Date.
     if (!version) continue;
     const cover = extractGameAnnouncementImageEntries({ ...announcement, image_urls: [], imageUrls: [] })
       .find(entry => entry.alt === '新版本导览封面');
-    return { announcement, version, imageUrl: cover?.url || null };
+    return { announcement, version, imageUrl: getOriginalBriefingImageUrl(cover?.url) };
   }
   return null;
 }

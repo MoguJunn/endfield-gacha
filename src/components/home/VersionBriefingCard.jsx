@@ -20,7 +20,7 @@ export default function VersionBriefingCard() {
     <article className={`version-briefing${briefing?.imageUrl ? ' version-briefing--with-art' : ''}`} aria-label={tt('新版本导览', 'New version briefing')}>
       {briefing?.imageUrl && <a className="version-briefing__art" href={VERSION_BRIEFING_URL} target="_blank" rel="noopener noreferrer"
         aria-label={tt('查看官方新版本导览', 'View the official new version briefing')}>
-        <img src={briefing.imageUrl} alt={tt(`「${versionName}」新版本导览`, `${versionName} version briefing`)} decoding="async" />
+        <img src={briefing.imageUrl} alt={tt(`「${versionName}」新版本导览`, `${versionName} version briefing`)} decoding="async" referrerPolicy="no-referrer" />
       </a>}
       <div className="version-briefing__details">
         <div className="version-briefing__intro">
