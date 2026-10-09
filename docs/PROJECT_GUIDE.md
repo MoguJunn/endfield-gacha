@@ -1,301 +1,89 @@
-# Project Guide
+# 开发与部署指南
 
-这份文档承接 README 中不适合放在 GitHub 首页的部署、环境变量、数据库和维护细节。
-
-当前发布为 `v4.6.3`，发布事实与后续维护见 [RELEASE_4.6.3.md](RELEASE_4.6.3.md)。旧日期的部署观察只代表对应时点。
-
-限定武器池管理现提供“同期开启的限定角色池”自动识别／手动选择和第三期截止时间一键填入，未知期次按 21 天估算，保存前仍可手改。独立版本日历卡池时间以主站数据库为准。数据库迁移、管理步骤和缓存边界见 [卡池时间管理](POOL_SCHEDULE_MANAGEMENT.md)。混合导入重复数据修正已登记为工作区 `STATS-DATA-REPAIR-001` 待办，未在本轮清理用户历史。
-
-## 功能范围
-
-- 官方抽卡记录导入、去重、内部暂存后自动原子写入、写入完成后的异常核对、云同步和区服纠错。
-- 私有历史记录按完整账号作用域精确编辑 / 删除；用户核对与超级管理员集中复核只处理已经写入的异常记录，不参与导入前逐条放行。
-- 个人分析按 owner/account revision 持久化快照，通过 Supabase `pg_cron + pg_net` 异步生成；活跃用户可即时派发，失败时保留上次成功结果。
-- 附加寻访支持重构寻访、重构申领和特殊寻访子类型，分类贯穿导入、分析、模拟器、管理端与桌面 / 移动展示。
-- 首页 bootstrap、公告、全服统计、卡池目录和阵容公开读取。
-- v4.6.2 候选提供单池与限定角色／限定武器／常驻武器／重构寻访／重构申领五类合池，十图、头像选择、分类排序与按范围迁移的旧指标／资源；合池首获逐账号逐期逐对象计算后再汇总，账号覆盖去重。
-- 桌面端 / 移动端双入口、抽卡模拟器、分享卡和后台管理。
-- 运营自动化：公告、卡池轮换、Wiki catalog 的 job graph、partial、review bundle 和审计。
-- 可观测性：Vercel Analytics、Speed Insights、性能预算报告。
+本文帮助贡献者启动项目、选择调试环境，并帮助自建部署者配置服务。功能概览见 [README](../README.md)，模块入口见 [CODEMAP](CODEMAP.md)。
 
 ## 本地开发
 
 ```bash
-npm install
+npm ci
 cp .env.contributor.example .env.local
 npm run dev
 ```
 
-外部贡献者默认使用 `.env.contributor.example`。其中 `VITE_CONTRIBUTOR_DEMO_MODE=true` 会在 Vite DEV 中启用本地内容沙盒；`VITE_CONTRIBUTOR_CATALOG_API_BASE` 默认指向正式站公共只读 API，因此无需数据库 key 就能使用当前真实卡池、角色、武器和阵容。成功目录会持久化，断网首启则回退仓库内可确认的真实最小目录。维护者需要调试完整服务端链路时，再从 `.env.example` 复制到本地私有 `.env.local` 并补齐服务端密钥。
+运行要求：Node.js `>=22.17.0 <27`、npm `>=10`。安装使用仓库锁文件；`predev` 会准备字体与分享渲染器。
 
-内容沙盒覆盖：
+### 贡献者内容沙盒
 
-- 正式站 `/api/stats?type=pool_catalog`、`characters`、`/api/pool-rosters` 和 `/api/bootstrap` 的真实公开目录；
-- 角色 / 武器目录、168 条演示历史、免费记录、情报书、赠送事件、个人 owner/account 分析快照与历史分页；
-- 全服统计、首页版本时间线、桌面 / 移动数据页面和模拟器数据源；
-- synthetic `super_admin` 账号，以及公告、卡池、阵容、角色、武器、版本时间线和站点配置的本地 CRUD；
-- 用户、异常、邮件、抽奖、自动化、工单、开发者 API 与账号恢复的脱敏安全交互布局。
+`VITE_CONTRIBUTOR_DEMO_MODE=true` 仅在 Vite DEV 生效。默认从公共只读 API 获取卡池、角色、武器和阵容，缓存最后一次成功目录；离线首启使用内置最小目录。
 
-本地沙盒账号为 `demo-admin@local.invalid` / `frontend-demo`，登录页可一键填入。会话只保存在当前标签页的 `sessionStorage`；它没有 Supabase 用户、Bearer token 或 HttpOnly 站点 Session。内容修改只写入 `gacha_contributor_content_sandbox_v3`，刷新保留，顶部可刷新正式目录或重置整个沙盒。沙盒模式不创建真实 Supabase 客户端，并在激活和退出时清理同源认证残留；OAuth、邮件验证码、密码恢复、身份绑定、官方代理导入和后台自动化在服务入口 fail closed。公共目录、图片资源主机与公开 `site_config` 键均使用显式白名单，目录请求不携带凭据。生产构建中 `import.meta.env.DEV` 为 false，因此即使误配环境变量也不会激活。
+演示身份：`demo-admin@local.invalid` / `frontend-demo`。登录页可一键填入，管理界面支持公告、卡池、阵容、角色、版本时间线与站点配置的本地编辑。会话保存在当前标签页，内容保存到独立 `localStorage`，顶部提供刷新目录和重置操作。
 
-如需改用只读镜像，可修改 `VITE_CONTRIBUTOR_CATALOG_API_BASE`；不要把它指向不可信服务。若要调试真实认证或 RLS，则关闭沙盒并使用维护者提供的隔离环境。
+该身份没有数据库用户、Bearer token 或生产权限。沙盒禁用真实认证、OAuth、邮件、身份绑定、官方导入和后台执行，目录请求不携带凭据。生产构建不会激活沙盒。
 
-### 桌面首页与导航
+只读镜像可用 `VITE_CONTRIBUTOR_CATALOG_API_BASE` 配置，额外资源与目录主机需加入明确白名单。调试真实认证或 RLS 时，关闭沙盒并使用自己的隔离 Supabase。
 
-新版桌面首页已随 `v4.6.0` 发布，并通过 PR #32 成为生产默认。直接访问 `/` 即可；新版首页引导区提供“切换至经典主页”，经典主页左下角提供“切换至新版主页”，偏好保存在当前浏览器的 `gacha_home_experience_v1`。旧 `/?home-demo=unified` 链接继续打开新版。主页偏好只选择界面，隔离演示数据仍由上面的贡献者沙盒配置提供。
+### 页面入口
 
-新版桌面以 1366×768 / 100% 缩放为基准。v4.6.2 候选将顶栏、各页主内容与底栏统一为首页响应式宽度：常规上限 1366px，1920px 以上采用 `clamp(1366px, 78vw, 1920px)`，3000px 以上采用 `min(74vw, 2560px)`。上方引导区填充剩余高度，卡片区保留当前寻访、原生抽奖、原生轮换和独立版本倒计时；较小窗口用分区页签。个人卡池分析位于 `/dashboard`，个人概览位于 `/dashboard?view=overview`，全服统计位于 `/summary`，两者锁定各自数据源。宽屏个人菜单在正文外侧且可收起。
+- `/`：默认新版桌面首页，可切换经典主页并保存浏览器偏好。
+- `/dashboard`：个人卡池分析；`?view=overview` 打开个人概览。
+- `/summary`：全服统计，私有数据读取失败不应阻塞该页面。
+- `/m/`：手机入口；`/m/stats` 为手机统计。
+- `/statistics-preview.html`：开发专用统计与指南样例，按钮不执行真实登录、导入或备份。
 
-完整布局、导航 / 消息语义、主题接口与分阶段验证见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。移动端原行为保留，长内容页仍可滚动；桌面发布不表示全站治理完成。
-
-### 分池统计与指南预览
-
-全服与个人统计读取 `public-statistics-v4` 快照，页面请求不扫描历史或触发计算。5/30/60 分钟刷新由常驻 Worker 调度，首次未就绪显示等待，已有结果保留真实计算时间。生产必须依次完成统计迁移、Worker 部署和公开／个人 v4 预热，随后才启用前端与 API；操作顺序及只读本地真实数据准备见 [STATISTICS_SCHEDULING.md](STATISTICS_SCHEDULING.md)。已有 owner/account 个人分析调度不替代该统计 Worker。
-
-开发服务器的 `/statistics-preview.html` 使用构造样例展示统计和指南，仅在 Vite DEV 中渲染。指南的游客、无记录、已有数据与导入待核对状态尚未连接真实业务动作，不作为生产教程入口。
-
-## 验证矩阵
-
-| 命令 | 用途 |
-|------|------|
-| `npm test` | 公开验证链 |
-| `npm run test:unit` | Vitest 单元测试 |
-| `npm run test:contributor-demo:ui` | 已启动沙盒开发服务器时，验证真实公开目录、本地公告持久化与零私有/写入请求 |
-| `npm run lint` | ESLint |
-| `npm run build` | 生产构建 |
-| `npm run perf:report` | 包体和资源预算 |
-| `npm run test:public-api-boundary` | 首屏公共读取不直连 Supabase |
-| `npm run test:bootstrap-cache` | 公共 cache partial / stale 行为 |
-| `npm run test:supabase-baseline` | baseline 覆盖范围和首尾 marker |
-| `npm run test:supabase-baseline:smoke` | 在临时 PostgreSQL 中小范围真实执行候选 baseline |
-| `npm run test:personal-analysis-queue` | 在临时 PostgreSQL 中验证活跃用户 FIFO、失败退避和同用户 owner/scope 整批领取 |
-| `npm run test:auth-hardening-phase-a` | Phase A/B：管理员 RPC、OAuth transaction、Session 与 owner 权限边界 |
-| `npm run test:auth-hardening-phase-cd` | Phase C/D：邮箱归属、首次设密、临时凭据到期与 identity key 迁移 |
-| `npm run test:history-batch-delete-guard` | 在临时 PostgreSQL 中验证旧批量删除的跨账号重复 ID 防护 |
-| `npm run test:mail-abuse-guards` | 自建邮件防刷 guard、预算桶、幂等和脱敏 |
-| `npm run test:mail-outbox-enqueue` | 自建邮件 outbox 入队、幂等、预算和 RPC 边界 |
-| `npm run test:mail-outbox-worker` | 自建邮件 outbox 队列处理器、provider adapter、演练 / 真实发送回写和脱敏 |
-| `npm run test:mail-inbound` | 自建邮件入站 webhook 脱敏记录和 secret 鉴权 |
-| `npm run test:mail-service-entrypoints` | 网站侧邮件 worker endpoint、后台测试邮件入口和脱敏边界 |
-| `npm run test:ops-automation` | 运营自动化 job graph |
-| `npm run test:official-announcements-feed` | 官方公告 feed |
-| `npm run backfill:history-anomalies` | 只读扫描已知异常历史；正式写入还需要 `--apply` 和精确记录数 / 用户数确认变量 |
+布局与消息合同见 [桌面界面](DESKTOP_HOME_DEMO.md)，统计口径见 [统计指标](STATS_OBSERVATION_CONTRACT.md)。
 
 ## 环境变量
 
-贡献者安全模板：
+前端开发使用 [.env.contributor.example](../.env.contributor.example)。完整服务端部署参考 [.env.example](../.env.example)，真实值保存在本地环境文件或部署平台的秘密存储中。
+
+- `VITE_*` 会进入浏览器构建，只用于可公开的 URL、publishable key 和界面开关。
+- `SUPABASE_URL`、`SUPABASE_SECRET_KEY` 供服务端使用；旧 `SUPABASE_SERVICE_ROLE_KEY` 别名仍可兼容。
+- OAuth Client Secret、`OAUTH_STATE_SECRET`、identity keyring 和 Session 密钥只放服务端，配置见 [认证专题](AUTH_SECURITY_HARDENING.md)。
+- 个人分析 Worker 需要 `PERSONAL_ANALYSIS_WORKER_ENABLED` 和独立 secret；详细调度见 [Worker 指南](PERSONAL_ANALYSIS_WORKER.md)。
+- 邮件默认演练且真实发送关闭。SMTP、业务开关、Webhook 与紧急停发规则见 [邮件架构](SELF_HOSTED_MAIL.md)。
+- `CRON_SECRET` 和 BOT token 只用于受保护服务入口；官方 BOT 调用规则见 [绑定与 BOT API](integration-api.md)。
+
+`VITE_PUBLIC_DATA_DIRECT_SUPABASE_FALLBACK` 默认关闭，生产公共读取使用同源 API。浏览器 Realtime 也默认关闭，仅在隔离环境需要时启用。变更环境后重新启动开发服务器，生产前端变量变化需要重新构建。
+
+## 验证
 
 ```bash
-cp .env.contributor.example .env.local
+npm test
+npm run test:unit
+npm run lint
+npm run build
+npm run perf:report
 ```
 
-这个模板只允许填写浏览器端可公开变量，例如 `VITE_CONTRIBUTOR_DEMO_MODE`、`VITE_CONTRIBUTOR_CATALOG_API_BASE`、`VITE_SUPABASE_URL`、`VITE_SUPABASE_PUBLISHABLE_KEY`、`VITE_APP_URL` 和前端功能开关。沙盒只读取指定目录基址的公共 GET 数据，不需要数据库 key；关闭沙盒后，`VITE_SUPABASE_PUBLISHABLE_KEY` 可以出现在浏览器中，但必须是受 RLS 限制的低权限公开 key。不要把 `SUPABASE_SECRET_KEY`、`SUPABASE_SERVICE_ROLE_KEY`、`SUPABASE_JWT_SECRET`、SMTP 密码、OAuth Client Secret、BOT token、Cron secret 或 CAPTCHA secret 交给外部贡献者。
+`npm test` 覆盖公开验证脚本，`test:unit` 运行 Vitest。专项 `test:*` 命令在 `package.json` 中登记，包括公共读取、认证、数据库、导入、邮件和自动化。
 
-维护者完整模板：
+沙盒浏览器验证使用 `npm run test:contributor-demo:ui`，运行前启动开发服务器。需要数据库的检查使用临时 PostgreSQL 或隔离环境，不直接以生产配置运行测试。纯文档修改核对引用与差异即可。
 
-```env
-# Supabase
-SUPABASE_URL=https://your-project-ref.supabase.co
-VITE_SUPABASE_URL=https://your-project-ref.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxx
-SUPABASE_SECRET_KEY=sb_secret_xxx
+## 自建部署
 
-# 认证安全与同源站点 Session（真实值仅放服务端秘密存储）
-OAUTH_STATE_SECRET=replace-me-with-long-random-secret
-AUTH_IDENTITY_HASH_KEY_LEGACY_STATE=replace-me-with-the-historical-identity-secret
-AUTH_IDENTITY_HASH_KEY_CURRENT=replace-me-with-independent-identity-hash-key
-AUTH_IDENTITY_HASH_KEY_CURRENT_VERSION=v2
-AUTH_IDENTITY_HASH_KEY_PREVIOUS=
-AUTH_IDENTITY_HASH_KEY_PREVIOUS_VERSION=
-APP_SESSION_SECRET=replace-me-with-another-long-random-secret
-APP_SESSION_COOKIE_NAME=__Host-eg_session
-APP_REFRESH_COOKIE_NAME=__Secure-eg_refresh
-AUTH_SECURITY_HASH_SECRET=replace-me-with-third-long-random-secret
-# 仅在服务端 OAuth 出站网络必须使用 HTTPS_PROXY / HTTP_PROXY 时开启；NO_PROXY 仍生效
-AUTH_OAUTH_USE_ENV_PROXY=false
+1. 配置 Supabase/PostgreSQL，按 [数据库指南](../supabase/README.md) 执行完整 baseline；不要重复执行已包含的历史迁移。
+2. 在服务端配置 Supabase secret、会话密钥与所需功能变量；浏览器只接收公开变量。
+3. 配置个人分析队列及 `pg_cron + pg_net` 调度，确认受保护 Worker 可以领取并发布任务。
+4. 按 [统计调度](STATISTICS_SCHEDULING.md) 部署常驻统计 Worker，并完成对应计算版本的公开／个人快照预热。
+5. 构建并部署主站与 API，配置 `vercel.json` 的路由和响应头；数据库必须先于依赖新字段／RPC 的代码。
+6. 核对正式域名、版本、公共页面、认证边界、快照读取与缓存失效。需要的邮件、BOT 和代理逐项配置及验证。
 
-# GitHub 公开模板默认关闭；隔离浏览器回归已完成，生产仍需单独授权后再开启
-AUTH_OAUTH_GITHUB_ENABLED=false
-AUTH_OAUTH_GITHUB_CLIENT_ID=
-AUTH_OAUTH_GITHUB_CLIENT_SECRET=
-AUTH_OAUTH_GITHUB_REDIRECT_URI=https://your-domain.vercel.app/api/auth/oauth/github/callback
-VITE_AUTH_OAUTH_GITHUB_ENABLED=false
+仓库默认使用 GitHub-connected Vercel：推送 `main` 触发生产构建。发布前准备数据库与后台计算，发布后确认部署 Ready 和正式域名指向正确版本，流程见 [发布检查](RELEASE_CHECKLIST.md)。
 
-# App / cache
-VITE_APP_URL=https://your-domain.vercel.app
-VITE_APP_FORCE_REFRESH_TOKEN=2026-05-22-release-refresh
-VITE_PUBLIC_DATA_DIRECT_SUPABASE_FALLBACK=false
-PERSONAL_ANALYSIS_WORKER_ENABLED=false
-PERSONAL_ANALYSIS_WORKER_BACKFILL_ENABLED=false
-PERSONAL_ANALYSIS_WORKER_SECRET=replace-me
-MAIL_ABUSE_HASH_SECRET=replace-me-with-long-random-secret
-MAIL_PROVIDER=stalwart
-AUTH_MAIL_ACTIONS_ENABLED=false
-ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=false
-DEVELOPER_API_REVIEW_MAIL_OUTBOX_ENABLED=false
-TICKET_REPLY_MAIL_OUTBOX_ENABLED=false
-ADMIN_ALERT_MAIL_OUTBOX_ENABLED=false
-MAIL_OUTBOX_WORKER_ENABLED=false
-MAIL_WORKER_DRY_RUN=true
-MAIL_WORKER_BATCH_SIZE=10
-MAIL_WORKER_MAX_ATTEMPTS=3
-MAIL_WORKER_RETRY_DELAY_SECONDS=900
-MAIL_PROVIDER_TIMEOUT_MS=15000
-MAIL_OUTBOX_GLOBAL_KILL_SWITCH=true
-MAIL_OUTBOX_WORKER_SECRET=replace-me
-STALWART_SMTP_HOST=mail.example.com
-STALWART_SMTP_PORT=587
-STALWART_SMTP_USERNAME=replace-me
-STALWART_SMTP_PASSWORD=replace-me
-STALWART_JMAP_URL=https://mail.example.com
-STALWART_WEBHOOK_SECRET=replace-me
-MAIL_DELIVERY_WEBHOOK_SECRET=replace-me
-MAIL_INBOUND_WEBHOOK_SECRET=replace-me
-MAIL_SENDING_DOMAIN=mail.example.com
-ACCOUNT_RECOVERY_TEMP_PASSWORD_TTL_HOURS=24
+管理后台使用同源 `/api/admin`，兼容 URL 由路由表映射；无需部署旧 Supabase 管理 Edge Functions。
 
-# Optional proxies and puzzle player
-VITE_PROXY_URL_CN=https://your-cn-proxy.example.com
-VITE_PROXY_URL_INTL=https://your-intl-proxy.example.com
-VITE_PUZZLE_PLAYER_URL=https://your-player.example.com
+## 官方导入与数据维护
 
-# Ops automation
-CRON_SECRET=replace-me
-OPS_AUTOMATION_ANNOUNCEMENTS_URL=https://example.com/announcements.json
-OPS_AUTOMATION_ANNOUNCEMENTS_TAG=official-json
-OPS_AUTOMATION_POOL_SCHEDULE_URL=https://example.com/pools.json
-OPS_AUTOMATION_POOL_SCHEDULE_TAG=official-json
-OPS_AUTOMATION_WIKI_CATALOG_URL=https://example.com/wiki.json
-OPS_AUTOMATION_WIKI_CATALOG_TAG=official-json
+官方数据获取由独立 CN／INTL 后端承接。浏览器提交 `import-full` 后轮询 `import-status`；后端规范化、过滤非寻访事件、内部暂存并通过 RPC 原子写入。可精确定位的未知记录产生核对提醒，缺少账号／区服／卡池／序号等安全归属的记录跳过。
 
-# Official bot
-TELEGRAM_OFFICIAL_BOT_TOKEN=replace-me
-TELEGRAM_OFFICIAL_BOT_PROXY_URL=http://127.0.0.1:7890
-TELEGRAM_OFFICIAL_BOT_PUBLIC_API_KEY=replace-me
-TELEGRAM_OFFICIAL_BOT_VERIFIER_SECRET=replace-me
-TELEGRAM_OFFICIAL_BOT_POLL_INTERVAL_MS=1500
-TELEGRAM_OFFICIAL_BOT_LONG_POLL_SECONDS=20
-```
+公开仓库保留共享导入合同与测试，不提供完整服务包。后端集成须携带相同的 normalizer、保底规则与暂存／增量模块，分别验证地区健康、CORS 和导入行为。重构与赠送规则见 [重构导入](official-rerun-import.md)、[赠送记录](OFFICIAL_TRUST_TOKEN_FIX.md)。
 
-旧变量别名 `VITE_SUPABASE_ANON_KEY` 和 `SUPABASE_SERVICE_ROLE_KEY` 仍可兼容，但新配置应使用 publishable / secret key 口径。
+历史编辑与删除使用完整账号作用域、乐观锁和变更审计；旧仅 ID 批量删除遇到跨账号重复 ID 时整笔拒绝。修复或回填前生成最新审阅计划、备份并核对精确影响范围，工具见 [数据待完善项](CLOSEOUT_LEDGER.md)。
 
-## 部署
+## 静态资源与缓存
 
-1. 在 Supabase 创建项目。
-2. 执行 `supabase/baseline/000_complete_schema.sql` 起库。
-3. 启用 `global_stats` 表 Realtime。
-4. 在 Vercel 配置 `VITE_SUPABASE_*`、`SUPABASE_SECRET_KEY`、`CRON_SECRET` 和需要的自动化 / BOT 环境变量。
-5. 按 [统计调度说明](STATISTICS_SCHEDULING.md) 部署常驻 Worker，并完成公开单池、五类合池、旧统计与个人 v4 快照预热。
-6. 预热核验通过后再部署前端／API；已有 GitHub 自动部署链路须在合入 main 前完成上述门禁。
+字体源和许可证随仓库维护，分片由 `npm run fonts:prepare` 生成。分享卡源变化后运行 `npm run share:renderer`，对应跟踪产物一起提交。
 
-主站生产部署由 GitHub `main` 推送触发 GitHub-connected Vercel 自动部署。正常开发流程不直接运行 `vercel deploy --prod`；仅在用户明确批准紧急回滚、promotion 或切换已有部署时使用 Vercel CLI，并在操作前后核对目标部署和生产 alias。独立状态页等其他 Vercel 项目必须按单独项目处理，不与主站发布混用。
+公共缓存使用 `site_config.public_cache_epoch`，读取失败可展示最近公共快照；用户历史、个人分析、工单与后台响应保持鉴权和 `no-store`。日历日期与 CDN 传播见 [卡池时间管理](POOL_SCHEDULE_MANAGEMENT.md)。
 
-`AUTH-HARDEN-001` Phase A–D、邮箱/凭据状态机、安全属性专项、PR #14 和隔离 GitHub 核心浏览器闭环均已完成。生产数据库已于 2026-08-02 按 166 → 167 完成迁移、回填与权限核验，并随后完成前向迁移 168 与 API 发布。LinuxDo 实现继续隔离在 `feat/linuxdo-oauth`，因无法申请 Connect Client 下调为 P3，前后端开关保持关闭。
-
-2026-08-27 当前发布主线为 `d186a425d5fb29aad940b4f08027744dfecbc602`。PR #24 已合入个人分析 Session 循环修复、Supabase `pg_cron + pg_net` 调度、即时派发、短间隔检查、Worker 多批处理与新附加寻访支持；PR #25 已修复含 PostgREST 保留字符的分析 `viewKey` 触发 HTTP 500。GitHub CI 与 GitHub-connected Vercel Production 均已核对为成功 / Ready。个人分析运行细节与核验命令见 `docs/PERSONAL_ANALYSIS_WORKER.md`。
-
-当前管理后台主链已收口到 Vercel Serverless `/api/admin`，并通过 `vercel.json` rewrite 兼容旧 `admin-*` 路径。不再要求额外部署同名 Supabase Edge Functions。
-
-官方导入的数据获取仍由独立 CN / INTL 私有后端承接。`v4.5.4` 当前两端最后核对版本为 `1.6.5`：浏览器用 `POST import-full` 创建后台任务，只通过 `GET import-status` 轮询；后端先过滤情报书等非寻访事件，再把规范化结果写入 `official_import_tasks` 与 `official_import_staged_records`，并在内部调用 `commit_official_import_records()` 自动原子提交。当前浏览器主路径不再调用同步 `import-confirm`，旧逐条审阅接口仅保留兼容。正常记录直接写入；仍具备账号、区服、卡池、官方序号和时间作用域的未知角色 / 武器记录会保留并写入 `history_anomalies`，由前端在导入完成后提示用户现在或稍后核对；缺少安全定位字段的记录继续跳过。再次导入时，后端只会通过迁移 157 提供的 service-role-only RPC 修复与官方非寻访标记完整吻合的旧版四星未知占位；查询失败时增量导入会保守降级为完整抓取。私有后端镜像必须同时包含 `backend/lib/officialImportStaging.js`、`backend/lib/officialImportIncremental.js`、`shared/historyPity.js` 和 `shared/officialImportRecordNormalizer.js`；两个地区部署后都要核对 `/health`、容器版本、正常 CORS 预检和一次受控导入，不得只更新单一区域。
-
-邮件发送分为两层：认证邮件使用受控同源 `/api/auth-email-action`，支持注册验证、密码重置和邮件登录；通知类和人工恢复队列继续走 provider-independent outbox / 队列处理器。认证邮件入口必须同时启用 `AUTH_MAIL_ACTIONS_ENABLED=true`、`MAIL_OUTBOX_WORKER_ENABLED=true`，且未命中环境级紧急停发开关 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH` 才会调用 provider adapter；它会先做 origin、CAPTCHA、内存限流、账号存在性判断和脱敏审计，未知邮箱的重置 / 邮件登录仍返回通用状态。当前 `api/_lib/mailOutbox.js` 只允许服务端 service-role 经过防刷、suppression、幂等和 `enqueue_mail_outbox_event()` RPC 写入私有 `mail_outbox`；`api/_lib/mailOutboxWorker.js` 和 `api/_lib/mailProviderAdapter.js` 已提供 Stalwart-first 的队列处理器 / provider 边界。`api/_lib/mailTemplateRenderer.js` 是统一 HTML + plaintext 邮件模板入口，注册验证、邮件登录、密码重置、账号恢复队列处理器、开发者 API 审核通知、工单回复通知、管理员告警和后台测试邮件都应复用它。开发者 API 审核结果已可在 `DEVELOPER_API_REVIEW_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时写入 outbox；工单 staff 回复已通过 `/api/tickets/reply` 服务端路由写入回复，并可在 `TICKET_REPLY_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时为工单所有者写入 `ticket.reply` outbox；后台“邮件状态”页可在 `ADMIN_ALERT_MAIL_OUTBOX_ENABLED=true` 且队列处理器开启时把 `admin.alert` 受控入队给当前超级管理员自己的账号邮箱。通知类入队失败都不会阻断原业务操作，响应只回传 queued / deduped / disabled / skipped / blocked / error 等脱敏状态，不返回收件邮箱或 guard decision。`/api/mail-outbox-worker` 是内部队列处理 endpoint，同时接受 `MAIL_OUTBOX_WORKER_SECRET` 和 `CRON_SECRET` 鉴权；`vercel.json` 已配置每日一次 Vercel Cron 触发该 endpoint，外部 cron 或受控运维脚本可使用独立 worker secret，后台“邮件状态”页也能由超级管理员手动调用 `/api/admin?route=mail-outbox-drain` 处理到期队列。`/api/mail-delivery-feedback` 是内部投递反馈入口，用服务端 secret 接收单条 hard bounce / complaint / invalid recipient / domain pause，也能接收 Stalwart Telemetry Webhook `{ events: [...] }` 批量投递事件；永久失败会写入 `mail_suppression`，成功和临时失败只写入脱敏 `mail_delivery_events`。`/api/mail-inbound` 是内部入站邮件事件入口，用服务端 secret 接收 Stalwart Webhooks / MTA Hooks 或受控桥接脚本的入站摘要，并只写入脱敏 `mail_delivery_events`，不保存原始正文或自动生成工单。后台“站点健康”和“邮件状态”面板通过 `/api/admin?route=site-health` 汇总内容更新时间、公共缓存、自动化、邮件队列、入站事件、suppression、发送预算高水位和待处理事项；“邮件状态”页还提供超级管理员测试邮件入口，用当前 provider adapter 发送受控测试邮件，并只记录脱敏投递事件。邮件状态页可在线编辑 `mail_abuse_budget_config` 的窗口、上限和启用状态，并能展开查看最近失败 / suppressed outbox 的脱敏错误摘要。所有响应不返回原始邮箱、SMTP 密码、webhook secret、Stalwart 原始 event id / queue id 或预算 bucket hash。真实投递前必须先设置 `MAIL_ABUSE_HASH_SECRET`、保持环境级紧急停发开关可用，并确认 `docs/SELF_HOSTED_MAIL.md` 中的 DNS、suppression、预算和投递监控检查项完成。
-
-账号恢复现在优先走自助重置邮件：登录弹窗的“账号恢复”会先调用 `/api/auth-email-action` 发送密码重置邮件；只有多次收不到邮件、邮箱不可访问或需要注销旧账号时，才提交人工恢复申请。人工恢复申请仍只返回通用 `received` 状态。Phase C 已把管理员临时密码的 issue/issued/expires 元数据与 Auth 密码更新原子写入，并通过 `auth.sessions` 门禁和站点 Session/Bearer 检查执行认证层到期；普通用户不能直接清除改密状态。只有 `ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时，人工恢复申请中的 `password_reset` 才会写入 `mail_outbox` 并标记为 `mail_reset_queued`；防刷阻断、入队异常或状态回写失败时仍保留人工恢复 fallback。认证预检和恢复申请会写入私有 `auth_security_events`，只保存 hash、风险桶、CAPTCHA 摘要和脱敏 metadata。不要把强制改密状态放进公开 profile 字段，也不要在响应、日志或审计包中保存明文临时密码、原始邮箱、验证码 token 或 `game_uid`。
-
-第三方一键登录当前走本站统一 OAuth 桥接：provider 进入 `/api/auth/oauth/{provider}/start` / callback，以 `auth.users` UUID 为锚点并通过 `app_auth_identities` / `app_sessions` 创建 HttpOnly 站点会话。Phase A–D 已完成 OAuth transaction 浏览器/Session 绑定与单次消费、Cookie/Bearer 冲突拒绝、独立版本化 identity keyring、旧 key 原子迁移、owner 防改写、原子认领/解绑和半成品 Auth user 补偿恢复。隔离 OAuth App 已完成 GitHub 核心浏览器闭环；跨浏览器 transaction、link Session 切换和 callback 重放由确定性专项自动化覆盖，已授权 App 无取消控件的平台限制已记录。LinuxDo 实现和专项文档保持在独立分支 `feat/linuxdo-oauth`，不进入本认证候选；真实 Client 浏览器闭环前保持开关关闭。QQ 保持关闭。真实 Client Secret 只写服务端环境变量，不进入 `VITE_*`。
-
-受控队列处理器可用 `npm run worker:mail-outbox` 手动运行，也可调用 `/api/mail-outbox-worker`，或在后台“邮件状态”页点击“处理到期队列”。这些路径默认都需要 `MAIL_OUTBOX_WORKER_ENABLED=true` 且未命中紧急停发开关才会处理队列；每日 Vercel Cron 只负责触发，不会绕过队列处理器开关、演练模式或紧急停发开关。当前已接入 Stalwart SMTP 真实传输、Stalwart Telemetry Webhook 批量投递事件归一、入站事件记录、后台健康汇总、发送预算高水位摘要和站内测试邮件入口；在关闭演练模式前仍必须完成 DNS、收件端认证结果审计、Stalwart 管理端 Webhook 真实事件小测试、紧急停发灰度和更细的投递监控。未配置 SMTP 主机、账号或密码时会以 `stalwart_smtp_not_configured` 安全失败，不会伪装投递成功。
-
-邮件运行期开关存放在 `site_config.mail_runtime_config`，由后台“邮件状态”页通过 `/api/admin?route=mail-runtime-config` 保存。它用于临时暂停全局发信、单独关闭认证邮件 / 账号恢复 outbox / 开发者 API 审核 / 工单回复 / 管理员告警，以及追加禁用事件和暂停域名。该配置只能进一步收紧：环境变量关闭时运行期“允许”不会启用发信，环境级紧急停发开启时运行期“关闭紧急停发”不会绕过停发；SMTP 密码、Webhook secret 和 Vercel env 仍只放在部署环境变量里。
-
-## 数据库维护
-
-- `supabase/baseline/`：新环境基线 schema。
-- `supabase/archive/migrations/`：已合并进 baseline 的历史标准迁移，仅用于审计和重建 baseline。
-- `supabase/migrations/`：当前 active 标准迁移源文件，以及未来新增、尚未合并进 baseline 的前向迁移。
-- `supabase/manual/`：危险、回滚、回填和历史诊断脚本，不进入默认部署链。
-
-刷新 baseline：
-
-```bash
-npm run generate:supabase-baseline
-npm run test:supabase-baseline
-```
-
-v4.6.2 候选 baseline 已纳入统计调度与五类合池迁移，本地验证覆盖 186 个迁移；新环境只执行 baseline，不再叠加其中已经包含的迁移。已有环境需对照真实执行清单按 [统计调度说明](STATISTICS_SCHEDULING.md) 追加缺失迁移，当前统计迁移尚未在生产执行。历史生产链包括主站 152–158、独立抽奖 160–165、认证 166–168 和正式导入修复 170；173–180 提供个人分析 revision、快照队列、活跃优先级、`pg_cron + pg_net` 调度和即时派发，181–183 提供附加寻访分类、重构卡池种子 / 官方 ID 晋升及 `reconstruction_claim` 子类。生产已只读核验个人分析调度和附加寻访最终数据库合同；仍不能只凭仓库文件尾号推定生产执行记录。历史异常回填脚本默认只读，只有同时提供 `--apply` 与脚本打印的精确确认快照时才允许写入。
-
-数据库体积治理的现状：远端 `history` 体积主要来自索引。删除字段或索引前必须先做线上读写路径、RPC 查询计划、回滚脚本和实际基准验证；本轮只整理 baseline 和迁移归档，不直接改生产表结构。
-
-## 静态资源维护
-
-- 头像主链优先使用 `public/avatars/` 本地静态路径，减少 Supabase Storage egress。
-- 版本日历等大图优先使用压缩后的 Web 友好格式。
-- `src/generated/fonts/harmony/` 由 `npm run fonts:prepare` 生成，不进入 Git。
-- 新增截图或大图后应运行 `npm run perf:report` 检查资源预算。
-
-## Changelog 摘要
-
-### v4.6.2（发布准备）
-
-- 新增五类合池，按逐账号、逐期、逐对象首获后类别汇总，并对覆盖账号跨期去重；旧指标和资源按所选范围迁入 v4 快照。
-- 统计页提供十图、头像对象选择、分类排序、花费区间与覆盖率，完善深色主题和减少动态效果。
-- 全服与个人统计接入持久队列和 5/30/60 分钟检查；生产迁移、Worker 与 v4 预热待执行，预热后才能启用页面。
-- 各桌面页统一首页响应式宽度。指南仅提供开发预览，真实业务接入待完成。
-- 最终全量 269 文件／1,495 项单测、完整 ESLint、主应用与抽奖子应用构建、PGlite 统计 SQL 与 186 个迁移 baseline 验证通过；生产依赖官方 registry 审计 0 漏洞；草稿公告与发布阻塞见 [RELEASE_4.6.2.md](RELEASE_4.6.2.md)。发布 PR 待创建并通过 CI，合入 main 仍需维护者审查，线上版本与生产迁移均未变更。
-
-### v4.6.0
-
-- 发布已验收的桌面首页、统一导航和四类消息弹窗，支持 1366×768 基线、容器自适应、主题和减少动态效果。
-- 新版个人概览、卡池分析与全服统计锁定各自数据源；提供可收起个人菜单和页面动效。
-- 统一主站包、锁文件、本地版本默认值和沙盒版本为 `4.6.0`，同步当前文档和构建日期。
-- 新版桌面主页默认启用，支持双向切换并保存偏好，兼容旧预览链接；首次使用教程与首页指南优化已登记，尚未实施。
-- 版本验证、运行时配置同步步骤及交付边界见 [RELEASE_4.6.0.md](RELEASE_4.6.0.md)。
-
-### v4.5.4
-
-- 官方导入过滤 `gift_intel_book` 等非寻访事件，避免情报书进入抽卡历史、卡池计数或保底计算。
-- 再次导入时可精确修复已被官方响应证明为非寻访事件的旧四星未知占位；修复要求完整账号作用域和待处理异常同时吻合，并记录审计、重算保底。
-- 导入完成页统一展示异常、跳过记录、漏池、警告和云端刷新失败；干净导入才自动关闭，桌面与移动端使用统一异常核对入口。
-- 独立 CN / INTL 导入后端升级到 `1.6.3`；迁移 157 增加受控修复 RPC，迁移 158 更新运行时站点版本并刷新公共缓存。
-
-### v4.5.3
-
-- 官方导入改为内部暂存后立即原子写入，不再让用户在写入前逐条保留或跳过。
-- 可精确定位的未知角色 / 武器记录会以明确标记的占位信息保留，并在导入完成后提供“现在处理 / 稍后处理”；缺少安全归属字段的记录仍会跳过并显示提示。
-- 修复时间排序后异常元数据与历史记录错位，以及生产历史响应使用 `id` 时无法打开编辑 / 删除操作的问题。
-- 独立 CN / INTL 导入后端升级到 `1.6.2`；迁移 156 仅更新运行时站点版本并刷新公共缓存，不增加业务表或接口。
-
-### v4.5.2
-
-> 以下为历史版本流程，已被 `v4.5.3` 的“后台自动写入、导入后再核对”路径替代。
-
-- 官方导入增加服务端暂存与前端逐条审阅，确认后通过数据库 RPC 原子写入；异常或无法识别记录可跳过，审阅会话可恢复。
-- 日志详情支持按用户、游戏账号、区服、卡池和序号精确编辑 / 删除，修改会写入审计并重算受影响卡池保底。
-- 增加用户异常提醒、超级管理员异常复核、旧批量删除歧义保护和受保护的生产异常回填脚本；生产迁移链与 baseline 覆盖到 155。
-- 优化卡池详情与本地登录后同步：隐藏日志按需挂载、复用时间线 / 阵容结果、延迟自定义分享统计，并以必要列并行分页读取账号历史。
-- 独立 CN / INTL 导入后端升级到 `1.6.1`。
-
-### v4.4.0
-
-- 账号邮件系统进入主线：注册邮箱验证、自助密码重置、邮件登录、邮箱更换验证和统一 HTML 邮件模板。
-- 后台新增站点健康与邮件状态面板，可查看邮件队列、发送预算、投递反馈、入站事件和关键运行期开关。
-- 验证链路升级为 Turnstile / 自建 PoW 双轨，并接入注册、登录、重置、恢复等账号入口。
-- 首页版本前瞻、倒计时、路线图、卡池 / 角色 / 武器管理和导入恢复体验完成本轮收口。
-- 公共卡池分析补齐预聚合缓存、趋势点和更完整指标，依赖、Node 26 兼容与 CI 链路完成复查。
-
-### v4.3.0
-
-- `CACHE-001 / ARCH-022`：公共数据访问统一到同源 `/api/*`，接入公共缓存版本、响应 `meta` 和显式失效。
-- `OPS-006`：运营自动化补齐 job graph、partial 语义、手动重跑、审计详情和缓存失效回写。
-- Speed Insights：接入 `@vercel/speed-insights` 并修复生产 bundle 动态配置透传。
-- 文档与数据库 baseline 同步到当前主线。
-
-### v4.2.0
-
-- 接入角色图鉴全服聚合、个人图鉴、手动补录与角色详情资源统计。
-- 补齐复刻混池与附加寻访的配额规则。
-- 优化统计页与角色图鉴的桌面端 / 移动端布局。
-
-### v4.0.0
-
-- 建立自定义字体链、公告多语言、官方游戏公告 feed、管理后台用户管理、CI 和移动端主路由。
+日常诊断优先查看脱敏错误、请求状态、计算时间和缓存响应头。反馈问题时提供最小复现，不公开用户导出、认证令牌或服务器秘密。

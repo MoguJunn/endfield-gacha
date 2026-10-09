@@ -3,7 +3,7 @@ import { BarChart3, Cloud, ListFilter, RefreshCw, User, Clock3, Users, Gift, Boo
 import { useI18n } from '../../i18n/index.js';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAppStore, useAuthStore, useHistoryStore, usePoolStore } from '../../stores/index.js';
-import { loadPersonalStatistics } from '../../services/scheduledStatisticsService.js';
+import { loadPersonalStatistics, loadPublicStatistics as readStats } from '../../services/scheduledStatisticsService.js';
 import { resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
 import { getStatisticsGroup, getStatisticsGroupPools, normalizeStatisticsPool } from '../../../shared/statisticsScopes.js';
 import StatisticsPoolList from './StatisticsPoolList.jsx';
@@ -15,16 +15,6 @@ import '../ui/experienceFoundation.css';
 import './poolStatisticsWorkspace.css';
 
 const EMPTY_PRIVATE_DATA = { data: null, error: false, meta: null };
-
-async function readStats(type, signal, scope = null) {
-  const params = new URLSearchParams({ type });
-  if (scope?.kind === 'pool') params.set('poolId', scope.poolId);
-  if (scope?.kind === 'group') params.set('groupKey', scope.groupKey);
-  const response = await fetch(`/api/stats?${params}`, { signal });
-  const result = await response.json();
-  if (!response.ok || result.success === false) throw new Error(result.error || 'statistics_unavailable');
-  return result;
-}
 
 // Keying the owner/source session prevents previously loaded private rows from surviving a user switch.
 export default function PoolStatisticsWorkspace({ lockedDataSource = null, mobile = false, overview = null }) {

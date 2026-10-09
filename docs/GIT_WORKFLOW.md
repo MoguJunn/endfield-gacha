@@ -1,133 +1,52 @@
-# Git Workflow
+# Git 工作流
 
-本文档从 `v4.4.1` 起作为本项目的默认 Git 提交规范。`v4.4.0` 以前的提交历史作为真实开发档案保留，不再为了展示效果反复压缩；`v4.4.0` 是第一版按功能 / 修复 / 发布收口整理的版本。
+`main` 保存稳定主线。常规贡献从最新主线建立主题分支，使用 Pull Request 说明改动并接受 CI 检查；集中发布时由维护者使用 `release/vX.Y.Z` 整合。
 
-## 历史边界
+## 建立分支
 
-- `v4.3.0` 及以前：保留真实旧历史。可以通过 `v4.0.0`、`v4.1.0`、`v4.2.0`、`v4.3.0` tags 回看对应版本。
-- `v4.4.0`：作为整理后的示例版本，保留 `feat/v4.4-*`、`fix/v4.4-*` 和 `release/v4.4.0` 作为参考。
-- `v4.4.1` 及以后：严格按本文档执行。`main` 只保留稳定主线，功能和修复先进入主题分支。
-
-旧历史如果需要再整理，只做轻量处理：补标签、补文档、清理无意义远端分支。不要为了标题更好看而改写大量旧 commit，除非已经建立备份并确认旧历史不再需要作为原始参考。
-
-## 分支模型
-
-从一个新版本开始：
+先确认当前工作区没有需要保留的未提交修改：
 
 ```bash
+git status --short
 git switch main
-git pull
-git switch -c release/vX.Y.Z
+git pull --ff-only
+git switch -c fix/vX.Y-topic
 ```
 
-功能分支从发布分支切出：
+功能使用 `feat/`，修复使用 `fix/`，文档使用 `docs/`，配置或仓库维护使用 `chore/`。多版本开发可在分支名加入版本号。
 
-```bash
-git switch release/vX.Y.Z
-git switch -c feat/vX.Y-topic-name
-```
+## 提交与 PR
 
-修复分支也从发布分支切出：
+- 一个 PR 聚焦一个问题或功能，提交说明修改的目的和结果。
+- 标题使用 `feat:`、`fix:`、`perf:`、`docs:`、`test:` 或 `chore:`；例如 `fix: 修正导出账号筛选`。
+- 检查暂存与未暂存差异，不混入凭据、用户样本、临时输出或无关格式变化。
+- 跟踪的生成物随源文件提交，文件范围见 [仓库结构](REPOSITORY_LAYOUT.md)。
+- PR 描述包含改后行为、验证结果及环境限制；UI 改动附截图。
 
-```bash
-git switch release/vX.Y.Z
-git switch -c fix/vX.Y-bug-name
-```
-
-命名规则：
-
-- `release/vX.Y.Z`：一个版本的集成与发布收口。
-- `feat/vX.Y-<name>`：该版本的新功能或较大体验改造。
-- `fix/vX.Y-<name>`：该版本的缺陷修复或线上兼容修复。
-- `docs/vX.Y-<name>`：纯文档整理，只有确实需要单独展示时使用。
-- `chore/vX.Y-<name>`：依赖、CI、构建、仓库治理等维护任务。
-
-## 提交信息
-
-提交标题使用中文，保持短句，不写流水账。
-
-推荐格式：
-
-```text
-feat:接入账号邮件验证
-fix:修复首页倒计时显示
-perf:拆分后台重型入口
-docs:更新自建邮件部署指南
-test:补齐公共API边界测试
-chore:发布v4.4.1
-```
-
-规则：
-
-- 标题控制在一行内，优先说明“改了什么结果”，不要列完整文件清单。
-- 一个功能分支合入发布分支前，整理成 1 个主题清晰的 `feat:` 提交。
-- 一个修复分支可以保留小提交，但每个提交只解决一个问题。
-- 文档、测试、构建、依赖更新不要混进业务功能提交。
-- 不提交真实密钥、服务器地址、私有 token、临时调试账号或本地生成文件。
-
-## 合入顺序
-
-推荐顺序：
-
-1. 功能分支完成局部验证。
-2. 将功能分支整理为可读提交。
-3. 合入 `release/vX.Y.Z`。
-4. 在 `release/vX.Y.Z` 跑版本验证。
-5. 发布收口提交：版本号、README、changelog、迁移说明、截图或公告。
-6. 合入 `main`。
-7. 打 `vX.Y.Z` tag。
-8. 推送 `main`、`release/vX.Y.Z`、需要保留的 `feat/*` / `fix/*` 分支和 tag。
-9. 等待 GitHub-connected Vercel 自动创建 Production 部署，确认状态为 Ready、生产 alias 指向新部署，并核对站点版本与公共缓存版本。
-
-认证和数据库变更需要额外分层：
-
-1. 合入前分别检查主站标准链、各 worktree 候选和共享生产库迁移记录；不能只按本地文件名推断生产编号。
-2. 迁移编号必须以当前 baseline 覆盖范围、所有活动 worktree 候选和共享生产记录共同决定；不能只把旧文档中的 166/167 或任意尾号当作下一编号。
-3. 变更 `archive/` 或 `migrations/` 后必须重新生成 baseline，并验证每个 migration block 的内容一致性和临时 PostgreSQL smoke；当前覆盖范围看 baseline 头部与 `supabase/README.md`。
-4. 数据库必须先于依赖新列 / RPC 的 API 应用；API 部署仍需独立授权。每个 provider 都必须完成各自真实浏览器回归后才开放，GitHub 验收不能替代 LinuxDo / QQ 验收。
-5. commit、push、部署、生产 migration 和生产账号修改分别授权，不能相互推定。生产已存在等价最终 schema 时，重编号后的仓库迁移不得重复执行。
-
-主站正常发布不直接运行 `vercel deploy --prod`。只有用户明确批准紧急回滚、promotion 或切换已有部署时，才使用 Vercel CLI；操作前必须说明目标部署 URL / ID，操作后必须重新核对生产 alias。独立状态页等其他 Vercel 项目是不同部署目标，不得与主站发布混用。
-
-发布收口提交建议固定为：
-
-```text
-chore:发布vX.Y.Z
-```
-
-## 验证口径
-
-普通功能分支至少确认：
+常用检查：
 
 ```bash
 npm run lint
 npm run test:unit
 npm run build
 git diff --check
+git diff --cached --check
 ```
 
-如果涉及公共 API、缓存、数据库迁移、邮件、账号安全或自动化，还要补对应专项脚本。认证变更必须运行 `test:auth-hardening-phase-a`、`test:auth-hardening-phase-cd` 和 baseline 验证；LinuxDo 独立分支还必须运行其 `test:linuxdo-oauth` 专项。任何 provider 的真实浏览器回归都不能由单元测试替代。验证结果应写进提交前说明、PR 描述或交接文档。
+按 [贡献指南](../CONTRIBUTING.md) 补充受影响的专项验证。纯文档修改检查引用、命令和差异即可。
 
-## 历史改写守则
+## 发布
 
-已经推送的 `main` 默认不改写。确实需要整理历史时，先完成以下动作：
+维护者在发布分支汇总已验证的改动，更新版本、发布说明与迁移要求，再合入 `main` 并创建版本标签。检查项见 [Release Checklist](RELEASE_CHECKLIST.md)。
 
-1. 建立本地备份分支。
-2. 导出 bundle 备份。
-3. 确认改写前后的最终文件树一致，或明确列出差异。
-4. 使用 `--force-with-lease` 推送，避免覆盖远端新提交。
-5. 同步更新 `todo` 和 `SESSION_HANDOFF.md`。
+当前主站连接 GitHub 与 Vercel，推送 `main` 会触发生产部署。数据库新列／RPC 必须先于依赖它们的 API，统计 Worker 与快照须在读端启用前准备好；发布后确认目标部署、正式域名、版本和受影响接口。
 
-根目录 `todo` 与 `SESSION_HANDOFF.md` 位于主仓库外层，不会随 `gacha-analyzer` 提交自动进入 Git。发布交接时必须单独检查它们是否已经同步，仓库内文档提交不要假定会包含这两个文件。
+新迁移核对当前基线与其他待合入改动，避免编号冲突；重新生成 baseline 并验证。已执行的手动修复不能当作初始化重跑。部署说明应记录数据、Worker 与应用的先后顺序及回退方式。
 
-## 已合并分支闭拢
+## 历史与分支清理
 
-分支或 worktree 的“已合并”不能只看名称或 PR 标题。闭拢前必须：
+已推送的主线通过新增提交修正。不要为了缩短历史反复改写发布提交。
 
-1. 用 `git merge-base --is-ancestor <branch> main` 确认 tip 已进入当前 `main`。
-2. 检查该 worktree 的跟踪改动、未跟踪文件和被忽略的本地配置；未提交内容需要逐文件判断是否已被主线覆盖。
-3. `.env.local`、密钥、数据库导出、Git bundle 和恢复材料不得因删除 worktree 被顺带清理；不得读取或复制其值到公开文档。
-4. 干净 worktree 可先移除再用 `git branch -d` 删除分支；有本地环境配置的目录可切到 detached `main` 保留环境，分支仍用非强制删除。
-5. 远端分支只在确认已合并且没有开放 PR 后删除；本地与远端引用分别核验，不使用强推或按名称批量猜测。
+清理分支前确认 PR 已合入且没有独有修改。普通合并可用 `git merge-base --is-ancestor` 核对；Squash 合并需结合 PR 和最终补丁比较，单凭祖先关系或 `git cherry` 不能判断多个压缩提交是否等价。
 
-历史改写只适合本练习项目或已明确允许的仓库。协作仓库默认用新增修复提交解决问题。
+额外工作目录可能含未提交代码和被忽略的环境文件，清理前分别核对。独立日历等其他仓库按各自 PR 与部署流程维护。

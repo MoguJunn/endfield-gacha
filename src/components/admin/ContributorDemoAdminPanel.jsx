@@ -187,9 +187,12 @@ function AnomaliesSandbox({ showToast }) {
 
 function AutomationSandbox({ showToast }) {
   const [runningId, setRunningId] = React.useState(null);
+  const timer = React.useRef(null);
+  React.useEffect(() => () => clearTimeout(timer.current), []);
   const run = (job) => {
+    clearTimeout(timer.current);
     setRunningId(job.id);
-    window.setTimeout(() => {
+    timer.current = setTimeout(() => {
       setRunningId(null);
       showToast?.(`已完成“${job.name}”本地 UI 演练；未请求真实自动化服务`, 'success');
     }, 500);

@@ -1,9 +1,11 @@
 // @vitest-environment node
 
 import { describe, expect, it, vi } from 'vitest';
+import { decodeHistories } from '../../shared/simulator/historyCodec.js';
 
 import {
   getPersonalAnalysisWorkerConfigFromEnv,
+  loadPersonalAnalysisModel,
   runPersonalAnalysisWorker,
 } from '../_lib/personalAnalysisWorker.js';
 
@@ -74,14 +76,37 @@ function createAdminClient({
       queryLog.push(this);
     }
 
-    select(columns) { this.columns = columns; return this; }
-    eq(column, value) { this.filters.push(['eq', column, value]); return this; }
-    gt(column, value) { this.filters.push(['gt', column, value]); return this; }
-    in(column, values) { this.filters.push(['in', column, values]); return this; }
-    or(value) { this.filters.push(['or', value]); return this; }
-    order() { return this; }
-    limit(value) { this.limitValue = value; return this; }
-    range(from, to) { this.rangeValue = [from, to]; return this; }
+    select(columns) {
+      this.columns = columns;
+      return this;
+    }
+    eq(column, value) {
+      this.filters.push(['eq', column, value]);
+      return this;
+    }
+    gt(column, value) {
+      this.filters.push(['gt', column, value]);
+      return this;
+    }
+    in(column, values) {
+      this.filters.push(['in', column, values]);
+      return this;
+    }
+    or(value) {
+      this.filters.push(['or', value]);
+      return this;
+    }
+    order() {
+      return this;
+    }
+    limit(value) {
+      this.limitValue = value;
+      return this;
+    }
+    range(from, to) {
+      this.rangeValue = [from, to];
+      return this;
+    }
 
     execute() {
       let data;
@@ -116,6 +141,7 @@ function createAdminClient({
   }
 
   const rpc = vi.fn(async (name) => {
+    if (name === 'get_app_visible_pools') return { data: pools.filter((pool) => !pool.user_id), error: null };
     if (name === 'enqueue_personal_analysis_backfill') {
       return {
         data: {
@@ -173,13 +199,15 @@ describe('personal analysis worker', () => {
       code: 'personal_analysis_worker_disabled',
     });
     expect(adminClient.rpc).not.toHaveBeenCalled();
-    expect(getPersonalAnalysisWorkerConfigFromEnv({
-      PERSONAL_ANALYSIS_WORKER_ENABLED: 'true',
-      PERSONAL_ANALYSIS_WORKER_BATCH_SIZE: '99',
-      PERSONAL_ANALYSIS_WORKER_BACKFILL_BATCH_SIZE: '999',
-      PERSONAL_ANALYSIS_WORKER_LEASE_SECONDS: '1',
-      PERSONAL_ANALYSIS_WORKER_HISTORY_PAGE_SIZE: '2000',
-    })).toMatchObject({
+    expect(
+      getPersonalAnalysisWorkerConfigFromEnv({
+        PERSONAL_ANALYSIS_WORKER_ENABLED: 'true',
+        PERSONAL_ANALYSIS_WORKER_BATCH_SIZE: '99',
+        PERSONAL_ANALYSIS_WORKER_BACKFILL_BATCH_SIZE: '999',
+        PERSONAL_ANALYSIS_WORKER_LEASE_SECONDS: '1',
+        PERSONAL_ANALYSIS_WORKER_HISTORY_PAGE_SIZE: '2000',
+      })
+    ).toMatchObject({
       enabled: true,
       batchSize: 5,
       backfillBatchSize: 500,
@@ -199,15 +227,21 @@ describe('personal analysis worker', () => {
     });
 
     expect(rpc.mock.calls.slice(0, 2)).toEqual([
-      ['enqueue_personal_analysis_backfill', {
-        p_after_user_id: null,
-        p_limit: 123,
-      }],
-      ['claim_personal_analysis_jobs', {
-        p_lease_id: LEASE_ID,
-        p_limit: 3,
-        p_lease_seconds: 55,
-      }],
+      [
+        'enqueue_personal_analysis_backfill',
+        {
+          p_after_user_id: null,
+          p_limit: 123,
+        },
+      ],
+      [
+        'claim_personal_analysis_jobs',
+        {
+          p_lease_id: LEASE_ID,
+          p_limit: 3,
+          p_lease_seconds: 55,
+        },
+      ],
     ]);
     expect(result.backfill).toEqual({
       processedUsers: 1,
@@ -234,10 +268,7 @@ describe('personal analysis worker', () => {
         p_lease_seconds: 50,
       },
     ]);
-    expect(rpc).not.toHaveBeenCalledWith(
-      'enqueue_personal_analysis_backfill',
-      expect.any(Object)
-    );
+    expect(rpc).not.toHaveBeenCalledWith('enqueue_personal_analysis_backfill', expect.any(Object));
     expect(result.backfill).toEqual({
       processedUsers: 0,
       insertedOwnerStates: 0,
@@ -248,18 +279,22 @@ describe('personal analysis worker', () => {
 
   it('loads one user once and publishes owner plus every matching account scope', async () => {
     const claimed = {
-      ownerJobs: [{
-        userId: USER_ID,
-        historyRevision: LARGE_REVISION,
-        analysisSchemaVersion: 1,
-      }],
-      scopeJobs: [{
-        userId: USER_ID,
-        scopeGameUid: 'game-1',
-        serverScope: 'scope-1',
-        historyRevision: LARGE_REVISION,
-        analysisSchemaVersion: 1,
-      }],
+      ownerJobs: [
+        {
+          userId: USER_ID,
+          historyRevision: LARGE_REVISION,
+          analysisSchemaVersion: 1,
+        },
+      ],
+      scopeJobs: [
+        {
+          userId: USER_ID,
+          scopeGameUid: 'game-1',
+          serverScope: 'scope-1',
+          historyRevision: LARGE_REVISION,
+          analysisSchemaVersion: 1,
+        },
+      ],
     };
     const history = [
       createHistoryRow({
@@ -282,20 +317,24 @@ describe('personal analysis worker', () => {
       claimed,
       history,
       pools: [createPoolRow({ pool_id: 'pool-1' })],
-      characters: [{
-        id: 'character-1',
-        name: '角色一',
-        rarity: 4,
-        type: 'character',
-        aliases: [],
-      }],
-      poolAliases: [{
-        id: 1,
-        source: 'official_api',
-        alias_id: 'raw-pool',
-        pool_id: 'pool-1',
-        is_primary: true,
-      }],
+      characters: [
+        {
+          id: 'character-1',
+          name: '角色一',
+          rarity: 4,
+          type: 'character',
+          aliases: [],
+        },
+      ],
+      poolAliases: [
+        {
+          id: 1,
+          source: 'official_api',
+          alias_id: 'raw-pool',
+          pool_id: 'pool-1',
+          is_primary: true,
+        },
+      ],
     });
 
     const result = await runPersonalAnalysisWorker({
@@ -307,22 +346,14 @@ describe('personal analysis worker', () => {
     expect(queryLog.filter((query) => query.table === 'history')).toHaveLength(2);
     expect(queryLog.filter((query) => query.table === 'pools')).toHaveLength(1);
     expect(queryLog.filter((query) => query.table === 'characters')).toHaveLength(1);
-    expect(queryLog.find((query) => query.table === 'pools').filters).toContainEqual([
-      'in',
-      'pool_id',
-      ['pool-1'],
-    ]);
+    expect(queryLog.find((query) => query.table === 'pools').filters).toContainEqual(['eq', 'user_id', USER_ID]);
 
-    const ownerCall = rpc.mock.calls.find(([name]) => (
-      name === 'publish_personal_analysis_owner_snapshot'
-    ));
-    const scopeCall = rpc.mock.calls.find(([name]) => (
-      name === 'publish_personal_analysis_scope_snapshots'
-    ));
+    const ownerCall = rpc.mock.calls.find(([name]) => name === 'publish_personal_analysis_owner_snapshot');
+    const scopeCall = rpc.mock.calls.find(([name]) => name === 'publish_personal_analysis_scope_snapshots');
     expect(ownerCall[1]).toMatchObject({
       p_user_id: USER_ID,
       p_input_revision: LARGE_REVISION,
-      p_analysis_schema_version: 2,
+      p_analysis_schema_version: 3,
       p_lease_id: LEASE_ID,
     });
     expect(ownerCall[1].p_payload.accounts).toHaveLength(2);
@@ -331,13 +362,15 @@ describe('personal analysis worker', () => {
       p_scope_game_uid: 'game-1',
       p_server_scope: 'scope-1',
       p_input_revision: LARGE_REVISION,
-      p_analysis_schema_version: 2,
+      p_analysis_schema_version: 3,
       p_lease_id: LEASE_ID,
     });
     expect(scopeCall[1].p_snapshots).toHaveLength(2);
-    expect(scopeCall[1].p_snapshots.every((snapshot) => (
-      snapshot.scopeKey && snapshot.payload && !('history' in snapshot.payload)
-    ))).toBe(true);
+    expect(
+      scopeCall[1].p_snapshots.every(
+        (snapshot) => snapshot.scopeKey && snapshot.payload && !('history' in snapshot.payload)
+      )
+    ).toBe(true);
     expect(result.stats).toEqual({
       claimedOwner: 1,
       claimedScope: 1,
@@ -347,14 +380,44 @@ describe('personal analysis worker', () => {
     });
   });
 
+  it('loads zero-pull adjacent catalog pools and isolates private pool ownership', async () => {
+    const { client, queryLog, rpc } = createAdminClient({
+      history: Array.from({ length: 60 }, (_, index) =>
+        createHistoryRow({
+          id: index + 1,
+          record_id: `record-${index + 1}`,
+          seq_id: String(index + 1),
+          pool_id: 'limited-a',
+          server_id: '2',
+          server_scope: '2',
+          region: 'intl',
+        })
+      ),
+      pools: [
+        createPoolRow({ pool_id: 'limited-a', start_time: '2026-01-01' }),
+        createPoolRow({ pool_id: 'limited-b', user_id: USER_ID, start_time: '2026-02-01' }),
+        createPoolRow({ pool_id: 'private-other', user_id: 'other-user', start_time: '2026-01-15' }),
+      ],
+    });
+    const model = await loadPersonalAnalysisModel(client, USER_ID);
+    expect(rpc).toHaveBeenCalledWith('get_app_visible_pools');
+    expect(queryLog.find((query) => query.table === 'pools').filters).toContainEqual(['eq', 'user_id', USER_ID]);
+    const inheritance = model.scopes[0].payload.simulatorInheritance;
+    expect(inheritance.session.infoBooks['limited-a']).toMatchObject({ targetPoolId: 'limited-b', used: false });
+    expect(decodeHistories(inheritance.histories)['limited-b']).toEqual([]);
+    expect(inheritance.catalogSignature).not.toContain('private-other');
+  });
+
   it('pages by internal id without dropping duplicate record ids across scopes', async () => {
     const { client, queryLog, rpc } = createAdminClient({
       claimed: {
-        ownerJobs: [{
-          userId: USER_ID,
-          historyRevision: '12',
-          analysisSchemaVersion: 1,
-        }],
+        ownerJobs: [
+          {
+            userId: USER_ID,
+            historyRevision: '12',
+            analysisSchemaVersion: 1,
+          },
+        ],
         scopeJobs: [],
       },
       history: [
@@ -370,9 +433,7 @@ describe('personal analysis worker', () => {
       leaseId: LEASE_ID,
     });
 
-    const ownerCall = rpc.mock.calls.find(([name]) => (
-      name === 'publish_personal_analysis_owner_snapshot'
-    ));
+    const ownerCall = rpc.mock.calls.find(([name]) => name === 'publish_personal_analysis_owner_snapshot');
     expect(queryLog.filter((query) => query.table === 'history')).toHaveLength(4);
     expect(ownerCall[1].p_payload.summary.total).toBe(2);
     expect(result.stats.succeeded).toBe(1);
@@ -382,13 +443,15 @@ describe('personal analysis worker', () => {
     const { client, rpc } = createAdminClient({
       claimed: {
         ownerJobs: [],
-        scopeJobs: [{
-          userId: USER_ID,
-          scopeGameUid: 'missing-game',
-          serverScope: 'missing-scope',
-          historyRevision: '7',
-          analysisSchemaVersion: 1,
-        }],
+        scopeJobs: [
+          {
+            userId: USER_ID,
+            scopeGameUid: 'missing-game',
+            serverScope: 'missing-scope',
+            historyRevision: '7',
+            analysisSchemaVersion: 1,
+          },
+        ],
       },
       history: [createHistoryRow()],
       pools: [createPoolRow()],
@@ -401,9 +464,7 @@ describe('personal analysis worker', () => {
       leaseId: LEASE_ID,
     });
 
-    const publishCall = rpc.mock.calls.find(([name]) => (
-      name === 'publish_personal_analysis_scope_snapshots'
-    ));
+    const publishCall = rpc.mock.calls.find(([name]) => name === 'publish_personal_analysis_scope_snapshots');
     expect(publishCall[1].p_snapshots).toEqual([]);
     expect(result.stats.succeeded).toBe(1);
   });
@@ -412,13 +473,15 @@ describe('personal analysis worker', () => {
     const { client, rpc } = createAdminClient({
       claimed: {
         ownerJobs: [],
-        scopeJobs: [{
-          userId: USER_ID,
-          scopeGameUid: 'legacy',
-          serverScope: '9',
-          historyRevision: '7',
-          analysisSchemaVersion: 1,
-        }],
+        scopeJobs: [
+          {
+            userId: USER_ID,
+            scopeGameUid: 'legacy',
+            serverScope: '9',
+            historyRevision: '7',
+            analysisSchemaVersion: 1,
+          },
+        ],
       },
       history: [
         createHistoryRow({
@@ -453,10 +516,7 @@ describe('personal analysis worker', () => {
       status: 'failed',
       code: 'personal_analysis_scope_identity_mismatch',
     });
-    expect(rpc).not.toHaveBeenCalledWith(
-      'publish_personal_analysis_scope_snapshots',
-      expect.any(Object)
-    );
+    expect(rpc).not.toHaveBeenCalledWith('publish_personal_analysis_scope_snapshots', expect.any(Object));
     expect(rpc).toHaveBeenCalledWith(
       'fail_personal_analysis_job',
       expect.objectContaining({
@@ -469,11 +529,13 @@ describe('personal analysis worker', () => {
   it('counts a false publish as stale instead of failed', async () => {
     const { client, rpc } = createAdminClient({
       claimed: {
-        ownerJobs: [{
-          userId: USER_ID,
-          historyRevision: '8',
-          analysisSchemaVersion: 1,
-        }],
+        ownerJobs: [
+          {
+            userId: USER_ID,
+            historyRevision: '8',
+            analysisSchemaVersion: 1,
+          },
+        ],
         scopeJobs: [],
       },
       history: [createHistoryRow()],
@@ -500,22 +562,28 @@ describe('personal analysis worker', () => {
     const brokenCharacter = {
       id: 'character-1',
       name: '角色一',
-      get aliases() { throw buildError; },
+      get aliases() {
+        throw buildError;
+      },
     };
     const { client, rpc } = createAdminClient({
       claimed: {
-        ownerJobs: [{
-          userId: USER_ID,
-          historyRevision: '9',
-          analysisSchemaVersion: 1,
-        }],
-        scopeJobs: [{
-          userId: USER_ID,
-          scopeGameUid: 'game-1',
-          serverScope: 'scope-1',
-          historyRevision: '9',
-          analysisSchemaVersion: 1,
-        }],
+        ownerJobs: [
+          {
+            userId: USER_ID,
+            historyRevision: '9',
+            analysisSchemaVersion: 1,
+          },
+        ],
+        scopeJobs: [
+          {
+            userId: USER_ID,
+            scopeGameUid: 'game-1',
+            serverScope: 'scope-1',
+            historyRevision: '9',
+            analysisSchemaVersion: 1,
+          },
+        ],
       },
       history: [createHistoryRow()],
       pools: [createPoolRow()],

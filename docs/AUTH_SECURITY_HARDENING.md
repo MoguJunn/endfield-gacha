@@ -1,245 +1,81 @@
-# 统一认证架构与安全加固计划
+# 认证、身份归属与会话安全
 
-> 2026-08-03 发布后更新：认证迁移 166/167/168、PR #14 和对应 API/前端已经生产完成。本文后续部分保留发布前候选审查快照；新的 `169_add_oauth_email_artifact_merge.sql` 及配套接口只处理旧版邮箱验证流程产生、且经严格证据确认没有任何站内数据的 Auth 空壳。用户必须在当前 GitHub Session 中验证目标邮箱并再次明确确认；真实已有账号、证据不全或任何数据归属冲突继续安全拒绝并转人工处理。安全复核后进一步收口：可修复判定要求 operator 逐条人工批准、验证码预算按源用户+邮箱持久累计、确认阶段在数据库内重新原子占用并冻结空壳（含双方原生 Auth Session 撤销）、按数据库最终状态决策补偿、完成后支持会话交接重试；这些都已在临时 PostgreSQL 17 与专项测试中验证。
+本文说明贡献者修改登录、邮箱、密码、OAuth 和账号恢复时需要保持的合同。环境字段见 [.env.example](../.env.example)，数据库结构和安装顺序见 [Supabase 指南](../supabase/README.md)。
 
-> 跟进迁移 `171_allow_consumed_magiclink_email_artifact.sql`（2026-08-04 已生产应用）：识别旧缺陷的第二种精确形状——用户点击过旧 Magic Link、留下占位 bcrypt 密码与原生 Session/refresh token 的 email-only Auth 空壳。该形状要求独立的 operator 证据版本 `legacy_magiclink_consumed_v2`，并绑定：真实源用户、真实工单、super_admin 批准人、不可变的完整证据快照哈希（覆盖 Auth 用户、identities、sessions、refresh tokens、审计与邮件投递证据）。`service_role` 对批准表只读；claim 先锁定批准行再复核；refresh token 必须非空、未撤销、未轮换且每个 Session 恰好一条。任何自动形状检查均不把 bcrypt 外形当作 Magic Link 占位密码的唯一证明，证据快照在批准与 claim 时逐字节一致。
+## 认证入口
 
-> 2026-08-04 生产跟进：迁移 171 与 operator 批准已生产应用。真实确认请求暴露出 GoTrue v2.188.1 Admin 更新用户会依次修改 email identity、Auth email、metadata 与封禁状态，活动 intent 的冻结触发器因此正确拒绝中间状态。迁移 `172_quarantine_oauth_email_artifact_atomically.sql` 将空壳用户、唯一 email identity、intent metadata 与长期封禁收口为同一数据库事务，并为活动空壳 identity 增加精确冻结触发器；应用层改用该 RPC，结果不明时先幂等重试，仍无法确认则进入人工协调状态，不再错误释放 claim。专项测试同时覆盖 identity 并发新增拒绝、用户更新失败后的整笔回滚，以及 v1/v2 最终隔离不变量。
-
-状态：`AUTH-HARDEN-001`、`AUTH-HARDEN-RELEASE-001`、PR #14 与生产 166–168 已完成；后续只在具体认证回归或 provider 任务中继续。历史提交或候选文件仍不自动授权新的生产迁移、账号修改或 provider 开放。
-
-> 新会话入口：根目录 `SESSION_HANDOFF.md` 与 `todo` 的 `AUTH-HARDEN-001`。
-> 当前实现入口：主站 `main`。旧 `_tmp/auth-hardening-integration` worktree 已于 2026-08-27 审计闭拢；Phase A–D 历史基线提交为 `5dd8505`，不再从已删除分支恢复。
-> Phase A、B、C、D 已重编号为 166/167，并于 2026-08-02 应用到生产数据库完成权限 / 回填核验；远端审查缺口由前向迁移 168 与配套代码收口。迁移 168、PR #14、认证 API 与主线发布均已完成；后续 169–172 的运行态仍需按具体生产任务实时核验，不能仅由 Git 文件推定。
-> LinuxDo 属于独立低优先级任务 `AUTH-LINUXDO-002`：实现继续隔离在 `feat/linuxdo-oauth`，不进入本认证候选；目前无法申请隔离 Connect Client，前后端开关保持关闭，不再阻塞认证发布。
-
-## 当前决策
-
-1. **保留正常邮箱注册主链。** 邮箱注册、密码登录、邮件验证码登录、密码找回和站内邮箱验证继续使用 Supabase Auth 与现有同源邮件入口；本轮不推翻这条主链。
-2. **保留统一同源认证出口。** GitHub、LinuxDo 和后续 QQ 等第三方 provider 由本站 OAuth bridge 接入，最终与邮箱登录共同落到 `app_sessions` 和 HttpOnly 站点 Cookie。Supabase `auth.users` 继续作为稳定用户 UUID 与邮箱密码锚点。
-3. **provider 使用独立协议 adapter。** LinuxDo 已完全脱离旧 Supabase Custom Provider 代理，固定使用当前 Connect 的授权码、PKCE S256、Basic Token 鉴权和 Bearer UserInfo；自动化通过不等于真实 provider 已验收，隔离浏览器闭环前保持开关关闭。
-4. **发布动作继续独立授权。** `AUTH-HARDEN-001` 完成不自动授权 push、合并、认证迁移、部署、账号修复脚本真实执行或生产 Auth 用户/账号归属修改；这些动作由 `AUTH-HARDEN-RELEASE-001` 分层推进。
-
-## 当前仓库事实
-
-- 生产版本文档口径仍是 `v4.5.4`；2026-08-27 主应用目录为干净的 `main@d186a425d5fb29aad940b4f08027744dfecbc602`，与 `origin/main` 一致，GitHub-connected Vercel Production Ready。
-- 当前生成 baseline 覆盖到 migration 183。已确认生产历史包括独立抽奖 160–165、认证 166–168 和正式导入修复 170；169–172 等后续合同的运行态仍需按具体任务实时核验，不从 Git 文件自动推定。
-- 旧认证 Phase A、Magic Link 和 `oauth-password-email-conflict` worktree 已于 2026-08-27 逐文件审计并闭拢；重复的 159/160/170 候选和旧跨系统手工修复脚本不再是恢复入口。
-- 当前认证实现、测试与专题文档均以主站 `main` 为准。LinuxDo 仍保留在独立 `feat/linuxdo-oauth` 分支，未推送、未合并、未部署，外部 Client 条件恢复前保持关闭。
-- Git / npm 默认入口为 `D:\Learning\Endfield Gacha\gacha-analyzer`。含 `.env.local` 的辅助目录只保留环境配置并停在 detached `main`；不得读取、公开或自动覆盖其中配置。
-
-### migration 编号历史冲突（已收口，仅用于解释最终编号）
-
-| 位置 | 文件名 | 含义 |
-| --- | --- | --- |
-| 当前主线 | `166_harden_admin_profile_and_oauth_transactions.sql` | Phase A/B forward migration；避开抽奖 160–165 |
-| 当前主线 | `167_harden_account_credentials_and_identity_keys.sql` | Phase C/D forward migration；紧随 Phase A/B |
-| 当前主线 | `168_close_auth_review_findings.sql` | 历史 identity 原子迁移、直连 RLS Session 门禁和首次设密并发串行化；已生产应用 |
-| 已闭拢旧候选 | `159_add_history_scope_read_models.sql` | 旧性能候选，不属于当前迁移链，不得补执行 |
-| 已闭拢旧候选 | `159_bind_email_verification_to_target.sql` | 旧邮箱参考候选，已被 167 与后续原子化流程取代，不得补执行 |
-
-- 2026-08-02 迁移前只读核对确认运行版本为 `v4.5.4`、抽奖 160–165 存在、性能 159 与认证结构不存在；随后已创建受限完整备份并按 166 → 167 应用认证迁移。生产库没有主站应用级 migration ledger。
-- 因此认证初始两条迁移使用连续新号 166/167，审查修复继续使用 168。性能线 159 和旧邮箱候选 159 仍是独立未发布候选，不进入本认证分支。
-- 166/167/168 已按编号顺序生产应用并随 PR #14 发布。旧 159 候选未应用，也不得因编号较小而补执行；当前新迁移编号只看实时 baseline、所有活动候选与生产记录。
-
-## 实现进度
-
-| 阶段 | 状态 |
-| --- | --- |
-| 文档 / 任务账本 / 交接 | 已同步到 2026-08-27 当前主线与发布事实 |
-| 认证实现入口 | 当前主站 `main`；Phase A–D 历史由 `5dd8505` 固化，旧认证 worktree 已闭拢 |
-| Phase A 代码（admin RPC + OAuth transaction） | **完成、合入并生产发布** |
-| Phase B 代码（双凭据、刷新凭据、session 撤销、兼容 JWT 回查） | **完成、合入并生产发布** |
-| Phase C 代码（候选邮箱、首次设密、临时密码到期） | **完成、合入并生产发布** |
-| Phase D 代码（identity keyring、原子认领、补偿恢复） | **完成、合入并生产发布** |
-| 候选验收（GitHub / 邮箱 / 安全属性） | **已完成**：GitHub 核心闭环使用隔离浏览器验证；跨浏览器 transaction、link Session 切换、callback 重放及邮箱/凭据状态机由专项自动化与本地 PostgreSQL 17 验证；已授权 App 无取消控件的限制已记录 |
-| LinuxDo provider | **转 `AUTH-LINUXDO-002`（P3）**：代码和自动化合同已完成，真实 Client 验收因外部条件暂停，不阻塞本任务 |
-| 生产 migration | **当前阶段完成**：166 → 168、确认邮箱归属回填、identity key 版本和角色权限核验通过；后续 169–172 运行态按具体任务实时核验 |
-| push / 合并 / API 部署 | **完成**：PR #14、主线 CI 和 Vercel Production 已完成；后续生产动作继续独立授权 |
-
-## 认证数据流
+邮箱凭据由 Supabase Auth 管理；第三方登录经过本站同源 OAuth bridge。两种入口最终以同一个 `auth.users` UUID 为账号锚点，通过 `app_sessions` 和 HttpOnly Cookie 访问私有 API。
 
 ```mermaid
 flowchart LR
-  Browser["Browser / Mobile"] --> EmailAuth["Supabase Auth\n邮箱密码 / OTP / recovery"]
-  Browser --> OAuthStart["Same-origin OAuth start / callback"]
-  OAuthStart --> Provider["GitHub / LinuxDo / later QQ"]
-  OAuthStart --> Identity["app_auth_identities"]
-  EmailAuth --> SessionBootstrap["POST /api/auth/session"]
-  Identity --> AuthUsers["auth.users UUID anchor"]
-  EmailAuth --> AuthUsers
-  OAuthStart --> SiteSession["app_sessions + HttpOnly cookie"]
-  SessionBootstrap --> SiteSession
-  SiteSession --> PrivateApi["Same-origin private API"]
-  AuthUsers --> Compat["Short-lived compatibility JWT\ntransition only"]
-  Compat --> PrivateApi
+  Browser[浏览器] --> Email[Supabase Auth 邮箱认证]
+  Browser --> OAuth[同源 OAuth bridge]
+  Email --> Bootstrap[站点 Session 引导]
+  OAuth --> Identity[provider identity 归属]
+  Bootstrap --> Session[app_sessions 与 HttpOnly Cookie]
+  Identity --> Session
+  Session --> Api[受保护同源 API]
 ```
 
-这不是两套互不相干的账号系统：邮箱和第三方登录拥有不同入口，但必须解析到同一个站点用户 UUID，并通过同一会话边界访问私有 API。
+相关入口：`api/_lib/siteAuth.js`、`siteSession.js`、`identityHash.js`、`oauthState.js`、`api/_routes/root/auth-oauth.js`、`auth-session.js`。
 
-## 必须长期成立的不变量
+## 身份与 OAuth
 
-- 一个 provider 的稳定 subject 只能归属一个站点用户；普通登录、绑定和重试不得改写已经存在的 owner。
-- OAuth transaction 必须绑定发起浏览器；`link` 还必须绑定发起时的同一站点 session 和 user，并只能消费一次。
-- 持久 provider identity key 必须使用独立、版本化、可迁移的密钥，不能依赖用于短期 `state` 签名的密钥。
-- 同一请求同时出现站点 Cookie 和 Bearer token 时，两者 user ID 必须一致；不一致时拒绝，而不是静默选择其中一个。
-- `profiles.email` 不能成为未验证邮箱的永久归属声明。候选邮箱应有独立 pending 状态，只有完成目标邮箱验证和 Auth 绑定后才成为 canonical email。
-- “已验证”必须同时满足：用户、规范化目标邮箱、challenge、版本和消费状态一致。仅有 `verified_at` 时间戳不构成邮箱所有权证明。
-- 解绑登录方式提交后必须至少保留一种真实可用方式：已验证且已绑定 Auth 的邮箱密码，或另一条活动 OAuth identity。
-- 首次设置密码、临时密码修改和恢复 token 都必须是一次性能力；部分成功不能留下可重复使用的免旧密码入口。
-- 密码修改、密码找回和管理员重置后，旧站点 session、其他设备 session 与相关兼容 token 必须按策略撤销。
-- 标注为“临时”的密码必须在认证层真正失效；业务表中的到期时间和设置页提示不能代替认证执行。
+- 一个 provider 的稳定 subject 只能归属一个站点用户。登录、绑定和重试不能改写已有 owner。
+- OAuth transaction 绑定发起浏览器、PKCE 与短期 state；绑定操作还须核对发起时的 user／Session。callback 原子消费 transaction，过期或重放拒绝。
+- 不把 provider 提供的邮箱自动视为本站已验证邮箱；OAuth 用户的内部合成邮箱不是找回密码地址。
+- 请求同时带 Cookie 与 Bearer 时，两者解析的用户必须一致，不一致返回 `auth_identity_conflict`。Bearer 引导不能被已有 Cookie 覆盖。
+- 登录或初始化部分失败时，只清理本次创建且可证明无有效归属的孤儿，不能删除已有真实账号。
+- 解绑在数据库锁内检查实际可用登录方式，不允许移除最后一种方式；软解绑后直接登录返回 `oauth_identity_unlinked`，重绑恢复原归属。
 
-## 本地候选已修复并完成候选验收的问题
+provider 使用独立 adapter。GitHub、LinuxDo、QQ 的启用条件分别核验；LinuxDo 使用授权码、PKCE S256、Basic Token 鉴权和 Bearer UserInfo，默认保持关闭，取得有效 Client 并完成浏览器闭环后再启用。
 
-### 第一组：直接攻击面
+## 邮箱、密码与一次性能力
 
-- ~~OAuth `state` 未绑定发起浏览器或站点 session~~ → **本地已修**：transaction + 浏览器绑定 Cookie + 原子 DELETE 消费 + PKCE。
-- ~~`admin_update_profile` 对普通角色开放并信任 actor UUID~~ → **本地已修**：migration 166 撤销 `PUBLIC/anon/authenticated` EXECUTE，仅 service-role。
+未验证邮箱只作为 pending 目标。`account_email_ownerships` 维护规范化邮箱的唯一归属，`account_email_challenges` 绑定用户、目标、版本与有效期，验证成功后才更新 canonical 邮箱。
 
-### 第二组：身份一致性与锁号
+挑战消费、首次设密和归属变更使用数据库 advisory lock 与条件更新，保证并发下只成功一次。Auth 密码更新失败或状态不明确时进入协调状态，不能重新开放免旧密码能力。OAuth callback 与首次设密完成共用锁，并在锁内检查真实密码登录能力，避免旧 callback 回退已完成状态。
 
-- ~~Cookie 与 Bearer 属于不同用户时静默优先 Cookie~~ → **本地已修**：同时存在时校验两边并比较 user ID；冲突返回 `auth_identity_conflict`。bootstrap 只认 Bearer。
-- ~~未验证、未绑定 Auth、未设置密码的 profile 邮箱会被当作备用登录方式，可能允许解绑最后一个 OAuth identity~~ → **本地已修**：解绑走 `unlink_oauth_identity_atomically`，在用户级锁内按“活动 OAuth identity 数 + Auth 确认邮箱密码”判定，提交后必然保留一种可用方式。
-- ~~候选邮箱在验证前写入 `profiles.email`，而 profile 邮箱缺少规范化唯一归属模型~~ → **本地已修**：migration 167 引入 `account_email_ownerships`（规范化唯一归属）与 `account_email_challenges`（一次性挑战），验证成功后才提升 canonical。
-- ~~OAuth identity 认领依赖先查后 upsert；并发时可能改写 owner。首次创建 Auth user 后 identity 写入失败也缺少幂等恢复~~ → **本地已修**：`claim_oauth_identity` 原子认领（owner 不可变、hash split 拒绝）；创建前先按新旧 synthetic email 恢复半成品 Auth user，profile 缺失时修复，孤儿清理只针对本次新建。
-- ~~迁移 167 只给历史 identity 标记 `legacy_state_v1`，应用却没有计算旧主线真实 HMAC 格式，既有 OAuth 用户可能被创建为新账号~~ → **本地已修**：完整复现旧 `getOAuthStateSecret()` fallback 与任意非空历史 key 行为，并支持用 `AUTH_IDENTITY_HASH_KEY_LEGACY_STATE` 固定轮换前真实值；`claim_oauth_identity_v2` 按每个候选排序加锁，在 current / previous / legacy 间锁定唯一 owner 后迁移到当前专用 key。
+管理员临时凭据的到期元数据与密码更新原子写入。到期校验在 Auth Session 创建／刷新及站点凭据解析层执行；普通状态清除不能解除到期限制，真正改密才完成恢复。
 
-### 第三组：凭据生命周期
+账号恢复、未知邮箱的邮件登录和重置使用通用响应，避免枚举。投递失败保留可解释状态和人工恢复入口，邮件合同见 [SELF_HOSTED_MAIL](SELF_HOSTED_MAIL.md)。
 
-- ~~临时密码到期时间目前只是业务元数据；通用状态清除接口也不要求密码实际已修改~~ → **本地已修**：`auth.sessions` 插入/更新前与站点 session/Bearer 解析均执行认证层到期检查；`clear_password_change_required` 用户入口已删除；管理员发放临时密码时到期状态随 Auth 更新原子写入。
-- ~~改密/找回/管理员重置后不撤销旧 `app_sessions`；兼容 JWT 不回查活动 session~~ → **本地已修**：`revokeAllSiteSessionsForUser` + `POST /api/auth/session/revoke-all`；兼容 JWT 回查 `session_id` 对应活动行。
-- ~~已签发兼容 JWT 仍可绕过同源 API 直接访问 Supabase RLS；独立导入后端也未检查临时凭据到期~~ → **本地已修**：迁移 168 为 `public/storage` 中所有已启用 RLS 的表附加 restrictive Session 门禁；原生与站点兼容 JWT 都必须绑定活动 Session 且临时凭据未过期。独立导入后端两条 token 路径同步执行 `is_account_credential_allowed`。
-- ~~仅剩 refresh Cookie 时注销只清浏览器 Cookie，不撤销数据库 Session~~ → **本地已修**：迁移 168 用受限 alias 表记录同一刷新凭据族的历史 hash，轮换与注销 RPC 对 token hash 使用同一 advisory lock；旧/新 refresh 任一命中都撤销整个 Session，数据库失败不再返回注销成功。
-- ~~OAuth 首次设密在 Auth 更新成功、状态清理失败时，可能继续保留免旧密码能力~~ → **本地已修**：一次性能力先原子 claim；Auth 更新失败或收尾失败均进入 `coordination_required`，不再重新开放免旧密码入口。
-- ~~OAuth callback 刷新安全状态可能与首次设密完成交错，把已完成能力回退为 `password_change_required=true`~~ → **本地已修**：`refresh_oauth_account_security_state` 与首次设密 RPC 共用用户级 advisory lock，并在锁内重新核对真实密码登录能力；已完成状态不能被陈旧 callback 覆盖。
-- ~~首次设密与邮箱补录跨 Supabase Auth 和业务表，最终检查后仍存在并发提交窗口~~ → **本地已修**：challenge/能力状态机全部在数据库 RPC 内以 advisory lock + 条件更新完成单次消费。
+## 会话撤销与直连边界
 
-### 第四组：密钥演进
+- 改密、邮箱真实变化、找回和管理员恢复撤销旧站点会话，原生 Auth Session 也受撤销状态和临时凭据门禁约束。
+- 兼容 JWT 必须绑定可查询的活动 Session，不接受凭证自行派生的兼容会话。
+- 刷新 Cookie 默认 `__Secure-eg_refresh`，路径限定 `/api/auth/session`；轮换和注销按凭据族加锁，旧／新 refresh 任一注销都撤销整个会话。
+- 数据库撤销失败不能返回注销成功。仅剩刷新 Cookie 时仍要撤销数据库 Session。
+- restrictive RLS 策略阻止撤销后的 JWT 绕过同源 API 直连表；身份、挑战、归属、审批与会话管理 RPC 保持服务端权限。
+- 私有账号、个人分析与历史响应使用 `no-store`，不进入公共缓存。
 
-- ~~provider subject hash 当前与 `OAUTH_STATE_SECRET` 耦合。轮换短期 state 密钥会使同一 provider 用户生成新的 identity key，并可能进入新的站点账号~~ → **本地已修**：独立 `AUTH_IDENTITY_HASH_KEY_CURRENT/PREVIOUS` keyring（缺 key 安全关闭，版本冲突拒绝）；登录时按新旧 hash 双读并原子迁移，identity 的 hash/版本字段不可直接改写。
+## 密钥与网络
 
-## 已确认可以保留的设计
+`OAUTH_STATE_SECRET` 只保护短期 OAuth state。持久 identity 使用独立的 `AUTH_IDENTITY_HASH_KEY_CURRENT/PREVIOUS` 与版本字段；迁移旧 identity 时按新旧 hash 双读，并在数据库锁内确认唯一 owner。hash 分裂或跨 owner 冲突拒绝，identity owner／hash／版本不能由普通更新改写。
 
-- GitHub provider email 不再直接作为站点可信邮箱。
-- OAuth Auth 用户使用内部合成邮箱，避免 provider email 自动成为密码找回地址。
-- Auth 用户、profile、站点 identity 与 session 都以同一个用户 UUID 为锚点。
-- 邮箱验证码和验证链接只保存 hash，并带用户和有效期边界。
-- 候选实现引入精确验证目标邮箱的方向正确；合入后仍需用一次性版本/CAS 处理并发和部分成功。
-- `app_auth_identities`、`app_sessions`、认证审计表保持 service-role-only，普通浏览器不得直接写入。
-- 正常邮箱注册在 profile 或安全状态建立失败时执行收容，避免返回一个表面成功但初始化不完整的账号。
+`AUTH_IDENTITY_HASH_KEY_LEGACY_STATE` 只用于仍需迁移的旧 hash，完整迁移后才能移除。`APP_SESSION_SECRET` 与上述密钥分开配置，服务端秘密不写入 `VITE_*`。
 
-## 分阶段实施顺序
+OAuth 出站默认不读取系统代理，需要时显式设置 `AUTH_OAUTH_USE_ENV_PROXY`，并核对 `NO_PROXY`。请求保持超时、有限重试和稳定脱敏错误码，不把 token 或 provider 原始响应暴露给用户。
 
-### Phase A：关闭直接攻击面
+## 旧邮箱空壳修复
 
-**实现状态：已完成、合入并生产发布；`5dd8505` 仅作为历史候选基线。**
+迁移 169–172 只处理符合已知旧故障证据的 email-only 空壳，不是通用账号合并。真实账号、MFA、额外身份、业务数据或不完整证据都继续拒绝。
 
-1. migration `166_harden_admin_profile_and_oauth_transactions.sql`：
-   - 撤销 `PUBLIC/anon/authenticated` 对 `admin_update_profile` 的 EXECUTE；仅 `service_role`
-   - 表 `app_oauth_transactions` + 过期清理 + 条件 `DELETE` 单次消费
-   - 用户级 session 撤销状态 / RPC 边界（Auth 邮箱或密码真实变化时撤销活动站点 session）
-   - OAuth identity owner 不可改写触发器
-   - 原生 Bearer bootstrap 幂等与活动 session 容量边界（见 migration 正文注释）
-2. OAuth 应用层：浏览器绑定 Cookie + PKCE S256；`intent=link` 校验发起 session+user。
-3. 回归：PostgreSQL 17 权限脚本、OAuth 跨浏览器/重放/跨 session、link 同用户等。
+修复需 operator 逐项批准不可变证据，用户在有效 OAuth Session 中控制目标邮箱、完成验证码并再次明确确认。发送和失败预算按源用户／目标邮箱持久累计，更换 intent 不能绕过限制。
 
-关键文件：`supabase/migrations/166_*.sql`、`api/_lib/oauthState.js`、`api/_routes/root/auth-oauth.js`、`api/_lib/oauthProviders.js`、`scripts/verify-auth-hardening-phase-a.mjs`
+claim 在数据库锁内重查证据、占用 intent、冻结空壳并撤销会话。消费过旧 Magic Link 的形态使用 `legacy_magiclink_consumed_v2`，核对完整 Auth／identity／Session／refresh／审计证据，不仅凭 bcrypt 外形判断。
 
-### Phase B：统一请求身份与凭据撤销
+迁移 172 将空壳用户、唯一 email identity 和 intent 状态原子隔离。跨 Auth API 与数据库结果不明时按最终状态做幂等核对，无法确定则进入人工协调；确认重试重建交接会话并撤销旧交接会话，不盲目释放 claim 或批量修复。
 
-**实现状态：已完成、合入并生产发布；`5dd8505` 仅作为历史候选基线。**
+## 验证与发布
 
-1. `POST /api/auth/session` bootstrap 只走 `resolveBearerRequestUser`；已有 Cookie 不能覆盖待引导用户。
-2. `resolveAuthenticatedRequestUser`：有 Authorization 时先校验 Bearer；若同时有有效 Cookie session，比较 user ID，不一致返回 `auth_identity_conflict`。
-3. `revokeAllSiteSessionsForUser` + `POST /api/auth/session/revoke-all`；接入 OAuth 首次设密、管理员重置、恢复临时密码、普通改密与找回改密收尾。
-4. 兼容 JWT（`app_metadata.provider=site_session`）解码 `session_id` 后回查 `app_sessions` 活动状态。
-5. 刷新凭据 Cookie 默认 `__Secure-eg_refresh` + `Path=/api/auth/session`；旧 `__Host-` 配置名自动规范化；rotation 条件更新绑定旧 refresh hash。
+```bash
+npm run test:auth-hardening-phase-a
+npm run test:auth-hardening-phase-cd
+npm run test:supabase-baseline
+npm run test:supabase-baseline:smoke
+```
 
-关键文件：`api/_lib/siteAuth.js`、`api/_lib/siteSession.js`、`api/_routes/root/auth-session.js`、`account-password-setup.js`、`admin.js`、`src/services/siteSessionService.js`、`accountSecurityService.js`、`ResetPasswordPage.jsx`
+专项覆盖管理员 RPC、transaction、owner、挑战单次消费、邮箱唯一归属、凭据到期、identity 迁移、会话撤销和并发。数据库真实验证之外，每个 provider 还需隔离账号的登录、绑定、解绑、重绑浏览器闭环；自动化或浏览器后退不替代未实际返回的 provider 取消事件。
 
-### Phase C：收敛邮箱与密码状态机
-
-**实现状态：已完成、合入并生产发布；`5dd8505` 仅作为历史候选基线。**
-
-1. 建立规范化候选邮箱/pending 状态；验证前不把候选值写成 canonical `profiles.email`。migration 167 新增 `account_email_ownerships`（规范化唯一归属）与 `account_email_challenges`（一次性挑战，绑定 `user_id + target_email + 版本`，`start/consume` RPC 以 advisory lock + 条件更新保证单次消费）。
-2. 邮箱归属使用数据库唯一约束或原子 claim，不用全量扫描 Auth 用户替代唯一性。
-3. challenge 绑定 `user_id + target_email + version`，验证和首次设密都使用条件消费。
-4. 首次设密先原子占用一次性能力（`available→claimed→completed/coordination_required`）；Auth 更新失败或收尾失败均不再重新开放免旧密码更新。
-5. 解绑 OAuth identity 走 `unlink_oauth_identity_atomically`，在用户级锁内检查提交后的真实登录方式。
-6. 临时密码在认证层真实到期（`auth.sessions` 门禁 + 站点 session/Bearer 校验）；删除普通用户可直接清状态的入口；管理员发放临时密码时到期状态随 Auth 更新原子写入（`app_metadata` + 触发器同步）。
-7. `has_verified_password_login` 在数据库内统一核对 Auth 密码、确认邮箱、profile 邮箱和私有邮箱归属；OAuth 登录与原子解绑不再依赖 Admin API 是否返回密码哈希。
-
-关键文件：`supabase/migrations/167_harden_account_credentials_and_identity_keys.sql`、`api/_routes/root/account-email-action.js`、`account-email-verify.js`、`account-password-setup.js`、`account-security-state.js`、`admin.js`、`api/_lib/siteSession.js`、`siteAuth.js`、`scripts/verify-auth-hardening-phase-cd.mjs`
-
-### Phase D：稳定 OAuth identity
-
-**实现状态：已完成、合入并生产发布；`5dd8505` 仅作为历史候选基线。**
-
-1. 引入独立、版本化的 identity hash key：`api/_lib/identityHash.js`（`AUTH_IDENTITY_HASH_KEY_CURRENT/PREVIOUS`，缺 key 安全关闭、版本冲突拒绝，与 state 密钥解耦）。
-2. 支持旧 key 查询、新 key 写入和登录时原子迁移（`claim_oauth_identity` RPC 双 hash 双读，owner 不可变、hash split 拒绝）；迁移完成前不得轮换/退役旧 key。
-3. identity claim 使用受控 RPC，冲突时只读取已有 owner；identity 的 owner/provider/hash/版本字段不可直接改写（触发器门禁）。
-4. Auth user 创建与 identity 写入增加补偿和幂等恢复：按新旧 synthetic email 恢复半成品，profile 缺失时修复，孤儿清理只针对本次新建。
-5. token/profile 请求使用稳定错误码、15 秒超时和有限重试；服务端 OAuth 环境代理仅在 `AUTH_OAUTH_USE_ENV_PROXY=true` 时启用，并尊重 `NO_PROXY`。
-
-### Phase E：候选验收与 provider 分工
-
-1. GitHub 核心浏览器闭环已完成：登录原账号、绑定、软解绑、解绑后拒绝和恢复原 identity。
-2. 跨浏览器 transaction、link Session 切换和 callback 重放是确定性安全属性，已由专项自动化覆盖，不再要求人工制造危险或不可稳定复现的状态。GitHub 已授权 scope 不显示取消/拒绝控件时如实记录平台限制，不以浏览器后退伪造证据。
-3. LinuxDo adapter 已完全重写并通过自动化合同；真实 Connect Client 验收全部转 `AUTH-LINUXDO-002`，当前降为 P3 外部条件任务。
-4. QQ 保持关闭，等待平台审核和真实回调格式确认。
-
-LinuxDo 专项合同、配置和验收矩阵由独立分支 `feat/linuxdo-oauth` 维护。
-
-## 邮箱主链候选验收
-
-邮箱主链不因 OAuth 加固而停用。下列安全合同已由 API 测试、数据库专项、本地普通账号和完整站点 Session 链覆盖，因此计入 `AUTH-HARDEN-001` 候选验收完成：
-
-- 新邮箱注册、重复邮箱、profile 初始化失败收容；
-- 密码登录、错误密码、Cookie/Bearer 一致性；
-- 邮件验证码登录和不存在邮箱的通用响应；
-- 密码找回、密码更新后旧 session 撤销；
-- 站内邮箱验证的目标绑定、过期、重放和并发换绑；
-- 邮件发送失败时的持久化状态与用户提示；
-- 普通邮箱双确认完成后的 Auth/profile/security-state 一致性。
-
-生产小范围真实验证仍在 166/167 与 API 部署之后执行，属于 `AUTH-HARDEN-RELEASE-001`，不反向否定本地实现完成。
-
-## AUTH-HARDEN-RELEASE-001：迁移与发布闸门
-
-1. `origin/main` 的主站标准迁移链仍到 158；共享生产 schema 包含独立抽奖 160–165。认证 166/167 已于 2026-08-02 按顺序生产应用，`site_version` 保持 `v4.5.4`。
-2. 性能线 `159_add_history_scope_read_models.sql` 与旧邮箱候选 `159_bind_email_verification_to_target.sql` 仍位于其他 worktree，未进入本分支、未生产应用。
-3. 集成树已重新生成 baseline 到 167，并通过静态校验、临时 PostgreSQL 完整执行与认证 PostgreSQL 17 专项。生产执行前已完成全库自定义格式备份和 schema 备份；迁移后确认 3,095 个已确认真实邮箱全部建立唯一归属、83 条既有 OAuth identity 全部带 key 版本，角色权限、表、函数与触发器断言通过。
-4. 数据库迁移先于依赖新列/新 RPC 的 API 代码部署。
-5. 先在关闭第三方 provider 和真实账号修复的状态下部署基础设施，再逐项做小范围真实测试。
-6. GitHub 核心验收已完成；LinuxDo 不属于本次认证发布的开放条件，前后端开关保持关闭。
-7. 生产账号定向修复必须单独申请授权，并先重新运行只读演练；提交、推送或部署授权不自动包含账号修改授权。
-8. `fix/auth-hardening-integration` 作为远端审查候选处理；推送不授权合并或部署。`feat/linuxdo-oauth` 只作为低优先级本地实现存储分支处理。
-
-### 本地验证快照（2026-08-02，认证集成 worktree）
-
-- LinuxDo OAuth 专项：6 文件 / 59 测试全部通过
-- 全量 Vitest：182 文件 / 988 测试全部通过
-- ESLint：通过
-- 生产构建：通过
-- `test:auth-hardening-phase-a`（PostgreSQL 17）：admin RPC 权限、transaction 单次删除消费、过期清理、owner 不可变、session 撤销、Bearer bootstrap 幂等通过
-- `test:auth-hardening-phase-cd`（PostgreSQL 17）：邮箱挑战单次消费/重放=0/唯一 owner、首次设密能力重放拒绝、过期临时密码拒绝（含 `auth.sessions` 门禁）、管理员临时凭据原子状态、identity 旧 key 迁移与字段防改写、原子解绑通过
-- `test:supabase-baseline` / `test:supabase-baseline:smoke`：通过；验证 `service_role` profile/撤销状态权限与浏览器角色拒绝
-- 本地 Supabase/PostgreSQL 17：candidate baseline 从空库完整导入；普通测试账号的邮箱确认、密码、profile、唯一邮箱归属以及“密码登录 → 站点 Session → 当前用户 → 注销”链路通过
-- GitHub OAuth/Session 专项 41 项通过；数据库密码备用登录判定、稳定网络错误码、15 秒超时、有限重试、显式环境代理和 `NO_PROXY` 旁路有回归断言
-- 当前本地站点使用 `http://127.0.0.1:5173`；隔离账号已完成“绑定 → GitHub 登录同一账号 → 软解绑 → 邮箱密码仍可登录 → `oauth_identity_unlinked` → 重绑恢复原 identity ID/owner”
-- MaaMCP 操作 Firefox 复验退出、GitHub 登录和官方账户选择器；最终为 1 个 user、1 条活动 identity、1 条活动 Session、0 个待处理 transaction
-- GitHub 已授权状态下官方账户选择器没有取消/拒绝控件；浏览器后退未重新请求 302 callback，因此没有把它冒充取消或重放通过
-- Phase A–D 已由 `5dd8505` 本地提交；生产 migration 166/167 已完成且未修改生产账号。LinuxDo 存储于本地分支 `feat/linuxdo-oauth`（`b8d14d2`），未合并、未部署；前后端开关保持关闭
-
-## 文档职责
-
-- 本文：认证目标架构、风险、实施顺序和验收门禁。
-- `LINUXDO_OAUTH.md`：LinuxDo Connect 固定协议、配置、安全边界和真实浏览器验收。
-- `ARCHITECTURE.md`：全站系统边界和数据流。
-- `PROJECT_GUIDE.md`：环境变量、部署和运维入口。
-- `supabase/README.md`：迁移编号、baseline 和数据库执行规则。
-- `SELF_HOSTED_MAIL.md`：邮件 provider、outbox、防刷和投递边界。
-- `RELEASE_CHECKLIST.md`：每次认证发布必须逐项执行的检查清单。
-
-历史交接、旧发布说明或旧邮件模板如果与本文冲突，以当前代码、实际 Git 状态和本文记录的“未完成”边界为准。
+数据库新字段／RPC 先于依赖代码部署。先验证关闭状态与权限，再逐项启用 provider；迁移与定向账号修复分别核对影响范围及回退措施。浏览器后台刷新锁是独立机制，见 [锁适配说明](SUPABASE_AUTH_LOCK_FIX.md)。

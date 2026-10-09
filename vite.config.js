@@ -1,8 +1,12 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react-swc';
+import tailwindcss from '@tailwindcss/postcss';
+import autoprefixer from 'autoprefixer';
+import { fileURLToPath } from 'node:url';
 import { getApiRouteEntries } from './api/_routes/index.js';
 import { createModuleRecoveryPlugin } from './scripts/lib/moduleRecoveryPlugin.mjs';
 
+const PROJECT_ROOT = fileURLToPath(new URL('.', import.meta.url));
 const LOCAL_SERVER_ENV_PREFERRED_KEYS = new Set([
   'QQBOT_POOL_PUSH_ENABLED',
   'QQBOT_POOL_PUSH_WEBHOOK_URL',
@@ -141,8 +145,9 @@ function createDevApiPlugin() {
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const rootEnv = loadEnv(mode, process.cwd(), '');
-  const backendEnv = loadEnv(mode, `${process.cwd()}/backend`, '');
+  // A CLI root argument may differ from cwd; both API and client must use this project's environment.
+  const rootEnv = loadEnv(mode, PROJECT_ROOT, '');
+  const backendEnv = loadEnv(mode, fileURLToPath(new URL('./backend', import.meta.url)), '');
   const env = {
     ...backendEnv,
     ...rootEnv,
@@ -159,6 +164,12 @@ export default defineConfig(({ mode }) => {
     // also safe to expose because they are publishable/anon browser keys.
     envPrefix: ['VITE_', 'SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_ANON_KEY', 'PUBLISHABLE_KEY'],
     plugins: [react(), createDevApiPlugin(), createModuleRecoveryPlugin()],
+    // Tailwind 4 theme is maintained in src/index.css; keep CSS processing here.
+    css: {
+      postcss: {
+        plugins: [tailwindcss(), autoprefixer()],
+      },
+    },
     // The app is deployed at the domain root, so generated asset and SW URLs
     // must stay absolute across nested SPA routes like /m/summary.
     base: '/',
@@ -217,6 +228,8 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      // Browser profiles and test output can hold locked files on Windows.
+      watch: { ignored: ['**/.agent-tmp/**'] },
       proxy: {
         // 开发环境代理 - 可选地转发到私有代理服务
         '/api/hg-proxy': {

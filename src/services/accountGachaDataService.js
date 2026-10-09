@@ -1,13 +1,12 @@
 import { getSameOriginAuthHeaders } from './authFetchService.js';
 import { fetchJsonWithTimeout } from './supabaseRequest.js';
-import {
-  createContributorDemoReadonlyError,
-  isContributorDemoSessionActive,
-} from '../dev/contributorDemoMode.js';
+import { unpackInheritanceProjection } from '../../shared/simulator/historyCodec.js';
+import { createContributorDemoReadonlyError, isContributorDemoSessionActive } from '../dev/contributorDemoMode.js';
 import {
   getContributorDemoRuntimeAnalysis,
   getContributorDemoRuntimeHistory,
   getContributorDemoRuntimeHistoryPage,
+  getContributorDemoRuntimeSimulatorInheritance,
 } from '../dev/contributorDemoRuntimeData.js';
 
 const PERSONAL_ANALYSIS_TIMEOUT_MS = 120000;
@@ -45,14 +44,18 @@ export async function loadAccountGachaData() {
   }
   const headers = await buildAccountGachaHeaders();
 
-  const { response, data } = await fetchJsonWithTimeout('/api/account-gacha-data', {
-    method: 'GET',
-    credentials: 'same-origin',
-    headers,
-  }, {
-    label: 'account-gacha-data',
-    retries: 1,
-  });
+  const { response, data } = await fetchJsonWithTimeout(
+    '/api/account-gacha-data',
+    {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers,
+    },
+    {
+      label: 'account-gacha-data',
+      retries: 1,
+    }
+  );
 
   if (!response.ok || data?.success === false) {
     createAccountGachaDataError(data, response, '账号抽卡数据读取失败', 'account_gacha_data_load_failed');
@@ -82,18 +85,22 @@ export async function loadAccountGachaAnalysis({ accountKey = '', viewKey = '', 
     params.set('locale', locale);
   }
 
-  const { response, data } = await fetchJsonWithTimeout(`/api/account-gacha-data?${params.toString()}`, {
-    method: 'GET',
-    credentials: 'same-origin',
-    headers,
-  }, {
-    label: 'account-gacha-data-analysis',
-    // 本地 transient fallback 需要读取完整 owner 历史并构建全部视图，
-    // 数据量较大时可能超过普通 GET 的 45 秒预算。Abort 后服务端任务仍可能
-    // 继续执行，因此这里也不能自动重试，避免并行重复计算。
-    timeoutMs: PERSONAL_ANALYSIS_TIMEOUT_MS,
-    retries: 0,
-  });
+  const { response, data } = await fetchJsonWithTimeout(
+    `/api/account-gacha-data?${params.toString()}`,
+    {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers,
+    },
+    {
+      label: 'account-gacha-data-analysis',
+      // 本地 transient fallback 需要读取完整 owner 历史并构建全部视图，
+      // 数据量较大时可能超过普通 GET 的 45 秒预算。Abort 后服务端任务仍可能
+      // 继续执行，因此这里也不能自动重试，避免并行重复计算。
+      timeoutMs: PERSONAL_ANALYSIS_TIMEOUT_MS,
+      retries: 0,
+    }
+  );
 
   if (!response.ok || data?.success === false) {
     createAccountGachaDataError(data, response, '账号抽卡分析读取失败', 'account_gacha_analysis_load_failed');
@@ -121,6 +128,67 @@ export async function loadAccountGachaAnalysis({ accountKey = '', viewKey = '', 
     source: data?.source || 'unknown',
     meta: data?.meta || null,
     warnings: Array.isArray(data?.warnings) ? data.warnings : [],
+  };
+}
+
+export async function loadSimulatorInheritance({ accountKey = '' } = {}) {
+  if (isContributorDemoSessionActive()) {
+    const result = getContributorDemoRuntimeSimulatorInheritance({ accountKey });
+    return {
+      ...result,
+      simulatorInheritance:
+        result.availability === 'ready' ? unpackInheritanceProjection(result.simulatorInheritance) : null,
+    };
+  }
+  const headers = await buildAccountGachaHeaders();
+  const params = new URLSearchParams({ mode: 'simulator-inheritance' });
+  if (accountKey) params.set('accountKey', accountKey);
+  const { response, data } = await fetchJsonWithTimeout(
+    `/api/account-gacha-data?${params.toString()}`,
+    {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers,
+    },
+    { label: 'account-gacha-data-simulator-inheritance', retries: 0 }
+  );
+  if (!response.ok || data?.success === false) {
+    createAccountGachaDataError(data, response, '模拟器继承快照读取失败', 'simulator_inheritance_load_failed');
+  }
+  const projection = data?.simulatorInheritance;
+  const readyValid =
+    data?.schemaVersion === 3 &&
+    projection?.contractVersion === 2 &&
+    projection?.historyEncoding === 1 &&
+    projection?.histories?.version === 1 &&
+    projection?.session?.version === 2 &&
+    projection?.session?.scope === data?.meta?.accountKey &&
+    (!accountKey || accountKey === data?.meta?.accountKey) &&
+    data?.meta?.scopeRevision !== null &&
+    data?.meta?.scopeRevision !== undefined &&
+    String(data.meta.scopeRevision) === String(data.meta.scopeSnapshotRevision) &&
+    projection?.histories &&
+    typeof projection.histories === 'object' &&
+    !Array.isArray(projection.histories) &&
+    typeof projection?.catalogSignature === 'string';
+  if (!['ready', 'building', 'empty'].includes(data?.availability) || (data.availability === 'ready' && !readyValid)) {
+    createAccountGachaDataError(
+      {
+        code: 'simulator_inheritance_response_invalid',
+        error: '模拟器继承快照版本或修订号无效',
+      },
+      response,
+      '模拟器继承响应无效',
+      'simulator_inheritance_response_invalid'
+    );
+  }
+  return {
+    availability: data.availability,
+    schemaVersion: data.schemaVersion,
+    simulatorInheritance: data.availability === 'ready' ? unpackInheritanceProjection(projection) : null,
+    source: data.source || 'unknown',
+    meta: data.meta || null,
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
   };
 }
 
@@ -153,14 +221,18 @@ export async function loadAccountGachaSeqKeys({ gameUid = '', accountKey = '', s
     params.set('region', region);
   }
 
-  const { response, data } = await fetchJsonWithTimeout(`/api/account-gacha-data?${params.toString()}`, {
-    method: 'GET',
-    credentials: 'same-origin',
-    headers,
-  }, {
-    label: 'account-gacha-data-seq-keys',
-    retries: 1,
-  });
+  const { response, data } = await fetchJsonWithTimeout(
+    `/api/account-gacha-data?${params.toString()}`,
+    {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers,
+    },
+    {
+      label: 'account-gacha-data-seq-keys',
+      retries: 1,
+    }
+  );
 
   if (!response.ok || data?.success === false) {
     createAccountGachaDataError(data, response, '账号抽卡记录查重失败', 'account_gacha_data_seq_keys_failed');
@@ -206,14 +278,18 @@ export async function loadAccountGachaHistoryPage({
     params.set('cursor', cursor);
   }
 
-  const { response, data } = await fetchJsonWithTimeout(`/api/account-gacha-data?${params.toString()}`, {
-    method: 'GET',
-    credentials: 'same-origin',
-    headers,
-  }, {
-    label: 'account-gacha-data-history-page',
-    retries: 1,
-  });
+  const { response, data } = await fetchJsonWithTimeout(
+    `/api/account-gacha-data?${params.toString()}`,
+    {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers,
+    },
+    {
+      label: 'account-gacha-data-history-page',
+      retries: 1,
+    }
+  );
 
   if (!response.ok || data?.success === false) {
     createAccountGachaDataError(data, response, '账号抽卡记录读取失败', 'account_gacha_history_page_failed');
@@ -227,14 +303,14 @@ export async function loadAccountGachaHistoryPage({
       limit: Number(data?.page?.limit || limit || 50),
       nextCursor: data?.page?.nextCursor || null,
       hasMore: data?.page?.hasMore === true,
-      total: pageTotal !== null && pageTotal !== undefined && Number.isFinite(Number(pageTotal))
-        ? Number(pageTotal)
-        : null,
-      revision: data?.page?.revision !== null && data?.page?.revision !== undefined
-        ? String(data.page.revision)
-        : data?.meta?.revision !== null && data?.meta?.revision !== undefined
-          ? String(data.meta.revision)
-          : null,
+      total:
+        pageTotal !== null && pageTotal !== undefined && Number.isFinite(Number(pageTotal)) ? Number(pageTotal) : null,
+      revision:
+        data?.page?.revision !== null && data?.page?.revision !== undefined
+          ? String(data.page.revision)
+          : data?.meta?.revision !== null && data?.meta?.revision !== undefined
+            ? String(data.meta.revision)
+            : null,
     },
     scope: data?.scope || null,
     source: data?.source || 'unknown',
@@ -269,13 +345,15 @@ function normalizeHistoryExportAccount(account, accountIndex) {
 }
 
 function buildHistoryExportRecordKey(record) {
-  return JSON.stringify([
-    record?.id ?? record?.recordId ?? record?.record_id ?? '',
-    record?.gameUid ?? record?.game_uid ?? '',
-    record?.serverScope ?? record?.server_scope ?? '',
-    record?.poolId ?? record?.pool_id ?? '',
-    record?.seqId ?? record?.seq_id ?? '',
-  ].map((value) => String(value ?? '')));
+  return JSON.stringify(
+    [
+      record?.id ?? record?.recordId ?? record?.record_id ?? '',
+      record?.gameUid ?? record?.game_uid ?? '',
+      record?.serverScope ?? record?.server_scope ?? '',
+      record?.poolId ?? record?.pool_id ?? '',
+      record?.seqId ?? record?.seq_id ?? '',
+    ].map((value) => String(value ?? ''))
+  );
 }
 
 export async function loadAllAccountGachaHistoryForAccounts({
@@ -285,8 +363,7 @@ export async function loadAllAccountGachaHistoryForAccounts({
   pageLimit = 200,
   maxPagesPerAccount = 5000,
 } = {}) {
-  const normalizedAccounts = (Array.isArray(accounts) ? accounts : [])
-    .map(normalizeHistoryExportAccount);
+  const normalizedAccounts = (Array.isArray(accounts) ? accounts : []).map(normalizeHistoryExportAccount);
 
   if (normalizedAccounts.length === 0) {
     return { history: [], accounts: [], warnings: [] };
@@ -294,20 +371,14 @@ export async function loadAllAccountGachaHistoryForAccounts({
 
   const normalizedExpectedOwnerId = String(expectedOwnerId || '').trim();
   if (!normalizedExpectedOwnerId) {
-    throw createHistoryExportError(
-      '全量读取抽卡记录时缺少 expectedOwnerId',
-      'account_gacha_history_owner_required'
-    );
+    throw createHistoryExportError('全量读取抽卡记录时缺少 expectedOwnerId', 'account_gacha_history_owner_required');
   }
 
   const normalizedPageLimit = Math.max(1, Number.parseInt(String(pageLimit || ''), 10) || 200);
-  const normalizedMaxPages = Math.max(
-    1,
-    Number.parseInt(String(maxPagesPerAccount || ''), 10) || 5000
-  );
-  const declaredTotal = normalizedAccounts.every((account) => (
-    Number.isFinite(Number(account.recordCount)) && Number(account.recordCount) >= 0
-  ))
+  const normalizedMaxPages = Math.max(1, Number.parseInt(String(maxPagesPerAccount || ''), 10) || 5000);
+  const declaredTotal = normalizedAccounts.every(
+    (account) => Number.isFinite(Number(account.recordCount)) && Number(account.recordCount) >= 0
+  )
     ? normalizedAccounts.reduce((sum, account) => sum + Number(account.recordCount), 0)
     : null;
   const history = [];
@@ -356,14 +427,12 @@ export async function loadAllAccountGachaHistoryForAccounts({
             );
           }
 
-          const pageRevision = result?.page?.revision === null || result?.page?.revision === undefined
-            ? null
-            : String(result.page.revision);
+          const pageRevision =
+            result?.page?.revision === null || result?.page?.revision === undefined
+              ? null
+              : String(result.page.revision);
           if (accountRevision !== null && pageRevision !== accountRevision) {
-            throw createHistoryExportError(
-              '抽卡记录在分页读取期间发生变化，请重新导出',
-              'history_revision_changed'
-            );
+            throw createHistoryExportError('抽卡记录在分页读取期间发生变化，请重新导出', 'history_revision_changed');
           }
           if (accountRevision === null) {
             accountRevision = pageRevision;
@@ -385,7 +454,7 @@ export async function loadAllAccountGachaHistoryForAccounts({
             accountIndex,
             accountCount: normalizedAccounts.length,
             loaded: history.length + accountHistory.length,
-            total: declaredTotal ?? (history.length + (accountTotal ?? accountHistory.length)),
+            total: declaredTotal ?? history.length + (accountTotal ?? accountHistory.length),
           });
 
           if (result?.page?.hasMore !== true) {
@@ -436,15 +505,19 @@ export async function saveAccountGachaData({ pools = [], history = [] } = {}) {
   const headers = await buildAccountGachaHeaders();
   headers['Content-Type'] = 'application/json';
 
-  const { response, data } = await fetchJsonWithTimeout('/api/account-gacha-data', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers,
-    body: JSON.stringify({ pools, history }),
-  }, {
-    label: 'account-gacha-data-save',
-    retries: 1,
-  });
+  const { response, data } = await fetchJsonWithTimeout(
+    '/api/account-gacha-data',
+    {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers,
+      body: JSON.stringify({ pools, history }),
+    },
+    {
+      label: 'account-gacha-data-save',
+      retries: 1,
+    }
+  );
 
   if (!response.ok || data?.success === false) {
     createAccountGachaDataError(data, response, '账号抽卡数据保存失败', 'account_gacha_data_save_failed');
@@ -471,24 +544,28 @@ export async function updateAccountGachaServerLabel({
   const headers = await buildAccountGachaHeaders();
   headers['Content-Type'] = 'application/json';
 
-  const { response, data } = await fetchJsonWithTimeout('/api/account-gacha-data', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers,
-    body: JSON.stringify({
-      action: 'updateServerLabel',
-      gameUid,
-      accountKey,
-      currentServerId,
-      currentRegion,
-      serverId,
-      region,
-      mergeGameUid,
-    }),
-  }, {
-    label: 'account-gacha-data-update-server-label',
-    retries: 1,
-  });
+  const { response, data } = await fetchJsonWithTimeout(
+    '/api/account-gacha-data',
+    {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers,
+      body: JSON.stringify({
+        action: 'updateServerLabel',
+        gameUid,
+        accountKey,
+        currentServerId,
+        currentRegion,
+        serverId,
+        region,
+        mergeGameUid,
+      }),
+    },
+    {
+      label: 'account-gacha-data-update-server-label',
+      retries: 1,
+    }
+  );
 
   if (!response.ok || data?.success === false) {
     createAccountGachaDataError(data, response, '账号区服标签更新失败', 'account_gacha_data_server_label_failed');
@@ -512,19 +589,23 @@ export async function resolveAccountGachaAliases({ poolIds = [], characterIds = 
   const headers = await buildAccountGachaHeaders();
   headers['Content-Type'] = 'application/json';
 
-  const { response, data } = await fetchJsonWithTimeout('/api/account-gacha-data', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers,
-    body: JSON.stringify({
-      action: 'resolveAliases',
-      poolIds,
-      characterIds,
-    }),
-  }, {
-    label: 'account-gacha-data-aliases',
-    retries: 1,
-  });
+  const { response, data } = await fetchJsonWithTimeout(
+    '/api/account-gacha-data',
+    {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers,
+      body: JSON.stringify({
+        action: 'resolveAliases',
+        poolIds,
+        characterIds,
+      }),
+    },
+    {
+      label: 'account-gacha-data-aliases',
+      retries: 1,
+    }
+  );
 
   if (!response.ok || data?.success === false) {
     createAccountGachaDataError(data, response, '账号抽卡数据 ID 解析失败', 'account_gacha_data_alias_failed');
@@ -552,24 +633,28 @@ export async function updateAccountGachaRecord({
   const headers = await buildAccountGachaHeaders();
   headers['Content-Type'] = 'application/json';
 
-  const { response, data } = await fetchJsonWithTimeout('/api/account-gacha-data', {
-    method: 'PATCH',
-    credentials: 'same-origin',
-    headers,
-    body: JSON.stringify({
-      recordId,
-      gameUid,
-      serverScope,
-      currentPoolId,
-      seqId,
-      editVersion,
-      changes,
-      reason,
-    }),
-  }, {
-    label: 'account-gacha-data-record-update',
-    retries: 0,
-  });
+  const { response, data } = await fetchJsonWithTimeout(
+    '/api/account-gacha-data',
+    {
+      method: 'PATCH',
+      credentials: 'same-origin',
+      headers,
+      body: JSON.stringify({
+        recordId,
+        gameUid,
+        serverScope,
+        currentPoolId,
+        seqId,
+        editVersion,
+        changes,
+        reason,
+      }),
+    },
+    {
+      label: 'account-gacha-data-record-update',
+      retries: 0,
+    }
+  );
 
   if (!response.ok || data?.success === false) {
     createAccountGachaDataError(data, response, '抽卡记录更新失败', 'account_gacha_record_update_failed');
@@ -588,15 +673,19 @@ export async function deleteAccountGachaData(payload) {
   const headers = await buildAccountGachaHeaders();
   headers['Content-Type'] = 'application/json';
 
-  const { response, data } = await fetchJsonWithTimeout('/api/account-gacha-data', {
-    method: 'DELETE',
-    credentials: 'same-origin',
-    headers,
-    body: JSON.stringify(payload || {}),
-  }, {
-    label: 'account-gacha-data-delete',
-    retries: 1,
-  });
+  const { response, data } = await fetchJsonWithTimeout(
+    '/api/account-gacha-data',
+    {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers,
+      body: JSON.stringify(payload || {}),
+    },
+    {
+      label: 'account-gacha-data-delete',
+      retries: 1,
+    }
+  );
 
   if (!response.ok || data?.success === false) {
     createAccountGachaDataError(data, response, '账号抽卡数据删除失败', 'account_gacha_data_delete_failed');
@@ -614,14 +703,7 @@ export function deleteAccountGachaRecords(recordIds) {
   });
 }
 
-export function deleteAccountGachaRecord({
-  recordId,
-  gameUid,
-  serverScope,
-  currentPoolId,
-  seqId,
-  reason = '',
-} = {}) {
+export function deleteAccountGachaRecord({ recordId, gameUid, serverScope, currentPoolId, seqId, reason = '' } = {}) {
   return deleteAccountGachaData({
     action: 'record',
     recordId,

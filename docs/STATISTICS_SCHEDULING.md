@@ -1,16 +1,16 @@
 # 统计定时刷新运行说明
 
-本轮统计实现来自 `feat/banner-stats-and-guide`，恢复发布分支为 `release/4.6.2-statistics-ready`。2026-09-24 已备份生产数据库，由函数所有者 `supabase_admin` 执行两份统计迁移，并启用隔离 Worker 预热。先前 PR #34 提前上线的问题已由 PR #36 恢复；再次发布必须在公开单池、五类合池、旧统计和个人范围的 `public-statistics-v4` 快照就绪后进行。发布证据见 [RELEASE_4.6.2.md](RELEASE_4.6.2.md)。
+统计快照随 v4.6.2（PR #37）发布。新环境与计算版本升级必须先完成数据库迁移、启动 Worker 并预热快照，再切换读端。统计口径见 [STATS_OBSERVATION_CONTRACT.md](STATS_OBSERVATION_CONTRACT.md)。
 
-## 当前生产运行方式
+## 推荐运行方式
 
-国际服／Supabase 主机运行独立 Docker Worker，系统 Node 和导入服务不变。`node scripts/build-statistics-worker.mjs` 生成 `.agent-tmp/statistics-worker.mjs`，部署为 `/opt/endfield-statistics/worker.mjs`；凭据保存在服务器 `/etc/endfield/statistics.env`，仅 root 可读，禁止加入构建文件或日志。数据库通过本机 Kong 接入。
+使用独立 Docker Worker。`node scripts/build-statistics-worker.mjs` 生成 `.agent-tmp/statistics-worker.mjs`，部署为 `/opt/endfield-statistics/worker.mjs`；凭据保存在服务器 `/etc/endfield/statistics.env`，仅 root 可读，禁止加入构建文件或日志。与 Supabase 同机部署时可通过本机 Kong 接入数据库。
 
 安装 `scripts/systemd/endfield-statistics-docker.service` 时命名为 `endfield-statistics.service`，沿用同目录 timer。镜像固定摘要，运行用户为容器内无权限用户，文件只读，1 CPU／1200MiB 总内存／768MiB 堆，不允许容器额外使用 Swap。串行处理、240 秒领取预算和5分钟任务租约保留。`STATISTICS_MAX_JOBS=500` 用于避免小型个人任务每分钟只处理8项造成积压，时间预算仍限制每轮耗时。
 
 容器包升级在当前轮结束后替换，再启动下一轮；不要同时启动多个服务实例。用只含分类计数的 SQL 检查任务与快照，不打印 owner 身份、个人 payload 或服务密钥。失败时先保留上次快照并查看租约／失败计数，不能跳过发布修订校验。
 
-同一 `pool_id` 下的官方 `pool_version` 独立计算首获与重复间隔；未知期次保留独立分组，不臆测为第一期。账号覆盖仍按真实账号去重，资源和保底继承沿用既有规则。首次生产预热已包含此修正。
+同一 `pool_id` 下的官方 `pool_version` 独立计算首获与重复间隔；未知期次保留独立分组，不臆测为第一期。账号覆盖仍按真实账号去重，资源和保底继承沿用既有规则。
 
 ## 计算与读取
 
@@ -28,6 +28,8 @@
 
 现有上传完成回调 `refresh_public_analytics_cache()` 保留名称，但迁移后只标记旧统计待更新，返回 `queued: true`；原计算函数改名为仅供内部 Worker 调用的 `recompute_public_analytics_for_worker()`。因此无需修改并行导入任务的业务代码，上传完成也不会立即扫描全量历史。管理员经该入口申请刷新时同样进入队列。
 
+PR #43 的 `2026100601_reuse_pool_counts_for_catalog_groups.sql` 已修正目录保存超时：角色／阵容变更仅递增 revision，卡池／可见性变更重计单池并复用同事务单池计数生成组合计数。它没有放宽 10 秒限制、修改函数 ACL 或跳过后台 payload 重算；不能为修复保存超时恢复旧的请求期全历史聚合。
+
 新观测图按单池、五类合池和个人 owner 重算；旧全服概览、排名、图鉴及公开卡池趋势使用同一队列。个人结果包含分账号单池／合池、按范围的旧指标、排名和中英图鉴，图鉴的本地手动补充仍直接作用于展示。当前增量粒度为“受影响范围”，并不是把新增记录直接累加进频数；修改、删除及乱序补录需要重新检查该范围内的先后关系。
 
 五类 `group:<key>` 使用共享白名单：限定角色、限定武器、常驻武器、重构寻访、重构申领。先逐账号逐期逐对象计算首次，再按当期身份汇总类别；账号覆盖跨期去重。历史变化根据旧／新行中的游戏账号找到关联池，使依赖保底继承或获得次序的池与合池同步失效。公共成员仅来自当前可见目录；旧 `metrics` / `resources` 按所选范围保存，资源与保底计算读取相关完整账号上下文，但不输出原始身份。记录按固定最大 ID 分段并使用主键翻页，最多八页并行，读取后校验完整计数；角色池读取其他角色池上下文，武器配额按单个结果且保底为单池，不读取无关武器期。
@@ -40,10 +42,10 @@
 
 ## 新主机启用顺序
 
-1. 在目标数据库依次执行 `supabase/migrations/2026092201_schedule_statistics_snapshots.sql`、`2026092401_group_statistics_snapshots.sql`。它们新增表、触发器与函数，不修改原历史记录；首次汇总计数会读取历史表。后续迁移登记五组并将既有范围标为需要按 v4 重算。
-2. 优先使用上面的 Docker 运行方式；若主机已有 Node 22.17+，也可安装源码及生产依赖，按实际路径修改原生 `endfield-statistics.service`。Vercel 页面进程本身不负责定时运行。容量评估必须使用正确连接文件和实时主机指标，不能沿用旧地址的连接失败；生产运行需监控内存、Swap、数据库与队列延迟。
+1. 按 [数据库指南](../supabase/README.md) 准备 schema。新环境 baseline 已包含两份统计迁移，不重复执行；已有环境升级时核对 `2026092201_schedule_statistics_snapshots.sql`、`2026092401_group_statistics_snapshots.sql` 及后续修复是否已应用。迁移新增表、触发器和函数，首次汇总计数会读取历史表；后续迁移登记五组并标记 v4 重算。
+2. 优先使用上面的 Docker 运行方式；若主机已有 Node 22.17+，也可安装源码及生产依赖，按实际路径修改原生 `endfield-statistics.service`。Vercel 页面进程本身不负责定时运行。容量评估使用目标主机的实时指标，运行时监控内存、Swap、数据库与队列延迟。
 3. 创建仅服务账号／管理员可读的 `/etc/endfield/statistics.env`，填入 `SUPABASE_URL` 和 `SUPABASE_SECRET_KEY`（或 `SUPABASE_SERVICE_ROLE_KEY`），同时设置 `NODE_ENV=production`。不要使用浏览器发布密钥，不要把文件加入仓库。
-4. 安装仓库的 service／timer 到 `/etc/systemd/system/`，运行 `systemctl daemon-reload`、`systemctl enable --now endfield-statistics.timer`。此动作会开始真实后台计算；国际服主机已执行，勿重复安装成第二个实例。
+4. 安装仓库的 service／timer 到 `/etc/systemd/system/`，运行 `systemctl daemon-reload`、`systemctl enable --now endfield-statistics.timer`。此动作会开始真实后台计算；先确认没有已有实例，避免重复启动。
 5. 用 `journalctl -u endfield-statistics.service` 查看结果。脚本默认每轮最多8项，生产 Docker 单元设置500项，均保留约4分钟领取预算；单次任务最多可令总时长超过预算一个任务，service 上限8分钟。首次会建立所有公开卡池及已有账号结果，需要等待队列处理。
 6. 确认公开卡池、五类合池和旧统计已有 `public-statistics-v4` 快照，个人快照也已预热，再发布前端／API。服务端必须持有同一项目的服务密钥。
 
@@ -68,7 +70,7 @@ FROM public.statistics_jobs GROUP BY 1;
 
 `scripts/prepare-statistics-local-preview.mjs` 仅从已有数据库读历史和旧缓存，计算后写入忽略提交的 `.agent-tmp/statistics-live/snapshots.json`。它不执行迁移、生产统计 RPC 或写入数据库。
 
-在此 worktree 中运行：
+在仓库根目录运行：
 
 ```powershell
 node --max-old-space-size=1536 scripts/prepare-statistics-local-preview.mjs --all
@@ -76,24 +78,14 @@ $env:STATISTICS_LOCAL_SNAPSHOT_FILE = "$PWD/.agent-tmp/statistics-live/snapshots
 npm run dev -- --host 127.0.0.1 --port 5193 --strictPort
 ```
 
-指定卡池 ID 可只准备该池和零记录池；`--groups` 独立实测五组，`--missing` 补齐缺失或旧版本快照。`--all` 在内存中复用一次完整读取，原始记录不写入文件。环境变量只在非生产且为公开统计时生效，个人数据仍走认证后的数据库快照。本地文件包含 34 个公开卡池、五类合池与 3 份旧统计缓存。它是静态计算预览，**不是正在运行的生产定时任务**；UI 明确标记“本地计算预览”。
+指定卡池 ID 可只准备该池和零记录池；`--groups` 独立计算五组，`--missing` 补齐缺失或旧版本快照。`--all` 在内存中复用一次完整读取，原始记录不写入文件。环境变量只在非生产且为公开统计时生效，个人数据仍走认证后的数据库快照。文件是静态计算预览，不能用于判断生产任务运行状态；UI 标记“本地计算预览”。Windows 文件锁导致替换失败时，脚本会重试，不发布不完整 JSON。
 
-## 实现阶段验证与边界（生产准备前的历史证据）
+## 验证与容量评估
 
-- 真实浏览器验证十图、头像选择与排序、全部卡池抽数、读取不改计算时间、搜索／切池／空池／理论／旧指标及资源，以及合池 360～1920 宽度、中英亮暗、减少动态效果和手机路由；桌面统一首页宽度另覆盖 1366～3840。
-- 单元测试验证本期首获与重复、目录精确匹配、未知对象间隔、未登录／跨用户拒绝、账号切换清空、完整分页、Worker 成功／失败及旧统计进入同一队列。
-- `scripts/verify-statistics-schedule-sql.mjs` 在 PGlite 的 PostgreSQL 引擎中执行迁移，验证批量触发器、增删改和移动、5/30/60 分钟、租约、修订冲突、旧缓存事务回滚、稳定刷新时间、权限及删除清理。安装验证依赖：`npm install --prefix .agent-tmp --no-save --package-lock=false @electric-sql/pglite`。该测试使用最小表结构和旧统计函数桩，不代表生产全量数据或 Supabase 扩展集成已验收。
-- 最终全量单元测试 269 个文件、1,495 项通过；完整 ESLint、主应用与抽奖子应用构建、PGlite 调度 SQL 行为和覆盖 186 个迁移的 baseline 验证通过。生产依赖改用官方 registry 执行 `npm audit --omit=dev --audit-level=high`，结果为 0 漏洞（内部镜像不支持 audit）。实现阶段早期另有 269 文件／1,492 项与 53 项相关调整测试通过。未借用用户登录会话执行私人数据测试，未启动生产 Worker。
-- 最大限定角色范围实测：1,009,281 个有效结果、2,675 个去重账号，读取 1,376,059 条相关上下文，独立任务约 70 秒，匿名响应约 96.5 KB。限定武器约 25 秒、常驻武器约 9 秒，两个未开始的重构组合约 1～2 秒。测量包含数据库网络读取；本地复用已读历史后的纯计算分别约 8.3／3.6／0.7 秒。
-- 批量预览在 1,536 MiB V8 堆限制下约 134 秒完成 34 单池＋5 合池＋3 旧缓存；进程 RSS 峰值约 1.34 GiB。服务配置同步限制堆，生产主机还需为运行时及数据库响应保留余量。Windows 预览读取可能短暂占用目标文件，写入脚本仅对此已复现的文件锁重试替换，不发布半截 JSON。
-
-### 算法优化复核（2026-09-24）
-
-- 最终回归 269 个测试文件／1,498 项通过；本轮改动 ESLint、主应用生产构建与 `git diff --check` 通过。新增测试覆盖复用结果独立性、跨池去重优先级、账号名称隔离，以及只有无效记录的账号仍须保留排除计数。
-- 固定 24 万条合成记录、12 池、聚合及五个账号共 72 个范围，在独立 Node 进程内比较；峰值使用 `process.resourceUsage().maxRSS`，包含输入数据与运行时。观测统计由 9,020ms／491MiB 降至 521ms／290MiB；旧指标由 7,816ms／471MiB 降至 469ms／184MiB。所有范围的完整序列化结果摘要一致。时间会受系统负载影响，不代表网络接口提速比例。
-- 同一批 1,985,909 条真实记录，新算法与优化前提交 `71fed8998cac86c9b155cc0976bd77c660477ae9` 对照，34 单池＋5 合池的观测、旧指标、成员及成员签名逐字段一致。原始记录仅在内存，不写入文件。较早静态快照已有新增数据，不能用其差异判断算法变化。
-- 新算法独立真实任务：限定角色 1,009,973 个有效结果／2,676 账号，相关上下文 1,376,844 条，数据库读取约 57.3 秒、任务约 62.2 秒、进程峰值 733MiB；限定武器约 22.5 秒，常驻武器约 8.2 秒。连续五组合池的进程总峰值 810MiB，未人为触发垃圾回收。生产仍按既有串行任务和堆上限运行，未启用生产任务或修改数据库。
-- 复现合成基准：`node --expose-gc --max-old-space-size=1536 scripts/benchmark-observation-statistics.mjs 240000 prepared`，模式另有 `group`、`repeated`、`legacy-single`、`legacy-repeated`、`legacy-prepared`。旧指标模式可在末尾指定参考模块路径。
-- 复现真实等价核对：`node --max-old-space-size=1536 scripts/verify-statistics-optimization.mjs 71fed8998cac86c9b155cc0976bd77c660477ae9`；从 Git 读取旧算法，在同一批内存数据上比较，仅输出范围与汇总结果。独立真实占用用预览脚本 `--groups` 测量，日志包含进程累计峰值。`--verify-existing` 只适用于源数据未变化的旧快照比较。
+- `scripts/verify-statistics-schedule-sql.mjs` 在 PGlite 中执行迁移，覆盖批量增删改和移动、5/30/60 分钟调度、租约、修订冲突、旧缓存事务回滚、刷新时间、权限及删除清理。安装依赖：`npm install --prefix .agent-tmp --no-save --package-lock=false @electric-sql/pglite`。该测试使用最小表结构和函数桩，不能替代目标数据库的 Supabase 扩展集成验证。
+- 页面验证应覆盖十图、目标选择、空池、旧指标与资源、双端布局，并确认读取不改变计算时间。个人接口还需验证未登录／跨用户拒绝、账号切换清空及分页完整性。
+- 合成基准：`node --expose-gc --max-old-space-size=1536 scripts/benchmark-observation-statistics.mjs 240000 prepared`。模式另有 `group`、`repeated`、`legacy-single`、`legacy-repeated`、`legacy-prepared`；旧指标模式可在末尾指定参考模块路径。
+- 算法等价核对：`node --max-old-space-size=1536 scripts/verify-statistics-optimization.mjs <reference-commit>`。脚本从 Git 读取参考算法，在同一批内存数据上比较，仅输出范围与汇总结果。`--verify-existing` 只适用于源数据未变化的旧快照。
+- 容量参考：2026-09-24 的约 100 万有效结果、约 138 万相关上下文任务，独立进程峰值约 733MiB；连续五组合池峰值约 810MiB。全量预览曾达到约 1.34GiB RSS，因此堆上限之外仍须预留运行时和数据库响应空间。这些历史测量只用于确定评估规模，不是性能承诺，也不代表当前主机余量或队列已核验。
 
 首次按本期已导入记录计数，缺失记录仍会使成本偏低；界面已说明。现阶段受影响的大卡池仍须完整读取，并发持续上传可能导致重试和结果延迟。5/30/60 分钟是任务检查／重算间隔，不能承诺任务排队、网络异常时严格按时完成。生产需要根据实际队列延迟和最大池耗时确认主机容量。

@@ -1,224 +1,50 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { createSimulator } from '../../utils/gachaSimulator';
-import { WEAPON_POOL_RULES } from '../../constants';
-import { useAuthStore, useHistoryStore, usePersonalAnalysisStore, usePoolStore } from '../../stores';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  applyCommand,
+  createSession,
+  getResourceLedger,
+  replayHistoryEvent,
+  seriesKey,
+  validateSession,
+} from '../../../shared/simulator/engine.js';
+import { compareRecords, toDisplayRecord } from '../../../shared/simulator/records.js';
+import { useAuthStore, useHistoryStore, usePoolStore } from '../../stores/index.js';
 import { usePersonalGameAccounts } from '../../hooks/app/usePersonalGameAccounts.js';
-import { loadAccountGachaAnalysis } from '../../services/accountGachaDataService.js';
-import { getBootstrapVisiblePools } from '../../services/bootstrapService';
-import { loadAllPoolsForCatalog, loadVisiblePools, mergePoolCollections } from '../../services/poolReadService';
+import { loadSimulatorInheritance } from '../../services/accountGachaDataService.js';
+import { getBootstrapVisiblePools } from '../../services/bootstrapService.js';
+import { loadAllPoolsForCatalog, loadVisiblePools, mergePoolCollections } from '../../services/poolReadService.js';
 import {
   buildSimulatorStorageScope,
-  migrateLegacySimulatorStorageToScope,
-  clearSimulatorResourceSettings,
-  clearInfoBookState,
-  clearSimulatorCurrentPoolId,
-  clearSimulatorMultipleFreeTenPreference,
   clearSimulatorSkipAnimationPreference,
-  clearSharedPityState,
-  clearSimulatorState,
-  clearSimulatorSeriesState,
-  copyToClipboard,
+  clearSimulatorMultipleFreeTenPreference,
   downloadAnalysisReport,
   downloadSimulatorData,
-  loadSimulatorCurrentPoolId,
-  loadSimulatorResourceSettings,
-  loadInfoBookState,
-  loadSimulatorOriginitePromptSuppressDate,
   loadSimulatorSkipAnimationPreference,
-  loadSharedPityState,
-  loadSimulatorState,
-  loadSimulatorSeriesState,
-  saveSimulatorCurrentPoolId,
-  saveSimulatorOriginitePromptSuppressDate,
-  saveSimulatorResourceSettings,
-  saveInfoBookState,
   saveSimulatorSkipAnimationPreference,
-  saveSharedPityState,
-  saveSimulatorState,
-  saveSimulatorSeriesState,
-} from '../../utils/simulatorStorage';
+  loadSimulatorOriginitePromptSuppressDate,
+  saveSimulatorOriginitePromptSuppressDate,
+} from '../../utils/simulatorStorage.js';
 import {
   DEFAULT_SIMULATOR_RESOURCE_SETTINGS,
-  buildSimulatorResourceLedger,
   canAffordSimulatorPull,
   getOriginiteConversionPlanForJadeCost,
   getSimulatorPullCost,
   normalizeResourceSettings,
-} from '../../utils/resourceEconomy';
-import {
-  buildSimulatorShareCardFileName,
-  buildSimulatorShareFile,
-  buildSimulatorSharePayload,
-  buildSimulatorShareText,
-  canCopyImageToClipboard,
-  canNativeShareSimulatorFile,
-  copyImageBlobToClipboard,
-  downloadSimulatorShareCard,
-  renderSimulatorShareCardToBlob,
-  shareSimulatorShareCardFile,
-} from '../../utils/simulatorShare';
+} from '../../utils/resourceEconomy.js';
+import { buildSimulatorSharePayload } from '../../utils/simulatorShare.js';
 import { buildSinglePoolTimelineSection } from '../../utils/poolTimelineView.js';
-import { buildDashboardStats, buildPityInfoWithGuarantee, processHistoryGroups } from './simulatorViewUtils';
-import {
-  activateInheritedSimulatorSnapshot,
-  buildInheritedSimulatorSnapshot,
-  normalizeSimulatorPoolType,
-} from './simulatorInheritance';
-import { getLatestPendingInfoBook, reconcileInfoBookState, sortLimitedPoolsByStartTime } from './simulatorInfoBook';
-import { getCurrentUpPoolName } from '../../utils/poolTimeUtils';
+import { buildDashboardStats, buildPityInfoWithGuarantee, processHistoryGroups } from './simulatorViewUtils.js';
+import { normalizeSimulatorPoolType } from './simulatorInheritance.js';
 import { resolvePoolRosterBuckets } from '../../utils/poolRoster.js';
-import { appLogger } from '../../utils/appLogger.js';
-import useShareActionFeedback from '../../hooks/useShareActionFeedback';
-import { useI18n } from '../../i18n/index.js';
-import { POOL_GROUP_PREFIX } from '../../utils/poolGroupUtils.js';
-import { getPoolFeaturedLead } from '../../utils/poolFeaturedResolver.js';
 import { resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
-import { getPoolSeriesStateKey } from '../../utils/poolScopedHistory.js';
-import { applySimulatorSeriesState, buildSimulatorSeriesState } from './simulatorSeriesState.js';
-import {
-  getGameAccountSelectionValue,
-  isGameAccountSelectionMatch,
-} from '../../utils/gameAccountMetadata.js';
-
-function dedupeRosterEntries(items = []) {
-  const seen = new Set();
-  return (Array.isArray(items) ? items : []).filter((item) => {
-    const key = String(item?.name || '').trim();
-    if (!key || seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-}
-
-function normalizeSimulatorRoster(roster) {
-  if (!roster) {
-    return null;
-  }
-
-  const items = Array.isArray(roster.items) ? roster.items : [];
-  const mapNamesToEntries = (names = [], rarity = 0, isUp = false) =>
-    (Array.isArray(names) ? names : []).map((name) => ({
-      id: String(name || '').trim(),
-      name: String(name || '').trim(),
-      rarity,
-      isUp,
-    })).filter((item) => item.name);
-
-  const resolvedUp = Array.isArray(roster.up) ? roster.up : [];
-  const resolvedOffBanner = Array.isArray(roster.offBanner)
-    ? roster.offBanner
-    : [];
-  const resolvedFiveStar = items.filter((item) => Number(item?.rarity) === 5);
-  const resolvedFourStar = items.filter((item) => Number(item?.rarity) === 4);
-
-  return {
-    up: dedupeRosterEntries(resolvedUp),
-    offBanner: dedupeRosterEntries(resolvedOffBanner),
-    fiveStar: dedupeRosterEntries(
-      resolvedFiveStar.length > 0 ? resolvedFiveStar : mapNamesToEntries(roster.fiveStar, 5)
-    ),
-    fourStar: dedupeRosterEntries(
-      resolvedFourStar.length > 0 ? resolvedFourStar : mapNamesToEntries(roster.fourStar, 4)
-    ),
-  };
-}
-
-function normalizeRosterForCompare(roster) {
-  if (!roster) {
-    return null;
-  }
-
-  const mapEntry = (entry) => {
-    if (typeof entry === 'string') {
-      return entry.trim();
-    }
-
-    return [
-      String(entry?.id || '').trim(),
-      String(entry?.name || '').trim(),
-      Number(entry?.rarity) || 0,
-      Boolean(entry?.isUp),
-    ];
-  };
-  const mapEntries = (items) => (Array.isArray(items) ? items.map(mapEntry) : []);
-
-  return {
-    up: mapEntries(roster.up),
-    offBanner: mapEntries(roster.offBanner),
-    fiveStar: mapEntries(roster.fiveStar),
-    fourStar: mapEntries(roster.fourStar),
-  };
-}
-
-function areSimulatorRostersEqual(left, right) {
-  return JSON.stringify(normalizeRosterForCompare(left)) === JSON.stringify(normalizeRosterForCompare(right));
-}
-
-function isAggregateSimulatorPool(pool) {
-  const rawId = String(pool?.id || pool?.pool_id || '').trim();
-  const rawName = String(pool?.name || '').trim();
-
-  if (!rawId && !rawName) {
-    return false;
-  }
-
-  if (rawId.startsWith(POOL_GROUP_PREFIX)) {
-    return true;
-  }
-
-  return [
-    /^全部.+池$/,
-    /^全部.+卡池$/,
-    /^全部.+寻访$/,
-    /^全.+池$/,
-    /汇总/,
-    /总览/,
-    /概览/
-  ].some((pattern) => pattern.test(rawName));
-}
-
-const getWeaponPoolRules = (pool) =>
-  pool?.isLimitedWeapon !== false
-    ? WEAPON_POOL_RULES
-    : {
-        ...WEAPON_POOL_RULES,
-        giftInterval: Infinity,
-      };
-
-const getCustomRulesForPool = (pool) => {
-  const capabilities = resolvePoolCapabilities(pool);
-  if (capabilities.basePoolType === 'weapon' && capabilities.rawPoolType !== 'extra') {
-    return getWeaponPoolRules(pool);
-  }
-
-  return capabilities.rules;
-};
-
-function getTodayPromptKey() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function normalizeStoredPoolId(value) {
-  if (!value || value === 'null' || value === 'undefined') {
-    return null;
-  }
-
-  return value;
-}
-
-function getRosterPoolTypeForSimulator(capabilities) {
-  if (capabilities.basePoolType === 'weapon') {
-    return 'weapon';
-  }
-
-  if (capabilities.basePoolType === 'limited' || capabilities.basePoolType === 'extra') {
-    return 'limited';
-  }
-
-  return 'standard';
-}
+import { getPoolFeaturedLead } from '../../utils/poolFeaturedResolver.js';
+import { getGameAccountSelectionValue, isGameAccountSelectionMatch } from '../../utils/gameAccountMetadata.js';
+import { useI18n } from '../../i18n/index.js';
+import { buildSimulatorDescriptors, createSessionView } from './simulatorSessionView.js';
+import { readLegacySimulatorSession } from './simulatorLegacyMigration.js';
+import { commitSimulatorSession, loadSimulatorSession } from './simulatorRepository.js';
+import { useSimulatorSharing } from './useSimulatorSharing.js';
+import { buildSimulatorCatalogSignature, buildSimulatorInheritanceProjection } from './inheritanceProjection.js';
 
 export function buildSimulatorCurrentPoolView({
   currentSimPool,
@@ -226,1554 +52,684 @@ export function buildSimulatorCurrentPoolView({
   resolvedRoster = null,
   fallbackName = '',
 } = {}) {
-  const sourcePool = currentSimPool || {};
-  const capabilities = resolvePoolCapabilities(
-    currentSimPool || simulator?.poolInfo || { type: simulator?.rawPoolType || simulator?.poolType || 'limited' }
+  const pool = currentSimPool || {};
+  const c = resolvePoolCapabilities(
+    currentSimPool || simulator?.poolInfo || { type: simulator?.poolType || 'limited' }
   );
-  const effectivePoolType = normalizeSimulatorPoolType(
-    simulator?.poolType || capabilities.basePoolType
-  );
-
+  const effective = normalizeSimulatorPoolType(simulator?.poolType || c.basePoolType);
   return {
-    ...sourcePool,
-    type: sourcePool.type || capabilities.rawPoolType,
-    source_pool_id: sourcePool.source_pool_id || sourcePool.sourcePoolId || sourcePool.id || null,
-    effectivePoolType,
-    effective_pool_type: effectivePoolType,
-    basePoolType: capabilities.basePoolType,
-    base_pool_type: capabilities.basePoolType,
-    extra_subtype: sourcePool.extra_subtype ?? sourcePool.extraSubtype ?? capabilities.extraSubtype,
-    extra_rule_profile: sourcePool.extra_rule_profile ?? sourcePool.extraRuleProfile ?? capabilities.ruleProfile,
-    extra_series_key: sourcePool.extra_series_key ?? sourcePool.extraSeriesKey ?? capabilities.seriesKey,
-    extra_series_phase: sourcePool.extra_series_phase ?? sourcePool.extraSeriesPhase ?? null,
-    isLimitedWeapon: sourcePool.isLimitedWeapon !== false,
-    name: sourcePool.original_name || sourcePool.name || fallbackName,
-    name_en: sourcePool.name_en || null,
-    up_character: sourcePool.up_character,
-    featured_characters: sourcePool.featured_characters || null,
-    resolved_roster: resolvedRoster || sourcePool.resolved_roster || null,
+    ...pool,
+    type: pool.type || c.rawPoolType,
+    source_pool_id: pool.source_pool_id || pool.sourcePoolId || pool.id || null,
+    effectivePoolType: effective,
+    effective_pool_type: effective,
+    basePoolType: c.basePoolType,
+    base_pool_type: c.basePoolType,
+    extra_subtype: pool.extra_subtype ?? pool.extraSubtype ?? c.extraSubtype,
+    extra_rule_profile: pool.extra_rule_profile ?? pool.extraRuleProfile ?? c.ruleProfile,
+    extra_series_key: pool.extra_series_key ?? pool.extraSeriesKey ?? c.seriesKey,
+    extra_series_phase: pool.extra_series_phase ?? pool.extraSeriesPhase ?? null,
+    isLimitedWeapon: pool.isLimitedWeapon !== false,
+    name: pool.original_name || pool.name || fallbackName,
+    name_en: pool.name_en || null,
+    up_character: pool.up_character,
+    featured_characters: pool.featured_characters || null,
+    resolved_roster: resolvedRoster || pool.resolved_roster || null,
   };
 }
 
-function hydrateSimulatorStateForPool(pool, savedState, storageScope) {
-  const seriesStateKey = getPoolSeriesStateKey(pool);
-  const seriesState = seriesStateKey
-    ? loadSimulatorSeriesState(seriesStateKey, storageScope)
-    : null;
-  return applySimulatorSeriesState(pool, savedState || {}, seriesState);
-}
-
-function persistSimulatorPoolState(pool, state, storageScope) {
-  if (!pool?.id || !state) {
-    return;
-  }
-
-  saveSimulatorState(pool.id, state, storageScope);
-  const seriesState = buildSimulatorSeriesState(pool, state);
-  if (seriesState?.seriesStateKey) {
-    saveSimulatorSeriesState(seriesState.seriesStateKey, seriesState, storageScope);
-  }
-}
-
-function clearSimulatorSeriesStatesForPools(pools, storageScope) {
-  const clearedKeys = new Set();
-  (Array.isArray(pools) ? pools : []).forEach((pool) => {
-    const seriesStateKey = getPoolSeriesStateKey(pool);
-    if (!seriesStateKey || clearedKeys.has(seriesStateKey)) {
-      return;
-    }
-    clearSimulatorSeriesState(seriesStateKey, storageScope);
-    clearedKeys.add(seriesStateKey);
-  });
+const EMPTY = createSession();
+const EMPTY_HISTORIES = {};
+const EMPTY_HISTORY = [];
+const FALLBACK = buildSimulatorDescriptors([{ id: 'unselected', type: 'limited' }]).unselected;
+const realId = (id) => String(id || '').replace(/^sim_/, '');
+function normalizeRoster(roster) {
+  if (!roster) return null;
+  const rows = roster.items || [];
+  const entries = (items, rarity) =>
+    (items || []).map((item) => (typeof item === 'string' ? { id: item, name: item, rarity } : item));
+  return {
+    up: entries(roster.up, 6),
+    offBanner: entries(roster.offBanner, 6),
+    fiveStar: entries(
+      rows.filter((x) => Number(x.rarity) === 5).length ? rows.filter((x) => Number(x.rarity) === 5) : roster.fiveStar,
+      5
+    ),
+    fourStar: entries(
+      rows.filter((x) => Number(x.rarity) === 4).length ? rows.filter((x) => Number(x.rarity) === 4) : roster.fourStar,
+      4
+    ),
+  };
 }
 
 export function useGachaSimulatorController() {
   const { t, locale } = useI18n();
-  const currentUserId = useAuthStore((state) => state.user?.id || null);
-  const history = useHistoryStore((state) => state.history);
-  const analysisScope = usePersonalAnalysisStore((state) => state.scope);
-  const personalGameAccounts = usePersonalGameAccounts();
-  const storePools = usePoolStore((state) => state.pools);
-  const currentGameUid = usePoolStore((state) => state.currentGameUid);
-  const switchGameAccount = usePoolStore((state) => state.switchGameAccount);
-  const simulatorStorageScope = useMemo(
-    () =>
-      buildSimulatorStorageScope({
-        currentUserId,
-        currentGameUid,
-      }),
-    [currentGameUid, currentUserId]
+  const currentUserId = useAuthStore((s) => s.user?.id || null);
+  const localHistory = useHistoryStore((s) => (currentUserId ? EMPTY_HISTORY : s.history));
+  const storePools = usePoolStore((s) => s.pools);
+  const currentGameUid = usePoolStore((s) => s.currentGameUid);
+  const switchGameAccount = usePoolStore((s) => s.switchGameAccount);
+  const accounts = usePersonalGameAccounts();
+  const selectedAccount =
+    accounts.find((a) => getGameAccountSelectionValue(a) === currentGameUid) ||
+    (accounts.filter((a) => isGameAccountSelectionMatch(a, currentGameUid)).length === 1
+      ? accounts.find((a) => isGameAccountSelectionMatch(a, currentGameUid))
+      : null);
+  const canonicalAccount = getGameAccountSelectionValue(selectedAccount || {}) || currentGameUid;
+  const ambiguousAccount = Boolean(
+    currentGameUid &&
+    !selectedAccount &&
+    accounts.filter((a) => isGameAccountSelectionMatch(a, currentGameUid)).length > 1
+  );
+  const scope = useMemo(
+    () => buildSimulatorStorageScope({ currentUserId, currentGameUid: canonicalAccount }),
+    [currentUserId, canonicalAccount]
   );
   const [publicPools, setPublicPools] = useState([]);
-  const realPools = storePools.length > 0 ? storePools : publicPools;
-  const fallbackLimitedPoolName = useMemo(() => getCurrentUpPoolName(realPools) || '莱万汀', [realPools]);
-  const resolvePoolTargetName = useCallback(
-    (pool, fallbackName = null) => {
-      const capabilities = resolvePoolCapabilities(pool);
-
-      if (capabilities.targetMode === 'single-up' && capabilities.entityType === 'character') {
-        return pool?.up_character || fallbackName || fallbackLimitedPoolName;
-      }
-
-      if (capabilities.targetMode === 'single-up' && capabilities.entityType === 'weapon') {
-        return pool?.up_character || fallbackName || null;
-      }
-
-      if (capabilities.targetMode === 'four-target-equal') {
-        return getPoolFeaturedLead(pool) || fallbackName || null;
-      }
-
-      return null;
+  const pools = storePools.length ? storePools : publicPools;
+  const simulatorPools = useMemo(
+    () =>
+      pools
+        .filter((p) => !String(p.id).startsWith('__group_') && !/汇总|总览|概览|^全部/.test(p.name || ''))
+        .slice()
+        .sort((a, b) => new Date(a.start_time || 8640000000000000) - new Date(b.start_time || 8640000000000000))
+        .map((p) => ({
+          ...p,
+          source_pool_id: p.id,
+          id: `sim_${p.id}`,
+          original_name: p.name,
+          name: `${p.name} [模拟]`,
+          isSimulator: true,
+        })),
+    [pools]
+  );
+  const descriptors = useMemo(() => buildSimulatorDescriptors(simulatorPools), [simulatorPools]);
+  const catalogKey = useMemo(
+    () => JSON.stringify(Object.values(descriptors).map((d) => [d.id, d.capabilities, d.nextPoolId])),
+    [descriptors]
+  );
+  const runtime = useRef(null);
+  const generation = useRef(0);
+  const operation = useRef(null);
+  const animationTimer = useRef(null);
+  const toastTimer = useRef(null);
+  const [view, setView] = useState(null);
+  const [storageFailure, setStorageFailure] = useState(false);
+  const [currentSimPoolId, setCurrentSimPoolId] = useState(null);
+  const [poolCharactersList, setPoolCharactersList] = useState(null);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [isInheritingRealState, setIsInheritingRealState] = useState(false);
+  const [lastResults, setLastResults] = useState(null);
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [expandedTenPulls, setExpandedTenPulls] = useState(new Set());
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetAllPools, setResetAllPools] = useState(false);
+  const [resetKeepResources, setResetKeepResources] = useState(false);
+  const [resetSettings, setResetSettings] = useState(false);
+  const [showOriginitePrompt, setShowOriginitePrompt] = useState(null);
+  const [disableOriginitePromptToday, setDisableOriginitePromptToday] = useState(false);
+  const [skipAnimation, setSkipAnimation] = useState(loadSimulatorSkipAnimationPreference);
+  const showToastMessage = useCallback((message) => {
+    clearTimeout(toastTimer.current);
+    setToastMessage(message);
+    setShowToast(true);
+    toastTimer.current = setTimeout(() => setShowToast(false), 3000);
+  }, []);
+  const showFailure = useCallback(
+    (error) => {
+      const code = error?.code || error?.message;
+      const key =
+        code === 'simulator_revision_conflict'
+          ? 'simulator.toast.stateConflict'
+          : code === 'simulator_legacy_version'
+            ? 'simulator.toast.legacyUnavailable'
+            : code === 'simulator_unresolved_pool' || code === 'simulator_unresolved_series'
+              ? 'simulator.toast.rulesUnavailable'
+              : code === 'simulator_incomplete_roster'
+                ? 'simulator.toast.syncingPool'
+                : 'simulator.toast.saveFailed';
+      showToastMessage(t(key));
     },
-    [fallbackLimitedPoolName]
+    [showToastMessage, t]
   );
 
   useEffect(() => {
-    if (storePools.length > 0) {
-      return undefined;
-    }
-
+    if (storePools.length) return;
     let cancelled = false;
-
-    const loadPublicPools = async () => {
-      try {
-        const bootstrapPools = await getBootstrapVisiblePools().catch(() => null);
-        const directPools =
-          Array.isArray(bootstrapPools) && bootstrapPools.length > 0
-            ? bootstrapPools
-            : await loadVisiblePools().catch(() => null);
-        const catalogPools = await loadAllPoolsForCatalog().catch(() => []);
-        const mergedPools = mergePoolCollections(
-          Array.isArray(directPools) ? directPools : [],
-          Array.isArray(catalogPools) ? catalogPools : []
-        );
-
-        if (!cancelled && mergedPools.length > 0) {
-          setPublicPools(mergedPools);
-        }
-      } catch (error) {
-        appLogger.warn('加载公开卡池失败，继续使用本地/已缓存卡池:', error);
-      }
-    };
-
-    loadPublicPools();
+    (async () => {
+      const visible = await getBootstrapVisiblePools().catch(() => loadVisiblePools().catch(() => []));
+      const catalog = await loadAllPoolsForCatalog().catch(() => []);
+      if (!cancelled) setPublicPools(mergePoolCollections(visible || [], catalog));
+    })();
     return () => {
       cancelled = true;
     };
   }, [storePools.length]);
 
-  const [poolCharactersList, setPoolCharactersList] = useState(null);
-  const [simulator, setSimulator] = useState(() => createSimulator('limited', null, fallbackLimitedPoolName, null));
-  const [isAnimating, setIsAnimating] = useState(false);
-  const [lastResults, setLastResults] = useState(null);
-  const [stats, setStats] = useState(simulator.getStatistics());
-  const [pityInfo, setPityInfo] = useState(simulator.getPityInfo());
-  const [showToast, setShowToast] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
-  const [pullHistory, setPullHistory] = useState([]);
-  const [expandedTenPulls, setExpandedTenPulls] = useState(new Set());
-  const [availableFreePulls, setAvailableFreePulls] = useState(0);
-  const [infoBookTenPullAvailable, setInfoBookTenPullAvailable] = useState(false);
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [isInheritingRealState, setIsInheritingRealState] = useState(false);
-  const [showOriginitePrompt, setShowOriginitePrompt] = useState(null);
-  const [disableOriginitePromptToday, setDisableOriginitePromptToday] = useState(false);
-  const [resetAllPools, setResetAllPools] = useState(false);
-  const [resetKeepResources, setResetKeepResources] = useState(false);
-  const [resetSettings, setResetSettings] = useState(false);
-  const [skipAnimation, setSkipAnimation] = useState(() => loadSimulatorSkipAnimationPreference());
-  const [showPoolMenu, setShowPoolMenu] = useState(false);
-  const [selectedLimitedPool, setSelectedLimitedPool] = useState(() => fallbackLimitedPoolName);
-  const [resourceSettings, setResourceSettings] = useState(() => loadSimulatorResourceSettings(simulatorStorageScope));
-  const [currentSimulatorState, setCurrentSimulatorState] = useState(() => simulator.getState());
-  const {
-    feedback: shareActionFeedback,
-    isBusy: isShareActionBusy,
-    beginAction: beginShareAction,
-    updateAction: updateShareAction,
-    finishAction: finishShareAction,
-    failAction: failShareAction,
-    resetFeedback: resetShareActionFeedback,
-  } = useShareActionFeedback();
-
-  const simulatorPools = useMemo(() => {
-    const poolsArray = Array.isArray(realPools) ? realPools : [];
-    const sortedPools = [...poolsArray]
-      .filter((pool) => !isAggregateSimulatorPool(pool))
-      .sort((left, right) => {
-      if (!left.start_time && !right.start_time) return 0;
-      if (!left.start_time) return 1;
-      if (!right.start_time) return -1;
-      return new Date(left.start_time).getTime() - new Date(right.start_time).getTime();
-      });
-
-    return sortedPools.map((pool) => ({
-      ...pool,
-      source_pool_id: pool.id,
-      id: `sim_${pool.id}`,
-      original_name: pool.name,
-      name: `${pool.name} [模拟]`,
-      isSimulator: true,
-    }));
-  }, [realPools]);
-
-  const [currentSimPoolId, setCurrentSimPoolId] = useState(() =>
-    normalizeStoredPoolId(loadSimulatorCurrentPoolId(simulatorStorageScope))
-  );
-  const [isInitialized, setIsInitialized] = useState(false);
-
   useEffect(() => {
-    if (simulatorPools.length === 0) {
-      return;
-    }
-
-    migrateLegacySimulatorStorageToScope({
-      scope: simulatorStorageScope,
-      poolIds: simulatorPools.map((pool) => pool.id),
-    });
-  }, [simulatorPools, simulatorStorageScope]);
-
-  useEffect(() => {
-    const fallbackUpPool = fallbackLimitedPoolName;
-    const nextSimulator = createSimulator('limited', null, fallbackUpPool, null);
-    const nextResourceSettings = loadSimulatorResourceSettings(simulatorStorageScope);
-    const nextPoolId = normalizeStoredPoolId(loadSimulatorCurrentPoolId(simulatorStorageScope));
+    if (!Object.keys(descriptors).length) return;
+    const token = ++generation.current;
+    runtime.current = null;
+    operation.current = null;
+    clearTimeout(animationTimer.current);
     let cancelled = false;
-
     queueMicrotask(() => {
-      if (cancelled) {
-        return;
+      if (!cancelled) {
+        setView(null);
+        setIsAnimating(false);
+        setIsInheritingRealState(false);
+        setPoolCharactersList(null);
+        setStorageFailure(false);
+        setLastResults(null);
+        setShowOriginitePrompt(null);
       }
-
-      setResourceSettings(nextResourceSettings);
-      setCurrentSimPoolId(nextPoolId);
-      setSimulator(nextSimulator);
-      setCurrentSimulatorState(nextSimulator.getState());
-      setStats(nextSimulator.getStatistics());
-      setPityInfo(nextSimulator.getPityInfo());
-      setPullHistory([]);
-      setLastResults(null);
-      setExpandedTenPulls(new Set());
-      setAvailableFreePulls(0);
-      setInfoBookTenPullAvailable(false);
-      setPoolCharactersList(null);
-      setSelectedLimitedPool(fallbackUpPool);
-      setIsInitialized(false);
     });
-
+    (async () => {
+      try {
+        let loaded = await loadSimulatorSession(scope);
+        if (!loaded.session) {
+          loaded = readLegacySimulatorSession(scope, descriptors);
+          loaded.session.currentPoolId = descriptors[loaded.session.currentPoolId]
+            ? loaded.session.currentPoolId
+            : Object.values(descriptors).find((d) => d.capabilities.rawPoolType === 'limited')?.id ||
+              Object.keys(descriptors)[0];
+          loaded.session.revision = 0;
+          try {
+            await commitSimulatorSession({
+              scope,
+              session: loaded.session,
+              expectedRevision: null,
+              replaceHistories: loaded.histories,
+            });
+          } catch (error) {
+            if (error.code !== 'simulator_revision_conflict') throw error;
+            loaded = await loadSimulatorSession(scope);
+          }
+        }
+        validateSession(loaded.session);
+        if (cancelled || generation.current !== token) return;
+        const poolId = descriptors[loaded.session.currentPoolId]
+          ? loaded.session.currentPoolId
+          : Object.keys(descriptors)[0];
+        runtime.current = { ...loaded, scope, token };
+        setView(runtime.current);
+        setCurrentSimPoolId(`sim_${poolId}`);
+        setExpandedTenPulls(new Set());
+      } catch (error) {
+        if (!cancelled) {
+          setStorageFailure(true);
+          showFailure(error);
+        }
+      }
+    })();
     return () => {
       cancelled = true;
+      if (generation.current === token) generation.current = token + 1;
+      clearTimeout(animationTimer.current);
     };
-  }, [fallbackLimitedPoolName, simulatorStorageScope]);
+    // Catalog fingerprint is stable across unrelated store updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, catalogKey]);
 
-  const currentSimPool = useMemo(
-    () => simulatorPools.find((pool) => pool.id === currentSimPoolId),
-    [simulatorPools, currentSimPoolId]
+  const currentSimPool = simulatorPools.find((p) => p.id === currentSimPoolId);
+  const descriptor = descriptors[realId(currentSimPoolId)] || FALLBACK;
+  const session = view?.scope === scope ? view.session : EMPTY;
+  const histories = view?.scope === scope ? view.histories : EMPTY_HISTORIES;
+  const pullHistory = useMemo(() => (histories[descriptor.id] || []).map(toDisplayRecord), [histories, descriptor.id]);
+  const simulator = useMemo(
+    () => createSessionView(session, descriptor, pullHistory),
+    [session, descriptor, pullHistory]
   );
-  const currentSimPoolSource = useMemo(
-    () => (
-      currentSimPool
-        ? {
-            ...currentSimPool,
-            resolved_roster: poolCharactersList || currentSimPool?.resolved_roster || null,
-          }
-        : null
-    ),
-    [currentSimPool, poolCharactersList]
+  const stats = simulator.getStatistics();
+  const pityInfo = simulator.getPityInfo();
+  const state = simulator.getState();
+  const currentPoolType = descriptor.capabilities.basePoolType;
+  const resourceSettings = session.resourceSettings;
+  const resourceLedger = useMemo(() => getResourceLedger(session), [session]);
+  const availableFreePulls = stats.freeTenPulls.available;
+  const infoBookTenPullAvailable = state.infoBookTenPullAvailable;
+  const isWeaponPool = descriptor.capabilities.entityType === 'weapon';
+  const rulesReady =
+    descriptor.capabilities.isResolved &&
+    (!['pityScope', 'targetScope', 'rewardScope'].some((k) => descriptor.capabilities[k] === 'series') ||
+      Boolean(seriesKey(descriptor.capabilities)));
+  const ready = Boolean(
+    view &&
+    view.scope === scope &&
+    rulesReady &&
+    !storageFailure &&
+    !isAnimating &&
+    !isInheritingRealState &&
+    !ambiguousAccount
   );
-  const currentPoolCapabilities = useMemo(
-    () => resolvePoolCapabilities(currentSimPool || { type: 'limited' }),
-    [currentSimPool]
-  );
-  const currentPoolType = currentPoolCapabilities.basePoolType;
-  const getLocalizedSimulatorPoolTypeName = useCallback(
-    (poolType) => {
-      const normalizedType = normalizeSimulatorPoolType(poolType || 'limited');
-      if (normalizedType === 'weapon') {
-        return t('simulator.poolTypeName.weapon');
-      }
-
-      if (normalizedType === 'extra') {
-        return t('simulator.poolTypeName.extra');
-      }
-
-      if (normalizedType === 'standard') {
-        return t('simulator.poolTypeName.standard');
-      }
-
-      return t('simulator.poolTypeName.limited');
-    },
-    [t]
-  );
-  const allSimulatorStates = useMemo(
-    () =>
-      simulatorPools.map((pool) => {
-        if (pool.id === currentSimPoolId && simulator) {
-          const state = currentSimulatorState || simulator.exportState();
-          return {
-            ...state,
-            poolId: pool.id,
-            poolType: resolvePoolCapabilities(pool).basePoolType,
-            extraRuleProfile: pool.extra_rule_profile || pool.extraRuleProfile || null,
-            extraSeriesKey: pool.extra_series_key || pool.extraSeriesKey || null,
-          };
-        }
-
-        const savedState = loadSimulatorState(pool.id, simulatorStorageScope) || {};
-        return {
-          ...savedState,
-          poolId: pool.id,
-          poolType: resolvePoolCapabilities(pool).basePoolType,
-          extraRuleProfile: pool.extra_rule_profile || pool.extraRuleProfile || null,
-          extraSeriesKey: pool.extra_series_key || pool.extraSeriesKey || null,
-          pullHistory: Array.isArray(savedState.pullHistory) ? savedState.pullHistory : [],
-        };
-      }),
-    [currentSimPoolId, currentSimulatorState, simulator, simulatorPools, simulatorStorageScope]
-  );
-  const poolPullCounts = useMemo(
-    () =>
-      simulatorPools.reduce((accumulator, pool, index) => {
-        accumulator[pool.id] = allSimulatorStates[index]?.pullHistory?.length || 0;
-        return accumulator;
-      }, {}),
-    [allSimulatorStates, simulatorPools]
-  );
-  const resourceLedger = useMemo(
-    () => buildSimulatorResourceLedger(allSimulatorStates, resourceSettings),
-    [allSimulatorStates, resourceSettings]
-  );
-  const currentPullCosts = useMemo(() => {
-    const normalizedSettings = normalizeResourceSettings(resourceSettings);
-      const tenPullContext = {
-      poolType: currentPoolType,
-      pullType: 'ten',
-      settings: normalizedSettings,
-      isFree: availableFreePulls > 0 && (currentPoolType === 'limited' || currentPoolType === 'extra'),
-      isInfoBook: infoBookTenPullAvailable && currentPoolType === 'limited',
-    };
-
-    return {
-      single: getSimulatorPullCost({
-        poolType: currentPoolType,
-        pullType: 'single',
-        settings: normalizedSettings,
-      }),
-      ten: getSimulatorPullCost(tenPullContext),
-      settings: normalizedSettings,
-    };
-  }, [availableFreePulls, currentPoolType, infoBookTenPullAvailable, resourceSettings]);
-  const isWeaponPool = currentPoolType === 'weapon';
-  const canAffordSinglePull = isWeaponPool
-    ? false
-    : canAffordSimulatorPull(resourceLedger, currentPullCosts.single);
-  const canAffordTenPull = canAffordSimulatorPull(resourceLedger, currentPullCosts.ten);
-  const getPullDisabledReason = useCallback(
-    (cost, canAfford) => {
-      if (isAnimating) {
-        return t('simulator.toast.animating');
-      }
-
-      if (!poolCharactersList) {
-        return t('simulator.toast.syncingPool');
-      }
-
-      if (canAfford) {
-        return '';
-      }
-
-      if (cost?.resource === 'arsenalQuota') {
-        const shortfall = Math.max(
-          Number(cost.amount || 0) - Math.max(Number(resourceLedger?.arsenalBalance || 0), 0),
-          0
-        );
-        return t('simulator.toast.arsenalShortfall', { count: shortfall.toLocaleString(locale) });
-      }
-
-      const shortfall = Math.max(
-        Number(cost?.amount || 0) - Math.max(Number(resourceLedger?.availableJadeBudget || 0), 0),
-        0
-      );
-      return t('simulator.toast.fullJadeShortfall', { count: shortfall.toLocaleString(locale) });
-    },
-    [isAnimating, locale, poolCharactersList, resourceLedger, t]
-  );
-  const singlePullDisabledReason = isWeaponPool
-    ? t('simulator.toast.weaponSingleDisabled')
-    : getPullDisabledReason(currentPullCosts.single, canAffordSinglePull);
-  const tenPullDisabledReason = getPullDisabledReason(currentPullCosts.ten, canAffordTenPull);
-  const currentSimPoolIdValue = currentSimPool?.id ?? null;
-  const currentSimPoolFeaturedLead = currentSimPoolSource ? getPoolFeaturedLead(currentSimPoolSource) : null;
-
   useEffect(() => {
-    if (!currentSimPoolIdValue) {
-      return undefined;
-    }
-
+    if (!currentSimPool || !descriptor.capabilities.isResolved) return;
     let cancelled = false;
-
-    const loadPoolCharacters = async () => {
-      if (!currentPoolCapabilities.isResolved || currentPoolCapabilities.entityType === 'unknown') {
-        setPoolCharactersList(null);
-        return;
-      }
-
-      const expectedType = currentPoolCapabilities.entityType;
-      const realPoolId = currentSimPoolIdValue.replace(/^sim_/, '');
-      const roster = await resolvePoolRosterBuckets({
-        poolId: realPoolId,
-        expectedType,
-        currentUpName: currentSimPoolFeaturedLead,
-        poolType: getRosterPoolTypeForSimulator(currentPoolCapabilities),
-        poolInfo: currentSimPool || null,
-        mergeStrategy: currentPoolType === 'limited' || currentPoolType === 'extra' ? 'fill-missing' : 'append',
+    queueMicrotask(() => {
+      if (!cancelled) setPoolCharactersList(null);
+    });
+    resolvePoolRosterBuckets({
+      poolId: descriptor.id,
+      expectedType: descriptor.capabilities.entityType,
+      currentUpName: getPoolFeaturedLead(currentSimPool),
+      poolType: isWeaponPool ? 'weapon' : currentPoolType === 'standard' ? 'standard' : 'limited',
+      poolInfo: currentSimPool,
+      mergeStrategy: currentPoolType === 'limited' || currentPoolType === 'extra' ? 'fill-missing' : 'append',
+    })
+      .then((roster) => {
+        if (!cancelled) setPoolCharactersList(normalizeRoster(roster));
+      })
+      .catch(() => {
+        if (!cancelled) setPoolCharactersList(null);
       });
-      const mergedRoster = normalizeSimulatorRoster(roster);
-
-      if (
-        mergedRoster
-        && (mergedRoster.up.length > 0
-          || mergedRoster.offBanner.length > 0
-          || mergedRoster.fiveStar.length > 0
-          || mergedRoster.fourStar.length > 0)
-      ) {
-        if (!cancelled) {
-          setPoolCharactersList((currentRoster) =>
-            areSimulatorRostersEqual(currentRoster, mergedRoster) ? currentRoster : mergedRoster
-          );
-        }
-        return;
-      }
-      appLogger.warn('[GachaSimulator] 当前卡池未配置显式阵容，模拟器已禁用默认回退');
-      if (!cancelled) {
-        setPoolCharactersList((currentRoster) => (currentRoster === null ? currentRoster : null));
-      }
-    };
-
-    loadPoolCharacters();
     return () => {
       cancelled = true;
     };
   }, [
     currentSimPool,
-    currentPoolCapabilities,
+    descriptor.id,
+    descriptor.capabilities.isResolved,
+    descriptor.capabilities.entityType,
     currentPoolType,
-    currentSimPoolFeaturedLead,
-    currentSimPoolIdValue
+    isWeaponPool,
   ]);
-
-  useEffect(() => {
-    if (currentSimPoolId && isInitialized) {
-      saveSimulatorCurrentPoolId(currentSimPoolId, simulatorStorageScope);
-      return;
-    }
-
-    if (isInitialized) {
-      clearSimulatorCurrentPoolId(simulatorStorageScope);
-    }
-  }, [currentSimPoolId, isInitialized, simulatorStorageScope]);
-
-  const getDefaultPool = useCallback(() => {
-    if (simulatorPools.length === 0) {
-      return null;
-    }
-
-    return simulatorPools.find((pool) => normalizeSimulatorPoolType(pool.type) === 'limited') || simulatorPools[0];
-  }, [simulatorPools]);
-
-  useEffect(() => {
-    if (poolCharactersList && simulator) {
-      simulator.setPoolCharactersList(poolCharactersList);
-    }
-  }, [poolCharactersList, simulator]);
-
   useEffect(() => {
     saveSimulatorSkipAnimationPreference(skipAnimation);
   }, [skipAnimation]);
+  useEffect(
+    () => () => {
+      clearTimeout(toastTimer.current);
+    },
+    []
+  );
 
-  useEffect(() => {
-    saveSimulatorResourceSettings(resourceSettings, simulatorStorageScope);
-  }, [resourceSettings, simulatorStorageScope]);
-
-  useEffect(() => {
-    if (simulatorPools.length === 0 || isInitialized) {
-      return;
-    }
-
-    const savedPoolId = normalizeStoredPoolId(loadSimulatorCurrentPoolId(simulatorStorageScope));
-    let targetPool = null;
-    let targetPoolId = null;
-
-    if (savedPoolId) {
-      targetPool = simulatorPools.find((pool) => pool.id === savedPoolId);
-      if (targetPool) {
-        targetPoolId = savedPoolId;
-      }
-    }
-
-    if (!targetPool) {
-      targetPool = getDefaultPool();
-      targetPoolId = targetPool?.id || null;
-    }
-
-    if (targetPool && targetPoolId) {
-      const savedState = loadSimulatorState(targetPoolId, simulatorStorageScope);
-      const upCharacter = resolvePoolTargetName(targetPool);
-      const nextSimulator = createSimulator(
-        targetPool,
-        getCustomRulesForPool(targetPool),
-        upCharacter,
-        poolCharactersList
-      );
-
-      nextSimulator.importState(hydrateSimulatorStateForPool(
-        targetPool,
-        savedState,
-        simulatorStorageScope
-      ));
-      if (poolCharactersList) {
-        nextSimulator.setPoolCharactersList(poolCharactersList);
-      }
-
-      queueMicrotask(() => {
-        setCurrentSimPoolId(targetPoolId);
-        setSimulator(nextSimulator);
-        setCurrentSimulatorState(nextSimulator.getState());
-        setStats(nextSimulator.getStatistics());
-        setPityInfo(nextSimulator.getPityInfo());
-        if (resolvePoolCapabilities(targetPool).basePoolType === 'limited') {
-          setSelectedLimitedPool(upCharacter || fallbackLimitedPoolName);
-        }
-      });
-    }
-
-    queueMicrotask(() => {
-      setIsInitialized(true);
+  const commit = async (nextSession, appendEvents = [], replaceHistories = null, target = runtime.current) => {
+    if (!target) throw new Error('simulator_not_ready');
+    const saved = { ...nextSession, scope: target.scope, revision: target.session.revision + 1 };
+    validateSession(saved);
+    await commitSimulatorSession({
+      scope: target.scope,
+      session: saved,
+      expectedRevision: target.session.revision,
+      appendEvents,
+      replaceHistories,
     });
-  }, [
-    fallbackLimitedPoolName,
-    getDefaultPool,
-    isInitialized,
-    poolCharactersList,
-    resolvePoolTargetName,
-    simulatorPools,
-    simulatorStorageScope,
-  ]);
-
-  useEffect(() => {
-    const updateUI = () => {
-      const state = simulator.getState();
-      setCurrentSimulatorState(state);
-      setStats(simulator.getStatistics());
-      setPityInfo(simulator.getPityInfo());
-      setPullHistory(state.pullHistory || []);
-
-      const simulatorCapabilities = simulator.capabilities;
-
-      if (simulatorCapabilities.freeTenPullLimit > 0 || simulatorCapabilities.infoBookEnabled) {
-        const nextStats = simulator.getStatistics();
-        const earnedFreePulls = nextStats.freeTenPulls?.count || 0;
-        const usedFreePulls = state.freeTenPullsReceived || 0;
-        setAvailableFreePulls(Math.max(0, earnedFreePulls - usedFreePulls));
-
-        if (!simulatorCapabilities.infoBookEnabled) {
-          setInfoBookTenPullAvailable(false);
-          if (currentSimPool) {
-            persistSimulatorPoolState(currentSimPool, simulator.exportState(), simulatorStorageScope);
-          }
-          return;
+    if (generation.current !== target.token || runtime.current?.scope !== target.scope) return null;
+    const nextHistories = replaceHistories || { ...target.histories };
+    if (!replaceHistories)
+      for (const event of appendEvents)
+        nextHistories[event.poolId] = [...(nextHistories[event.poolId] || []), event.record];
+    const updated = { ...target, session: saved, histories: nextHistories };
+    runtime.current = updated;
+    setView(updated);
+    return updated;
+  };
+  const mutate = async (transform) => {
+    if (operation.current || !runtime.current) return;
+    const target = runtime.current;
+    operation.current = target;
+    try {
+      await commit(transform(target.session), [], null, target);
+    } catch (error) {
+      showFailure(error);
+    } finally {
+      if (operation.current === target) operation.current = null;
+    }
+  };
+  const executePull = async (type, expectedPoolId = descriptor.id) => {
+    if (operation.current || !runtime.current || expectedPoolId !== realId(currentSimPoolId) || !poolCharactersList)
+      return;
+    const target = runtime.current;
+    operation.current = target;
+    setIsAnimating(true);
+    setLastResults(null);
+    try {
+      const result = applyCommand(
+        target.session,
+        { type, poolId: expectedPoolId },
+        {
+          descriptors: {
+            ...descriptors,
+            [expectedPoolId]: { ...descriptors[expectedPoolId], roster: poolCharactersList },
+          },
+          random: Math.random,
+          now: Date.now(),
         }
-
-        const limitedPools = sortLimitedPoolsByStartTime(simulatorPools);
-        const storedInfoBooks = loadInfoBookState(simulatorStorageScope);
-        let nextInfoBooks = reconcileInfoBookState(storedInfoBooks, limitedPools);
-
-        if (state.hasUnactivatedInfoBook && !nextInfoBooks[currentSimPoolId]) {
-          const currentIndex = limitedPools.findIndex((pool) => pool.id === currentSimPoolId);
-          if (currentIndex !== -1) {
-            const nextPool = limitedPools[currentIndex + 1];
-            nextInfoBooks = reconcileInfoBookState(
-              {
-                ...nextInfoBooks,
-                [currentSimPoolId]: {
-                  activated: false,
-                  used: false,
-                  targetPoolId: nextPool?.id || null,
-                  obtainedAt: Date.now(),
-                },
-              },
-              limitedPools
-            );
-          }
-        }
-
-        if (JSON.stringify(nextInfoBooks) !== JSON.stringify(storedInfoBooks)) {
-          saveInfoBookState(nextInfoBooks, simulatorStorageScope);
-        }
-
-        const latestInfoBook = getLatestPendingInfoBook(nextInfoBooks, limitedPools);
-        const isInfoBookAvailable = Boolean(
-          latestInfoBook &&
-          latestInfoBook.targetPoolId === currentSimPoolId &&
-          latestInfoBook.activated &&
-          !latestInfoBook.used
-        );
-        setInfoBookTenPullAvailable(isInfoBookAvailable);
-
-        if (state.infoBookTenPullAvailable !== isInfoBookAvailable) {
-          simulator.updateState({
-            infoBookTenPullAvailable: isInfoBookAvailable,
-          });
-        }
-
-        if (simulatorCapabilities.pityScope === 'shared') {
-          saveSharedPityState(
-            {
-              sixStarPity: state.sixStarPity,
-              fiveStarPity: state.fiveStarPity,
-            },
-            simulatorStorageScope
-          );
-        }
-      } else {
-        setAvailableFreePulls(0);
-        setInfoBookTenPullAvailable(false);
-      }
-
-      if (currentSimPool) {
-        persistSimulatorPoolState(currentSimPool, simulator.exportState(), simulatorStorageScope);
-      }
-    };
-
-    simulator.addListener(updateUI);
-    updateUI();
-    return () => simulator.removeListener(updateUI);
-  }, [currentSimPool, currentSimPoolId, simulator, simulatorPools, simulatorStorageScope]);
-
-  const showToastMessage = useCallback((message) => {
-    setToastMessage(message);
-    setShowToast(true);
-    setTimeout(() => setShowToast(false), 3000);
-  }, []);
-
-  const adjustResourceAmount = useCallback(
-    (resourceKey, mode, amount) => {
-      const normalizedAmount = Math.max(0, Math.floor(Number(amount) || 0));
-      if (!normalizedAmount && (mode === 'add' || mode === 'convertOriginite')) {
-        return;
-      }
-
-      setResourceSettings((current) => {
-        const normalized = normalizeResourceSettings(current);
-
-        if (resourceKey === 'jade') {
-          if (mode === 'convertOriginite') {
-            const currentOriginiteBalance = Math.max(Number(resourceLedger?.originiteBalance || 0), 0);
-            if (normalizedAmount > currentOriginiteBalance) {
-              showToastMessage(t('simulator.toast.availableOriginiteShortfall', { count: currentOriginiteBalance.toLocaleString(locale) }));
-              return normalized;
-            }
-
-            return normalizeResourceSettings({
-              ...normalized,
-              manualConvertedOriginite: normalized.manualConvertedOriginite + normalizedAmount,
-            });
-          }
-
-          const nextBaseJade =
-            mode === 'add'
-              ? normalized.baseJade + normalizedAmount
-              : normalizedAmount + Number(resourceLedger?.jadeSpent || 0) - Number(resourceLedger?.convertedJade || 0);
-
-          return normalizeResourceSettings({
-            ...normalized,
-            baseJade: nextBaseJade,
-          });
-        }
-
-        if (resourceKey === 'originite') {
-          const nextBaseOriginite =
-            mode === 'add'
-              ? normalized.baseOriginite + normalizedAmount
-              : Math.max(0, normalizedAmount + Number(resourceLedger?.originiteSpent || 0));
-
-          return normalizeResourceSettings({
-            ...normalized,
-            baseOriginite: nextBaseOriginite,
-          });
-        }
-
-        if (resourceKey === 'arsenalQuota') {
-          const nextBaseArsenalQuota =
-            mode === 'add'
-              ? normalized.baseArsenalQuota + normalizedAmount
-              : normalizedAmount +
-                Number(resourceLedger?.arsenalSpent || 0) -
-                Number(resourceLedger?.arsenalGained || 0);
-
-          return normalizeResourceSettings({
-            ...normalized,
-            baseArsenalQuota: nextBaseArsenalQuota,
-          });
-        }
-
-        return normalized;
-      });
-    },
-    [locale, resourceLedger, showToastMessage, t]
-  );
-
-  const toggleCnOriginiteDoubleBonus = useCallback(() => {
-    setResourceSettings((current) =>
-      normalizeResourceSettings({
-        ...current,
-        cnOriginiteDoubleBonusEnabled: !normalizeResourceSettings(current).cnOriginiteDoubleBonusEnabled,
-      })
-    );
-  }, []);
-
-  const toggleInfiniteResources = useCallback(() => {
-    setResourceSettings((current) =>
-      normalizeResourceSettings({
-        ...current,
-        infiniteResources: !normalizeResourceSettings(current).infiniteResources,
-      })
-    );
-  }, []);
-
-  const executeResolvedPull = useCallback(
-    (type, options = {}) => {
-      const { isInfoBookPull = false, isFreePull = false, conversionPlan = null } = options;
-
-      if (type === 'single' && normalizeSimulatorPoolType(simulator.poolType) === 'weapon') {
-        showToastMessage(t('simulator.toast.weaponSingleDisabled'));
-        return;
-      }
-
-      if (conversionPlan?.originiteNeeded > 0) {
-        adjustResourceAmount('jade', 'convertOriginite', conversionPlan.originiteNeeded);
-      }
-
-      setIsAnimating(true);
-      setLastResults(null);
-
-      const animationDelay = skipAnimation ? 0 : 2500;
-      setTimeout(() => {
-        let results;
-
-        if (type === 'single') {
-          results = [simulator.pullSingle()];
-        } else if (isInfoBookPull) {
-          const limitedPools = sortLimitedPoolsByStartTime(simulatorPools);
-          const infoBooks = reconcileInfoBookState(loadInfoBookState(simulatorStorageScope), limitedPools);
-          const latestInfoBook = getLatestPendingInfoBook(infoBooks, limitedPools);
-          const sourcePoolId =
-            latestInfoBook?.targetPoolId === currentSimPoolId && latestInfoBook?.activated
-              ? latestInfoBook.sourcePoolId
-              : null;
-
-          if (sourcePoolId) {
-            saveInfoBookState(
-              {
-                ...infoBooks,
-                [sourcePoolId]: {
-                  ...infoBooks[sourcePoolId],
-                  used: true,
-                },
-              },
-              simulatorStorageScope
-            );
-          }
-
-          setInfoBookTenPullAvailable(false);
-          results = simulator.pullInfoBookTen();
-          showToastMessage(t('simulator.toast.infoBookTenUsed'));
-        } else if (isFreePull) {
-          results = simulator.pullFreeTen();
-          showToastMessage(t('simulator.toast.freeTenUsed'));
-        } else {
-          results = simulator.pullTen();
-        }
-
-        setLastResults(results);
+      );
+      const saved = await commit(result.session, result.events, null, target);
+      if (!saved) return;
+      const complete = () => {
+        if (generation.current !== target.token) return;
+        setLastResults(result.events.map((e) => toDisplayRecord(e.record)));
         setIsAnimating(false);
-      }, animationDelay);
-    },
-    [
-      adjustResourceAmount,
-      currentSimPoolId,
-      simulatorPools,
-      simulatorStorageScope,
-      showToastMessage,
-      simulator,
-      skipAnimation,
-      t,
-    ]
-  );
-
-  const closeOriginiteConversionPrompt = useCallback(() => {
-    setShowOriginitePrompt(null);
-    setDisableOriginitePromptToday(false);
-  }, []);
-
-  const confirmOriginiteConversionPrompt = useCallback(() => {
-    if (!showOriginitePrompt) {
+        if (operation.current === target) operation.current = null;
+      };
+      if (skipAnimation) complete();
+      else animationTimer.current = setTimeout(complete, 2500);
+    } catch (error) {
+      if (generation.current === target.token) {
+        setIsAnimating(false);
+        showFailure(error);
+      }
+      if (operation.current === target) operation.current = null;
+    }
+  };
+  const currentPullCosts = {
+    settings: resourceSettings,
+    single: getSimulatorPullCost({ poolType: currentPoolType, settings: resourceSettings }),
+    ten: getSimulatorPullCost({
+      poolType: currentPoolType,
+      pullType: 'ten',
+      settings: resourceSettings,
+      isFree: availableFreePulls > 0,
+      isInfoBook: infoBookTenPullAvailable,
+    }),
+  };
+  const disabledReason = (cost) =>
+    !rulesReady
+      ? t('simulator.toast.rulesUnavailable')
+      : !ready
+        ? t(
+            ambiguousAccount
+              ? 'simulator.toast.selectAccount'
+              : storageFailure
+                ? 'simulator.toast.saveFailed'
+                : 'simulator.toast.animating'
+          )
+        : !poolCharactersList
+          ? t('simulator.toast.syncingPool')
+          : !canAffordSimulatorPull(resourceLedger, cost)
+            ? t(
+                cost.resource === 'arsenalQuota'
+                  ? 'simulator.toast.arsenalShortfall'
+                  : 'simulator.toast.fullJadeShortfall',
+                {
+                  count: Math.max(
+                    0,
+                    cost.amount -
+                      (cost.resource === 'arsenalQuota'
+                        ? resourceLedger.arsenalBalance
+                        : resourceLedger.availableJadeBudget)
+                  ).toLocaleString(locale),
+                }
+              )
+            : '';
+  const handlePull = (type) => {
+    if (!ready || operation.current) return;
+    const kind =
+      type === 'ten' ? (infoBookTenPullAvailable ? 'info_book' : availableFreePulls ? 'free' : 'ten') : 'single';
+    const cost = currentPullCosts[type === 'ten' ? 'ten' : 'single'];
+    if (disabledReason(cost)) {
+      showToastMessage(disabledReason(cost));
       return;
     }
-
-    if (disableOriginitePromptToday) {
-      saveSimulatorOriginitePromptSuppressDate(getTodayPromptKey());
+    const conversion = getOriginiteConversionPlanForJadeCost({
+      ledger: resourceLedger,
+      jadeCost: cost.resource === 'jade' ? cost.amount : 0,
+      settings: resourceSettings,
+    });
+    const today = new Date().toISOString().slice(0, 10);
+    if (
+      conversion.canConvert &&
+      conversion.originiteNeeded > 0 &&
+      loadSimulatorOriginitePromptSuppressDate() !== today
+    ) {
+      setShowOriginitePrompt({
+        type: kind,
+        poolId: descriptor.id,
+        token: runtime.current.token,
+        message: t('simulator.toast.originiteConfirmMessage', {
+          actionLabel: t(type === 'ten' ? 'simulator.toast.action.ten' : 'simulator.toast.action.single'),
+          originite: conversion.originiteNeeded.toLocaleString(locale),
+          jade: (conversion.originiteNeeded * conversion.rate).toLocaleString(locale),
+        }),
+      });
+      return;
     }
-
-    const pendingPrompt = showOriginitePrompt;
+    executePull(kind);
+  };
+  const closeOriginiteConversionPrompt = () => {
     setShowOriginitePrompt(null);
     setDisableOriginitePromptToday(false);
-    executeResolvedPull(pendingPrompt.type, pendingPrompt);
-  }, [disableOriginitePromptToday, executeResolvedPull, showOriginitePrompt]);
+  };
+  const confirmOriginiteConversionPrompt = () => {
+    const prompt = showOriginitePrompt;
+    closeOriginiteConversionPrompt();
+    if (!prompt || prompt.token !== runtime.current?.token) return;
+    if (disableOriginitePromptToday) saveSimulatorOriginitePromptSuppressDate(new Date().toISOString().slice(0, 10));
+    executePull(prompt.type, prompt.poolId);
+  };
 
-  const handlePull = useCallback(
-    (type) => {
-      if (isAnimating) {
+  const handleInheritRealState = async (account = null) => {
+    if (operation.current || !runtime.current) return;
+    const selected = account || selectedAccount || (accounts.length === 1 ? accounts[0] : null);
+    const accountKey = getGameAccountSelectionValue(selected || {});
+    if (!accountKey) {
+      showToastMessage(t('simulator.toast.selectAccount'));
+      return;
+    }
+    const targetScope = buildSimulatorStorageScope({ currentUserId, currentGameUid: accountKey });
+    const target = runtime.current;
+    operation.current = target;
+    setIsInheritingRealState(true);
+    try {
+      const result = currentUserId
+        ? await loadSimulatorInheritance({ accountKey })
+        : {
+            availability: 'ready',
+            meta: {},
+            simulatorInheritance: buildSimulatorInheritanceProjection({
+              history: localHistory.filter((record) => isGameAccountSelectionMatch(record, accountKey)),
+              pools,
+            }),
+          };
+      if (generation.current !== target.token) return;
+      const projection = result.projection || result.scope?.simulatorInheritance || result.simulatorInheritance;
+      if (result.availability !== 'ready' || projection?.contractVersion !== 2) {
+        showToastMessage(t('simulator.toast.inheritBuilding'));
         return;
       }
-
-      if (type === 'single' && normalizeSimulatorPoolType(simulator.poolType) === 'weapon') {
-        showToastMessage(t('simulator.toast.weaponSingleDisabled'));
+      if (projection.catalogSignature !== buildSimulatorCatalogSignature({ pools })) {
+        showToastMessage(t('simulator.toast.inheritBuilding'));
         return;
       }
-
-      const isInfoBookPull =
-        type === 'ten' && infoBookTenPullAvailable && normalizeSimulatorPoolType(simulator.poolType) === 'limited';
-      const isFreePull =
-        !isInfoBookPull &&
-        type === 'ten' &&
-        availableFreePulls > 0 &&
-        ['limited', 'extra'].includes(normalizeSimulatorPoolType(simulator.poolType));
-      const pullCost = getSimulatorPullCost({
-        poolType: simulator.poolType,
-        pullType: type,
-        settings: currentPullCosts.settings,
-        isFree: isFreePull,
-        isInfoBook: isInfoBookPull,
-      });
-
-      if (!canAffordSimulatorPull(resourceLedger, pullCost)) {
-        if (pullCost.resource === 'arsenalQuota') {
-          const shortfall = Math.max(pullCost.amount - Math.max(resourceLedger.arsenalBalance, 0), 0);
-          showToastMessage(t('simulator.toast.arsenalShortfall', { count: shortfall.toLocaleString(locale) }));
-        } else {
-          const shortfall = Math.max(pullCost.amount - Math.max(resourceLedger.availableJadeBudget, 0), 0);
-          showToastMessage(t('simulator.toast.resourceShortfall', { count: shortfall.toLocaleString(locale) }));
-        }
+      if (!Object.keys(projection.session.pools).length) {
+        showToastMessage(t('simulator.toast.noRealHistory', { name: selected.nickName || selected.gameUid }));
         return;
       }
-
-      let conversionPlan = null;
-      if (!isFreePull && !isInfoBookPull && pullCost.resource === 'jade') {
-        conversionPlan = getOriginiteConversionPlanForJadeCost({
-          ledger: resourceLedger,
-          jadeCost: pullCost.amount,
-          settings: currentPullCosts.settings,
+      const targetLoaded =
+        targetScope === scope
+          ? target
+          : { ...(await loadSimulatorSession(targetScope)), scope: targetScope, token: target.token };
+      const resourceBase = targetLoaded.session?.resourceSettings || normalizeResourceSettings();
+      const inherited = {
+        ...structuredClone(projection.session),
+        scope: targetScope,
+        currentPoolId: descriptor.id,
+        resourceSettings: resourceBase,
+      };
+      const ledger = getResourceLedger(inherited);
+      if (ledger.arsenalBalance < 0)
+        inherited.resourceSettings = {
+          ...resourceBase,
+          baseArsenalQuota: resourceBase.baseArsenalQuota - ledger.arsenalBalance,
+        };
+      inherited.inheritance = {
+        contractVersion: 2,
+        accountKey,
+        generatedAt: result.meta?.generatedAt,
+        revision: result.meta?.scopeSnapshotRevision,
+      };
+      if (targetScope === scope) await commit(inherited, [], projection.histories, target);
+      else {
+        inherited.revision = targetLoaded.session ? targetLoaded.session.revision + 1 : 0;
+        await commitSimulatorSession({
+          scope: targetScope,
+          session: inherited,
+          expectedRevision: targetLoaded.session?.revision ?? null,
+          replaceHistories: projection.histories,
         });
-
-        if (conversionPlan.canConvert && conversionPlan.originiteNeeded > 0) {
-          const actionLabel = type === 'ten' ? t('simulator.toast.action.ten') : t('simulator.toast.action.single');
-          const suppressToday = loadSimulatorOriginitePromptSuppressDate() === getTodayPromptKey();
-
-          if (!suppressToday) {
-            setDisableOriginitePromptToday(false);
-            setShowOriginitePrompt({
-              type,
-              isInfoBookPull,
-              isFreePull,
-              conversionPlan,
-              message: t('simulator.toast.originiteConfirmMessage', {
-                actionLabel,
-                originite: conversionPlan.originiteNeeded.toLocaleString(locale),
-                jade: (conversionPlan.originiteNeeded * conversionPlan.rate).toLocaleString(locale),
-              }),
-            });
-            return;
-          }
-        }
+        if (generation.current !== target.token) return;
+        switchGameAccount(accountKey);
       }
-
-      executeResolvedPull(type, {
-        isInfoBookPull,
-        isFreePull,
-        conversionPlan,
-      });
-    },
-    [
-      availableFreePulls,
-      currentPullCosts.settings,
-      infoBookTenPullAvailable,
-      isAnimating,
-      locale,
-      resourceLedger,
-      executeResolvedPull,
-      showToastMessage,
-      simulator.poolType,
-      t,
-    ]
-  );
-
-  const handleReset = useCallback(() => {
-    setShowResetConfirm(true);
-  }, []);
-
-  const handleInheritRealState = useCallback(
-    async (selectedAccount = null) => {
-      if (isInheritingRealState) {
-        return;
-      }
-      if (!currentSimPoolId || !currentSimPool) {
-        showToastMessage(t('simulator.toast.noInheritablePool'));
-        return;
-      }
-
-      const availableAccounts = personalGameAccounts;
-      const resolvedAccount =
-        selectedAccount ||
-        (currentGameUid ? availableAccounts.find((account) => isGameAccountSelectionMatch(account, currentGameUid)) : null) ||
-        (availableAccounts.length === 1 ? availableAccounts[0] : null);
-      const selectedAccountValue = getGameAccountSelectionValue(resolvedAccount);
-      const selectedGameUid = resolvedAccount?.gameUid || resolvedAccount?.game_uid || null;
-      const selectedAccountName = resolvedAccount?.nickName || resolvedAccount?.nick_name || selectedGameUid;
-
-      if (!selectedAccountValue) {
-        showToastMessage(t('simulator.toast.selectAccount'));
-        return;
-      }
-
-      const targetStorageScope = buildSimulatorStorageScope({
-        currentUserId,
-        currentGameUid: selectedAccountValue,
-      });
-      setIsInheritingRealState(true);
-      showToastMessage(t('simulator.toast.inheritLoading'));
-
-      let inheritedSnapshot = null;
-      try {
-        if (currentUserId) {
-          const cachedAccountKey = String(analysisScope?.account?.accountKey || '').trim();
-          let inheritanceProjection = cachedAccountKey === selectedAccountValue
-            ? analysisScope?.simulatorInheritance || null
-            : null;
-
-          if (!inheritanceProjection) {
-            const realPoolId = currentSimPoolId.replace(/^sim_/, '');
-            const analysis = await loadAccountGachaAnalysis({
-              accountKey: selectedAccountValue,
-              viewKey: realPoolId,
-              locale,
-            });
-            if (analysis.availability === 'building') {
-              showToastMessage(t('simulator.toast.inheritBuilding'));
-              return;
-            }
-            inheritanceProjection = analysis.scope?.simulatorInheritance || null;
-          }
-
-          if (!inheritanceProjection) {
-            showToastMessage(t('simulator.toast.inheritUnavailable'));
-            return;
-          }
-          inheritedSnapshot = activateInheritedSimulatorSnapshot(inheritanceProjection, currentSimPoolId);
-        } else {
-          inheritedSnapshot = buildInheritedSimulatorSnapshot({
-            history,
-            realPools,
-            currentGameUid: selectedAccountValue,
-            currentUserId,
-            currentSimPoolId,
-          });
-        }
-      } catch (error) {
-        showToastMessage(error?.message || t('simulator.toast.noRealHistory', { name: selectedAccountName }));
-        return;
-      } finally {
-        setIsInheritingRealState(false);
-      }
-
-      if (!inheritedSnapshot?.hasAnyData) {
-        showToastMessage(t('simulator.toast.noRealHistory', { name: selectedAccountName }));
-        return;
-      }
-
-      simulatorPools.forEach((pool) => {
-        clearSimulatorState(pool.id, targetStorageScope);
-      });
-      clearSimulatorSeriesStatesForPools(simulatorPools, targetStorageScope);
-
-      Object.entries(inheritedSnapshot.statesByPoolId).forEach(([poolId, state]) => {
-        saveSimulatorState(poolId, state, targetStorageScope);
-      });
-      Object.entries(inheritedSnapshot.seriesStates || {}).forEach(([seriesStateKey, state]) => {
-        saveSimulatorSeriesState(seriesStateKey, state, targetStorageScope);
-      });
-
-      clearSharedPityState(targetStorageScope);
-      if (inheritedSnapshot.sharedPityState) {
-        saveSharedPityState(inheritedSnapshot.sharedPityState, targetStorageScope);
-      }
-
-      clearInfoBookState(targetStorageScope);
-      if (Object.keys(inheritedSnapshot.infoBooks).length > 0) {
-        saveInfoBookState(inheritedSnapshot.infoBooks, targetStorageScope);
-      }
-
-      const targetResourceSettings =
-        selectedAccountValue === currentGameUid ? resourceSettings : loadSimulatorResourceSettings(targetStorageScope);
-      const inheritedLedger = buildSimulatorResourceLedger(
-        Object.values(inheritedSnapshot.statesByPoolId),
-        targetResourceSettings
-      );
-
-      if (Number(inheritedLedger?.arsenalBalance || 0) < 0) {
-        const nextResourceSettings = normalizeResourceSettings({
-          ...targetResourceSettings,
-          baseArsenalQuota:
-            Number(targetResourceSettings?.baseArsenalQuota || 0) +
-            Math.abs(Number(inheritedLedger.arsenalBalance || 0)),
-        });
-
-        saveSimulatorResourceSettings(nextResourceSettings, targetStorageScope);
-
-        if (selectedAccountValue === currentGameUid) {
-          setResourceSettings(nextResourceSettings);
-        }
-      }
-
-      saveSimulatorCurrentPoolId(currentSimPoolId, targetStorageScope);
-
-      if (selectedAccountValue !== currentGameUid) {
-        switchGameAccount(selectedAccountValue);
-        showToastMessage(t('simulator.toast.inheritAllSuccess', { name: selectedAccountName }));
-        return;
-      }
-
-      const inheritedState = inheritedSnapshot.statesByPoolId[currentSimPoolId];
-      const upCharacter = resolvePoolTargetName(currentSimPool);
-      const nextSimulator = createSimulator(
-        currentSimPool,
-        getCustomRulesForPool(currentSimPool),
-        upCharacter,
-        poolCharactersList
-      );
-
-      if (inheritedState) {
-        nextSimulator.importState(inheritedState);
-      }
-      if (upCharacter) {
-        nextSimulator.setCurrentUpCharacter(upCharacter);
-        setSelectedLimitedPool(upCharacter);
-      }
-      if (poolCharactersList) {
-        nextSimulator.setPoolCharactersList(poolCharactersList);
-      }
-      setExpandedTenPulls(new Set());
       setLastResults(null);
-      setSimulator(nextSimulator);
-      setCurrentSimulatorState(nextSimulator.getState());
-      setStats(nextSimulator.getStatistics());
-      setPityInfo(nextSimulator.getPityInfo());
-      setPullHistory(nextSimulator.getState().pullHistory || []);
-      showToastMessage(t('simulator.toast.inheritAllSuccess', { name: selectedAccountName }));
-    },
-    [
-      currentGameUid,
-      currentSimPool,
-      currentSimPoolId,
-      currentUserId,
-      history,
-      analysisScope,
-      isInheritingRealState,
-      locale,
-      personalGameAccounts,
-      poolCharactersList,
-      realPools,
-      resourceSettings,
-      simulatorPools,
-      showToastMessage,
-      resolvePoolTargetName,
-      switchGameAccount,
-      t,
-    ]
-  );
-
-  const closeResetDialog = useCallback(() => {
+      setExpandedTenPulls(new Set());
+      showToastMessage(t('simulator.toast.inheritAllSuccess', { name: selected.nickName || selected.gameUid }));
+    } catch (error) {
+      if (generation.current === target.token) showFailure(error);
+    } finally {
+      if (operation.current === target) operation.current = null;
+      if (generation.current === target.token) setIsInheritingRealState(false);
+    }
+  };
+  const switchPool = async (id) => {
+    const targetId = realId(id);
+    if (!descriptors[targetId] || operation.current || id === currentSimPoolId) return;
+    await mutate((s) => ({ ...s, currentPoolId: targetId }));
+    if (runtime.current?.session.currentPoolId === targetId) {
+      setCurrentSimPoolId(id);
+      setLastResults(null);
+      setPoolCharactersList(null);
+    }
+  };
+  const adjustResourceAmount = (key, mode, amount) =>
+    mutate((s) => {
+      const value = Math.max(0, Math.floor(Number(amount) || 0));
+      const balance = getResourceLedger(s);
+      const settings = { ...s.resourceSettings };
+      if (key === 'jade' && mode === 'convertOriginite') {
+        if (value > balance.originiteBalance) {
+          showToastMessage(
+            t('simulator.toast.availableOriginiteShortfall', { count: balance.originiteBalance.toLocaleString(locale) })
+          );
+          return s;
+        }
+        settings.manualConvertedOriginite += value;
+      } else if (key === 'jade')
+        settings.baseJade =
+          mode === 'add' ? settings.baseJade + value : value + balance.jadeSpent - balance.convertedJade;
+      else if (key === 'originite')
+        settings.baseOriginite = mode === 'add' ? settings.baseOriginite + value : value + balance.originiteSpent;
+      else if (key === 'arsenalQuota')
+        settings.baseArsenalQuota =
+          mode === 'add' ? settings.baseArsenalQuota + value : value + balance.arsenalSpent - balance.arsenalGained;
+      return { ...s, resourceSettings: normalizeResourceSettings(settings) };
+    });
+  const toggleCnOriginiteDoubleBonus = () =>
+    mutate((s) => ({
+      ...s,
+      resourceSettings: {
+        ...s.resourceSettings,
+        cnOriginiteDoubleBonusEnabled: !s.resourceSettings.cnOriginiteDoubleBonusEnabled,
+      },
+    }));
+  const toggleInfiniteResources = () =>
+    mutate((s) => ({
+      ...s,
+      resourceSettings: { ...s.resourceSettings, infiniteResources: !s.resourceSettings.infiniteResources },
+    }));
+  const closeResetDialog = () => {
     setShowResetConfirm(false);
     setResetAllPools(false);
     setResetKeepResources(false);
     setResetSettings(false);
-  }, []);
-
-  const confirmReset = useCallback(() => {
-    let resetMessage = '';
-
-    if (resetAllPools) {
-      simulatorPools.forEach((pool) => {
-        clearSimulatorState(pool.id, simulatorStorageScope);
-      });
-      clearSimulatorSeriesStatesForPools(simulatorPools, simulatorStorageScope);
-      clearSharedPityState(simulatorStorageScope);
-      clearInfoBookState(simulatorStorageScope);
-      resetMessage = t('simulator.toast.resetAllSuccess');
-    } else {
-      const type = normalizeSimulatorPoolType(currentSimPool?.type || 'limited');
-      const resetPools = simulatorPools
-        .filter((pool) => normalizeSimulatorPoolType(pool.type) === type);
-      resetPools.forEach((pool) => {
-          clearSimulatorState(pool.id, simulatorStorageScope);
+  };
+  const confirmReset = async () => {
+    if (operation.current || !runtime.current) return;
+    const target = runtime.current;
+    operation.current = target;
+    try {
+      const settings = resetKeepResources
+        ? target.session.resourceSettings
+        : {
+            ...target.session.resourceSettings,
+            baseJade: 0,
+            baseOriginite: 0,
+            baseArsenalQuota: 0,
+            manualConvertedOriginite: 0,
+            infiniteResources: DEFAULT_SIMULATOR_RESOURCE_SETTINGS.infiniteResources,
+            cnOriginiteDoubleBonusEnabled: DEFAULT_SIMULATOR_RESOURCE_SETTINGS.cnOriginiteDoubleBonusEnabled,
+          };
+      const keep = resetAllPools
+        ? {}
+        : Object.fromEntries(
+            Object.entries(target.histories).filter(
+              ([id]) => descriptors[id]?.capabilities.basePoolType !== currentPoolType
+            )
+          );
+      let next = createSession({ scope, resourceSettings: settings });
+      Object.entries(keep)
+        .flatMap(([id, records]) => records.map((record) => ({ id, record })))
+        .sort((a, b) => compareRecords(a.record, b.record))
+        .forEach(({ id, record }) => {
+          if (
+            descriptors[id]?.capabilities.isResolved &&
+            [4, 5, 6].includes(record.rarity) &&
+            Number.isFinite(record.timestamp)
+          )
+            next = replayHistoryEvent(next, record, descriptors[id]);
         });
-      clearSimulatorSeriesStatesForPools(resetPools, simulatorStorageScope);
-
-      if (type === 'limited') {
-        clearSharedPityState(simulatorStorageScope);
-        clearInfoBookState(simulatorStorageScope);
+      next.currentPoolId = descriptor.id;
+      await commit(next, [], keep, target);
+      if (resetSettings) {
+        setSkipAnimation(false);
+        clearSimulatorSkipAnimationPreference();
+        clearSimulatorMultipleFreeTenPreference();
       }
-
-      resetMessage = t('simulator.toast.resetTypeSuccess', {
-        typeName: getLocalizedSimulatorPoolTypeName(type),
-      });
-    }
-
-    simulator.reset();
-    setCurrentSimulatorState(simulator.getState());
-    setPullHistory([]);
-    setAvailableFreePulls(0);
-    setInfoBookTenPullAvailable(false);
-    setLastResults(null);
-
-    if (!resetKeepResources) {
-      clearSimulatorResourceSettings(simulatorStorageScope);
-      setResourceSettings((current) =>
-        normalizeResourceSettings({
-          ...current,
-          baseJade: 0,
-          baseOriginite: 0,
-          baseArsenalQuota: 0,
-          manualConvertedOriginite: 0,
-          cnOriginiteDoubleBonusEnabled: DEFAULT_SIMULATOR_RESOURCE_SETTINGS.cnOriginiteDoubleBonusEnabled,
-          infiniteResources: DEFAULT_SIMULATOR_RESOURCE_SETTINGS.infiniteResources,
+      setLastResults(null);
+      setExpandedTenPulls(new Set());
+      closeResetDialog();
+      showToastMessage(
+        t(resetAllPools ? 'simulator.toast.resetAllSuccess' : 'simulator.toast.resetTypeSuccess', {
+          typeName: t(`simulator.poolTypeName.${currentPoolType}`),
         })
       );
+    } catch (error) {
+      showFailure(error);
+    } finally {
+      if (operation.current === target) operation.current = null;
     }
-
-    if (resetSettings) {
-      setSkipAnimation(false);
-      clearSimulatorSkipAnimationPreference();
-      clearSimulatorMultipleFreeTenPreference();
-    }
-
-    closeResetDialog();
-    showToastMessage(
-      resetKeepResources ? `${resetMessage}${t('simulator.toast.resetKeepResources')}` : resetMessage
-    );
-  }, [
-    closeResetDialog,
-    currentSimPool?.type,
-    getLocalizedSimulatorPoolTypeName,
-    resetAllPools,
-    resetKeepResources,
-    resetSettings,
-    showToastMessage,
+  };
+  const dashboardStats = buildDashboardStats(stats, pityInfo, simulator, locale);
+  const pityInfoWithGuarantee = buildPityInfoWithGuarantee(stats, simulator);
+  const currentPoolObj = buildSimulatorCurrentPoolView({
+    currentSimPool,
     simulator,
-    simulatorPools,
-    simulatorStorageScope,
-    t,
-  ]);
-
-  const switchPool = useCallback(
-    (poolId) => {
-      if (currentSimPoolId === poolId) {
-        return;
-      }
-
-      const targetPool = simulatorPools.find((pool) => pool.id === poolId);
-      if (!targetPool) {
-        return;
-      }
-
-      if (currentSimPool) {
-        persistSimulatorPoolState(currentSimPool, simulator.exportState(), simulatorStorageScope);
-      }
-
-      if (simulator.capabilities.pityScope === 'shared') {
-        const state = simulator.getState();
-        saveSharedPityState(
-          {
-            sixStarPity: state.sixStarPity,
-            fiveStarPity: state.fiveStarPity,
-          },
-          simulatorStorageScope
-        );
-      }
-
-      setPoolCharactersList(null);
-
-      const savedState = loadSimulatorState(poolId, simulatorStorageScope);
-      const upCharacter = resolvePoolTargetName(targetPool, selectedLimitedPool);
-      const targetCapabilities = resolvePoolCapabilities(targetPool);
-      const nextSimulator = createSimulator(targetPool, getCustomRulesForPool(targetPool), upCharacter, null);
-
-      nextSimulator.importState(hydrateSimulatorStateForPool(
-        targetPool,
-        savedState,
-        simulatorStorageScope
-      ));
-      if (upCharacter) {
-        nextSimulator.setCurrentUpCharacter(upCharacter);
-      }
-
-      if (targetCapabilities.pityScope === 'shared') {
-        const sharedPity = loadSharedPityState(simulatorStorageScope);
-        if (sharedPity) {
-          nextSimulator.updateState({
-            sixStarPity: Number(sharedPity.sixStarPity || 0),
-            fiveStarPity: Number(sharedPity.fiveStarPity || 0),
-          });
-        }
-
-        const limitedPools = sortLimitedPoolsByStartTime(simulatorPools);
-        const infoBooks = reconcileInfoBookState(loadInfoBookState(simulatorStorageScope), limitedPools);
-        const latestInfoBook = getLatestPendingInfoBook(infoBooks, limitedPools);
-
-        if (JSON.stringify(infoBooks) !== JSON.stringify(loadInfoBookState(simulatorStorageScope))) {
-          saveInfoBookState(infoBooks, simulatorStorageScope);
-        }
-
-        if (latestInfoBook?.targetPoolId === poolId && !latestInfoBook.activated) {
-          saveInfoBookState(
-            {
-              ...infoBooks,
-              [latestInfoBook.sourcePoolId]: {
-                ...infoBooks[latestInfoBook.sourcePoolId],
-                activated: true,
-              },
-            },
-            simulatorStorageScope
-          );
-          showToastMessage(t('simulator.toast.infoBookActivated'));
-          nextSimulator.updateState({
-            infoBookTenPullAvailable: true,
-          });
-        } else {
-          nextSimulator.updateState({
-            infoBookTenPullAvailable: Boolean(
-              latestInfoBook &&
-              latestInfoBook.targetPoolId === poolId &&
-              latestInfoBook.activated &&
-              !latestInfoBook.used
-            ),
-          });
-        }
-      }
-
-      if (targetCapabilities.basePoolType === 'limited' && upCharacter) {
-        setSelectedLimitedPool(upCharacter);
-      }
-
-      setCurrentSimPoolId(poolId);
-      setSimulator(nextSimulator);
-      setCurrentSimulatorState(nextSimulator.getState());
-      setLastResults(null);
-      setStats(nextSimulator.getStatistics());
-      setPityInfo(nextSimulator.getPityInfo());
-      setShowPoolMenu(false);
-    },
-    [
-      currentSimPoolId,
-      currentSimPool,
-      resolvePoolTargetName,
-      selectedLimitedPool,
-      showToastMessage,
-      simulator,
-      simulatorPools,
-      simulatorStorageScope,
-      t,
-    ]
+    resolvedRoster: poolCharactersList,
+  });
+  const sharePayload = buildSimulatorSharePayload(
+    { currentPoolObj, dashboardStats, pityInfoWithGuarantee, resourceLedger },
+    locale
   );
-
-  const historyGroups = useMemo(() => processHistoryGroups(pullHistory), [pullHistory]);
-  const dashboardStats = useMemo(
-    () => buildDashboardStats(stats, pityInfo, simulator, locale),
-    [locale, pityInfo, simulator, stats]
-  );
-  const pityInfoWithGuarantee = useMemo(() => buildPityInfoWithGuarantee(stats, simulator), [stats, simulator]);
-  const currentSharePity6 = pityInfo?.sixStar?.current;
-  const currentSharePity5 = pityInfo?.fiveStar?.current;
-  const currentPoolObj = useMemo(
-    () => buildSimulatorCurrentPoolView({
-      currentSimPool,
-      simulator,
-      resolvedRoster: poolCharactersList,
-      fallbackName: t('simulator.toast.noSelection'),
-    }),
-    [
-      currentSimPool,
-      poolCharactersList,
-      simulator,
-      t
-    ]
-  );
-  const sharePayload = useMemo(
-    () =>
-      buildSimulatorSharePayload({
-        currentPoolObj,
-        dashboardStats,
-        pityInfoWithGuarantee,
-        resourceLedger,
-      }, locale),
-    [currentPoolObj, dashboardStats, locale, pityInfoWithGuarantee, resourceLedger]
-  );
+  const sharing = useSimulatorSharing(sharePayload, showToastMessage);
   const shareTimelineSections = useMemo(() => {
     const section = buildSinglePoolTimelineSection({
-      pool: {
-        id: currentSimPoolId || 'simulator-pool',
-        type: currentPoolObj?.type,
-        name: currentPoolObj?.name,
-        up_character: currentPoolObj?.up_character,
-        featured_characters: currentPoolObj?.featured_characters,
-        resolved_roster: currentPoolObj?.resolved_roster,
-        extra_subtype: currentPoolObj?.extra_subtype,
-        extra_rule_profile: currentPoolObj?.extra_rule_profile,
-        extra_series_key: currentPoolObj?.extra_series_key,
-        extra_series_phase: currentPoolObj?.extra_series_phase,
-        source_pool_id: currentPoolObj?.source_pool_id,
-      },
+      pool: currentPoolObj,
       history: pullHistory,
-      currentPityOverride: currentSharePity6,
-      currentPity5Override: currentSharePity5,
+      currentPityOverride: pityInfo.sixStar.current,
+      currentPity5Override: pityInfo.fiveStar.current,
       locale,
     });
-
     return section ? [section] : [];
-  }, [currentPoolObj, currentSimPoolId, currentSharePity5, currentSharePity6, locale, pullHistory]);
-  const supportsNativeImageShare = useMemo(() => {
-    if (typeof window === 'undefined' || typeof File === 'undefined' || typeof navigator?.share !== 'function') {
-      return false;
-    }
-
-    if (typeof navigator.canShare !== 'function') {
-      return false;
-    }
-
-    try {
-      return navigator.canShare({
-        files: [new File(['share'], 'share.txt', { type: 'text/plain' })],
-      });
-    } catch {
-      return false;
-    }
-  }, []);
-  const supportsClipboardImageCopy = useMemo(() => canCopyImageToClipboard(), []);
-  const effectivePityObj = {
-    pity6: pityInfo.sixStar.current,
-    pity5: pityInfo.fiveStar.current,
-    isInherited: false,
-  };
-
-  const handleExportReport = useCallback(() => {
-    downloadAnalysisReport(stats, pityInfo, currentPoolType);
-    showToastMessage(t('simulator.toast.exportReport'));
-  }, [currentPoolType, pityInfo, showToastMessage, stats, t]);
-
-  const handleExportData = useCallback(
-    (format) => {
-      const poolName = currentSimPool?.name || t('simulator.defaultPoolName');
-      downloadSimulatorData(simulator.getState().pullHistory, currentSimPoolId, poolName, currentPoolType, format);
-      showToastMessage(t('simulator.toast.exportData', { format: format.toUpperCase() }));
-    },
-    [currentPoolType, currentSimPool?.name, currentSimPoolId, showToastMessage, simulator, t]
-  );
-
-  const handleCopyShareText = useCallback(async () => {
-    if (!beginShareAction('copy-text', t('simulator.share.progress.copyText'))) {
-      return;
-    }
-
-    try {
-      const shareText = buildSimulatorShareText(sharePayload, locale);
-      const success = await copyToClipboard(shareText);
-      const message = success ? t('simulator.share.copyTextSuccess') : t('simulator.share.copyTextFailure');
-      if (success) {
-        finishShareAction('copy-text', message);
-      } else {
-        failShareAction('copy-text', message);
-      }
-      showToastMessage(message);
-    } catch {
-      const message = t('simulator.share.copyTextFailure');
-      failShareAction('copy-text', message);
-      showToastMessage(message);
-    }
-  }, [beginShareAction, failShareAction, finishShareAction, locale, sharePayload, showToastMessage, t]);
-
-  const handleShareImage = useCallback(
-    async (shareCardNode) => {
-      if (!beginShareAction('share', t('simulator.share.progress.generateImage'))) {
-        return;
-      }
-
-      if (!shareCardNode) {
-        const message = t('simulator.share.notReady');
-        failShareAction('share', message);
-        showToastMessage(message);
-        return;
-      }
-
-      try {
-        const blob = await renderSimulatorShareCardToBlob(shareCardNode);
-        const file = buildSimulatorShareFile(blob, sharePayload);
-        const canUseNativeShare = canNativeShareSimulatorFile(file);
-
-        if (supportsNativeImageShare && canUseNativeShare) {
-          updateShareAction('share', t('simulator.share.progress.openSystemShare'));
-          await shareSimulatorShareCardFile(file, sharePayload, locale);
-          const message = t('simulator.share.systemOpened');
-          finishShareAction('share', message);
-          showToastMessage(message);
-          return;
-        }
-
-        updateShareAction('share', t('simulator.share.progress.downloadImage'));
-        const downloaded = downloadSimulatorShareCard(blob, sharePayload);
-        const message = downloaded ? t('simulator.share.systemUnavailableDownloaded') : t('simulator.share.downloadFailure');
-        if (downloaded) {
-          finishShareAction('share', message);
-        } else {
-          failShareAction('share', message);
-        }
-        showToastMessage(message);
-      } catch (error) {
-        if (error?.name === 'AbortError') {
-          resetShareActionFeedback();
-          return;
-        }
-
-        appLogger.error('[GachaSimulator] share card generation failed:', error);
-        const message = t('simulator.share.generateFailure');
-        failShareAction('share', message);
-        showToastMessage(message);
-      }
-    },
-    [
-      beginShareAction,
-      failShareAction,
-      finishShareAction,
-      locale,
-      resetShareActionFeedback,
-      sharePayload,
-      showToastMessage,
-      supportsNativeImageShare,
-      t,
-      updateShareAction,
-    ]
-  );
-
-  const handleDownloadShareImage = useCallback(
-    async (shareCardNode) => {
-      if (!beginShareAction('download', t('simulator.share.progress.generateLongImage'))) {
-        return;
-      }
-
-      if (!shareCardNode) {
-        const message = t('simulator.share.notReady');
-        failShareAction('download', message);
-        showToastMessage(message);
-        return;
-      }
-
-      try {
-        const blob = await renderSimulatorShareCardToBlob(shareCardNode);
-        updateShareAction('download', t('simulator.share.progress.saveLongImage'));
-        const downloaded = downloadSimulatorShareCard(blob, sharePayload);
-        const message = downloaded ? t('simulator.share.downloadSuccess') : t('simulator.share.downloadFailure');
-        if (downloaded) {
-          finishShareAction('download', message);
-        } else {
-          failShareAction('download', message);
-        }
-        showToastMessage(message);
-      } catch {
-        const message = t('simulator.share.generateFailure');
-        failShareAction('download', message);
-        showToastMessage(message);
-      }
-    },
-    [beginShareAction, failShareAction, finishShareAction, sharePayload, showToastMessage, t, updateShareAction]
-  );
-
-  const handleCopyShareImage = useCallback(
-    async (shareCardNode) => {
-      if (!beginShareAction('copy-image', t('simulator.share.progress.generateCopyImage'))) {
-        return;
-      }
-
-      if (!shareCardNode) {
-        const message = t('simulator.share.notReady');
-        failShareAction('copy-image', message);
-        showToastMessage(message);
-        return;
-      }
-
-      if (!supportsClipboardImageCopy) {
-        const message = t('simulator.share.browserCopyUnsupported');
-        failShareAction('copy-image', message);
-        showToastMessage(message);
-        return;
-      }
-
-      try {
-        const blob = await renderSimulatorShareCardToBlob(shareCardNode);
-        updateShareAction('copy-image', t('simulator.share.progress.writeClipboard'));
-        const copied = await copyImageBlobToClipboard(blob);
-        const message = copied ? t('simulator.share.copyImageSuccess') : t('simulator.share.copyImageFailure');
-        if (copied) {
-          finishShareAction('copy-image', message);
-        } else {
-          failShareAction('copy-image', message);
-        }
-        showToastMessage(message);
-      } catch {
-        const message = t('simulator.share.copyImageFailure');
-        failShareAction('copy-image', message);
-        showToastMessage(message);
-      }
-    },
-    [
-      beginShareAction,
-      failShareAction,
-      finishShareAction,
-      showToastMessage,
-      supportsClipboardImageCopy,
-      t,
-      updateShareAction,
-    ]
-  );
-
-  const toggleTenPull = useCallback((id) => {
-    setExpandedTenPulls((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }, []);
-
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, pullHistory, descriptor.id, locale, poolCharactersList]);
   return {
-    availableFreePulls,
+    ...sharing,
     adjustResourceAmount,
-    canAffordSinglePull,
-    canAffordTenPull,
+    availableFreePulls,
+    canAffordSinglePull: !isWeaponPool && !disabledReason(currentPullCosts.single),
+    canAffordTenPull: !disabledReason(currentPullCosts.ten),
+    singlePullDisabledReason: isWeaponPool
+      ? t('simulator.toast.weaponSingleDisabled')
+      : disabledReason(currentPullCosts.single),
+    tenPullDisabledReason: disabledReason(currentPullCosts.ten),
     closeOriginiteConversionPrompt,
-    closeResetDialog,
     confirmOriginiteConversionPrompt,
+    disableOriginitePromptToday,
+    setDisableOriginitePromptToday,
+    showOriginitePrompt,
+    closeResetDialog,
     confirmReset,
     currentPullCosts,
     currentPoolObj,
@@ -1781,63 +737,73 @@ export function useGachaSimulatorController() {
     currentSimPool,
     currentSimPoolId,
     dashboardStats,
-    effectivePityObj,
+    effectivePityObj: {
+      pity6: state.sixStarPity,
+      pity5: state.fiveStarPity,
+      isInherited: Boolean(
+        session.inheritance &&
+        descriptor.capabilities.pityScope === 'shared' &&
+        session.sharedPityState.lastSixPoolId !== descriptor.id &&
+        state.sixStarPity > 0
+      ),
+    },
     expandedTenPulls,
-    handleExportData,
-    handleExportReport,
-    handleCopyShareText,
-    handleCopyShareImage,
-    handleDownloadShareImage,
+    toggleTenPull: (id) =>
+      setExpandedTenPulls((previous) => {
+        const next = new Set(previous);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    handleExportData: (format) => {
+      downloadSimulatorData(
+        pullHistory,
+        currentSimPoolId,
+        currentSimPool?.name || t('simulator.defaultPoolName'),
+        currentPoolType,
+        format
+      );
+      showToastMessage(t('simulator.toast.exportData', { format: format.toUpperCase() }));
+    },
+    handleExportReport: () => {
+      downloadAnalysisReport(stats, pityInfo, currentPoolType);
+      showToastMessage(t('simulator.toast.exportReport'));
+    },
     handleInheritRealState,
     handlePull,
-    handleReset,
-    handleShareImage,
-    historyGroups,
+    handleReset: () => setShowResetConfirm(true),
+    historyGroups: processHistoryGroups(pullHistory),
     infoBookTenPullAvailable,
-    isAnimating,
     isInheritingRealState,
+    isAnimating,
+    isWeaponPool,
     lastResults,
+    setLastResults,
     pityInfoWithGuarantee,
-    poolPullCounts,
     poolCharactersList,
+    poolPullCounts: Object.fromEntries(
+      simulatorPools.map((p) => [p.id, session.pools[realId(p.id)]?.sequenceCount || 0])
+    ),
     pullHistory,
     resourceLedger,
     resourceSettings,
     resetAllPools,
     resetKeepResources,
     resetSettings,
-    shareActionFeedback,
-    isShareActionBusy,
-    setDisableOriginitePromptToday,
-    setLastResults,
-    setResourceSettings,
     setResetAllPools,
     setResetKeepResources,
     setResetSettings,
-    setShowPoolMenu,
     setSkipAnimation,
-    showOriginitePrompt,
-    showPoolMenu,
-    showResetConfirm,
-    showToast,
-    shareCardFileName: buildSimulatorShareCardFileName(sharePayload),
     sharePayload,
     shareTimelineSections,
-    singlePullDisabledReason,
+    showResetConfirm,
+    showToast,
     simulator,
     simulatorPools,
     skipAnimation,
-    supportsNativeImageShare,
-    supportsClipboardImageCopy,
     switchPool,
-    tenPullDisabledReason,
     toastMessage,
-    toggleTenPull,
     toggleCnOriginiteDoubleBonus,
     toggleInfiniteResources,
-    isWeaponPool,
-    updateResourceSetting: adjustResourceAmount,
   };
 }
-
-export default useGachaSimulatorController;

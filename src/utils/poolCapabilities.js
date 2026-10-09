@@ -5,10 +5,7 @@ import {
   UNRESOLVED_POOL_RULES,
   WEAPON_POOL_RULES,
 } from '../constants/index.js';
-import {
-  EXTRA_POOL_RULE_PROFILES,
-  EXTRA_POOL_SUBTYPES,
-} from '../../shared/extraPoolSubtype.js';
+import { EXTRA_POOL_RULE_PROFILES, EXTRA_POOL_SUBTYPES } from '../../shared/extraPoolSubtype.js';
 
 export const EXTRA_RULE_PROFILES = EXTRA_POOL_RULE_PROFILES;
 
@@ -139,21 +136,25 @@ function resolveOrdinaryPoolCapabilities(rawPoolType) {
  * extra_rule_profile；仅历史卡池 joint_1_2_2 可在 profile 缺失时回退为辉光庆典。
  */
 export function resolvePoolCapabilities(pool) {
-  const source = typeof pool === 'string' ? { type: pool } : (pool || {});
+  const source = typeof pool === 'string' ? { type: pool } : pool || {};
   const rawPoolType = normalizeCapabilityPoolType(source.type || source.pool_type);
   if (rawPoolType !== 'extra') {
+    if (rawPoolType === 'weapon' && (source.isLimitedWeapon ?? source.is_limited_weapon) === false) {
+      return {
+        ...resolveOrdinaryPoolCapabilities(rawPoolType),
+        targetMode: 'none',
+        targetCount: 0,
+        rules: { ...WEAPON_POOL_RULES, upProbability: 0, guaranteedLimitedPity: 0, guaranteedLimitedClaimPity: 0 },
+      };
+    }
     return resolveOrdinaryPoolCapabilities(rawPoolType);
   }
 
   const poolId = normalizeText(source.source_pool_id || source.sourcePoolId || source.id || source.pool_id);
-  const explicitRuleProfile = normalizeText(
-    source.extra_rule_profile ?? source.extraRuleProfile
-  );
+  const explicitRuleProfile = normalizeText(source.extra_rule_profile ?? source.extraRuleProfile);
   const seriesKey = normalizeText(source.extra_series_key ?? source.extraSeriesKey) || null;
   const isLegacyFallback = !explicitRuleProfile && poolId === 'joint_1_2_2';
-  const ruleProfile = isLegacyFallback
-    ? EXTRA_RULE_PROFILES.BRILLIANCE_FESTIVAL
-    : explicitRuleProfile || null;
+  const ruleProfile = isLegacyFallback ? EXTRA_RULE_PROFILES.BRILLIANCE_FESTIVAL : explicitRuleProfile || null;
 
   if (ruleProfile === EXTRA_RULE_PROFILES.RECONSTRUCTION_CHARACTER) {
     return createCapabilities({

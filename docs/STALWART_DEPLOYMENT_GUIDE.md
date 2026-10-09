@@ -1,21 +1,21 @@
 # Stalwart 自建邮件部署模板
 
-本文档用于把项目的邮件方向从“只做 outbox / 演练模式”推进到 Stalwart-first 的可公开部署模板。当前代码仍默认 `MAIL_WORKER_DRY_RUN=true`（演练模式），不会真实发信；本指南只保留部署、验证、回滚和运维方法，不记录任何现有生产设施或人员信息。
+本文提供 Stalwart 部署、应用邮件接入和故障诊断方法。代码默认 `MAIL_WORKER_DRY_RUN=true`（演练模式）；启用真实发信前须完成下述配置与小范围验证。
 
-## 认证发布额外门禁
+## 账号恢复邮件的前提
 
-`AUTH-HARDEN-001` Phase A–D、PR #14 和生产 166–168 已完成，认证 API 已随主线发布。测试邮件只证明投递链路，不能证明账号归属或 OAuth / Session 安全闭环；LinuxDo 已降为 P3，真实 Connect Client 验收完成前保持关闭且不阻塞本发布。
+测试邮件只证明投递链路，不能证明账号归属或 OAuth / Session 安全。启用账号恢复邮件前，还需验证身份核对、恢复流程和人工恢复渠道；未验收的登录提供方保持关闭。
 
-## 结论
+## 接入方式
 
-- 第一阶段优先使用 Stalwart：它更适合当前自建 Supabase 服务器的资源余量，也保留后续完整邮箱能力。
-- Postal 暂退为后续独立邮件 VPS 上的事务邮件平台备选。
-- Cloudflare Email Routing 可以做免费收信转发；Cloudflare Email Sending 可以通过 Workers / external servers REST API 发信，但发信需要 Workers Paid，额度为每月 3,000 封，超出后 $0.35 / 1,000 封。它可以作为后续 fallback adapter，不替代 Stalwart 主线。
-- 应用只写 `mail_outbox`，由受控 worker 拉取并调用 provider。前端和公开 API 不直接调用 Stalwart 或 Cloudflare。
+- 低流量事务邮件优先使用 Stalwart，部署前按目标服务器实际资源评估；它也支持后续完整邮箱能力。
+- Postal 可作为独立邮件 VPS 上的事务邮件平台备选。
+- Cloudflare 收信转发或发送服务可以作为另一 adapter 的选项，能力、价格与额度按供应商当前文档核对。
+- 事务通知写 `mail_outbox`，由受控 Worker 调用 provider；认证邮件通过受保护同源入口同步发送。浏览器不直接调用邮件服务器，两条链路都遵守应用防刷与停发设置，见 [邮件架构](SELF_HOSTED_MAIL.md)。
 
 ## 部署前服务器评估模板
 
-先从私有资产清单读取目标服务器规格，并把评估结果记录在受限运维系统中。公开文档只保留以下判断口径：
+确认目标主机规格、现有服务和 SMTP 出站条件，再选择部署规模：
 
 | 项目 | 待部署服务器 | Stalwart 参考需求 | 判断 |
 | --- | --- | --- | --- |
@@ -27,6 +27,8 @@
 | 出站 SMTP | `<open-or-blocked>` | 直接投递时需要 | `<assessment>` |
 | 现有服务 | `<co-located-services>` | Stalwart 建议按实际负载调参 | `<assessment>` |
 
+资源数值仅用于初步规划，不是性能承诺；同机部署还须为数据库、导入和统计 Worker 留出余量。
+
 同机部署边界：
 
 - 只做低频事务邮件：密码重置、工单提醒、审核通知、管理员告警。
@@ -35,7 +37,7 @@
 - 保持 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH=true`（环境级紧急停发）到真实发信链路验证完成。
 - 生产前要限制连接数、日志保留、队列重试和 Stalwart 存储增长。
 
-## 部署状态记录模板
+## 部署配置记录
 
 以下字段用于私有运维记录；公开副本必须只保留占位符：
 
@@ -47,12 +49,12 @@
 - 容器名：`stalwart`
 - 镜像：`stalwartlabs/stalwart:v0.16`
 - 管理端：仅绑定 `<loopback-address>:<local-admin-port> -> <container-admin-port>`
-- 当前状态：`<container-health>`
+- 容器健康状态：`<container-health>`
 - 管理入口：`https://<mail-host>/<admin-path>`，应配合访问控制，不在公开记录中保留真实入口
 - 公网端口：`<public-mail-ports>`
 - 回滚备份：`<private-backup-path>`
 
-生产前置检查记录模板：
+生产前置检查：
 
 - `<mail-host> A -> <mail-server-ip>`
 - `<mail-domain> MX -> <mail-host>`
@@ -69,11 +71,10 @@
 - `<sender@example.com>` SMTP AUTH 测试通过；本域内测试邮件 `<sender@example.com> -> <postmaster@example.com>` 已成功入库投递。
 - 外部投递测试邮件已完成：`<sender@example.com> -> <external-test-recipient@example.com>` 被目标服务器接受并进入投递队列。
 
-当前仍未完成：
-
-- 真实发信仍未启用；项目环境变量继续保持 `MAIL_WORKER_DRY_RUN=true`（演练模式）和 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH=true`（环境级紧急停发）。
-- 应用侧 Stalwart SMTP live transport 已接入；内部 `/api/mail-delivery-feedback` 已可记录 hard bounce / complaint / invalid recipient / domain pause，也能接收 Stalwart Telemetry Webhook 的 `{ events: [...] }` 批量投递事件并按永久失败写入 suppression；内部 `/api/mail-inbound` 已可记录 Stalwart Webhooks / MTA Hooks 或受控桥接脚本提交的入站摘要；后台“站点健康”和“邮件状态”面板已可查看 outbox、suppression、delivery events、入站事件、预算高水位、环境变量硬闸门和 `site_config.mail_runtime_config` 运行期开关；JMAP live transport 仍未接入。
-- Outlook 原始邮件头已确认 `SPF / RSA DKIM / DMARC / compauth` 均通过；Ed25519 DKIM 已退役。Outlook 仍按 `SCL=5` 投递到垃圾邮件夹，后续按冷启动信誉问题处理。
+应用侧支持 Stalwart SMTP 真实传输。内部 `/api/mail-delivery-feedback` 接收投递反馈和
+Stalwart `{ events: [...] }` 批量事件；`/api/mail-inbound` 接收入站摘要。后台“站点健康”
+与“邮件状态”可查看队列、suppression、delivery events、入站事件、预算和运行期开关。
+JMAP 真实传输尚未接入，不能仅配置 URL 就视为可用。
 
 访问 WebUI 的推荐方式：
 
@@ -108,40 +109,33 @@ Stalwart 部署完成后应仅按规划提供 SMTP / SMTPS / IMAPS，使用 ACME
 
 - `<sender@example.com>` 使用单独强密码，只授予 SMTP submission 所需能力。
 - 不把管理员账号密码配置进项目环境变量。
-- 真实发信灰度前仍保持项目侧 `MAIL_WORKER_DRY_RUN=true`（演练模式）和 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH=true`（环境级紧急停发）。
+- 真实发信小范围验证前仍保持项目侧 `MAIL_WORKER_DRY_RUN=true`（演练模式）和 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH=true`（环境级紧急停发）。
 
-### 当前下一步：投递信誉与认证审计
+### 投递信誉与认证诊断
 
 账号创建、本域内投递、外部投递测试邮件和应用侧 Stalwart SMTP 真实传输均应纳入验收。如果目标邮箱服务已接受测试邮件、收件侧也确认收到，但邮件进入垃圾邮件夹，这通常不是 SMTP 链路失败，而是冷启动域名 / IP 信誉和内容信誉需要继续验证。
 
-首封外部测试邮件的审计记录模板：
+收件侧原始邮件头可按以下字段核对：
 
 - `SPF`: pass，`smtp.mailfrom=<mail-domain>`，发信 IP `<mail-server-ip>` 被授权。
-- `DKIM`: RSA 签名 pass，`header.d=<mail-domain>`；Ed25519 签名被目标服务标为 `signature syntax error`。
+- `DKIM`: 签名应为 pass，`header.d=<mail-domain>`；若出现 `signature syntax error`，检查签名算法兼容性与配置。
 - `DMARC`: pass，`header.from=<mail-domain>`。
 - `compauth`: pass。
 - `SCL`: 5，`X-Microsoft-Antispam-Mailbox-Delivery` 显示 `dest:J` / `RF:JunkEmail`，因此进入垃圾邮件夹。
 
-历史观察结论（Ed25519 退役前）：这不是认证主链失败。为了减少兼容性负信号，当时的处置建议是只保留 RSA-SHA256 DKIM 外发签名、暂停 Ed25519，并用真实事务邮件内容低频复测。
+若 `SPF / DKIM / DMARC / compauth` 均通过，但 Outlook 仍显示 `SCL=5` 和垃圾邮件
+投递标记，应继续检查 IP／域名信誉、内容与收件端信任，不能只反复修改 DKIM。
+遇到 Ed25519 兼容性错误时，可停用该签名并仅保留 RSA-SHA256，核对新邮件头后再判断。
 
-当前记录状态（Ed25519 已退役后的复测结果）：
+按以下顺序小范围验证：
 
-- Stalwart 的 Ed25519 DKIM signature 已进入 pending deletion / retired 状态。
-- 新邮件头只剩 `DKIM-Signature: a=rsa-sha256`。
-- Outlook `Authentication-Results`: `spf=pass`、`dkim=pass`、`dmarc=pass`、`compauth=pass`。
-- Outlook 仍给 `X-MS-Exchange-Organization-SCL: 5`，并继续投递到 `dest:J` / `RF:JunkEmail`。
-
-结论：DKIM 兼容性问题已排除；后续不要继续围绕 DKIM 配置排查垃圾箱问题，应进入 IP / 域名信誉、邮件内容和收件端信任预热阶段。
-
-下一步按低风险顺序推进：
-
-1. 保持 Ed25519 DKIM 退役，只保留 RSA-SHA256 DKIM 外发签名。
-2. 改用真实事务邮件内容低频测试，不再使用“测试”主题和过短正文。
+1. 核对实际邮件头中的认证结果与签名算法，修复明确的认证错误。
+2. 使用接近实际事务邮件的内容低频测试，避免只用“测试”主题和过短正文评估投递信誉。
 3. 检查 `From`、`Return-Path`、`Message-ID`、`HELO/EHLO` 是否与 `<mail-domain>` / `<mail-host>` 边界一致。
 4. 让测试收件账号在目标邮箱服务中把 `<sender@example.com>` 标记为“非垃圾邮件”，并加入联系人或安全发件人列表；这只能改善该用户侧信任，不代表全局信誉已建立。
 5. 保留低频人工测试邮件，不做批量测试；新域名 / 新 IP 先用真实事务类内容慢速预热。
-6. 在 Stalwart 管理端配置真实 Telemetry Webhook 并完成真实事件复测后，再考虑打开 `MAIL_WORKER_DRY_RUN=false`。项目侧 `/api/mail-delivery-feedback` 已能接收 Stalwart 批量投递事件，`/api/mail-inbound` 已能接收入站摘要；真实事件来源仍需在 Stalwart Webhooks、MTA Hooks 或受控日志轮询中配置。
-7. 即使 SMTP live transport 已可用，账号恢复邮件仍保持 `ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=false`，直到投递监控和人工恢复 fallback 都验证完成。
+6. 在 Stalwart 管理端配置 Telemetry Webhook 并验证实际事件回写后，再按上线开关顺序关闭演练模式。事件来源需在 Stalwart Webhooks、MTA Hooks 或受控日志轮询中配置。
+7. 即使 SMTP 真实传输已可用，账号恢复邮件仍保持 `ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=false`，直到投递监控和人工恢复渠道都验证完成。
 
 ### Submission listener 配置模板
 
@@ -260,7 +254,7 @@ openssl s_client -connect <mail-host>:<imaps-port> -servername <mail-host> -brie
 | 465 | SMTPS | 可选 |
 | 443 | HTTPS / JMAP / Web 管理 | 推荐通过现有 OpenResty 反代 |
 | 8080 | 初始 HTTP 管理 / bootstrap | 只绑定本机或临时防火墙放行 |
-| 993 / 143 | IMAP / IMAPS | Phase 1 不需要，可不开放 |
+| 993 / 143 | IMAP / IMAPS | 仅事务邮件阶段不需要，可不开放 |
 
 ### 2. 准备 Docker 数据目录
 
@@ -312,7 +306,7 @@ docker logs stalwart --tail=100
 
 ### 4. 完成 WebUI 初始化
 
-1. 访问 `http://<mail-server-ip>:<admin-port>/<admin-path>` 或反代后的 `https://mail.example.com/<admin-path>`。
+1. 通过上述 SSH 隧道访问 `http://<loopback-host>:<local-admin-port>/<admin-path>`，或访问受控反代后的 `https://mail.example.com/<admin-path>`。
 2. 从私有密码管理器或服务器受限 secret store 临时注入 `STALWART_RECOVERY_ADMIN` 后登录，不在命令行或文档中打印其值。
 3. 设置 server hostname，例如 `mail.example.com`。
 4. 设置 default email domain，例如 `example.com` 或 `notify.example.com`。
@@ -437,15 +431,13 @@ MAIL_OUTBOX_WORKER_ENABLED=true MAIL_WORKER_DRY_RUN=true npm run worker:mail-out
 真实发信前按顺序推进：
 
 1. 保持 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH=true`（环境级紧急停发）。
-2. Stalwart SMTP 真实传输、内部 `/api/mail-outbox-worker`、每日 Vercel Cron 触发、后台测试邮件入口、应用侧基础 suppression 回写、Stalwart Telemetry Webhook 批量投递事件归一、后台基础健康面板、发送预算高水位摘要、预算在线编辑和投递失败脱敏下钻已完成；JMAP 仍可后续补齐。
-3. Outlook 垃圾邮件夹结果暂不阻断后续本地测试，但要继续按冷启动信誉处理，不做批量发信。
-4. 在 Stalwart 管理端把投递事件 Webhook 配置到内部 `/api/mail-delivery-feedback`，或先用受控日志轮询调用该入口，完成 live 事件复测。
-5. 如果要观测 `support@`、`postmaster@`、`abuse@` 的入站邮件，使用 Stalwart Webhooks / MTA Hooks 或桥接脚本调用 `/api/mail-inbound`；该入口只保存脱敏摘要，不解析正文、不自动生成工单。
-6. 管理后台已能查看队列、suppression、delivery events、入站事件、发送预算高水位、环境变量硬闸门和运行期开关，并能手动处理到期 outbox、编辑预算配置和查看脱敏失败原因；Vercel Cron 每日触发一次 `/api/mail-outbox-worker`，但仍不会绕过 `MAIL_OUTBOX_WORKER_ENABLED`、演练模式、全局紧急停发或运行期紧急停发。后续补真实 Stalwart Webhook 小范围测试记录。
-7. 先只对管理员账号或测试域名开启。
-8. `MAIL_WORKER_DRY_RUN=false`，但 `ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=false`。
-9. 手动投递测试通过后再开启小范围账号恢复邮件。
-10. 最后再按事件类型开放注册确认、工单回复、开发者 API 审核通知。
+2. 在演练模式下验证 SMTP 配置、内部 `/api/mail-outbox-worker`、测试邮件入口、suppression、发送预算和后台状态。Vercel Cron 每日触发该 Worker，但不会绕过 `MAIL_OUTBOX_WORKER_ENABLED`、演练模式、全局或运行期紧急停发。
+3. 将 Stalwart 投递 Webhook 配置到 `/api/mail-delivery-feedback`，或使用携带 secret 的受控日志轮询，验证实际事件回写。
+4. 如需观测 `support@`、`postmaster@`、`abuse@`，用 Stalwart Webhooks / MTA Hooks 或桥接脚本调用 `/api/mail-inbound`；该入口只保存脱敏摘要，不解析正文、不自动生成工单。
+5. 确认后台能查看队列、失败原因和预算，运行期开关将收件范围限制到管理员账号或测试域名。
+6. 开启 `MAIL_OUTBOX_WORKER_ENABLED=true`，设置 `MAIL_WORKER_DRY_RUN=false`，确认运行期允许发送后再解除环境级紧急停发；保持 `ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=false`。手动发送少量测试邮件，核对收件、认证头和反馈事件；垃圾邮件夹问题按信誉诊断处理，不做批量发信。
+7. 投递监控、身份核对和人工恢复渠道均验证完成后，再开启小范围账号恢复邮件。
+8. 最后按事件类型逐步开放注册确认、工单回复和开发者 API 审核通知。
 
 ## Cloudflare Email 是否能接入
 

@@ -4,6 +4,8 @@
 自建 Supabase PostgreSQL 的 `pg_cron + pg_net` 中，不使用 Vercel 高频 Cron，
 也不依赖可能延迟数十分钟的 GitHub Scheduled Workflow。
 
+个人 owner/account 分析 Worker 与 v4 公共／个人统计的独立 Docker Worker 是不同链路，后者见 [STATISTICS_SCHEDULING.md](STATISTICS_SCHEDULING.md)。发布涉及分析能力时，须核对本 Worker 的不可变部署地址，并重建受影响快照；主站部署成功不能代替该核验。
+
 ## 调度方式
 
 - migrations：178 建立定时调度，179/180 增加节流与优先级感知即时派发
@@ -55,9 +57,9 @@ personal_analysis_worker_vercel_bypass_secret=<Deployment Protection bypass secr
 SELECT public.request_personal_analysis_worker_dispatch(NULL, 5);
 ```
 
-自建数据库必须已经预加载并提供 `pg_cron`、`pg_net` 与 `supabase_vault`。生产当前
-使用数据库 `postgres`，`cron.database_name` 和 `pg_net.database_name` 也必须指向
-该数据库。
+自建数据库必须已经预加载并提供 `pg_cron`、`pg_net` 与 `supabase_vault`。
+`cron.database_name` 和 `pg_net.database_name` 必须指向实际业务数据库；使用默认
+数据库 `postgres` 时，两项均设置为 `postgres`。
 
 ### GitHub 手动应急入口
 
@@ -112,10 +114,9 @@ Migration 177 增加 `priority_requested_at`。分析 API 发现当前用户的 
 如果 Vault、pg_cron 或 pg_net 不可用，不能把用户请求伪装成“正在排队”。分析 API
 会返回明确的 `personal_analysis_queue_unavailable` 503，页面保留可诊断的错误状态。
 
-## 已核对的发布证据
+## 发布与诊断注意事项
 
-- PR #24 已将 Session 循环修复、即时派发、短间隔轻量检查和 45 秒多批 Worker 合入主线；PR #25 已修复含 `:` 的附加寻访 `viewKey` 触发 PostgREST `PGRST100 / HTTP 500` 的问题。
-- 2026-08-27 当前发布主线为 `d186a425d5fb29aad940b4f08027744dfecbc602`，GitHub CI 与 GitHub-connected Vercel Production 已核对为成功 / Ready。
-- 1789 条合成历史、4 个游戏账号、25 个卡池的一次真实浏览器冷启动观测约为 `13.1s`，其中 `building → ready` 约 `6s`，未观察到 `building → loading` 或页面错误。该结果是一次脱敏 E2E 观测，不是 SLA 或长期性能承诺。
-- 生产带 `viewKey=__group_extra:reconstruction` 的真实登录请求返回 HTTP 200 / `availability=ready`。测试账号没有该分组记录时目标视图为空属于正常结果；单元测试覆盖有数据时只投影目标 view / locale。
-- 源码 migration 181–183 是为解决分支编号冲突后的前向文件名。生产数据库只读核验确认已经具备最终字段、约束、触发器、受限 RPC、种子卡池与版本绑定；不要据此重复执行重编号迁移。
+- PR #24 引入即时派发、轻量轮询和多批 Worker；PR #25 修复包含 `:` 的附加寻访 `viewKey` 查询。验证 `viewKey=__group_extra:reconstruction` 时，无该分组记录的账号可以正常返回空视图；有记录时只投影目标 view / locale。
+- PR #39 修复旧固定部署漏读重构规则的问题。升级后核对 `poolManifest.extra_rule_profile` 与时间线 `stageKind`，再确认受影响快照已按新代码生成。
+- 源码 migration 181–183 是编号冲突后的前向文件名。既有环境应核对最终字段、约束、触发器、受限 RPC、种子卡池与版本绑定，再判断缺失迁移；不能仅按文件编号重复执行已生效内容。
+- 历史发布或测试结果不代表当前生产队列状态。每次部署均按上面的调度状态检查确认派发、HTTP 响应与快照发布。

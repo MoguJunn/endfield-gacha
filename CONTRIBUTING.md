@@ -1,30 +1,34 @@
-# Contributing
+# 贡献指南
 
-欢迎提交 Issue 和 Pull Request。
+欢迎报告问题、改进文档或提交代码。较大的功能和交互调整建议先开 Issue 说明目标，便于确认范围；小修复可以直接提交 Pull Request。
 
-## 提交前
-
-- 先确认改动是否属于当前公开主链，还是只应该留在私有环境。
-- 触及公开页面、统计、导入、缓存、自动化或部署配置时，优先对齐现有代码和文档边界。
-- 不要提交秘密、真实 token、生产数据库连接串、私有后端地址或临时调试账号。
-
-## 本地环境
-
-外部贡献者请复制安全模板：
+## 准备开发环境
 
 ```bash
+npm ci
 cp .env.contributor.example .env.local
+npm run dev
 ```
 
-该模板只包含浏览器端公开变量。`VITE_SUPABASE_PUBLISHABLE_KEY` 需要由维护者提供低权限公开 key，或改用贡献者自己的本地 Supabase。不要把 service role、JWT secret、SMTP 密码、OAuth Client Secret、BOT token、Cron secret 或 CAPTCHA secret 写入 `.env.local` 后提交。
+Node.js 与 npm 要求见 [README](README.md)。默认贡献者模板提供本地内容沙盒，读取公共目录，内容修改只保存在浏览器，无需数据库密钥。演示身份为 `demo-admin@local.invalid` / `frontend-demo`。
 
-新版桌面首页已在 v4.6.0 成为默认入口，`/?home-demo=unified` 保留兼容。当前 v4.6.2 候选统一各桌面页与首页的响应式宽度，并更新统计工作区；生产迁移、Worker 和 v4 快照预热尚未执行。调整首页、顶栏、统计入口或共享组件前，请对齐 [桌面界面合同](docs/DESKTOP_HOME_DEMO.md) 和 [统计口径合同](docs/STATS_OBSERVATION_CONTRACT.md)，保留 1366×768 基线、独立版本主题接口及移动端边界。
+调试真实认证或数据库时，关闭沙盒并使用自己的隔离环境。真实密钥、用户记录和可登录后端的测试身份不要放入代码、截图或 Issue；公开演示身份没有生产权限，允许随文档提供。
 
-指南样例位于开发服务器的 `/statistics-preview.html`，仅在 Vite DEV 中渲染，未接入真实登录、导入或备份动作。它与贡献者数据沙盒是独立入口；真实统计的只读本地预览按 [统计调度说明](docs/STATISTICS_SCHEDULING.md) 准备，不代表生产 Worker 已启用。
+详细环境和启动说明见 [PROJECT_GUIDE](docs/PROJECT_GUIDE.md)。
 
-## 最低验证
+## 找到修改入口
 
-公开主链改动建议至少跑：
+- 页面、路由和状态：[代码地图](docs/CODEMAP.md)。
+- 数据读取、私有边界和后台计算：[架构](docs/ARCHITECTURE.md)。
+- 首页布局、导航和消息交互：[桌面界面合同](docs/DESKTOP_HOME_DEMO.md)。
+- 统计定义与调度：[观测合同](docs/STATS_OBSERVATION_CONTRACT.md)、[快照调度](docs/STATISTICS_SCHEDULING.md)。
+- 卡池日期和官方来源：[时间管理](docs/POOL_SCHEDULE_MANAGEMENT.md)。
+
+`/statistics-preview.html` 是开发预览，指南按钮尚未连接真实登录、导入或备份。请按 [项目进展](docs/RECENT_DELIVERY_STATUS.md) 区分可用功能和设计方案。
+
+## 验证修改
+
+代码改动通常执行：
 
 ```bash
 npm run lint
@@ -33,38 +37,20 @@ npm run build
 git diff --check
 ```
 
-如果改到了公共数据、缓存或自动化，再补跑对应的专项验证，例如：
+优先覆盖受影响的合同。公共 API、缓存或自动化变更补运行 `npm test` 和相应 `test:*` 脚本；认证变更运行 `test:auth-hardening-phase-a`、`test:auth-hardening-phase-cd` 并验证相关 Session／provider 行为。
 
-```bash
-npm test
-npm run test:public-api-boundary
-npm run test:bootstrap-cache
-npm run test:ops-automation
-npm run test:official-announcements-feed
-```
+数据库迁移需重新生成并验证 baseline，必要时使用临时 PostgreSQL 做真实执行验证，见 [数据库指南](supabase/README.md)。文档修改检查链接、命令和内容一致性即可；在 PR 中说明已执行的检查和环境限制。
 
-如果改到了邮箱、密码、OAuth、站点 Session、身份 key 或认证迁移，还必须补跑：
+## 文件与文档
 
-```bash
-npm run test:auth-hardening-phase-a
-npm run test:auth-hardening-phase-cd
-npm run test:supabase-baseline
-npm run test:supabase-baseline:smoke
-```
+- 每个 PR 聚焦一个主题，避免批量格式化无关源码。
+- 更新页面、API、环境变量或部署方式时，同时更新对应说明；README 保持简短，细节放入专题。
+- 公共文档直接说明功能、使用方法与维护要求，不要求读者访问维护者的个人目录、内部任务账本或会话记录。
+- CSS 处理在 `vite.config.js`，Tailwind 主题在 `src/index.css`；Prettier 选项在 `package.json`，测试初始化在 `tests/setup.js`。
+- 跟踪的生成物随源文件刷新，例如 `npm run share:renderer`；构建输出、临时报告和真实环境文件不进入提交，范围见 [仓库结构](docs/REPOSITORY_LAYOUT.md)。
 
-认证迁移编号改变后必须重新生成并验证 baseline；本地测试通过不代表真实浏览器回归、生产迁移或部署已经完成。真实 OAuth secret、identity hash key、邮箱 challenge 和临时凭据不得进入提交。
+## 提交 Pull Request
 
-## 文档要求
+从最新主线建立主题分支，说明问题、改后行为和验证结果；UI 调整附上相关截图。标题使用 `feat:`、`fix:`、`docs:`、`test:`、`perf:` 或 `chore:`，概括修改的目的。
 
-- UI 或路由变更请同步更新 README、截图或代码地图。
-- 桌面 Demo 改动同步 `docs/DESKTOP_HOME_DEMO.md`；区分本地验收、最终改动验证和正式发布，预览阶段不替换 README 的正式站截图。
-- 环境变量、部署方式、Supabase baseline、公共缓存版本和自动化入口变更时，请同步更新对应文档。
-- 如果改动会影响 GitHub 页面展示，优先更新 README 顶部、预览图和更新日志。
-
-## 提交建议
-
-- 单个 PR 聚焦一个主题，避免把功能、修复、依赖和文档整理混在一起。
-- 从 `v4.4.1` 起按 [Git Workflow](docs/GIT_WORKFLOW.md) 执行：功能走 `feat/vX.Y-*`，修复走 `fix/vX.Y-*`，版本收口走 `release/vX.Y.Z`。
-- 提交信息保持简洁明确，优先使用 `feat:`、`fix:`、`perf:`、`docs:`、`test:`、`chore:`。
-- 功能分支合入发布分支前整理为 1 个主题清晰的提交；修复分支按问题保持小提交。
-- 如果改动只影响文档，也请说明测试未运行或为何不需要运行。
+分支与发布流程见 [Git Workflow](docs/GIT_WORKFLOW.md)。安全漏洞请按 [Security Policy](SECURITY.md) 私密报告，不在公开 Issue 附带凭据或用户数据。

@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCrossPoolPityMap,
   buildPersonalAnalysisSnapshots,
-  createSnapshotCharacterResolver
+  createSnapshotCharacterResolver,
 } from '../personalAnalysisSnapshot.js';
 import { buildSummaryStats } from '../summaryStats.js';
+import { decodeHistories } from '../../../shared/simulator/historyCodec.js';
 
 const USER_ID = 'user-1';
 
@@ -27,7 +28,7 @@ function createPull({
     rarity,
     timestamp,
     character_name: overrides.character_name || `角色-${id}`,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -44,13 +45,13 @@ describe('buildPersonalAnalysisSnapshots', () => {
     const history = [
       createPull({ id: 'mine-1' }),
       createPull({ id: 'mine-2', timestamp: '2026-01-02T00:00:00.000Z' }),
-      createPull({ id: 'other', userId: 'user-2', gameUid: 'other-game' })
+      createPull({ id: 'other', userId: 'user-2', gameUid: 'other-game' }),
     ];
 
     const result = buildPersonalAnalysisSnapshots({
       history,
       pools: [{ id: 'standard-main', type: 'standard' }],
-      userId: USER_ID
+      userId: USER_ID,
     });
 
     expect(result.owner.accounts).toHaveLength(1);
@@ -58,7 +59,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
       accountKey: 'game-1::server:1',
       gameUid: 'game-1',
       recordCount: 2,
-      latestRecordAt: '2026-01-02T00:00:00.000Z'
+      latestRecordAt: '2026-01-02T00:00:00.000Z',
     });
     expect(result.owner.defaultAccountKey).toBe('game-1::server:1');
     expect(result.scopes).toHaveLength(1);
@@ -71,38 +72,38 @@ describe('buildPersonalAnalysisSnapshots', () => {
       createPull({ id: 'asia', gameUid: 'same-game', serverId: '2' }),
       createPull({ id: 'eu', gameUid: 'same-game', serverId: '3' }),
       createPull({ id: 'legacy-1', gameUid: null, serverId: '9' }),
-      createPull({ id: 'legacy-2', gameUid: null, serverId: '10' })
+      createPull({ id: 'legacy-2', gameUid: null, serverId: '10' }),
     ];
 
     const result = buildPersonalAnalysisSnapshots({
       history,
       pools: [{ id: 'standard-main', type: 'standard' }],
-      userId: USER_ID
+      userId: USER_ID,
     });
     const byKey = Object.fromEntries(result.scopes.map((scope) => [scope.scopeKey, scope]));
 
-    expect(Object.keys(byKey)).toEqual(expect.arrayContaining([
-      'same-game::server:2',
-      'same-game::server:3',
-      'legacy'
-    ]));
+    expect(Object.keys(byKey)).toEqual(
+      expect.arrayContaining(['same-game::server:2', 'same-game::server:3', 'legacy'])
+    );
     expect(byKey['same-game::server:2'].sourceServerScope).toBe('2');
     expect(byKey['same-game::server:3'].sourceServerScope).toBe('3');
     expect(byKey.legacy).toMatchObject({
       sourceGameUid: 'legacy',
-      sourceServerScope: '10'
+      sourceServerScope: '10',
     });
     expect(byKey.legacy.payload.account.recordCount).toBe(2);
   });
 
   it('旧 server_scope 不会被伪装成 server id，账号键与分页 API 一致', () => {
-    const history = [createPull({
-      id: 'legacy-scope',
-      gameUid: 'legacy-game',
-      serverId: null,
-      server_scope: 'legacy',
-      region: 'cn',
-    })];
+    const history = [
+      createPull({
+        id: 'legacy-scope',
+        gameUid: 'legacy-game',
+        serverId: null,
+        server_scope: 'legacy',
+        region: 'cn',
+      }),
+    ];
 
     const result = buildPersonalAnalysisSnapshots({
       history,
@@ -122,7 +123,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
   it('为限定单池使用账号内完整限定时间线计算跨池继承', () => {
     const pools = [
       { id: 'limited-a', type: 'limited', up_character: '限定甲' },
-      { id: 'limited-b', type: 'limited_character', up_character: '限定乙' }
+      { id: 'limited-b', type: 'limited_character', up_character: '限定乙' },
     ];
     const history = [
       createPull({
@@ -130,11 +131,11 @@ describe('buildPersonalAnalysisSnapshots', () => {
         poolId: 'limited-a',
         rarity: 6,
         character_name: '限定甲',
-        timestamp: '2026-01-01T00:00:00.000Z'
+        timestamp: '2026-01-01T00:00:00.000Z',
       }),
       createPull({ id: 'after-a', poolId: 'limited-a', timestamp: '2026-01-02T00:00:00.000Z' }),
       createPull({ id: 'in-b-1', poolId: 'limited-b', timestamp: '2026-01-03T00:00:00.000Z' }),
-      createPull({ id: 'in-b-2', poolId: 'limited-b', timestamp: '2026-01-04T00:00:00.000Z' })
+      createPull({ id: 'in-b-2', poolId: 'limited-b', timestamp: '2026-01-04T00:00:00.000Z' }),
     ];
 
     const { scopes } = buildPersonalAnalysisSnapshots({ history, pools, userId: USER_ID });
@@ -143,7 +144,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
     expect(limitedB.inheritedPityInfo).toEqual({
       inheritedPity: 3,
       inheritedPity5: 3,
-      hasInheritedPity: true
+      hasInheritedPity: true,
     });
     expect(limitedB.effectivePity).toEqual({ pity6: 3, pity5: 3, isInherited: true });
   });
@@ -156,14 +157,14 @@ describe('buildPersonalAnalysisSnapshots', () => {
         id: 'gift',
         special_type: 'gift',
         rarity: 6,
-        timestamp: '2026-01-03T00:00:00.000Z'
-      })
+        timestamp: '2026-01-03T00:00:00.000Z',
+      }),
     ];
 
     const { scopes } = buildPersonalAnalysisSnapshots({
       history,
       pools: [{ id: 'standard-main', type: 'standard' }],
-      userId: USER_ID
+      userId: USER_ID,
     });
     const payload = scopes[0].payload;
     const view = payload.dashboard.views['standard-main'];
@@ -172,7 +173,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
       totalPulls: 3,
       latestRecordAt: '2026-01-03T00:00:00.000Z',
       poolPullCounts: { 'standard-main': 3 },
-      poolLatestRecordAt: { 'standard-main': '2026-01-03T00:00:00.000Z' }
+      poolLatestRecordAt: { 'standard-main': '2026-01-03T00:00:00.000Z' },
     });
     expect(view.excludeFree.stats.total).toBe(1);
     expect(view.includeFree.stats.total).toBe(2);
@@ -184,18 +185,18 @@ describe('buildPersonalAnalysisSnapshots', () => {
     const pools = [
       { id: 'limited-a', type: 'limited', up_character: '限定甲' },
       { id: 'standard-main', type: 'standard' },
-      { id: 'weapon-main', type: 'weapon', up_character: '限定武器', isLimitedWeapon: true }
+      { id: 'weapon-main', type: 'weapon', up_character: '限定武器', isLimitedWeapon: true },
     ];
     const characters = [
       { id: 'limited-alpha', name: '限定甲', type: 'character', is_limited: true },
-      { id: 'limited-offrate', name: '往期限定', type: 'character', is_limited: true }
+      { id: 'limited-offrate', name: '往期限定', type: 'character', is_limited: true },
     ];
     const history = [
       createPull({
         id: 'limited-four',
         poolId: 'limited-a',
         character_name: '四星甲',
-        timestamp: '2026-01-01T00:00:00.000Z'
+        timestamp: '2026-01-01T00:00:00.000Z',
       }),
       createPull({
         id: 'limited-free',
@@ -204,7 +205,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
         character_name: '限定甲',
         character_id: 'limited-alpha',
         is_free: true,
-        timestamp: '2026-01-02T00:00:00.000Z'
+        timestamp: '2026-01-02T00:00:00.000Z',
       }),
       createPull({
         id: 'limited-target',
@@ -212,7 +213,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
         rarity: 6,
         character_name: '限定甲',
         character_id: 'limited-alpha',
-        timestamp: '2026-01-03T00:00:00.000Z'
+        timestamp: '2026-01-03T00:00:00.000Z',
       }),
       createPull({
         id: 'limited-offrate',
@@ -220,29 +221,29 @@ describe('buildPersonalAnalysisSnapshots', () => {
         rarity: 6,
         character_name: '往期限定',
         character_id: 'limited-offrate',
-        timestamp: '2026-01-04T00:00:00.000Z'
+        timestamp: '2026-01-04T00:00:00.000Z',
       }),
       createPull({
         id: 'standard-five',
         poolId: 'standard-main',
         rarity: 5,
         character_name: '常驻五星',
-        timestamp: '2026-01-05T00:00:00.000Z'
+        timestamp: '2026-01-05T00:00:00.000Z',
       }),
       createPull({
         id: 'weapon-six',
         poolId: 'weapon-main',
         rarity: 6,
         character_name: '限定武器',
-        timestamp: '2026-01-06T00:00:00.000Z'
-      })
+        timestamp: '2026-01-06T00:00:00.000Z',
+      }),
     ];
 
     const { scopes } = buildPersonalAnalysisSnapshots({
       history,
       pools,
       characters,
-      userId: USER_ID
+      userId: USER_ID,
     });
     const views = scopes[0].payload.dashboard.views;
     const limitedExclude = views['limited-a'].excludeFree;
@@ -252,18 +253,20 @@ describe('buildPersonalAnalysisSnapshots', () => {
     const timelineViews = scopes[0].payload.dashboard.timelineViews;
     const simulatorInheritance = scopes[0].payload.simulatorInheritance;
 
-    expect(limitedExclude.characterStats).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: '限定甲', count: 1, pities: [2] }),
-      expect.objectContaining({ name: '往期限定', count: 1, pities: [1] })
-    ]));
-    expect(limitedInclude.characterStats).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: '限定甲', count: 2, freeCount: 1, pities: ['free', 2] })
-    ]));
+    expect(limitedExclude.characterStats).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: '限定甲', count: 1, pities: [2] }),
+        expect.objectContaining({ name: '往期限定', count: 1, pities: [1] }),
+      ])
+    );
+    expect(limitedInclude.characterStats).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: '限定甲', count: 2, freeCount: 1, pities: ['free', 2] })])
+    );
     expect(limitedExclude.checkLimitedInFirstN).toEqual({
       firstTargetIndex: 2,
       firstLimitedIndex120: 2,
       firstLimitedIndex80: 2,
-      validPullCount: 3
+      validPullCount: 3,
     });
     expect(limitedExclude.hasReceivedFreeTen).toBe(true);
     expect(limitedExclude.splitOverviewStats).toBeNull();
@@ -272,54 +275,63 @@ describe('buildPersonalAnalysisSnapshots', () => {
     expect(allExclude.splitOverviewStats.character.total).toBe(4);
     expect(allExclude.splitOverviewStats.weapon.total).toBe(1);
     expect(allInclude.splitOverviewStats.character.total).toBe(5);
-    expect(allExclude.overviewCharacterStats.limited).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: '限定甲', count: 1 }),
-      expect.objectContaining({ name: '往期限定', count: 1 })
-    ]));
-    expect(allInclude.overviewCharacterStats.limited).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: '限定甲', count: 2, freeCount: 1 })
-    ]));
+    expect(allExclude.overviewCharacterStats.limited).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: '限定甲', count: 1 }),
+        expect.objectContaining({ name: '往期限定', count: 1 }),
+      ])
+    );
+    expect(allInclude.overviewCharacterStats.limited).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: '限定甲', count: 2, freeCount: 1 })])
+    );
     expect(allExclude.overviewCharacterStats.standard).toEqual([
-      expect.objectContaining({ name: '常驻五星', count: 1 })
+      expect.objectContaining({ name: '常驻五星', count: 1 }),
     ]);
-    expect(allExclude.overviewCharacterStats.weapon).toEqual([
-      expect.objectContaining({ name: '限定武器', count: 1 })
-    ]);
+    expect(allExclude.overviewCharacterStats.weapon).toEqual([expect.objectContaining({ name: '限定武器', count: 1 })]);
     expect(allExclude.overviewCharacterStats.extra).toEqual([]);
     expect(simulatorInheritance).toMatchObject({
-      hasAnyData: true,
-      statesByPoolId: {
-        'sim_limited-a': expect.objectContaining({ totalPulls: 3, sixStarPity: 0 }),
-        'sim_standard-main': expect.objectContaining({ totalPulls: 1 }),
-        'sim_weapon-main': expect.objectContaining({ totalPulls: 1 }),
+      contractVersion: 2,
+      session: {
+        version: 2,
+        scope: 'game-1::server:1',
+        sharedPityState: { sixStarPity: 0 },
+        pools: {
+          'limited-a': expect.objectContaining({ totalPulls: 3 }),
+          'standard-main': expect.objectContaining({ totalPulls: 1 }),
+          'weapon-main': expect.objectContaining({ totalPulls: 1 }),
+        },
       },
     });
-    expect(simulatorInheritance.statesByPoolId['sim_limited-a'].pullHistory).toHaveLength(3);
-    expect(simulatorInheritance.statesByPoolId['sim_limited-a'].pullHistory[0]).toEqual(expect.objectContaining({
-      pullNumber: 1,
-      rarity: 4,
-      characterName: '四星甲',
-    }));
+    const inheritedHistories = decodeHistories(simulatorInheritance.histories);
+    expect(inheritedHistories['limited-a']).toHaveLength(4);
+    expect(inheritedHistories['limited-a'][0]).toEqual(
+      expect.objectContaining({
+        sequenceIndex: 1,
+        kind: 'paid',
+        rarity: 4,
+        characterName: '四星甲',
+      })
+    );
+    expect(inheritedHistories['limited-a'].some((record) => record.kind === 'free')).toBe(true);
+    expect(simulatorInheritance.session.pools['limited-a']).not.toHaveProperty('pullHistory');
     expect(allExclude.dashboardResourceSummary).toMatchObject({
       characterPulls: 4,
       weaponPulls: 1,
       chargedCharacterPulls: 4,
-      chargedWeaponPulls: 1
+      chargedWeaponPulls: 1,
     });
     expect(allInclude.dashboardResourceSummary).toMatchObject({
       characterPulls: 5,
       weaponPulls: 1,
       chargedCharacterPulls: 4,
-      chargedWeaponPulls: 1
+      chargedWeaponPulls: 1,
     });
     expect(timelineViews['zh-CN']['limited-a']).toEqual([
       expect.objectContaining({
         id: 'limited-a',
         totalPulls: 3,
-        entries: expect.arrayContaining([
-          expect.objectContaining({ stageKind: 'up' })
-        ])
-      })
+        entries: expect.arrayContaining([expect.objectContaining({ stageKind: 'up' })]),
+      }),
     ]);
     expect(timelineViews['en-US'].__group_all.length).toBeGreaterThan(0);
     expect(JSON.stringify(timelineViews)).not.toContain('sourceRecordKeys');
@@ -332,7 +344,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
       createPull({ id: 'gift-six', rarity: 6, special_type: 'gift', timestamp: '2026-01-02T00:00:00.000Z' }),
       createPull({ id: 'free-five', rarity: 5, is_free: true, timestamp: '2026-01-03T00:00:00.000Z' }),
       createPull({ id: 'paid-five', rarity: 5, timestamp: '2026-01-04T00:00:00.000Z' }),
-      createPull({ id: 'paid-six', rarity: 6, timestamp: '2026-01-05T00:00:00.000Z' })
+      createPull({ id: 'paid-six', rarity: 6, timestamp: '2026-01-05T00:00:00.000Z' }),
     ]);
 
     expect(map.has('gift-six')).toBe(false);
@@ -347,11 +359,13 @@ describe('buildPersonalAnalysisSnapshots', () => {
     const { scopes } = buildPersonalAnalysisSnapshots({ history, pools: [], userId: USER_ID });
     const payload = scopes[0].payload;
 
-    expect(payload.poolManifest).toEqual([expect.objectContaining({
-      id: 'special_9_9_9',
-      type: 'limited',
-      isPlaceholder: true
-    })]);
+    expect(payload.poolManifest).toEqual([
+      expect.objectContaining({
+        id: 'special_9_9_9',
+        type: 'limited',
+        isPlaceholder: true,
+      }),
+    ]);
     expect(payload.dashboard.views['special_9_9_9'].excludeFree.stats.total).toBe(1);
     expect(payload.dashboard.views.__group_limited.excludeFree.stats.total).toBe(1);
   });
@@ -359,11 +373,11 @@ describe('buildPersonalAnalysisSnapshots', () => {
   it('直接用 owner 全量历史和显式角色元数据构建汇总', () => {
     const pools = [
       { id: 'limited-a', type: 'limited', up_character: 'Alpha' },
-      { id: 'standard-main', type: 'standard' }
+      { id: 'standard-main', type: 'standard' },
     ];
     const characters = [
       { id: 'char-alpha', name: 'Alpha', aliases: ['阿尔法'], rarity: 6, type: 'character' },
-      { id: 'char-beta', name: 'Beta', rarity: 4, type: 'character' }
+      { id: 'char-beta', name: 'Beta', rarity: 4, type: 'character' },
     ];
     const history = [
       createPull({
@@ -371,29 +385,29 @@ describe('buildPersonalAnalysisSnapshots', () => {
         poolId: 'limited-a',
         rarity: 6,
         character_name: 'Alpha',
-        character_id: 'char-alpha'
+        character_id: 'char-alpha',
       }),
       createPull({
         id: 'beta',
         gameUid: 'game-2',
         poolId: 'standard-main',
         character_name: 'Beta',
-        character_id: 'char-beta'
+        character_id: 'char-beta',
       }),
-      createPull({ id: 'other-user', userId: 'user-2', character_name: 'Beta' })
+      createPull({ id: 'other-user', userId: 'user-2', character_name: 'Beta' }),
     ];
 
     const result = buildPersonalAnalysisSnapshots({
       history,
       pools,
       characters,
-      userId: USER_ID
+      userId: USER_ID,
     });
     const expected = buildSummaryStats({
       history: history.filter((record) => record.user_id === USER_ID),
       pools,
       user: { id: USER_ID },
-      characters
+      characters,
     });
 
     expect(result.owner.summary).toEqual(expected);
@@ -401,19 +415,21 @@ describe('buildPersonalAnalysisSnapshots', () => {
   });
 
   it('只保留最近六条六星紧凑字段', () => {
-    const history = Array.from({ length: 8 }, (_, index) => createPull({
-      id: `six-${index}`,
-      rarity: 6,
-      character_name: `六星-${index}`,
-      character_id: `char-${index}`,
-      poolVersion: index < 4 ? 1 : 2,
-      timestamp: `2026-01-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`
-    }));
+    const history = Array.from({ length: 8 }, (_, index) =>
+      createPull({
+        id: `six-${index}`,
+        rarity: 6,
+        character_name: `六星-${index}`,
+        character_id: `char-${index}`,
+        poolVersion: index < 4 ? 1 : 2,
+        timestamp: `2026-01-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+      })
+    );
 
     const { scopes } = buildPersonalAnalysisSnapshots({
       history,
       pools: [{ id: 'standard-main', type: 'standard' }],
-      userId: USER_ID
+      userId: USER_ID,
     });
     const recent = scopes[0].payload.recentSixStars;
 
@@ -429,7 +445,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
       'poolId',
       'poolVersion',
       'rarity',
-      'timestamp'
+      'timestamp',
     ]);
   });
 
@@ -446,20 +462,22 @@ describe('buildPersonalAnalysisSnapshots', () => {
   it('返回值可 JSON 序列化且不泄漏 Map 或 Set', () => {
     const result = buildPersonalAnalysisSnapshots({
       history: [createPull({ id: 'serializable' })],
-      pools: [{
-        id: 'standard-main',
-        type: 'standard',
-        nestedMap: new Map([['key', { value: 1 }]]),
-        nestedSet: new Set(['a', 'b'])
-      }],
-      userId: USER_ID
+      pools: [
+        {
+          id: 'standard-main',
+          type: 'standard',
+          nestedMap: new Map([['key', { value: 1 }]]),
+          nestedSet: new Set(['a', 'b']),
+        },
+      ],
+      userId: USER_ID,
     });
 
     expect(() => JSON.stringify(result)).not.toThrow();
     assertNoMapOrSet(result);
     expect(result.scopes[0].payload.poolManifest[0]).toMatchObject({
       nestedMap: { key: { value: 1 } },
-      nestedSet: ['a', 'b']
+      nestedSet: ['a', 'b'],
     });
   });
 });

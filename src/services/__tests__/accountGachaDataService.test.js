@@ -8,12 +8,14 @@ import {
   loadAccountGachaData,
   loadAccountGachaHistoryPage,
   loadAccountGachaSeqKeys,
+  loadSimulatorInheritance,
   resolveAccountGachaAliases,
   saveAccountGachaData,
   updateAccountGachaRecord,
 } from '../accountGachaDataService.js';
 import { getSameOriginAuthHeaders } from '../authFetchService.js';
 import { fetchJsonWithTimeout } from '../supabaseRequest.js';
+import { packInheritanceProjection } from '../../../shared/simulator/historyCodec.js';
 
 vi.mock('../authFetchService.js', () => ({
   getSameOriginAuthHeaders: vi.fn(),
@@ -73,22 +75,125 @@ describe('accountGachaDataService', () => {
       warnings: [],
     });
 
-    expect(getSameOriginAuthHeaders).toHaveBeenCalledWith({
-      Accept: 'application/json',
-    }, {
-      syncSiteSession: false,
-      useSiteSessionCache: true,
-      allowSiteSessionToken: false,
-    });
-    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/account-gacha-data', {
-      method: 'GET',
-      credentials: 'same-origin',
-      headers: {
+    expect(getSameOriginAuthHeaders).toHaveBeenCalledWith(
+      {
         Accept: 'application/json',
       },
-    }, expect.objectContaining({
-      label: 'account-gacha-data',
-    }));
+      {
+        syncSiteSession: false,
+        useSiteSessionCache: true,
+        allowSiteSessionToken: false,
+      }
+    );
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith(
+      '/api/account-gacha-data',
+      {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+        },
+      },
+      expect.objectContaining({
+        label: 'account-gacha-data',
+      })
+    );
+  });
+
+  it('loads the dedicated v2 inheritance projection with matching revisions', async () => {
+    const simulatorInheritance = {
+      contractVersion: 2,
+      session: { version: 2, scope: 'uid::server:2' },
+      histories: {
+        'limited-a': [
+          {
+            kind: 'free',
+            eventId: 'r1',
+            sequenceIndex: 1,
+            rarity: 4,
+            isUp: false,
+            characterId: null,
+            characterName: '四星',
+            timestamp: 1,
+            poolId: 'limited-a',
+          },
+          {
+            kind: 'info_book',
+            eventId: 'r2',
+            sequenceIndex: 2,
+            rarity: 5,
+            isUp: false,
+            characterId: null,
+            characterName: '五星',
+            timestamp: 2,
+            poolId: 'limited-a',
+          },
+        ],
+      },
+      catalogSignature: 'catalog',
+    };
+    fetchJsonWithTimeout.mockResolvedValue({
+      response: { ok: true, status: 200 },
+      data: {
+        success: true,
+        availability: 'ready',
+        schemaVersion: 3,
+        simulatorInheritance: packInheritanceProjection(simulatorInheritance),
+        meta: { accountKey: 'uid::server:2', scopeRevision: '9', scopeSnapshotRevision: '9' },
+      },
+    });
+    await expect(loadSimulatorInheritance({ accountKey: 'uid::server:2' })).resolves.toMatchObject({
+      availability: 'ready',
+      simulatorInheritance,
+    });
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith(
+      '/api/account-gacha-data?mode=simulator-inheritance&accountKey=uid%3A%3Aserver%3A2',
+      expect.objectContaining({ method: 'GET', credentials: 'same-origin' }),
+      expect.objectContaining({ retries: 0 })
+    );
+  });
+
+  it.each(['schema', 'contract', 'revision', 'account'])(
+    'rejects ready inheritance with invalid %s',
+    async (failure) => {
+      const data = {
+        success: true,
+        availability: 'ready',
+        schemaVersion: 3,
+        simulatorInheritance: {
+          contractVersion: 2,
+          session: { version: 2, scope: 'uid::server:2' },
+          histories: {},
+          catalogSignature: 'catalog',
+        },
+        meta: { accountKey: 'uid::server:2', scopeRevision: '9', scopeSnapshotRevision: '9' },
+      };
+      if (failure === 'schema') data.schemaVersion = 2;
+      if (failure === 'contract') data.simulatorInheritance.contractVersion = 1;
+      if (failure === 'revision') data.meta.scopeSnapshotRevision = '8';
+      if (failure === 'account') data.meta.accountKey = 'uid::server:3';
+      fetchJsonWithTimeout.mockResolvedValue({ response: { ok: true, status: 200 }, data });
+      await expect(loadSimulatorInheritance({ accountKey: 'uid::server:2' })).rejects.toMatchObject({
+        code: 'simulator_inheritance_response_invalid',
+      });
+    }
+  );
+
+  it('keeps rebuilding inheritance unavailable even if a stale projection is present', async () => {
+    fetchJsonWithTimeout.mockResolvedValue({
+      response: { ok: true, status: 202 },
+      data: {
+        success: true,
+        availability: 'building',
+        schemaVersion: 3,
+        simulatorInheritance: { contractVersion: 1 },
+        meta: { retryAfterSeconds: 3 },
+      },
+    });
+    await expect(loadSimulatorInheritance()).resolves.toMatchObject({
+      availability: 'building',
+      simulatorInheritance: null,
+    });
   });
 
   it('loads a lightweight analysis snapshot without requiring a history array', async () => {
@@ -119,9 +224,11 @@ describe('accountGachaDataService', () => {
       },
     });
 
-    await expect(loadAccountGachaAnalysis({
-      accountKey: 'game-1::server:2',
-    })).resolves.toEqual({
+    await expect(
+      loadAccountGachaAnalysis({
+        accountKey: 'game-1::server:2',
+      })
+    ).resolves.toEqual({
       availability: 'stale',
       schemaVersion: 1,
       owner: {
@@ -190,14 +297,18 @@ describe('accountGachaDataService', () => {
 
     await loadAccountGachaData();
 
-    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/account-gacha-data', {
-      method: 'GET',
-      credentials: 'same-origin',
-      headers: {
-        Accept: 'application/json',
-        Authorization: 'Bearer native-token',
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith(
+      '/api/account-gacha-data',
+      {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer native-token',
+        },
       },
-    }, expect.any(Object));
+      expect.any(Object)
+    );
   });
 
   it('throws a readable error when the endpoint rejects the request', async () => {
@@ -260,15 +371,19 @@ describe('accountGachaDataService', () => {
       warnings: [],
     });
 
-    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/account-gacha-data?mode=seq-keys&gameUid=game-1', {
-      method: 'GET',
-      credentials: 'same-origin',
-      headers: {
-        Accept: 'application/json',
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith(
+      '/api/account-gacha-data?mode=seq-keys&gameUid=game-1',
+      {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+        },
       },
-    }, expect.objectContaining({
-      label: 'account-gacha-data-seq-keys',
-    }));
+      expect.objectContaining({
+        label: 'account-gacha-data-seq-keys',
+      })
+    );
   });
 
   it('loads one bounded history page with an account-scoped cursor', async () => {
@@ -303,15 +418,17 @@ describe('accountGachaDataService', () => {
       },
     });
 
-    await expect(loadAccountGachaHistoryPage({
-      gameUid: 'game-1',
-      accountKey: 'game-1::server:2',
-      serverScope: '2',
-      poolId: 'pool-1',
-      region: 'intl',
-      cursor: 'current-cursor',
-      limit: 25,
-    })).resolves.toEqual({
+    await expect(
+      loadAccountGachaHistoryPage({
+        gameUid: 'game-1',
+        accountKey: 'game-1::server:2',
+        serverScope: '2',
+        poolId: 'pool-1',
+        region: 'intl',
+        cursor: 'current-cursor',
+        limit: 25,
+      })
+    ).resolves.toEqual({
       records: [{ id: 'record-1' }],
       page: {
         limit: 25,
@@ -421,17 +538,9 @@ describe('accountGachaDataService', () => {
       pageLimit: 2,
     });
 
-    expect(result.history.map((item) => item.id)).toEqual([
-      'record-1',
-      'record-2',
-      'record-3',
-      'record-4',
-    ]);
+    expect(result.history.map((item) => item.id)).toEqual(['record-1', 'record-2', 'record-3', 'record-4']);
     expect(result.accounts).toEqual([accountOne, accountTwo]);
-    expect(result.warnings).toEqual([
-      { code: 'page-one-warning' },
-      { code: 'account-two-warning' },
-    ]);
+    expect(result.warnings).toEqual([{ code: 'page-one-warning' }, { code: 'account-two-warning' }]);
     expect(onProgress).toHaveBeenLastCalledWith({
       accountIndex: 1,
       accountCount: 2,
@@ -450,13 +559,17 @@ describe('accountGachaDataService', () => {
   });
 
   it('rejects an incomplete account before starting paged reads', async () => {
-    await expect(loadAllAccountGachaHistoryForAccounts({
-      accounts: [{
-        accountKey: 'game-1::server:1',
-        gameUid: 'game-1',
-      }],
-      expectedOwnerId: 'user-1',
-    })).rejects.toMatchObject({
+    await expect(
+      loadAllAccountGachaHistoryForAccounts({
+        accounts: [
+          {
+            accountKey: 'game-1::server:1',
+            gameUid: 'game-1',
+          },
+        ],
+        expectedOwnerId: 'user-1',
+      })
+    ).rejects.toMatchObject({
       code: 'account_gacha_history_account_invalid',
     });
     expect(fetchJsonWithTimeout).not.toHaveBeenCalled();
@@ -473,15 +586,19 @@ describe('accountGachaDataService', () => {
       },
     });
 
-    await expect(loadAllAccountGachaHistoryForAccounts({
-      accounts: [{
-        accountKey: 'game-1::server:1',
-        gameUid: 'game-1',
-        serverScope: '1',
-        region: null,
-      }],
-      expectedOwnerId: 'user-1',
-    })).resolves.toMatchObject({
+    await expect(
+      loadAllAccountGachaHistoryForAccounts({
+        accounts: [
+          {
+            accountKey: 'game-1::server:1',
+            gameUid: 'game-1',
+            serverScope: '1',
+            region: null,
+          },
+        ],
+        expectedOwnerId: 'user-1',
+      })
+    ).resolves.toMatchObject({
       history: [{ id: 'record-1' }],
     });
   });
@@ -497,15 +614,19 @@ describe('accountGachaDataService', () => {
       },
     });
 
-    await expect(loadAllAccountGachaHistoryForAccounts({
-      accounts: [{
-        accountKey: 'game-1::server:1',
-        gameUid: 'game-1',
-        serverScope: '1',
-        region: 'cn',
-      }],
-      expectedOwnerId: 'user-1',
-    })).rejects.toMatchObject({
+    await expect(
+      loadAllAccountGachaHistoryForAccounts({
+        accounts: [
+          {
+            accountKey: 'game-1::server:1',
+            gameUid: 'game-1',
+            serverScope: '1',
+            region: 'cn',
+          },
+        ],
+        expectedOwnerId: 'user-1',
+      })
+    ).rejects.toMatchObject({
       code: 'account_gacha_history_owner_mismatch',
     });
   });
@@ -522,12 +643,14 @@ describe('accountGachaDataService', () => {
       },
     });
     fetchJsonWithTimeout
-      .mockResolvedValueOnce(buildPage({
-        records: [{ id: 'discarded-record' }],
-        nextCursor: 'stale-cursor',
-        hasMore: true,
-        revision: '1',
-      }))
+      .mockResolvedValueOnce(
+        buildPage({
+          records: [{ id: 'discarded-record' }],
+          nextCursor: 'stale-cursor',
+          hasMore: true,
+          revision: '1',
+        })
+      )
       .mockResolvedValueOnce({
         response: { ok: false, status: 409 },
         data: {
@@ -536,24 +659,30 @@ describe('accountGachaDataService', () => {
           code: 'history_revision_changed',
         },
       })
-      .mockResolvedValueOnce(buildPage({
-        records: [{ id: 'record-new-1' }],
-        nextCursor: 'fresh-cursor',
-        hasMore: true,
-        revision: '2',
-      }))
-      .mockResolvedValueOnce(buildPage({
-        records: [{ id: 'record-new-2' }],
-        revision: '2',
-      }));
+      .mockResolvedValueOnce(
+        buildPage({
+          records: [{ id: 'record-new-1' }],
+          nextCursor: 'fresh-cursor',
+          hasMore: true,
+          revision: '2',
+        })
+      )
+      .mockResolvedValueOnce(
+        buildPage({
+          records: [{ id: 'record-new-2' }],
+          revision: '2',
+        })
+      );
 
     const result = await loadAllAccountGachaHistoryForAccounts({
-      accounts: [{
-        accountKey: 'game-1::server:1',
-        gameUid: 'game-1',
-        serverScope: '1',
-        region: 'cn',
-      }],
+      accounts: [
+        {
+          accountKey: 'game-1::server:1',
+          gameUid: 'game-1',
+          serverScope: '1',
+          region: 'cn',
+        },
+      ],
       expectedOwnerId: 'user-1',
     });
 
@@ -591,15 +720,19 @@ describe('accountGachaDataService', () => {
       .mockResolvedValueOnce(firstPage('cursor-2', '2'))
       .mockResolvedValueOnce(revisionChanged);
 
-    await expect(loadAllAccountGachaHistoryForAccounts({
-      accounts: [{
-        accountKey: 'game-1::server:1',
-        gameUid: 'game-1',
-        serverScope: '1',
-        region: 'cn',
-      }],
-      expectedOwnerId: 'user-1',
-    })).rejects.toMatchObject({
+    await expect(
+      loadAllAccountGachaHistoryForAccounts({
+        accounts: [
+          {
+            accountKey: 'game-1::server:1',
+            gameUid: 'game-1',
+            serverScope: '1',
+            region: 'cn',
+          },
+        ],
+        expectedOwnerId: 'user-1',
+      })
+    ).rejects.toMatchObject({
       code: 'history_revision_changed',
     });
     expect(fetchJsonWithTimeout).toHaveBeenCalledTimes(4);
@@ -623,21 +756,25 @@ describe('accountGachaDataService', () => {
     };
     fetchJsonWithTimeout.mockResolvedValue(repeatingPage);
 
-    await expect(loadAllAccountGachaHistoryForAccounts({
-      accounts: [account],
-      expectedOwnerId: 'user-1',
-    })).rejects.toMatchObject({
+    await expect(
+      loadAllAccountGachaHistoryForAccounts({
+        accounts: [account],
+        expectedOwnerId: 'user-1',
+      })
+    ).rejects.toMatchObject({
       code: 'account_gacha_history_cursor_repeated',
     });
 
     vi.clearAllMocks();
     getSameOriginAuthHeaders.mockImplementation(async (headers) => ({ headers }));
     fetchJsonWithTimeout.mockResolvedValue(repeatingPage);
-    await expect(loadAllAccountGachaHistoryForAccounts({
-      accounts: [account],
-      expectedOwnerId: 'user-1',
-      maxPagesPerAccount: 1,
-    })).rejects.toMatchObject({
+    await expect(
+      loadAllAccountGachaHistoryForAccounts({
+        accounts: [account],
+        expectedOwnerId: 'user-1',
+        maxPagesPerAccount: 1,
+      })
+    ).rejects.toMatchObject({
       code: 'account_gacha_history_page_limit_exceeded',
     });
   });
@@ -661,10 +798,12 @@ describe('accountGachaDataService', () => {
       },
     });
 
-    await expect(saveAccountGachaData({
-      pools: [{ id: 'pool-1' }],
-      history: [{ id: 1 }],
-    })).resolves.toEqual({
+    await expect(
+      saveAccountGachaData({
+        pools: [{ id: 'pool-1' }],
+        history: [{ id: 1 }],
+      })
+    ).resolves.toEqual({
       saved: {
         pools: 1,
         history: 1,
@@ -675,20 +814,24 @@ describe('accountGachaDataService', () => {
       },
     });
 
-    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/account-gacha-data', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith(
+      '/api/account-gacha-data',
+      {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pools: [{ id: 'pool-1' }],
+          history: [{ id: 1 }],
+        }),
       },
-      body: JSON.stringify({
-        pools: [{ id: 'pool-1' }],
-        history: [{ id: 1 }],
-      }),
-    }, expect.objectContaining({
-      label: 'account-gacha-data-save',
-    }));
+      expect.objectContaining({
+        label: 'account-gacha-data-save',
+      })
+    );
   });
 
   it('resolves account gacha aliases through the same private endpoint', async () => {
@@ -708,10 +851,12 @@ describe('accountGachaDataService', () => {
       },
     });
 
-    await expect(resolveAccountGachaAliases({
-      poolIds: ['old_pool'],
-      characterIds: ['old_char'],
-    })).resolves.toEqual({
+    await expect(
+      resolveAccountGachaAliases({
+        poolIds: ['old_pool'],
+        characterIds: ['old_char'],
+      })
+    ).resolves.toEqual({
       poolAliases: {
         old_pool: 'new_pool',
       },
@@ -720,21 +865,25 @@ describe('accountGachaDataService', () => {
       },
     });
 
-    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/account-gacha-data', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith(
+      '/api/account-gacha-data',
+      {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'resolveAliases',
+          poolIds: ['old_pool'],
+          characterIds: ['old_char'],
+        }),
       },
-      body: JSON.stringify({
-        action: 'resolveAliases',
-        poolIds: ['old_pool'],
-        characterIds: ['old_char'],
-      }),
-    }, expect.objectContaining({
-      label: 'account-gacha-data-aliases',
-    }));
+      expect.objectContaining({
+        label: 'account-gacha-data-aliases',
+      })
+    );
   });
 
   it('deletes selected account gacha records through same-origin auth', async () => {
@@ -768,21 +917,25 @@ describe('accountGachaDataService', () => {
       },
     });
 
-    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/account-gacha-data', {
-      method: 'DELETE',
-      credentials: 'same-origin',
-      headers: {
-        Accept: 'application/json',
-        Authorization: 'Bearer native-token',
-        'Content-Type': 'application/json',
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith(
+      '/api/account-gacha-data',
+      {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer native-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'records',
+          recordIds: [1, 2],
+        }),
       },
-      body: JSON.stringify({
-        action: 'records',
-        recordIds: [1, 2],
-      }),
-    }, expect.objectContaining({
-      label: 'account-gacha-data-delete',
-    }));
+      expect.objectContaining({
+        label: 'account-gacha-data-delete',
+      })
+    );
   });
 
   it('updates one owned record with its complete account scope and optimistic version', async () => {
@@ -810,14 +963,18 @@ describe('accountGachaDataService', () => {
       updated: 1,
       record: { id: 'record-1', editVersion: 3 },
     });
-    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/account-gacha-data', expect.objectContaining({
-      method: 'PATCH',
-      credentials: 'same-origin',
-      body: JSON.stringify(payload),
-    }), expect.objectContaining({
-      label: 'account-gacha-data-record-update',
-      retries: 0,
-    }));
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith(
+      '/api/account-gacha-data',
+      expect.objectContaining({
+        method: 'PATCH',
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+      }),
+      expect.objectContaining({
+        label: 'account-gacha-data-record-update',
+        retries: 0,
+      })
+    );
   });
 
   it('deletes one detailed record with its complete account scope', async () => {
@@ -837,9 +994,13 @@ describe('accountGachaDataService', () => {
     await expect(deleteAccountGachaRecord(locator)).resolves.toEqual({
       deleted: { history: 1, pools: 0 },
     });
-    expect(fetchJsonWithTimeout).toHaveBeenCalledWith('/api/account-gacha-data', expect.objectContaining({
-      method: 'DELETE',
-      body: JSON.stringify({ action: 'record', ...locator }),
-    }), expect.objectContaining({ label: 'account-gacha-data-delete' }));
+    expect(fetchJsonWithTimeout).toHaveBeenCalledWith(
+      '/api/account-gacha-data',
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ action: 'record', ...locator }),
+      }),
+      expect.objectContaining({ label: 'account-gacha-data-delete' })
+    );
   });
 });

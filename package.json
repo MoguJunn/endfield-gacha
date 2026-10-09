@@ -2,12 +2,22 @@
   "name": "endfield-gacha-analyzer",
   "description": "终末地抽卡分析器 - 《明日方舟：终末地》抽卡记录分析工具",
   "private": true,
-  "version": "4.6.3",
+  "version": "4.6.4",
   "type": "module",
   "packageManager": "npm@11.2.0",
   "engines": {
     "node": ">=22.17.0 <27",
     "npm": ">=10"
+  },
+  "prettier": {
+    "semi": true,
+    "singleQuote": true,
+    "trailingComma": "es5",
+    "printWidth": 120,
+    "tabWidth": 2,
+    "bracketSpacing": true,
+    "arrowParens": "always",
+    "endOfLine": "lf"
   },
   "scripts": {
     "fonts:prepare": "node scripts/build-font-subsets.mjs",
@@ -32,6 +42,8 @@
     "preview": "vite preview",
     "test:harness": "node scripts/run-private-backend.mjs harness",
     "test:simulator-inheritance": "node scripts/verify-simulator-inheritance.mjs",
+    "test:simulator-v2:ui": "node scripts/verify-simulator-v2-playwright.mjs",
+    "test:simulator-v2:sql": "node scripts/verify-simulator-inheritance-v2-sql.mjs",
     "test:simulator-share": "node scripts/verify-simulator-share.mjs",
     "test:simulator-share:ui": "node scripts/verify-simulator-share-playwright.mjs",
     "test:contributor-demo:ui": "node scripts/verify-contributor-demo-playwright.mjs",
@@ -145,6 +157,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.26",
+    "fake-indexeddb": "^6.2.5",
     "globals": "^16.5.0",
     "jsdom": "^27.0.1",
     "playwright": "^1.60.0",

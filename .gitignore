@@ -20,8 +20,32 @@ playwright-report/
 
 # Environment variables
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.contributor.example
+
+# 私钥、证书私钥、凭据及数据库恢复包只能保存在本地。
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.secret
+*.api.key.json
+credentials*.json
+service-account*.json
+*.token
+*.cookie
+*.session
+*.sqlite
+*.sqlite3
+*.db
+id_rsa
+id_ed25519
+*.dump
+*.backup
+*.sql.gz
+*.bundle
 
 # Temp files
 nul
@@ -39,13 +63,29 @@ test-results/
 *.tmp
 *.bak
 
+# 运维和任务恢复记录不属于公开源码。
+docs/agent-runtime.md
+scripts/run-local-task.mjs
+supabase/manual/history-snapshot*.ndjson
+supabase/manual/history-*.json
+supabase/manual/public-data-latest.sql
+supabase/manual/*-audit*.json
+supabase/manual/data-backfill/*.generated.json
+supabase/manual/data-backfill/*.generated.sql
+supabase/manual/data-backfill/manual-placeholder-audit.json
+supabase/manual/data-backfill/manual-placeholder-production-snapshot.json
+supabase/manual/data-backfill/076_legacy_id_alias_seed.plan.json
+
 # Backend services / 抓取链路（因合规与版权风险保留私有，不进入公开仓库）
 # Shared backend library files that are imported by tests/runtime are explicitly re-included below.
 backend/*
+# 以下文件属于公开测试与数据合同的兼容层；完整后端部署包仍忽略。
+!backend/fullImportService.js
 !backend/lib/
 backend/lib/*
 !backend/lib/canonicalEntityUtils.js
 !backend/lib/idAliasService.js
+!backend/lib/networkFetch.js
 !backend/lib/officialIdReconciliation.js
 !backend/lib/officialImportIncremental.js
 !backend/lib/officialImportStaging.js
@@ -95,5 +135,3 @@ src/generated/fonts/judou/
 bots/*
 !bots/official/
 !bots/official/**
-backend/lib/canonicalEntityUtils.js
-backend/lib/idAliasService.js

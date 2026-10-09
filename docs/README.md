@@ -1,47 +1,45 @@
-# Docs Layout
+# 文档导航
 
-仓库内的补充文档统一收口到 `docs/`：
+第一次使用请从[项目首页](../README.md)开始；准备参与开发时阅读[贡献指南](../CONTRIBUTING.md)。这里按阅读目的整理专题。
 
-当前发布为 `v4.6.3`，PR #43 及导览原图直连修复已上线；发布事实见 `docs/RELEASE_4.6.3.md`，历史版本文档保留当时事实。
+## 使用与项目进展
 
-- `docs/ARCHITECTURE.md`：整体架构、公共 / 私有 / admin 边界、缓存、自动化和数据库分层
-- `docs/AUTH_SECURITY_HARDENING.md`：Phase A–D 本地候选、认证不变量、迁移重编号、真实浏览器回归和发布门禁
-- `docs/PROJECT_GUIDE.md`：部署、环境变量、数据库维护、静态资源和 changelog 摘要
-- `docs/CODEMAP.md`：代码入口和主要模块索引
-- `docs/DESKTOP_HOME_DEMO.md`：默认新版桌面主页与经典版切换、1366×768 布局、个人与全服统计拆分、统一消息弹窗及独立版本主题接口
-- `docs/MOBILE_HOME_PLAN.md`：手机首页 P1 改版任务、内容顺序、触摸滚动与正式启用验收标准
-- `docs/RELEASE_4.6.0.md`：v4.6.0 交付范围、贡献署名、版本验证及运行时配置同步
-- `docs/RELEASE_4.6.2.md`：本轮五类合池、十图、旧指标迁移、全页宽度、已有验证与生产启用门禁
-- `docs/RELEASE_4.6.3.md`：v4.6.3 发布及后续独立维护记录
-- `docs/POOL_SCHEDULE_MANAGEMENT.md`：限定武器池同期角色关联、三期截止时间填入及独立版本日历数据库同步
-- `docs/STATS_OBSERVATION_CONTRACT.md`：单池／合池首次样本、去重账号覆盖、旧指标与资源口径、理论边界
-- `docs/STATISTICS_SCHEDULING.md`：v4 快照、5/30/60 分钟调度、生产迁移和预热顺序、只读本地预览
-- `docs/STATS_BRANCH_SCOPE.md`：统计与指南实现范围、阶段提交和未完成边界
-- `docs/ONBOARDING_GUIDE_PLAN.md`：首次使用教程与首页指南优化任务；已有开发预览，真实业务动作待接入
-- `docs/PERSONAL_ANALYSIS_WORKER.md`：个人分析快照队列、Supabase `pg_cron + pg_net` 调度、应急入口与生产核验
-- `docs/CLOSEOUT_LEDGER.md`：已上线但仍依赖 placeholder / fallback / 隐藏入口的功能收口总账
-- `docs/ACCOUNT_ALL_CLOSEOUT.md`：全部账号汇总的保留、关闭和重新开放条件
-- `docs/SELF_HOSTED_MAIL.md`：自建邮件平台选型、投递基础设施、outbox / suppression / 防刷预算边界和后续决策点
-- `docs/STALWART_DEPLOYMENT_GUIDE.md`：Stalwart-first 自建邮件部署步骤、同机资源边界、DNS 清单和 Cloudflare Email 边界
-- `docs/RELEASE_CHECKLIST.md`：发布前检查清单
-- `docs/GIT_WORKFLOW.md`：从 `v4.4.1` 起执行的分支、提交、发布和历史整理规则
-- `docs/developer-api-v1.zh-CN.md` / `docs/developer-api-v1.en-US.md`：开发者 API v1 双语 Wiki 源文档
-- `docs/integration-api.md`：平台绑定与官方 BOT 私有接口边界
-- `docs/screenshots/`：README 和发布页引用的产品截图
-- `docs/reviews/`：设计评审、架构审计、阶段性复盘
-- `docs/email-template/`：历史认证邮件模板与 SMTP 配置说明；后续账号邮件主线以 `docs/SELF_HOSTED_MAIL.md` 为准
+- [项目进展](RECENT_DELIVERY_STATUS.md)：可用功能、已知限制与开发方向。
+- [统计指标](STATS_OBSERVATION_CONTRACT.md)：单池／合池、首次样本、账号覆盖与未知数据的解释。
+- [卡池与日历时间](POOL_SCHEDULE_MANAGEMENT.md)：武器池关联、重构期次、官方日期与缓存传播。
+- [桌面界面](DESKTOP_HOME_DEMO.md)：新版／经典主页、导航、消息与响应式布局。
+- [首次指南设计](ONBOARDING_GUIDE_PLAN.md)、[移动首页设计](MOBILE_HOME_PLAN.md)：尚未完成的交互方案与验收要求。
+- [账号分析范围](ACCOUNT_ALL_CLOSEOUT.md)：同账号总览、跨账号限制与原始记录导出。
 
-公开文档的职责边界如下：
+## 开发与架构
 
-- 根目录 `README.md` 只负责 GitHub 首页摘要：项目定位、主线状态、快速开始、常用验证和文档入口
-- 部署、环境变量、数据库和长 changelog 放在 `docs/PROJECT_GUIDE.md`
-- 整体架构、公共缓存、自动化和数据库边界放在 `docs/ARCHITECTURE.md`
-- 认证目标架构、候选验证证据、GitHub 回归和生产边界放在 `docs/AUTH_SECURITY_HARDENING.md`
-- `supabase/README.md` 负责数据库迁移链、baseline 与手工脚本说明
-- 新版桌面的布局、路由、主页偏好与验收维护在 `docs/DESKTOP_HOME_DEMO.md`；当前发布提交、CI 与生产验证维护在 `docs/RELEASE_4.6.3.md`，旧发布文档与早期预览截图保留历史含义
-- 与当前运行状态冲突的“历史计划 / 旧部署方式”不要继续保留在主文档正文里
-- 认证文档必须区分本地候选、真实浏览器回归、授权后集成与生产部署；候选 migration 文件名不等于最终生产编号
-- 新增迁移、CI、Serverless 路由、字体链、公告采集链或公共缓存版本后，应同步更新对应专题文档，而不是把细节塞回根 README
-- 官方导入后台任务、内部暂存 / 自动原子提交、写入后异常核对与受控编辑属于“私有账号数据”主链：用户操作写入 `docs/PROJECT_GUIDE.md`，服务与数据边界写入 `docs/ARCHITECTURE.md`，入口索引写入 `docs/CODEMAP.md`，表 / RPC / 迁移状态写入 `supabase/README.md`
+- [开发与部署指南](PROJECT_GUIDE.md)：环境、命令及部署顺序。
+- [代码地图](CODEMAP.md)、[架构](ARCHITECTURE.md)：定位模块，理解数据流与权限边界。
+- [仓库结构](REPOSITORY_LAYOUT.md)、[Git 工作流](GIT_WORKFLOW.md)：文件职责、生成物及贡献流程。
+- [认证与会话](AUTH_SECURITY_HARDENING.md)：身份归属、邮箱验证、凭据撤销与 provider 集成。
+- [浏览器认证锁](SUPABASE_AUTH_LOCK_FIX.md)：后台刷新与 SDK 升级验证。
+- [个人分析 Worker](PERSONAL_ANALYSIS_WORKER.md)、[统计快照调度](STATISTICS_SCHEDULING.md)：异步计算、部署与诊断。
+- [模拟器引擎](SIMULATOR_ENGINE.md)：统一水位、完整继承历史、增量资源、事务存档与版本迁移。
+- [数据与体验待完善项](CLOSEOUT_LEDGER.md)：可贡献的工作和现行数据审计工具。
 
-源码根目录只保留真实入口、构建配置和面向开发者的顶层说明。一次性分析、归档材料和构建产物不要再直接堆在仓库根目录。
+## API 与官方数据
+
+- [开发者 API：中文](developer-api-v1.zh-CN.md) / [English](developer-api-v1.en-US.md)。
+- [绑定与官方 BOT API](integration-api.md)：私有查询范围及平台身份验证。
+- [重构导入](official-rerun-import.md)、[赠送记录处理](OFFICIAL_TRUST_TOKEN_FIX.md)：官方数据规范化与统计约束。
+
+## 数据库与运营部署
+
+- [数据库指南](../supabase/README.md)：baseline、前向迁移、手动修复与回滚。
+- [邮件架构](SELF_HOSTED_MAIL.md)、[Stalwart 部署](STALWART_DEPLOYMENT_GUIDE.md)：发信开关、队列、防刷和邮件服务器配置。
+- [抽奖运营](SUMMER_LOTTERY_OPERATIONS.md)：资格、开奖、公示、履约与联系信息保护。
+- [发布检查](RELEASE_CHECKLIST.md)：按修改范围选择验证与部署检查。
+
+## 发布记录
+
+- [v4.6.4](RELEASE_4.6.4.md)：模拟器完整重写、仓库／文档整理、本地统计与沙盒修复、验证及发布准备。
+- [v4.6.3](RELEASE_4.6.3.md)：官方版本导览、管理与后续日程维护。
+- [v4.6.2](RELEASE_4.6.2.md)：统计快照、五类合池、十图与桌面宽度。
+- [v4.6.0](RELEASE_4.6.0.md)：默认新版桌面与经典主页切换。
+
+发布记录保存对应版本的变化与验证；配置与运行要求以现行专题为准。截图位于 `docs/screenshots/`，游戏图片、字体及许可证按各资源目录维护。

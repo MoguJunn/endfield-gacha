@@ -44,6 +44,9 @@ jobs:
       - name: Personal analysis queue SQL behavior
         run: npm run test:personal-analysis-queue
 
+      - name: Simulator inheritance v2 SQL behavior
+        run: npm run test:simulator-v2:sql
+
       - name: Official rerun period and promotion SQL behavior
         run: node scripts/verify-supabase-baseline-smoke.mjs --history-pool-version
 
