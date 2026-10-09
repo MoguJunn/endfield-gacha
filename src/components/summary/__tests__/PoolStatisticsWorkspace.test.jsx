@@ -15,7 +15,9 @@ vi.mock('../../../stores/index.js', () => ({
   useHistoryStore: (selector) => selector({ history: state.history }),
   usePoolStore: (selector) => selector({ pools: state.pools, currentPoolId: null }),
 }));
-vi.mock('../../../services/scheduledStatisticsService.js', () => ({ loadPersonalStatistics: state.load }));
+vi.mock('../../../services/scheduledStatisticsService.js', async (importOriginal) => ({
+  ...(await importOriginal()), loadPersonalStatistics: state.load,
+}));
 vi.mock('../PoolObservationCharts.jsx', () => ({ default: ({ stats }) => <div data-testid="chart-source">{stats.scopeKind === 'group' ? stats.groupKey : stats.poolId}:{stats.total}</div> }));
 vi.mock('../PoolTargetPrediction.jsx', () => ({ default: () => <div>theory</div> }));
 import PoolStatisticsWorkspace from '../PoolStatisticsWorkspace.jsx';

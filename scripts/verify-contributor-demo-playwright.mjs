@@ -89,7 +89,7 @@ async function run() {
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
     await page.getByTestId('contributor-demo-banner').waitFor({ timeout: 15000 });
     await page.getByText(/贡献者内容沙盒 · 正式公开目录/).waitFor({ timeout: 30000 });
-    await page.waitForFunction(() => document.body.textContent.includes('本地内容沙盒已启用'), null, { timeout: 15000 });
+    await page.getByRole('button', { name: '登录', exact: true }).first().waitFor({ timeout: 15000 });
 
     await page.getByRole('button', { name: '登录' }).first().click();
     await page.getByTestId('contributor-demo-login-card').waitFor();
@@ -106,7 +106,16 @@ async function run() {
     assert.equal((await page.locator('body').innerText()).includes('余烬回响'), false, '不应继续出现旧虚构卡池');
 
     await page.goto(`${baseUrl}/summary`, { waitUntil: 'domcontentloaded' });
+    await page.getByTestId('observation-total').waitFor({ timeout: 15000 });
+    await page.getByRole('button', { name: /^全部限定角色/ }).click();
+    await page.waitForFunction(() => Number(document.querySelector('[data-testid="observation-total"]')?.textContent.replaceAll(',', '')) > 0);
+    await page.getByRole('button', { name: '综合概览与图鉴', exact: true }).click();
     await page.waitForFunction(() => document.body.textContent.includes('128,640'), null, { timeout: 15000 });
+
+    await page.goto(`${baseUrl}/dashboard?view=overview`, { waitUntil: 'domcontentloaded' });
+    await page.locator('.ex-integrated[data-source="local"]').waitFor({ timeout: 15000 });
+    await page.getByTestId('observation-total').waitFor({ timeout: 15000 });
+    assert.ok(Number((await page.getByTestId('observation-total').textContent()).replaceAll(',', '')) > 0, '个人统计应读取沙盒演示历史');
 
     await page.goto(`${baseUrl}/admin`, { waitUntil: 'domcontentloaded' });
     await page.getByTestId('contributor-demo-admin-panel').waitFor({ timeout: 15000 });

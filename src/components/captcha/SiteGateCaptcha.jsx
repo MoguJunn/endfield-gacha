@@ -206,6 +206,7 @@ export default function SiteGateCaptcha({ onVerified, isMobile = false }) {
             : tt('切换 PoW', 'Switch to PoW')}
         </button>
         <button
+          hidden
           type="button"
           onClick={() => setShowLegacy(true)}
           className="border border-zinc-700 px-3 py-2 text-[11px] tracking-[0.16em] text-zinc-300 transition-colors hover:border-endfield-yellow hover:text-endfield-yellow"
