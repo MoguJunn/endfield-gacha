@@ -228,6 +228,8 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
+      // Browser profiles and test output can hold locked files on Windows.
+      watch: { ignored: ['**/.agent-tmp/**'] },
       proxy: {
         // 开发环境代理 - 可选地转发到私有代理服务
         '/api/hg-proxy': {

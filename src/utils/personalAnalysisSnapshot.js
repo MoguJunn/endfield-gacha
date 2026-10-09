@@ -29,7 +29,8 @@ import { buildDashboardResourceSummary } from './dashboardResourceSummary.js';
 import { buildOverviewTimelineSections, buildSinglePoolTimelineSection } from './poolTimelineView.js';
 import { buildOverviewPoolAnalysisPityMap, getPoolAnalysisPityState } from './poolAnalysisPity.js';
 import { getOverviewPoolBucket } from './dashboardOverviewPoolFilters.js';
-import { buildInheritedSimulatorSnapshot } from '../features/simulator/simulatorInheritance.js';
+import { buildSimulatorInheritanceProjection } from '../features/simulator/inheritanceProjection.js';
+import { packInheritanceProjection } from '../../shared/simulator/historyCodec.js';
 import { getRecordPoolVersion } from '../../shared/poolVersion.js';
 
 const LEGACY_ACCOUNT_KEY = 'legacy';
@@ -251,7 +252,7 @@ function createPoolPlaceholder(poolId) {
   };
 }
 
-function buildPoolManifest(history, pools) {
+function buildPoolManifest(history, pools, ownerId) {
   const poolLookup = new Map();
   pools.forEach((pool) => {
     [pool?.id, pool?.pool_id].forEach((value) => {
@@ -265,6 +266,13 @@ function buildPoolManifest(history, pools) {
   history.forEach((record) => {
     const poolId = getHistoryPoolId(record);
     if (poolId && !referencedPoolIdSet.has(poolId)) {
+      referencedPoolIdSet.add(poolId);
+      referencedPoolIds.push(poolId);
+    }
+  });
+  pools.forEach((pool) => {
+    const poolId = getPoolId(pool);
+    if (ownerId && pool.user_id === ownerId && poolId && !referencedPoolIdSet.has(poolId)) {
       referencedPoolIdSet.add(poolId);
       referencedPoolIds.push(poolId);
     }
@@ -548,34 +556,34 @@ function buildCheckLimitedInFirstN({ history, accountHistory, poolCatalog, curre
   };
 }
 
-function buildAllOverviewCharacterStats({
-  history,
-  selectedPools,
-  crossPoolPityMap,
-  includeFreePullsInStats,
-}) {
-  return Object.fromEntries(ALL_OVERVIEW_FILTER_BUCKETS.map((bucket) => {
-    const bucketPools = selectedPools.filter((pool) => getOverviewPoolBucket(pool) === bucket);
-    const bucketPoolIds = new Set(bucketPools.map(getPoolId).filter(Boolean));
-    const bucketHistory = history.filter((record) => bucketPoolIds.has(getHistoryPoolId(record)));
-    const limitedPoolIds = new Set(
-      bucketPools
-        .filter((pool) => {
-          const capabilities = resolvePoolCapabilities(pool);
-          return capabilities.basePoolType === 'limited' && capabilities.entityType === 'character';
-        })
-        .map(getPoolId)
-        .filter(Boolean)
-    );
+function buildAllOverviewCharacterStats({ history, selectedPools, crossPoolPityMap, includeFreePullsInStats }) {
+  return Object.fromEntries(
+    ALL_OVERVIEW_FILTER_BUCKETS.map((bucket) => {
+      const bucketPools = selectedPools.filter((pool) => getOverviewPoolBucket(pool) === bucket);
+      const bucketPoolIds = new Set(bucketPools.map(getPoolId).filter(Boolean));
+      const bucketHistory = history.filter((record) => bucketPoolIds.has(getHistoryPoolId(record)));
+      const limitedPoolIds = new Set(
+        bucketPools
+          .filter((pool) => {
+            const capabilities = resolvePoolCapabilities(pool);
+            return capabilities.basePoolType === 'limited' && capabilities.entityType === 'character';
+          })
+          .map(getPoolId)
+          .filter(Boolean)
+      );
 
-    return [bucket, buildCharacterStats({
-      history: bucketHistory,
-      isLimitedPool: false,
-      crossPoolPityMap,
-      limitedPoolIds,
-      includeFreePullsInStats,
-    })];
-  }));
+      return [
+        bucket,
+        buildCharacterStats({
+          history: bucketHistory,
+          isLimitedPool: false,
+          crossPoolPityMap,
+          limitedPoolIds,
+          includeFreePullsInStats,
+        }),
+      ];
+    })
+  );
 }
 
 function buildStatsVariant({
@@ -860,7 +868,7 @@ export function buildPersonalAnalysisSnapshots({ history = [], pools = [], chara
   };
   const scopes = accountGroups.map((accountGroup) => {
     const account = toPublicAccount(accountGroup);
-    const poolManifest = buildPoolManifest(accountGroup.records, poolsArray);
+    const poolManifest = buildPoolManifest(accountGroup.records, poolsArray, userId);
     return {
       scopeKey: account.accountKey,
       sourceGameUid: account.gameUid,
@@ -870,11 +878,14 @@ export function buildPersonalAnalysisSnapshots({ history = [], pools = [], chara
         poolManifest,
         selector: buildSelector(accountGroup.records),
         dashboard: buildDashboard(accountGroup.records, poolsArray, poolManifest, resolveCharacter),
-        simulatorInheritance: buildInheritedSimulatorSnapshot({
-          history: accountGroup.records,
-          realPools: poolManifest,
-          currentUserId: userId,
-        }),
+        simulatorInheritance: packInheritanceProjection(
+          buildSimulatorInheritanceProjection({
+            history: accountGroup.records,
+            pools: buildInfoBookPoolList(poolsArray, poolManifest),
+            currentUserId: userId,
+            accountKey: account.accountKey,
+          })
+        ),
         recentSixStars: buildRecentSixStars(accountGroup.records, poolManifest, resolveCharacter),
       },
     };

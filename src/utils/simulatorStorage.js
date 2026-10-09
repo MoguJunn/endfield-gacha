@@ -6,6 +6,7 @@
 
 import { DEFAULT_SIMULATOR_RESOURCE_SETTINGS, normalizeResourceSettings } from './resourceEconomy.js';
 import appLogger from './appLogger.js';
+import { classifyRecord } from '../../shared/simulator/records.js';
 import {
   STORAGE_KEYS,
   readBooleanStorageValue,
@@ -91,10 +92,7 @@ export function clearSimulatorOriginitePromptSuppressDate() {
   return removeStorageValue(STORAGE_KEYS.SIMULATOR_ORIGINITE_PROMPT_SUPPRESS_DATE, { raw: true });
 }
 
-export function migrateLegacySimulatorStorageToScope({
-  scope = null,
-  poolIds = []
-} = {}) {
+export function migrateLegacySimulatorStorageToScope({ scope = null, poolIds = [] } = {}) {
   if (!scope || localStorage.getItem(LEGACY_SCOPE_MIGRATION_KEY) === '1') {
     return false;
   }
@@ -138,7 +136,7 @@ export function saveSimulatorState(poolType, state, scope = null) {
       version: STORAGE_VERSION,
       timestamp: Date.now(),
       poolType,
-      state
+      state,
     };
     localStorage.setItem(getScopedStorageKey(`${STORAGE_KEY}_${poolType}`, scope), JSON.stringify(storageData));
     return true;
@@ -193,7 +191,7 @@ export function clearSimulatorState(poolType, scope = null) {
  */
 export function clearAllSimulatorStates(scope = null) {
   const poolTypes = ['limited', 'extra', 'weapon', 'standard'];
-  poolTypes.forEach(type => clearSimulatorState(type, scope));
+  poolTypes.forEach((type) => clearSimulatorState(type, scope));
 }
 
 /**
@@ -210,20 +208,26 @@ export function convertSimulatorHistoryToImportFormat(pullHistory, poolId, poolT
 
   // 将卡池类型转换为导入系统需要的格式
   const poolTypeMap = {
-    'extra': 'extra',
-    'limited': 'limited_character',
-    'weapon': 'limited_weapon',
-    'standard': 'standard'
+    extra: 'extra',
+    limited: 'limited_character',
+    weapon: 'limited_weapon',
+    standard: 'standard',
   };
   const importPoolType = poolTypeMap[poolType] || 'limited_character';
 
-  return pullHistory.map(record => ({
-    pool: importPoolType,  // 使用标准卡池类型而非模拟池ID
+  return pullHistory.map((record) => ({
+    pool: importPoolType, // 使用标准卡池类型而非模拟池ID
+    poolId: String(record.poolId || poolId || '').replace(/^sim_/, ''),
     name: record.characterName || record.name || `${record.rarity}星角色`,
     rarity: record.rarity,
     timestamp: record.timestamp || Date.now(),
-    isLimited: record.isUp || false,  // 是否为限定角色（UP角色视为限定）
-    isSimulated: true  // 标记为模拟器数据
+    isLimited: record.isUp || false, // 是否为限定角色（UP角色视为限定）
+    isFree: classifyRecord(record) === 'free',
+    isInfoBook: classifyRecord(record) === 'info_book',
+    specialType: classifyRecord(record) === 'gift' ? 'gift' : null,
+    sequenceIndex: record.sequenceIndex ?? record.pullNumber,
+    batchId: record.batchId || null,
+    isSimulated: true, // 标记为模拟器数据
   }));
 }
 
@@ -250,20 +254,33 @@ export function exportSimulatorDataAsCSV(pullHistory, poolId, poolType) {
   const importData = convertSimulatorHistoryToImportFormat(pullHistory, poolId, poolType);
 
   if (importData.length === 0) {
-    return 'pool,name,rarity,timestamp,isLimited,isSimulated\n';
+    return 'pool,poolId,name,rarity,timestamp,isLimited,isFree,isInfoBook,specialType,sequenceIndex,batchId,isSimulated\n';
   }
 
   // CSV 表头
-  const headers = ['pool', 'name', 'rarity', 'timestamp', 'isLimited', 'isSimulated'];
+  const headers = [
+    'pool',
+    'poolId',
+    'name',
+    'rarity',
+    'timestamp',
+    'isLimited',
+    'isFree',
+    'isInfoBook',
+    'specialType',
+    'sequenceIndex',
+    'batchId',
+    'isSimulated',
+  ];
   let csv = headers.join(',') + '\n';
 
   // CSV 数据行
-  importData.forEach(record => {
-    const row = headers.map(header => {
+  importData.forEach((record) => {
+    const row = headers.map((header) => {
       const value = record[header];
       // 处理包含逗号的字段，用双引号包裹
-      if (typeof value === 'string' && value.includes(',')) {
-        return `"${value}"`;
+      if (typeof value === 'string' && /[,"\r\n]/.test(value)) {
+        return `"${value.replace(/"/g, '""')}"`;
       }
       return value;
     });
@@ -330,24 +347,24 @@ export function exportAnalysisReport(stats, pityInfo, poolType) {
       fiveStarRate: stats.fiveStarRate,
       upRate: stats.upRate,
       avgPullsPerSixStar: stats.avgPullsPerSixStar,
-      expectedPulls: stats.expectedPulls
+      expectedPulls: stats.expectedPulls,
     },
     pityStatus: {
       sixStarPity: pityInfo.sixStar.current,
       fiveStarPity: pityInfo.fiveStar.current,
       guaranteedUpPity: pityInfo.guaranteedUp?.current || 0,
-      isGuaranteedUp: pityInfo.guaranteedUp?.isActive || false
+      isGuaranteedUp: pityInfo.guaranteedUp?.isActive || false,
     },
     giftProgress: stats.gifts,
     hasReceivedInfoBook: stats.hasReceivedInfoBook,
     hasReceivedSelectGift: stats.hasReceivedSelectGift,
-    sixStarHistory: stats.sixStarHistory.map(record => ({
+    sixStarHistory: stats.sixStarHistory.map((record) => ({
       pullNumber: record.pullNumber,
       isUp: record.isUp,
       isLimited: record.isLimited,
       pityWhenPulled: record.pityWhenPulled,
-      timestamp: record.timestamp
-    }))
+      timestamp: record.timestamp,
+    })),
   };
 
   return JSON.stringify(report, null, 2);
@@ -379,13 +396,8 @@ export function downloadJSON(content, filename) {
 export function downloadAnalysisReport(stats, pityInfo, poolType) {
   const report = exportAnalysisReport(stats, pityInfo, poolType);
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-  const poolName = poolType === 'extra'
-    ? '附加寻访'
-    : poolType === 'limited'
-      ? '限定池'
-      : poolType === 'weapon'
-        ? '武器池'
-        : '常驻池';
+  const poolName =
+    poolType === 'extra' ? '附加寻访' : poolType === 'limited' ? '限定池' : poolType === 'weapon' ? '武器池' : '常驻池';
   const filename = `终末地模拟器报告_${poolName}_${timestamp}.json`;
 
   downloadJSON(report, filename);
@@ -398,13 +410,14 @@ export function downloadAnalysisReport(stats, pityInfo, poolType) {
  * @returns {string} 文本摘要
  */
 export function generateShareText(stats, poolType) {
-  const poolName = poolType === 'extra'
-    ? '附加寻访'
-    : poolType === 'limited'
-      ? '限定寻访'
-      : poolType === 'weapon'
-        ? '武器寻访'
-        : '常驻寻访';
+  const poolName =
+    poolType === 'extra'
+      ? '附加寻访'
+      : poolType === 'limited'
+        ? '限定寻访'
+        : poolType === 'weapon'
+          ? '武器寻访'
+          : '常驻寻访';
 
   let text = `【终末地 ${poolName} 模拟报告】\n\n`;
   text += `📊 总抽数: ${stats.totalPulls}\n`;
@@ -473,7 +486,7 @@ export function saveSharedPityState(pityState, scope = null) {
     const storageData = {
       version: STORAGE_VERSION,
       timestamp: Date.now(),
-      pityState
+      pityState,
     };
     localStorage.setItem(getScopedStorageKey(SHARED_PITY_KEY, scope), JSON.stringify(storageData));
     return true;
@@ -535,11 +548,14 @@ export function saveSimulatorSeriesState(seriesStateKey, seriesState, scope = nu
   }
 
   try {
-    localStorage.setItem(storageKey, JSON.stringify({
-      version: STORAGE_VERSION,
-      timestamp: Date.now(),
-      seriesState,
-    }));
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        version: STORAGE_VERSION,
+        timestamp: Date.now(),
+        seriesState,
+      })
+    );
     return true;
   } catch (error) {
     appLogger.error('保存系列模拟状态失败:', error);
@@ -595,7 +611,7 @@ export function saveInfoBookState(infoBooks, scope = null) {
     const storageData = {
       version: '2.0',
       timestamp: Date.now(),
-      infoBooks
+      infoBooks,
     };
     localStorage.setItem(getScopedStorageKey(INFO_BOOK_KEY, scope), JSON.stringify(storageData));
     return true;
@@ -653,7 +669,7 @@ export function saveSimulatorResourceSettings(settings, scope = null) {
     const storageData = {
       version: STORAGE_VERSION,
       timestamp: Date.now(),
-      settings: normalizeResourceSettings(settings)
+      settings: normalizeResourceSettings(settings),
     };
     localStorage.setItem(getScopedStorageKey(RESOURCE_SETTINGS_KEY, scope), JSON.stringify(storageData));
     return true;
@@ -735,5 +751,5 @@ export default {
   downloadJSON,
   downloadAnalysisReport,
   generateShareText,
-  copyToClipboard
+  copyToClipboard,
 };

@@ -24,16 +24,29 @@ import {
   getContributorDemoRuntimeAnalysis,
   getContributorDemoRuntimeHistory,
   getContributorDemoRuntimeHistoryPage,
+  getContributorDemoRuntimeSimulatorInheritance,
 } from '../contributorDemoRuntimeData.js';
+import { loadSimulatorInheritance } from '../../services/accountGachaDataService.js';
 import { activateContributorDemoSession, reapplyContributorDemoSandboxSession } from '../contributorDemoSession.js';
 import { queuedFetch } from '../../utils/requestQueue.js';
 import { getEnabledOAuthProviders, startOAuthLogin } from '../../services/authOAuthService.js';
 import { linkLoginIdentity, loadAuthIdentities, unlinkLoginIdentity } from '../../services/authIdentityService.js';
 import { triggerManualSync } from '../../services/admin/opsAutomationService.js';
-import { getAuthFetchHeaders, getSupabaseAccessToken, getValidatedSupabaseSession } from '../../services/authFetchService.js';
+import {
+  getAuthFetchHeaders,
+  getSupabaseAccessToken,
+  getValidatedSupabaseSession,
+} from '../../services/authFetchService.js';
 
 const LIVE_POOLS = [
-  { id: 'standard', name: '基础寻访', type: 'standard', locked: true, user_id: 'private-user-uuid', creator_role: 'super_admin' },
+  {
+    id: 'standard',
+    name: '基础寻访',
+    type: 'standard',
+    locked: true,
+    user_id: 'private-user-uuid',
+    creator_role: 'super_admin',
+  },
   {
     id: 'joint_manual_extra_reconstruction_yvonne_p1',
     name: '绚丽异彩',
@@ -49,10 +62,42 @@ const LIVE_POOLS = [
 ];
 
 const LIVE_CHARACTERS = [
-  { id: 'chr_0017_yvonne', name: '伊冯', rarity: 6, type: 'character', is_limited: true, aliases: [], pool_config: { pools: ['limited'] } },
-  { id: 'chr_0004_pelica', name: '佩丽卡', rarity: 5, type: 'character', is_limited: false, aliases: [], pool_config: { pools: ['standard', 'limited'] } },
-  { id: 'chr_0020_meurs', name: '卡契尔', rarity: 4, type: 'character', is_limited: false, aliases: [], pool_config: { pools: ['standard', 'limited'] } },
-  { id: 'wpn_pistol_0010', name: '艺术暴君', rarity: 6, type: 'weapon', is_limited: true, aliases: [], pool_config: { pools: ['weapon'] } },
+  {
+    id: 'chr_0017_yvonne',
+    name: '伊冯',
+    rarity: 6,
+    type: 'character',
+    is_limited: true,
+    aliases: [],
+    pool_config: { pools: ['limited'] },
+  },
+  {
+    id: 'chr_0004_pelica',
+    name: '佩丽卡',
+    rarity: 5,
+    type: 'character',
+    is_limited: false,
+    aliases: [],
+    pool_config: { pools: ['standard', 'limited'] },
+  },
+  {
+    id: 'chr_0020_meurs',
+    name: '卡契尔',
+    rarity: 4,
+    type: 'character',
+    is_limited: false,
+    aliases: [],
+    pool_config: { pools: ['standard', 'limited'] },
+  },
+  {
+    id: 'wpn_pistol_0010',
+    name: '艺术暴君',
+    rarity: 6,
+    type: 'weapon',
+    is_limited: true,
+    aliases: [],
+    pool_config: { pools: ['weapon'] },
+  },
 ];
 
 function jsonResponse(data) {
@@ -68,13 +113,34 @@ function createPublicCatalogFetchMock() {
     const url = String(input);
     if (url.includes('type=pool_catalog')) return jsonResponse({ pools: LIVE_POOLS });
     if (url.includes('type=characters')) return jsonResponse({ characters: LIVE_CHARACTERS });
-    if (url.includes('/api/bootstrap')) return jsonResponse({ siteConfig: { site_version: 'v-live', home_version_timeline: '{"versions":[]}', mail_runtime_config: '{"secret":"must-not-cache"}' }, pools: LIVE_POOLS });
-    if (url.includes('/api/auth/session/logout')) return Promise.resolve({ ok: true, status: 200, json: async () => ({ success: true }) });
+    if (url.includes('/api/bootstrap'))
+      return jsonResponse({
+        siteConfig: {
+          site_version: 'v-live',
+          home_version_timeline: '{"versions":[]}',
+          mail_runtime_config: '{"secret":"must-not-cache"}',
+        },
+        pools: LIVE_POOLS,
+      });
+    if (url.includes('/api/auth/session/logout'))
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ success: true }) });
     if (url.includes('/api/pool-rosters')) {
       return jsonResponse({
         poolRosters: {
-          standard: LIVE_CHARACTERS.filter((item) => item.type === 'character' && !item.is_limited).map((item) => ({ pool_id: 'standard', character_id: item.id, is_up: false, characters: item })),
-          joint_manual_extra_reconstruction_yvonne_p1: LIVE_CHARACTERS.filter((item) => item.type === 'character').map((item) => ({ pool_id: 'joint_manual_extra_reconstruction_yvonne_p1', character_id: item.id, is_up: item.id === 'chr_0017_yvonne', characters: item })),
+          standard: LIVE_CHARACTERS.filter((item) => item.type === 'character' && !item.is_limited).map((item) => ({
+            pool_id: 'standard',
+            character_id: item.id,
+            is_up: false,
+            characters: item,
+          })),
+          joint_manual_extra_reconstruction_yvonne_p1: LIVE_CHARACTERS.filter((item) => item.type === 'character').map(
+            (item) => ({
+              pool_id: 'joint_manual_extra_reconstruction_yvonne_p1',
+              character_id: item.id,
+              is_up: item.id === 'chr_0017_yvonne',
+              characters: item,
+            })
+          ),
         },
       });
     }
@@ -104,7 +170,9 @@ describe('contributor content sandbox', () => {
 
   it('is development-only and uses a synthetic local account', () => {
     expect(isContributorDemoModeEnabled()).toBe(true);
-    expect(isContributorDemoCredentials(CONTRIBUTOR_DEMO_CREDENTIALS.email, CONTRIBUTOR_DEMO_CREDENTIALS.password)).toBe(true);
+    expect(
+      isContributorDemoCredentials(CONTRIBUTOR_DEMO_CREDENTIALS.email, CONTRIBUTOR_DEMO_CREDENTIALS.password)
+    ).toBe(true);
     expect(isContributorDemoCredentials('other@example.com', 'wrong')).toBe(false);
     expect(markContributorDemoSessionActive(true)).toBe(true);
     expect(isContributorDemoSessionActive()).toBe(true);
@@ -117,19 +185,43 @@ describe('contributor content sandbox', () => {
     const snapshot = getContributorDemoSandboxSnapshot();
     expect(snapshot.catalogSource).toBe('production-public-api');
     expect(snapshot.pools.map((pool) => pool.name)).toEqual(['基础寻访', '绚丽异彩']);
-    expect(snapshot.characters.map((item) => item.name)).toEqual(expect.arrayContaining(['伊冯', '佩丽卡', '卡契尔', '艺术暴君']));
-    expect(snapshot.poolCharacters.joint_manual_extra_reconstruction_yvonne_p1.map((item) => item.characters.rarity)).toEqual(expect.arrayContaining([4, 5, 6]));
+    expect(snapshot.characters.map((item) => item.name)).toEqual(
+      expect.arrayContaining(['伊冯', '佩丽卡', '卡契尔', '艺术暴君'])
+    );
+    expect(
+      snapshot.poolCharacters.joint_manual_extra_reconstruction_yvonne_p1.map((item) => item.characters.rarity)
+    ).toEqual(expect.arrayContaining([4, 5, 6]));
     expect(snapshot.pools[0]).not.toHaveProperty('user_id');
     expect(snapshot.pools[0]).not.toHaveProperty('creator_role');
     expect(snapshot.siteConfig).not.toHaveProperty('mail_runtime_config');
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('https://ef-gacha.mogujun.icu/api/stats?type=pool_catalog'), expect.objectContaining({ method: 'GET', credentials: 'omit' }));
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('https://ef-gacha.mogujun.icu/api/stats?type=pool_catalog'),
+      expect.objectContaining({ method: 'GET', credentials: 'omit' })
+    );
   });
 
   it('persists editable announcements, pools, entities, rosters, and site config locally', () => {
     const store = useContributorDemoSandboxStore.getState();
-    store.saveAnnouncement({ title: '可编辑公告', content: '本地内容', announcement_type: 'update', severity: 'info', is_active: true, priority: 30 });
-    const entity = store.saveCharacter({ id: 'sandbox-char', name: '本地角色', rarity: 5, type: 'character', aliases: [], is_limited: false, pool_config: { pools: ['standard'] } });
-    store.savePool({ name: '本地测试池', type: 'limited', up_character: null, locked: false }, null, [{ character_id: entity.id, is_up: false }]);
+    store.saveAnnouncement({
+      title: '可编辑公告',
+      content: '本地内容',
+      announcement_type: 'update',
+      severity: 'info',
+      is_active: true,
+      priority: 30,
+    });
+    const entity = store.saveCharacter({
+      id: 'sandbox-char',
+      name: '本地角色',
+      rarity: 5,
+      type: 'character',
+      aliases: [],
+      is_limited: false,
+      pool_config: { pools: ['standard'] },
+    });
+    store.savePool({ name: '本地测试池', type: 'limited', up_character: null, locked: false }, null, [
+      { character_id: entity.id, is_up: false },
+    ]);
     store.upsertSiteConfig('sandbox_banner_text', '本地标题', { label: '沙盒标题', category: 'content' });
 
     const snapshot = getContributorDemoSandboxSnapshot();
@@ -137,7 +229,11 @@ describe('contributor content sandbox', () => {
     expect(snapshot.pools.some((item) => item.name === '本地测试池')).toBe(true);
     expect(snapshot.characters.some((item) => item.name === '本地角色')).toBe(true);
     expect(snapshot.siteConfig.sandbox_banner_text).toBe('本地标题');
-    expect(JSON.parse(window.localStorage.getItem(CONTRIBUTOR_DEMO_SANDBOX_STORAGE_KEY)).announcements.some((item) => item.title === '可编辑公告')).toBe(true);
+    expect(
+      JSON.parse(window.localStorage.getItem(CONTRIBUTOR_DEMO_SANDBOX_STORAGE_KEY)).announcements.some(
+        (item) => item.title === '可编辑公告'
+      )
+    ).toBe(true);
   });
 
   it('builds ready personal analysis and stable history pages from the active real catalog', () => {
@@ -156,18 +252,46 @@ describe('contributor content sandbox', () => {
     expect(second.records[0].id).not.toBe(first.records[0].id);
   });
 
+  it('keeps simulator inheritance in its dedicated local sandbox read', async () => {
+    markContributorDemoSessionActive(true);
+    fetch.mockClear();
+    const projection = getContributorDemoRuntimeSimulatorInheritance();
+    expect(projection).toMatchObject({
+      availability: 'ready',
+      schemaVersion: 3,
+      simulatorInheritance: { contractVersion: 2, session: { version: 2, scope: 'demo-cn-001::server:1' } },
+      meta: { readOnly: true },
+    });
+    expect(getContributorDemoRuntimeAnalysis().scope).not.toHaveProperty('simulatorInheritance');
+    await expect(loadSimulatorInheritance({ accountKey: 'demo-cn-001::server:1' })).resolves.toMatchObject({
+      simulatorInheritance: { contractVersion: 2 },
+      source: 'contributor-local-sandbox',
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(() => getContributorDemoRuntimeSimulatorInheritance({ accountKey: 'demo-cn-001::server:3' })).toThrow(
+      '没有找到沙盒账号'
+    );
+  });
+
   it('activates a ready sandbox admin while denying real edit authority', async () => {
     const user = await activateContributorDemoSession();
     expect(user).toMatchObject({ id: 'demo:contributor-admin', email: 'demo-admin@local.invalid' });
     expect(useAuthStore.getState()).toMatchObject({ userRole: 'super_admin', authResolved: true });
     expect(useAuthStore.getState().canEdit()).toBe(false);
-    expect(usePersonalDataStore.getState()).toMatchObject({ ownerId: 'demo:contributor-admin', phase: 'ready', hasSnapshot: true });
+    expect(usePersonalDataStore.getState()).toMatchObject({
+      ownerId: 'demo:contributor-admin',
+      phase: 'ready',
+      hasSnapshot: true,
+    });
     expect(usePoolStore.getState().pools).toHaveLength(LIVE_POOLS.length);
     expect(usePoolStore.getState().currentGameUid).toBe('demo-cn-001::server:1');
   });
 
   it('fails closed when the existing site session cannot be cleared', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.reject(new Error('offline')))
+    );
     const user = await activateContributorDemoSession();
     expect(user).toBeNull();
     expect(useAuthStore.getState().user).toBeNull();
@@ -176,13 +300,20 @@ describe('contributor content sandbox', () => {
 
   it('blocks generic private fetch and Supabase builders before execution', async () => {
     let readBuilderCalled = false;
-    await expect(fetchWithTimeout('/api/admin', { method: 'POST' })).rejects.toMatchObject({ code: 'contributor_demo_readonly' });
-    await expect(executeSupabaseRead(() => {
-      readBuilderCalled = true;
-      return Promise.resolve({ data: [] });
-    })).rejects.toMatchObject({ code: 'contributor_demo_readonly' });
+    await expect(fetchWithTimeout('/api/admin', { method: 'POST' })).rejects.toMatchObject({
+      code: 'contributor_demo_readonly',
+    });
+    await expect(
+      executeSupabaseRead(() => {
+        readBuilderCalled = true;
+        return Promise.resolve({ data: [] });
+      })
+    ).rejects.toMatchObject({ code: 'contributor_demo_readonly' });
     expect(readBuilderCalled).toBe(false);
-    expect(createContributorDemoReadonlyError('save')).toMatchObject({ code: 'contributor_demo_readonly', operation: 'save' });
+    expect(createContributorDemoReadonlyError('save')).toMatchObject({
+      code: 'contributor_demo_readonly',
+      operation: 'save',
+    });
   });
 
   it('blocks native auth, import queue, identity, and automation side effects', async () => {
@@ -190,10 +321,14 @@ describe('contributor content sandbox', () => {
     fetch.mockClear();
     expect(getEnabledOAuthProviders({ VITE_AUTH_OAUTH_GITHUB_ENABLED: 'true' })).toEqual([]);
     await expect(startOAuthLogin('github', { assign })).rejects.toMatchObject({ code: 'contributor_demo_readonly' });
-    await expect(queuedFetch('/api/hg-proxy?action=grant', { method: 'POST' })).rejects.toMatchObject({ code: 'contributor_demo_readonly' });
+    await expect(queuedFetch('/api/hg-proxy?action=grant', { method: 'POST' })).rejects.toMatchObject({
+      code: 'contributor_demo_readonly',
+    });
     await expect(loadAuthIdentities()).rejects.toMatchObject({ code: 'contributor_demo_readonly' });
     await expect(linkLoginIdentity('github', { assign })).rejects.toMatchObject({ code: 'contributor_demo_readonly' });
-    await expect(unlinkLoginIdentity({ id: 'identity-1', provider: 'github' })).rejects.toMatchObject({ code: 'contributor_demo_readonly' });
+    await expect(unlinkLoginIdentity({ id: 'identity-1', provider: 'github' })).rejects.toMatchObject({
+      code: 'contributor_demo_readonly',
+    });
     await expect(triggerManualSync()).rejects.toMatchObject({ code: 'contributor_demo_readonly' });
     expect(await getValidatedSupabaseSession()).toBeNull();
     expect(await getSupabaseAccessToken()).toBeNull();
@@ -218,17 +353,20 @@ describe('contributor content sandbox', () => {
   });
 
   it('cannot overwrite store methods through persisted sandbox JSON', async () => {
-    window.localStorage.setItem(CONTRIBUTOR_DEMO_SANDBOX_STORAGE_KEY, JSON.stringify({
-      schemaVersion: 3,
-      revision: 7,
-      pools: [],
-      characters: [],
-      announcements: [{ id: 'safe-announcement', title: 'Safe' }],
-      poolCharacters: {},
-      siteConfigItems: [],
-      saveAnnouncement: 'overwritten',
-      replaceSandbox: null,
-    }));
+    window.localStorage.setItem(
+      CONTRIBUTOR_DEMO_SANDBOX_STORAGE_KEY,
+      JSON.stringify({
+        schemaVersion: 3,
+        revision: 7,
+        pools: [],
+        characters: [],
+        announcements: [{ id: 'safe-announcement', title: 'Safe' }],
+        poolCharacters: {},
+        siteConfigItems: [],
+        saveAnnouncement: 'overwritten',
+        replaceSandbox: null,
+      })
+    );
     useContributorDemoSandboxStore.setState({ initialized: false, initializing: false });
 
     await initializeContributorDemoSandbox();

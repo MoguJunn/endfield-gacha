@@ -65,16 +65,17 @@ const CHARACTER_FIELDS = [
   'pool_config',
 ].join(', ');
 
-const POOL_QUERY_CHUNK_SIZE = 100;
 const ERROR_CODE_PATTERN = /[^A-Za-z0-9_.:-]+/g;
-export const PERSONAL_ANALYSIS_SCHEMA_VERSION = 2;
+export const PERSONAL_ANALYSIS_SCHEMA_VERSION = 3;
 
 function readEnvironment() {
   return globalThis.process?.env || {};
 }
 
 function parseBoolean(value, defaultValue = false) {
-  const normalized = String(value ?? '').trim().toLowerCase();
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
   if (!normalized) return defaultValue;
   return ['1', 'true', 'yes', 'on'].includes(normalized);
 }
@@ -88,36 +89,13 @@ function parseInteger(value, defaultValue, { min = 1, max = Number.MAX_SAFE_INTE
 export function getPersonalAnalysisWorkerConfigFromEnv(env = readEnvironment()) {
   return {
     enabled: parseBoolean(env.PERSONAL_ANALYSIS_WORKER_ENABLED, false),
-    backfillEnabled: parseBoolean(
-      env.PERSONAL_ANALYSIS_WORKER_BACKFILL_ENABLED,
-      false
-    ),
+    backfillEnabled: parseBoolean(env.PERSONAL_ANALYSIS_WORKER_BACKFILL_ENABLED, false),
     batchSize: parseInteger(env.PERSONAL_ANALYSIS_WORKER_BATCH_SIZE, 1, { min: 1, max: 5 }),
-    backfillBatchSize: parseInteger(
-      env.PERSONAL_ANALYSIS_WORKER_BACKFILL_BATCH_SIZE,
-      100,
-      { min: 1, max: 500 }
-    ),
-    leaseSeconds: parseInteger(
-      env.PERSONAL_ANALYSIS_WORKER_LEASE_SECONDS,
-      50,
-      { min: 30, max: 55 }
-    ),
-    historyPageSize: parseInteger(
-      env.PERSONAL_ANALYSIS_WORKER_HISTORY_PAGE_SIZE,
-      1000,
-      { min: 1, max: 1000 }
-    ),
-    maxHistoryPages: parseInteger(
-      env.PERSONAL_ANALYSIS_WORKER_MAX_HISTORY_PAGES,
-      100,
-      { min: 1, max: 500 }
-    ),
-    historyPageConcurrency: parseInteger(
-      env.PERSONAL_ANALYSIS_WORKER_HISTORY_PAGE_CONCURRENCY,
-      2,
-      { min: 1, max: 4 }
-    ),
+    backfillBatchSize: parseInteger(env.PERSONAL_ANALYSIS_WORKER_BACKFILL_BATCH_SIZE, 100, { min: 1, max: 500 }),
+    leaseSeconds: parseInteger(env.PERSONAL_ANALYSIS_WORKER_LEASE_SECONDS, 50, { min: 30, max: 55 }),
+    historyPageSize: parseInteger(env.PERSONAL_ANALYSIS_WORKER_HISTORY_PAGE_SIZE, 1000, { min: 1, max: 1000 }),
+    maxHistoryPages: parseInteger(env.PERSONAL_ANALYSIS_WORKER_MAX_HISTORY_PAGES, 100, { min: 1, max: 500 }),
+    historyPageConcurrency: parseInteger(env.PERSONAL_ANALYSIS_WORKER_HISTORY_PAGE_CONCURRENCY, 2, { min: 1, max: 4 }),
   };
 }
 
@@ -127,35 +105,16 @@ function normalizeConfig(config) {
 
   return {
     enabled: typeof config.enabled === 'boolean' ? config.enabled : defaults.enabled,
-    backfillEnabled: typeof config.backfillEnabled === 'boolean'
-      ? config.backfillEnabled
-      : defaults.backfillEnabled,
+    backfillEnabled: typeof config.backfillEnabled === 'boolean' ? config.backfillEnabled : defaults.backfillEnabled,
     batchSize: parseInteger(config.batchSize, defaults.batchSize, { min: 1, max: 5 }),
-    backfillBatchSize: parseInteger(
-      config.backfillBatchSize,
-      defaults.backfillBatchSize,
-      { min: 1, max: 500 }
-    ),
-    leaseSeconds: parseInteger(
-      config.leaseSeconds,
-      defaults.leaseSeconds,
-      { min: 30, max: 55 }
-    ),
-    historyPageSize: parseInteger(
-      config.historyPageSize,
-      defaults.historyPageSize,
-      { min: 1, max: 1000 }
-    ),
-    maxHistoryPages: parseInteger(
-      config.maxHistoryPages,
-      defaults.maxHistoryPages,
-      { min: 1, max: 500 }
-    ),
-    historyPageConcurrency: parseInteger(
-      config.historyPageConcurrency,
-      defaults.historyPageConcurrency,
-      { min: 1, max: 4 }
-    ),
+    backfillBatchSize: parseInteger(config.backfillBatchSize, defaults.backfillBatchSize, { min: 1, max: 500 }),
+    leaseSeconds: parseInteger(config.leaseSeconds, defaults.leaseSeconds, { min: 30, max: 55 }),
+    historyPageSize: parseInteger(config.historyPageSize, defaults.historyPageSize, { min: 1, max: 1000 }),
+    maxHistoryPages: parseInteger(config.maxHistoryPages, defaults.maxHistoryPages, { min: 1, max: 500 }),
+    historyPageConcurrency: parseInteger(config.historyPageConcurrency, defaults.historyPageConcurrency, {
+      min: 1,
+      max: 4,
+    }),
   };
 }
 
@@ -185,46 +144,29 @@ function createLeaseId() {
   return globalThis.crypto?.randomUUID?.() || randomUUID();
 }
 
-function uniqueTextValues(values) {
-  return [...new Set(
-    (Array.isArray(values) ? values : [])
-      .map((value) => String(value ?? '').trim())
-      .filter(Boolean)
-  )];
-}
-
-function chunkValues(values, size) {
-  const chunks = [];
-  for (let index = 0; index < values.length; index += size) {
-    chunks.push(values.slice(index, index + size));
-  }
-  return chunks;
-}
-
 async function loadHistory(adminClient, userId, config) {
   const rows = [];
-  const concurrency = Math.min(
-    config.maxHistoryPages,
-    Math.max(1, Number(config.historyPageConcurrency) || 2)
-  );
+  const concurrency = Math.min(config.maxHistoryPages, Math.max(1, Number(config.historyPageConcurrency) || 2));
 
   for (let firstPage = 0; firstPage < config.maxHistoryPages; firstPage += concurrency) {
     const pageNumbers = Array.from(
       { length: Math.min(concurrency, config.maxHistoryPages - firstPage) },
       (_, offset) => firstPage + offset
     );
-    const pages = await Promise.all(pageNumbers.map(async (page) => {
-      const from = page * config.historyPageSize;
-      const to = from + config.historyPageSize - 1;
-      const { data, error } = await adminClient
-        .from('history')
-        .select(HISTORY_FIELDS)
-        .eq('user_id', userId)
-        .order('id', { ascending: true })
-        .range(from, to);
-      if (error) throw error;
-      return Array.isArray(data) ? data : [];
-    }));
+    const pages = await Promise.all(
+      pageNumbers.map(async (page) => {
+        const from = page * config.historyPageSize;
+        const to = from + config.historyPageSize - 1;
+        const { data, error } = await adminClient
+          .from('history')
+          .select(HISTORY_FIELDS)
+          .eq('user_id', userId)
+          .order('id', { ascending: true })
+          .range(from, to);
+        if (error) throw error;
+        return Array.isArray(data) ? data : [];
+      })
+    );
 
     for (const pageRows of pages) {
       rows.push(...pageRows);
@@ -232,9 +174,7 @@ async function loadHistory(adminClient, userId, config) {
     }
   }
 
-  const limitError = new Error(
-    `Personal analysis history exceeded ${config.maxHistoryPages} full pages`
-  );
+  const limitError = new Error(`Personal analysis history exceeded ${config.maxHistoryPages} full pages`);
   limitError.code = 'personal_analysis_history_page_limit_exceeded';
   throw limitError;
 }
@@ -255,29 +195,29 @@ function formatPoolRow(row) {
   };
 }
 
-async function loadPools(adminClient, poolIds) {
-  const chunks = chunkValues(uniqueTextValues(poolIds), POOL_QUERY_CHUNK_SIZE);
-  if (chunks.length === 0) return [];
-
-  const pages = [];
-  for (const chunk of chunks) {
-    // Keep catalog reads bounded so a maliciously fragmented account cannot
-    // fan out hundreds of simultaneous PostgREST requests.
+async function loadPools(adminClient, userId) {
+  const { data: catalogRows, error: catalogError } = await adminClient.rpc('get_app_visible_pools');
+  if (catalogError) throw catalogError;
+  const catalog = (Array.isArray(catalogRows) ? catalogRows : []).map(formatPoolRow);
+  const poolLookup = new Map(catalog.map((pool) => [pool.id, pool]));
+  for (let page = 0; ; page += 1) {
+    // Include this owner's unpulled pools: adjacency is a catalog dependency.
     const { data, error } = await adminClient
       .from('pools')
       .select(POOL_FIELDS)
-      .in('pool_id', chunk);
+      .eq('user_id', userId)
+      .order('pool_id', { ascending: true })
+      .range(page * 1000, (page + 1) * 1000 - 1);
     if (error) throw error;
-    pages.push((Array.isArray(data) ? data : []).map(formatPoolRow));
+    const rows = Array.isArray(data) ? data : [];
+    rows.map(formatPoolRow).forEach((pool) => poolLookup.set(pool.id, pool));
+    if (rows.length < 1000) break;
   }
-
-  return pages.flat();
+  return Array.from(poolLookup.values());
 }
 
 async function loadCharacters(adminClient) {
-  const { data, error } = await adminClient
-    .from('characters')
-    .select(CHARACTER_FIELDS);
+  const { data, error } = await adminClient.from('characters').select(CHARACTER_FIELDS);
   if (error) throw error;
   return Array.isArray(data) ? data : [];
 }
@@ -292,18 +232,20 @@ export async function loadPersonalAnalysisModel(adminClient, userId, config = {}
   };
   const rawHistory = await loadHistory(adminClient, userId, normalizedModelConfig);
   const [poolAliasMap, characterAliasMap] = await Promise.all([
-    resolvePoolAliasMap(adminClient, rawHistory.map((row) => row?.pool_id)),
-    resolveCharacterAliasMap(adminClient, rawHistory.map((row) => row?.character_id)),
+    resolvePoolAliasMap(
+      adminClient,
+      rawHistory.map((row) => row?.pool_id)
+    ),
+    resolveCharacterAliasMap(
+      adminClient,
+      rawHistory.map((row) => row?.character_id)
+    ),
   ]);
   const history = formatAccountGachaHistoryRows(rawHistory, {
     poolAliasMap,
     characterAliasMap,
   });
-  const canonicalPoolIds = uniqueTextValues(history.map((row) => row?.poolId));
-  const [pools, characters] = await Promise.all([
-    loadPools(adminClient, canonicalPoolIds),
-    loadCharacters(adminClient),
-  ]);
+  const [pools, characters] = await Promise.all([loadPools(adminClient, userId), loadCharacters(adminClient)]);
 
   return buildPersonalAnalysisSnapshots({ history, pools, characters, userId });
 }
@@ -360,9 +302,8 @@ async function hasHistoryForClaimedScope(adminClient, job) {
     .eq('user_id', job.userId)
     .eq('server_scope', job.serverScope)
     .limit(1);
-  query = job.scopeGameUid === 'legacy'
-    ? query.or('game_uid.is.null,game_uid.eq.')
-    : query.eq('game_uid', job.scopeGameUid);
+  query =
+    job.scopeGameUid === 'legacy' ? query.or('game_uid.is.null,game_uid.eq.') : query.eq('game_uid', job.scopeGameUid);
   const { data, error } = await query;
   if (error) throw error;
   return Array.isArray(data) && data.length > 0;
@@ -381,18 +322,13 @@ async function publishJob(adminClient, job, model, leaseId) {
       });
     } else {
       const snapshots = (Array.isArray(model.scopes) ? model.scopes : [])
-        .filter((scope) => (
-          scope?.sourceGameUid === job.scopeGameUid
-          && scope?.sourceServerScope === job.serverScope
-        ))
+        .filter((scope) => scope?.sourceGameUid === job.scopeGameUid && scope?.sourceServerScope === job.serverScope)
         .map((scope) => ({
           scopeKey: scope.scopeKey,
           payload: scope.payload,
         }));
-      if (snapshots.length === 0 && await hasHistoryForClaimedScope(adminClient, job)) {
-        const scopeMismatchError = new Error(
-          'Claimed scope still has history but produced no analysis snapshots'
-        );
+      if (snapshots.length === 0 && (await hasHistoryForClaimedScope(adminClient, job))) {
+        const scopeMismatchError = new Error('Claimed scope still has history but produced no analysis snapshots');
         scopeMismatchError.code = 'personal_analysis_scope_identity_mismatch';
         throw scopeMismatchError;
       }
@@ -441,11 +377,7 @@ function sanitizeBackfillSummary(backfill) {
   };
 }
 
-export async function runPersonalAnalysisWorker({
-  adminClient,
-  config,
-  leaseId,
-} = {}) {
+export async function runPersonalAnalysisWorker({ adminClient, config, leaseId } = {}) {
   const workerConfig = normalizeConfig(config);
   if (!workerConfig.enabled) {
     return {
@@ -469,9 +401,9 @@ export async function runPersonalAnalysisWorker({
 
   const backfill = workerConfig.backfillEnabled
     ? await callRpc(adminClient, 'enqueue_personal_analysis_backfill', {
-      p_after_user_id: null,
-      p_limit: workerConfig.backfillBatchSize,
-    })
+        p_after_user_id: null,
+        p_limit: workerConfig.backfillBatchSize,
+      })
     : null;
   const activeLeaseId = leaseId || createLeaseId();
   const claimed = await callRpc(adminClient, 'claim_personal_analysis_jobs', {
@@ -516,9 +448,7 @@ export async function runPersonalAnalysisWorker({
   return {
     ok: stats.failed === 0,
     skipped: false,
-    code: stats.failed === 0
-      ? 'personal_analysis_worker_completed'
-      : 'personal_analysis_worker_partial_failure',
+    code: stats.failed === 0 ? 'personal_analysis_worker_completed' : 'personal_analysis_worker_partial_failure',
     backfill: sanitizeBackfillSummary(backfill),
     stats,
     results,

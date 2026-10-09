@@ -15,11 +15,13 @@ function clone(value) {
 }
 
 function isoAt(dayOffset, hourOffset = 0) {
-  return new Date(BASE_TIME + ((dayOffset * 24 + hourOffset) * 60 * 60 * 1000)).toISOString();
+  return new Date(BASE_TIME + (dayOffset * 24 + hourOffset) * 60 * 60 * 1000).toISOString();
 }
 
 function getExpectedType(pool = {}) {
-  return pool.type === 'weapon' || pool.extra_subtype === 'reconstruction_claim' || pool.extra_rule_profile === 'reconstruction_weapon_v1'
+  return pool.type === 'weapon' ||
+    pool.extra_subtype === 'reconstruction_claim' ||
+    pool.extra_rule_profile === 'reconstruction_weapon_v1'
     ? 'weapon'
     : 'character';
 }
@@ -42,16 +44,21 @@ function chooseEntity({ pool, roster, characters, rarity, index }) {
 }
 
 function buildRuntimeHistory(snapshot) {
-  const poolsWithRoster = snapshot.pools.filter((pool) => (
-    Array.isArray(snapshot.poolCharacters[pool.pool_id || pool.id])
-    && snapshot.poolCharacters[pool.pool_id || pool.id].length > 0
-  ));
+  const poolsWithRoster = snapshot.pools.filter(
+    (pool) =>
+      Array.isArray(snapshot.poolCharacters[pool.pool_id || pool.id]) &&
+      snapshot.poolCharacters[pool.pool_id || pool.id].length > 0
+  );
   const candidatePools = poolsWithRoster.length > 0 ? poolsWithRoster : snapshot.pools;
   const records = [];
   const pityByPool = new Map();
 
   for (let index = 0; index < 168; index += 1) {
-    const pool = candidatePools[index % Math.max(candidatePools.length, 1)] || { id: 'standard', pool_id: 'standard', type: 'standard' };
+    const pool = candidatePools[index % Math.max(candidatePools.length, 1)] || {
+      id: 'standard',
+      pool_id: 'standard',
+      type: 'standard',
+    };
     const poolId = pool.pool_id || pool.id;
     const pity = (pityByPool.get(poolId) || 0) + 1;
     const rarity = index % 37 === 36 ? 6 : index % 9 === 8 ? 5 : 4;
@@ -113,13 +120,14 @@ function getRuntimeData() {
 }
 
 function projectScope(scope, viewKey, locale) {
-  if (!scope || !viewKey) return scope;
+  if (!scope) return null;
+  const { simulatorInheritance: _simulatorInheritance, ...analysisScope } = scope;
+  if (!viewKey) return analysisScope;
   const view = scope.dashboard?.views?.[viewKey] || null;
-  const timeline = scope.dashboard?.timelineViews?.[locale]?.[viewKey]
-    || scope.dashboard?.timelineViews?.['zh-CN']?.[viewKey]
-    || null;
+  const timeline =
+    scope.dashboard?.timelineViews?.[locale]?.[viewKey] || scope.dashboard?.timelineViews?.['zh-CN']?.[viewKey] || null;
   return {
-    ...scope,
+    ...analysisScope,
     dashboard: {
       views: view ? { [viewKey]: view } : {},
       timelineViews: Array.isArray(timeline) ? { [locale]: { [viewKey]: timeline } } : {},
@@ -134,8 +142,8 @@ export function getContributorDemoRuntimeHistory() {
 export function getContributorDemoRuntimeAnalysis({ accountKey = '', viewKey = '', locale = 'zh-CN' } = {}) {
   const runtime = getRuntimeData();
   const selectedAccountKey = accountKey || runtime.analysis.owner.defaultAccountKey || CONTRIBUTOR_DEMO_ACCOUNT_KEY;
-  const scope = runtime.analysis.scopes.find((item) => item.scopeKey === selectedAccountKey)
-    || runtime.analysis.scopes[0];
+  const scope =
+    runtime.analysis.scopes.find((item) => item.scopeKey === selectedAccountKey) || runtime.analysis.scopes[0];
   return clone({
     availability: 'ready',
     schemaVersion: 1,
@@ -153,6 +161,35 @@ export function getContributorDemoRuntimeAnalysis({ accountKey = '', viewKey = '
       viewKey: viewKey || null,
       locale,
       readOnly: true,
+      catalogSource: runtime.snapshot.catalogSource,
+    },
+    warnings: [{ code: 'contributor_local_sandbox' }],
+  });
+}
+
+export function getContributorDemoRuntimeSimulatorInheritance({ accountKey = '' } = {}) {
+  const runtime = getRuntimeData();
+  const selectedAccountKey = accountKey || runtime.analysis.owner.defaultAccountKey || CONTRIBUTOR_DEMO_ACCOUNT_KEY;
+  const scope = runtime.analysis.scopes.find((item) => item.scopeKey === selectedAccountKey);
+  if (!scope) {
+    const error = new Error('没有找到沙盒账号的模拟器继承快照');
+    error.code = 'personal_analysis_account_not_found';
+    throw error;
+  }
+  return clone({
+    availability: 'ready',
+    schemaVersion: 3,
+    simulatorInheritance: scope.payload.simulatorInheritance,
+    source: 'contributor-local-sandbox',
+    meta: {
+      ownerId: CONTRIBUTOR_DEMO_USER.id,
+      accountKey: scope.scopeKey,
+      revision: `sandbox-${runtime.revision}`,
+      scopeRevision: `sandbox-${runtime.revision}`,
+      scopeSnapshotRevision: `sandbox-${runtime.revision}`,
+      rawIncluded: true,
+      readOnly: true,
+      generatedAt: new Date().toISOString(),
       catalogSource: runtime.snapshot.catalogSource,
     },
     warnings: [{ code: 'contributor_local_sandbox' }],

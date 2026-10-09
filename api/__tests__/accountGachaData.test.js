@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { packInheritanceProjection, unpackInheritanceProjection } from '../../shared/simulator/historyCodec.js';
 
 const mocks = vi.hoisted(() => ({
   rejectDisallowedBrowserOrigin: vi.fn(() => false),
@@ -199,11 +200,7 @@ function createQuery(table, state) {
       const isHeadCount = table === 'history' && query.selectOptions?.head === true;
       const isBoundedHistoryRead = table === 'history' && query.selectedLimit !== null;
       return Promise.resolve({
-        data: isHeadCount
-          ? null
-          : isBoundedHistoryRead
-            ? state.historyRows.slice(0, query.selectedLimit)
-            : [],
+        data: isHeadCount ? null : isBoundedHistoryRead ? state.historyRows.slice(0, query.selectedLimit) : [],
         count: isHeadCount ? state.historyRows.length : null,
         error: null,
       }).then(resolve, reject);
@@ -299,11 +296,13 @@ function createAdminClient() {
       computed_at: '2026-08-04T12:00:00.000Z',
       payload: {
         defaultAccountKey: 'game-1::server:2',
-        accounts: [{
-          accountKey: 'game-1::server:2',
-          gameUid: 'game-1',
-          serverScope: '2',
-        }],
+        accounts: [
+          {
+            accountKey: 'game-1::server:2',
+            gameUid: 'game-1',
+            serverScope: '2',
+          },
+        ],
         summary: { total: 1 },
       },
     },
@@ -343,6 +342,9 @@ function createAdminClient() {
     })),
     rpc: vi.fn(async (functionName, params = {}) => {
       state.rpcCalls.push({ functionName, params });
+      if (functionName === 'get_app_visible_pools') {
+        return { data: state.poolRows, error: null };
+      }
       if (functionName === 'prioritize_personal_analysis_jobs') {
         if (state.priorityRpcError) {
           return { data: null, error: state.priorityRpcError };
@@ -397,12 +399,22 @@ describe('/api/account-gacha-data', () => {
 
   it('only enables transient analysis without admin or through an explicit local flag', () => {
     expect(__internal.shouldUseTransientPersonalAnalysis(null, {})).toBe(true);
-    expect(__internal.shouldUseTransientPersonalAnalysis({}, {
-      PERSONAL_ANALYSIS_TRANSIENT_FALLBACK: 'true',
-    })).toBe(true);
-    expect(__internal.shouldUseTransientPersonalAnalysis({}, {
-      PERSONAL_ANALYSIS_TRANSIENT_FALLBACK: 'false',
-    })).toBe(false);
+    expect(
+      __internal.shouldUseTransientPersonalAnalysis(
+        {},
+        {
+          PERSONAL_ANALYSIS_TRANSIENT_FALLBACK: 'true',
+        }
+      )
+    ).toBe(true);
+    expect(
+      __internal.shouldUseTransientPersonalAnalysis(
+        {},
+        {
+          PERSONAL_ANALYSIS_TRANSIENT_FALLBACK: 'false',
+        }
+      )
+    ).toBe(false);
   });
 
   it('loads current user history through the site-session auth path', async () => {
@@ -502,9 +514,12 @@ describe('/api/account-gacha-data', () => {
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     const res = createJsonResponseRecorder();
 
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2&viewKey=pool-current&locale=en-US',
-    }), res);
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2&viewKey=pool-current&locale=en-US',
+      }),
+      res
+    );
 
     expect(res.statusCode).toBe(200);
     expect(res.body.meta).toMatchObject({ viewKey: 'pool-current', locale: 'en-US' });
@@ -512,20 +527,14 @@ describe('/api/account-gacha-data', () => {
       views: { 'pool-current': { total: 12 } },
       timelineViews: { 'en-US': { 'pool-current': [{ id: 'current-en' }] } },
     });
-    expect(res.body.scope.simulatorInheritance).toEqual({
-      hasAnyData: true,
-      statesByPoolId: { sim_pool_current: { sixStarPity: 7 } },
-    });
-    const projectedRead = adminClient.__state.selectCalls.find((call) => (
-      call.table === 'personal_analysis_snapshots'
-      && call.selection.includes('view:payload->dashboard->views->pool-current')
-    ));
-    expect(projectedRead?.selection).toContain(
-      'timeline:payload->dashboard->timelineViews->en-US->pool-current'
+    expect(res.body.scope).not.toHaveProperty('simulatorInheritance');
+    const projectedRead = adminClient.__state.selectCalls.find(
+      (call) =>
+        call.table === 'personal_analysis_snapshots' &&
+        call.selection.includes('view:payload->dashboard->views->pool-current')
     );
-    expect(projectedRead?.selection).toContain(
-      'simulator_inheritance:payload->simulatorInheritance'
-    );
+    expect(projectedRead?.selection).toContain('timeline:payload->dashboard->timelineViews->en-US->pool-current');
+    expect(projectedRead?.selection).not.toContain('simulator_inheritance:payload->simulatorInheritance');
     expect(JSON.stringify(res.body.scope)).not.toContain('pool-other');
   });
 
@@ -546,9 +555,12 @@ describe('/api/account-gacha-data', () => {
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     const res = createJsonResponseRecorder();
 
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2&viewKey=__group_extra%3Areconstruction&locale=zh-CN',
-    }), res);
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2&viewKey=__group_extra%3Areconstruction&locale=zh-CN',
+      }),
+      res
+    );
 
     expect(res.statusCode).toBe(200);
     expect(res.body.scope.dashboard).toEqual({
@@ -559,18 +571,146 @@ describe('/api/account-gacha-data', () => {
         },
       },
     });
-    const snapshotReads = adminClient.__state.selectCalls.filter((call) => (
-      call.table === 'personal_analysis_snapshots'
-      && call.filters.some((filter) => (
-        filter.column === 'scope_kind' && filter.value === 'account'
-      ))
-    ));
-    expect(snapshotReads).toHaveLength(1);
-    expect(snapshotReads[0].selection).toContain('payload');
-    expect(snapshotReads[0].selection).not.toContain(
-      'views->__group_extra:reconstruction'
+    const snapshotReads = adminClient.__state.selectCalls.filter(
+      (call) =>
+        call.table === 'personal_analysis_snapshots' &&
+        call.filters.some((filter) => filter.column === 'scope_kind' && filter.value === 'account')
     );
+    expect(snapshotReads).toHaveLength(1);
+    expect(snapshotReads[0].selection).toContain('dashboard:payload->dashboard');
+    expect(snapshotReads[0].selection).not.toContain('simulatorInheritance');
+    expect(snapshotReads[0].selection).not.toContain('views->__group_extra:reconstruction');
     expect(JSON.stringify(res.body.scope)).not.toContain('pool-other');
+  });
+
+  it('omits full simulator inheritance from analysis even without a dashboard view key', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.accountSnapshots['game-1::server:2'].payload.simulatorInheritance = {
+      contractVersion: 2,
+      session: { version: 2 },
+      histories: { 'limited-a': [{ eventId: 'private-inheritance-history' }] },
+    };
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({ url: '/api/account-gacha-data?mode=analysis' }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.scope).not.toHaveProperty('simulatorInheritance');
+    expect(JSON.stringify(res.body)).not.toContain('private-inheritance-history');
+    const accountRead = adminClient.__state.selectCalls.find(
+      (call) =>
+        call.table === 'personal_analysis_snapshots' &&
+        call.filters.some((filter) => filter.column === 'scope_kind' && filter.value === 'account')
+    );
+    expect(accountRead.selection).toContain('dashboard:payload->dashboard');
+    expect(accountRead.selection.split(',')).not.toContain('payload');
+    expect(accountRead.selection).not.toContain('simulatorInheritance');
+  });
+
+  it('reads only simulator inheritance v2 with matching account revisions', async () => {
+    const adminClient = createAdminClient();
+    const state = adminClient.__state;
+    [state.ownerState, state.scopeState, state.ownerSnapshot, state.accountSnapshots['game-1::server:2']].forEach(
+      (row) => {
+        row.analysis_schema_version = 3;
+      }
+    );
+    state.scopeState.snapshot_revision = 7;
+    state.accountSnapshots['game-1::server:2'].payload.simulatorInheritance = packInheritanceProjection({
+      contractVersion: 2,
+      session: { version: 2, scope: 'game-1::server:2', pools: { 'limited-a': { totalPulls: 30 } } },
+      histories: {
+        'limited-a': [
+          { eventId: 'free-used', kind: 'free', sequenceIndex: 1, rarity: 4, characterName: 'four', timestamp: 100 },
+          {
+            eventId: 'book-used',
+            kind: 'info_book',
+            sequenceIndex: 2,
+            rarity: 5,
+            characterName: 'five',
+            timestamp: 101,
+          },
+        ],
+      },
+      catalogSignature: 'catalog-v2',
+    });
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=simulator-inheritance&accountKey=game-1%3A%3Aserver%3A2',
+      }),
+      res
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({
+      availability: 'ready',
+      schemaVersion: 3,
+      simulatorInheritance: { contractVersion: 2, historyEncoding: 1 },
+      meta: { accountKey: 'game-1::server:2', scopeRevision: '7', scopeSnapshotRevision: '7' },
+    });
+    expect(
+      unpackInheritanceProjection(res.body.simulatorInheritance).histories['limited-a'].map((r) => r.kind)
+    ).toEqual(['free', 'info_book']);
+    expect(res.body).not.toHaveProperty('scope');
+    expect(JSON.stringify(res.body)).not.toContain('dashboard');
+    expect(adminClient.from).not.toHaveBeenCalledWith('history');
+    const read = state.selectCalls.find((call) => call.selection.includes('simulator_inheritance:'));
+    expect(read.filters).toEqual(
+      expect.arrayContaining([
+        { op: 'eq', column: 'user_id', value: 'user-1' },
+        { op: 'eq', column: 'scope_key', value: 'game-1::server:2' },
+      ])
+    );
+    expect(state.rpcCalls).toHaveLength(0);
+  });
+
+  it.each(['old-schema', 'old-contract', 'revision-changed', 'wrong-server'])(
+    'queues %s inheritance without serving stale state or scanning history',
+    async (failure) => {
+      const adminClient = createAdminClient();
+      const state = adminClient.__state;
+      [state.ownerState, state.scopeState, state.ownerSnapshot, state.accountSnapshots['game-1::server:2']].forEach(
+        (row) => {
+          row.analysis_schema_version = 3;
+        }
+      );
+      state.scopeState.snapshot_revision = 7;
+      const snapshot = state.accountSnapshots['game-1::server:2'];
+      snapshot.payload.simulatorInheritance = packInheritanceProjection({
+        contractVersion: 2,
+        session: { version: 2, scope: 'game-1::server:2' },
+        histories: {},
+        catalogSignature: 'catalog',
+      });
+      if (failure === 'old-schema') snapshot.analysis_schema_version = 2;
+      if (failure === 'old-contract') snapshot.payload.simulatorInheritance.contractVersion = 1;
+      if (failure === 'revision-changed') state.scopeState.history_revision = 8;
+      if (failure === 'wrong-server') snapshot.source_server_scope = '3';
+      mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+      const res = createJsonResponseRecorder();
+      await accountGachaDataHandler(createRequest({ url: '/api/account-gacha-data?mode=simulator-inheritance' }), res);
+      expect(res.statusCode).toBe(202);
+      expect(res.body).toMatchObject({
+        availability: 'building',
+        simulatorInheritance: null,
+        meta: { updateQueued: true },
+      });
+      expect(adminClient.from).not.toHaveBeenCalledWith('history');
+      expect(state.rpcCalls).toContainEqual(
+        expect.objectContaining({ functionName: 'prioritize_personal_analysis_jobs' })
+      );
+    }
+  );
+
+  it('queues a missing owner inheritance snapshot without even probing history', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.ownerSnapshot = null;
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({ url: '/api/account-gacha-data?mode=simulator-inheritance' }), res);
+    expect(res.statusCode).toBe(202);
+    expect(res.body.simulatorInheritance).toBeNull();
+    expect(adminClient.from).not.toHaveBeenCalledWith('history');
   });
 
   it('returns building instead of falling back to a full history read when no snapshot exists', async () => {
@@ -579,9 +719,12 @@ describe('/api/account-gacha-data', () => {
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     const res = createJsonResponseRecorder();
 
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=analysis',
-    }), res);
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=analysis',
+      }),
+      res
+    );
 
     expect(res.statusCode).toBe(202);
     expect(res.headers['Retry-After']).toBe('3');
@@ -637,9 +780,12 @@ describe('/api/account-gacha-data', () => {
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     const res = createJsonResponseRecorder();
 
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=analysis',
-    }), res);
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=analysis',
+      }),
+      res
+    );
 
     expect(res.statusCode).toBe(503);
     expect(res.body).toMatchObject({
@@ -655,9 +801,12 @@ describe('/api/account-gacha-data', () => {
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     const res = createJsonResponseRecorder();
 
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=analysis',
-    }), res);
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=analysis',
+      }),
+      res
+    );
 
     expect(res.statusCode).toBe(503);
     expect(res.body).toMatchObject({
@@ -674,9 +823,12 @@ describe('/api/account-gacha-data', () => {
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     const res = createJsonResponseRecorder();
 
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=analysis',
-    }), res);
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=analysis',
+      }),
+      res
+    );
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({
@@ -699,9 +851,12 @@ describe('/api/account-gacha-data', () => {
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     const res = createJsonResponseRecorder();
 
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2',
-    }), res);
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2',
+      }),
+      res
+    );
 
     expect(res.statusCode).toBe(202);
     expect(res.headers['Retry-After']).toBe('3');
@@ -733,9 +888,12 @@ describe('/api/account-gacha-data', () => {
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     const res = createJsonResponseRecorder();
 
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=analysis',
-    }), res);
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=analysis',
+      }),
+      res
+    );
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({
@@ -765,9 +923,12 @@ describe('/api/account-gacha-data', () => {
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     const res = createJsonResponseRecorder();
 
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=analysis&accountKey=other-account',
-    }), res);
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=analysis&accountKey=other-account',
+      }),
+      res
+    );
 
     expect(res.statusCode).toBe(400);
     expect(res.body).toMatchObject({
@@ -789,9 +950,12 @@ describe('/api/account-gacha-data', () => {
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     const res = createJsonResponseRecorder();
 
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=analysis',
-    }), res);
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=analysis',
+      }),
+      res
+    );
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({
@@ -865,9 +1029,9 @@ describe('/api/account-gacha-data', () => {
     ]);
     expect(typeof res.body.page.nextCursor).toBe('string');
 
-    const historyRead = adminClient.__state.selectCalls.find((call) => (
-      call.table === 'history' && call.selectOptions?.count === 'exact'
-    ));
+    const historyRead = adminClient.__state.selectCalls.find(
+      (call) => call.table === 'history' && call.selectOptions?.count === 'exact'
+    );
     expect(historyRead.selection.split(',')).toContain('pool_version');
     expect(historyRead).toMatchObject({
       from: 0,
@@ -891,31 +1055,35 @@ describe('/api/account-gacha-data', () => {
     });
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     const firstRes = createJsonResponseRecorder();
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=history&gameUid=game-1&serverScope=2&limit=1',
-    }), firstRes);
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=history&gameUid=game-1&serverScope=2&limit=1',
+      }),
+      firstRes
+    );
 
     const cursor = encodeURIComponent(firstRes.body.page.nextCursor);
     const nextRes = createJsonResponseRecorder();
-    await accountGachaDataHandler(createRequest({
-      url: `/api/account-gacha-data?mode=history&gameUid=game-1&serverScope=2&limit=1&cursor=${cursor}`,
-    }), nextRes);
+    await accountGachaDataHandler(
+      createRequest({
+        url: `/api/account-gacha-data?mode=history&gameUid=game-1&serverScope=2&limit=1&cursor=${cursor}`,
+      }),
+      nextRes
+    );
     expect(nextRes.statusCode).toBe(200);
     expect(nextRes.body.page.total).toBeNull();
-    const latestHistoryRead = adminClient.__state.selectCalls
-      .filter((call) => call.table === 'history')
-      .at(-1);
-    expect(latestHistoryRead.filters).toEqual(expect.arrayContaining([
-      expect.objectContaining({ op: 'or' }),
-    ]));
-    expect(latestHistoryRead.filters.find((filter) => filter.op === 'or')?.value)
-      .toContain('id.lt.2');
+    const latestHistoryRead = adminClient.__state.selectCalls.filter((call) => call.table === 'history').at(-1);
+    expect(latestHistoryRead.filters).toEqual(expect.arrayContaining([expect.objectContaining({ op: 'or' })]));
+    expect(latestHistoryRead.filters.find((filter) => filter.op === 'or')?.value).toContain('id.lt.2');
 
     adminClient.__state.scopeState.history_revision = 8;
     const changedRevisionRes = createJsonResponseRecorder();
-    await accountGachaDataHandler(createRequest({
-      url: `/api/account-gacha-data?mode=history&gameUid=game-1&serverScope=2&cursor=${cursor}`,
-    }), changedRevisionRes);
+    await accountGachaDataHandler(
+      createRequest({
+        url: `/api/account-gacha-data?mode=history&gameUid=game-1&serverScope=2&cursor=${cursor}`,
+      }),
+      changedRevisionRes
+    );
     expect(changedRevisionRes.statusCode).toBe(409);
     expect(changedRevisionRes.body).toMatchObject({
       success: false,
@@ -923,9 +1091,12 @@ describe('/api/account-gacha-data', () => {
     });
 
     const wrongScopeRes = createJsonResponseRecorder();
-    await accountGachaDataHandler(createRequest({
-      url: `/api/account-gacha-data?mode=history&gameUid=game-1&serverScope=3&cursor=${cursor}`,
-    }), wrongScopeRes);
+    await accountGachaDataHandler(
+      createRequest({
+        url: `/api/account-gacha-data?mode=history&gameUid=game-1&serverScope=3&cursor=${cursor}`,
+      }),
+      wrongScopeRes
+    );
     expect(wrongScopeRes.statusCode).toBe(400);
     expect(wrongScopeRes.body).toMatchObject({
       success: false,
@@ -933,9 +1104,12 @@ describe('/api/account-gacha-data', () => {
     });
 
     const missingScopeRes = createJsonResponseRecorder();
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=history&gameUid=game-1',
-    }), missingScopeRes);
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=history&gameUid=game-1',
+      }),
+      missingScopeRes
+    );
     expect(missingScopeRes.statusCode).toBe(400);
     expect(missingScopeRes.body).toMatchObject({
       success: false,
@@ -1091,19 +1265,23 @@ describe('/api/account-gacha-data', () => {
     });
 
     const firstResponse = createJsonResponseRecorder();
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=analysis',
-      headers: { authorization: 'Bearer native-token' },
-    }), firstResponse);
-    const firstHistoryReadCount = callerClient.__state.selectCalls.filter((call) => (
-      call.table === 'history'
-    )).length;
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=analysis',
+        headers: { authorization: 'Bearer native-token' },
+      }),
+      firstResponse
+    );
+    const firstHistoryReadCount = callerClient.__state.selectCalls.filter((call) => call.table === 'history').length;
 
     const secondResponse = createJsonResponseRecorder();
-    await accountGachaDataHandler(createRequest({
-      url: '/api/account-gacha-data?mode=analysis',
-      headers: { authorization: 'Bearer native-token' },
-    }), secondResponse);
+    await accountGachaDataHandler(
+      createRequest({
+        url: '/api/account-gacha-data?mode=analysis',
+        headers: { authorization: 'Bearer native-token' },
+      }),
+      secondResponse
+    );
 
     expect(firstHistoryReadCount).toBeGreaterThan(0);
     expect(callerClient.__state.selectCalls.filter((call) => call.table === 'history')).toHaveLength(
@@ -1212,11 +1390,13 @@ describe('/api/account-gacha-data', () => {
     const req = createRequest({
       method: 'POST',
       body: {
-        pools: [{
-          id: 'limited_character',
-          name: 'limited_character',
-          type: 'limited',
-        }],
+        pools: [
+          {
+            id: 'limited_character',
+            name: 'limited_character',
+            type: 'limited',
+          },
+        ],
       },
     });
     const res = createJsonResponseRecorder();
@@ -1233,19 +1413,23 @@ describe('/api/account-gacha-data', () => {
 
   it('does not overwrite a global pool owned by another user', async () => {
     const adminClient = createAdminClient();
-    adminClient.__state.poolRows = [{
-      pool_id: 'special_official_001',
-      user_id: 'other-owner',
-    }];
+    adminClient.__state.poolRows = [
+      {
+        pool_id: 'special_official_001',
+        user_id: 'other-owner',
+      },
+    ];
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     const req = createRequest({
       method: 'POST',
       body: {
-        pools: [{
-          id: 'official_pool_alias',
-          name: '恶意覆盖名称',
-          type: 'limited',
-        }],
+        pools: [
+          {
+            id: 'official_pool_alias',
+            name: '恶意覆盖名称',
+            type: 'limited',
+          },
+        ],
       },
     });
     const res = createJsonResponseRecorder();
