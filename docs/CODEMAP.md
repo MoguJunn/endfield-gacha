@@ -39,6 +39,7 @@
 - 顶栏、独立工单 / 管理入口、身份与主题菜单：`src/components/home/HomeLandingHeader.jsx`、`homeLandingDemo.css`。
 - 原生轮换与活动卡：`src/components/home/RotationScheduleCard.jsx`、`SummerLotteryBanner.jsx`。
 - 独立版本倒计时及 `--vc-*` 主题接口：`src/components/home/VersionCountdownCard.jsx`、`versionCountdownCard.css`。
+- 前瞻／导览切换与官方封面：`src/components/home/CommunityActivitySection.jsx`、`VersionBriefingCard.jsx`、`src/utils/versionBriefing.js`、`src/constants/versionPreview.js`；抓取与保留封面：`api/_lib/officialAnnouncementsFeed.js`、`api/_routes/root/announcements.js`。
 - 四类消息 / 公告模型与统一弹窗：`src/components/home/DesktopMessageCenter.jsx`、`desktopMessageModel.js`、`DesktopHomeDialog.jsx`；组件测试：`src/components/home/__tests__/DesktopMessageCenter.test.jsx`。
 - 个人概览 / 卡池分析二级菜单与持久化收起：`src/components/app/DesktopPersonalWorkspace.jsx`；共享宽度 / 外置菜单：`desktopPageLayout.css`。
 - 路由入场与滚动重置：`src/components/app/DesktopPageMotion.jsx`；统计来源锁定：`src/components/SummaryView.jsx`、`src/hooks/summary/useSummaryViewState.js`、`src/components/summary/CharacterCatalogView.jsx`。
@@ -81,6 +82,8 @@
 | 单一 API 入口 | `api/router.js` |
 | 路由表 | `api/_routes/index.js` |
 | 公共缓存 helper | `api/_lib/publicCache.js` |
+| 版本日历快照、数据库日期与重构期次 | `api/_lib/versionCalendarSnapshot.js`、`shared/extraPoolSubtype.js`、`api/__tests__/versionCalendarSnapshot.test.js` |
+| 浏览器后台刷新锁适配与双标签验证 | `src/utils/supabaseAuthLock.js`、`src/supabaseClient.js`、`scripts/verify-supabase-auth-lock-playwright.mjs` |
 | 邮件防刷 / 入队 / worker / webhook / 模板 / 运行期开关 | `api/_lib/mailAbuseGuards.js`、`api/_lib/mailOutbox.js`、`api/_lib/mailOutboxWorker.js`、`api/_lib/mailProviderAdapter.js`、`api/_lib/mailTemplateRenderer.js`、`api/_lib/mailDeliveryFeedback.js`、`api/_lib/mailInboundEvents.js`、`api/_lib/mailSmokeTest.js`、`api/_lib/mailRuntimeConfig.js` |
 | 认证 CAPTCHA / 风险桶 / 脱敏审计 | `api/_lib/authSecurityGuards.js` |
 | 认证邮件 / 邮箱归属 / 首次设密 / 账号恢复状态 | `api/_routes/root/auth-email-action.js`、`account-email-action.js`、`account-email-verify.js`、`account-password-setup.js`、`account-recovery-request.js`、`account-security-state.js` |
@@ -107,6 +110,17 @@
 | 历史批量删除歧义保护验证 | `scripts/verify-history-batch-delete-guard.mjs` |
 | 贡献者沙盒真实目录、内容持久化与零私有请求验证 | `scripts/verify-contributor-demo-playwright.mjs` |
 | 生产历史异常扫描 / 受保护回填 | `scripts/backfill-history-anomalies.mjs` |
+| 目录保存计数复用的数据库验证 | `scripts/verify-catalog-count-reuse.mjs` |
+| 已有角色／武器头像匹配与补图 | `scripts/lib/localAvatarSync.mjs`、`scripts/lib/sklandCatalogSource.mjs` |
+
+以下手动专项脚本继续保留，未列入默认 `npm test` 不等于废弃：
+
+- `scripts/verify-supabase-env.mjs`、`scripts/verify-auth-pow-challenge.mjs`：使用构造输入验证环境解析与工作量证明合同，无需生产凭据。
+- `scripts/verify-statistics-ready.mjs`：通过服务端 key 对已准备的数据库快照做只读就绪核验；必须明确目标环境，不放入无凭据的默认 CI。
+- `scripts/verify-group-statistics-live.mjs`：指定本地 `STATISTICS_BASE_URL` 后验证五组统计和响应式十图，需要已准备的页面与快照。
+- `scripts/verify-bootstrap-proxy.mjs`：历史本地集成验证，会读取本机环境并调用 API，按实际连接目标受控运行，不作为干净检出的默认测试。
+
+本轮退役脚本和本地生成报告范围见 [仓库内容规范](REPOSITORY_LAYOUT.md)，报告按当前输入生成，不提交某次生产快照作为公共测试夹具。
 
 ## Supabase 与资源
 
@@ -128,7 +142,7 @@
 | 历史 v4.5.3 运行时版本与缓存失效 | `supabase/migrations/156_bump_site_version_453.sql` |
 | 官方非寻访事件旧占位精确修复 RPC | `supabase/migrations/157_repair_official_non_pull_artifact.sql` |
 | 历史 v4.5.4 运行时版本与缓存失效 | `supabase/migrations/158_bump_site_version_454.sql` |
-| v4.6.2 候选包版本与运行时版本核对 | `package.json`、`src/constants/appMeta.js`、`docs/RELEASE_4.6.2.md` |
+| 当前包与构建版本、发布事实 | `package.json`、`src/constants/appMeta.js`、`docs/RELEASE_4.6.3.md`、`docs/RECENT_DELIVERY_STATUS.md` |
 | 认证 Phase A/B | `supabase/migrations/166_harden_admin_profile_and_oauth_transactions.sql` |
 | 认证 Phase C/D | `supabase/migrations/167_harden_account_credentials_and_identity_keys.sql` |
 | 认证审查与旧邮箱空壳修复 | `supabase/migrations/168_close_auth_review_findings.sql`–`172_quarantine_oauth_email_artifact_atomically.sql` |
@@ -136,8 +150,13 @@
 | 个人分析 `pg_cron + pg_net` 调度与即时派发 | `supabase/migrations/178_schedule_personal_analysis_worker_with_pg_cron.sql`–`180_prioritize_immediate_personal_analysis_dispatch.sql` |
 | 附加寻访、重构寻访与重构申领 | `supabase/migrations/181_add_extra_pool_subtypes.sql`–`183_split_reconstruction_claim_subtype.sql` |
 | 统计队列与五类合池 v4 快照 | `supabase/migrations/2026092201_schedule_statistics_snapshots.sql`、`2026092401_group_statistics_snapshots.sql` |
+| 目录保存复用单池计数 | `supabase/migrations/2026100601_reuse_pool_counts_for_catalog_groups.sql` |
+| 限定武器同期角色关联 | `supabase/migrations/2026100701_weapon_character_pool_schedule.sql`、`supabase/tests/weapon-character-pool-schedule.sql` |
+| 已执行的重构日期与维护截止修正 | `supabase/manual/data-backfill/20261007_fill_danqing_reconstruction_weapon_dates.sql`、`20261007_correct_reconstruction_maintenance_end.sql` |
 | 静态头像 | `public/avatars/` |
 | 版本日历静态图 | `public/game-calendar/` |
+
+独立日历仓库的 `lib/calendar-core.js` 负责数据库日期优先、重构类型和期次及公开序列化；`lib/version-six.js` 维护已核对活动；`assets/events/OFFICIAL_SOURCES.md` 保存官方海报和日期来源。它们不在主站仓库的 `public/game-calendar/` 中维护。数据工作台代码尚在独立本地候选，不能据原目录存在相关文件推定主线已提供该路由。
 
 ## 仍需治理的复杂点
 

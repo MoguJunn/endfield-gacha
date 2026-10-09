@@ -6,7 +6,8 @@
 
 - 先确认改动是否属于当前公开主链，还是只应该留在私有环境。
 - 触及公开页面、统计、导入、缓存、自动化或部署配置时，优先对齐现有代码和文档边界。
-- 不要提交秘密、真实 token、生产数据库连接串、私有后端地址或临时调试账号。
+- 不要提交秘密、真实 token、生产数据库连接串、私有后端地址或能登录真实后端的调试账号。公开 synthetic 沙盒身份须保持无真实 token 与生产权限。
+- 文件范围、生成物及本地恢复材料按 [仓库内容规范](docs/REPOSITORY_LAYOUT.md) 维护；提交前同时核对已暂存与未暂存差异。
 
 ## 本地环境
 
@@ -16,11 +17,15 @@
 cp .env.contributor.example .env.local
 ```
 
-该模板只包含浏览器端公开变量。`VITE_SUPABASE_PUBLISHABLE_KEY` 需要由维护者提供低权限公开 key，或改用贡献者自己的本地 Supabase。不要把 service role、JWT secret、SMTP 密码、OAuth Client Secret、BOT token、Cron secret 或 CAPTCHA secret 写入 `.env.local` 后提交。
+模板默认启用仅 Vite DEV 生效的内容沙盒，无需数据库 key。目录读取正式站公共 GET，成功后缓存，离线使用最小真实目录。只有关闭沙盒并调试真实认证时，才需要低权限 publishable key 或自己的隔离 Supabase；不向贡献者提供 service role、JWT／SMTP／OAuth／BOT／Cron 等服务端秘密。
 
-新版桌面首页已在 v4.6.0 成为默认入口，`/?home-demo=unified` 保留兼容。当前 v4.6.2 候选统一各桌面页与首页的响应式宽度，并更新统计工作区；生产迁移、Worker 和 v4 快照预热尚未执行。调整首页、顶栏、统计入口或共享组件前，请对齐 [桌面界面合同](docs/DESKTOP_HOME_DEMO.md) 和 [统计口径合同](docs/STATS_OBSERVATION_CONTRACT.md)，保留 1366×768 基线、独立版本主题接口及移动端边界。
+新版桌面首页已在 v4.6.0 成为默认入口，`/?home-demo=unified` 保留兼容。当前 v4.6.3 已包含 PR #37 的统计与宽度更新及 PR #43 的版本导览；统计迁移、Worker 与首次预热已完成。调整相关入口前，请对齐 [桌面合同](docs/DESKTOP_HOME_DEMO.md)、[统计合同](docs/STATS_OBSERVATION_CONTRACT.md) 和 [近期交付](docs/RECENT_DELIVERY_STATUS.md)，保留 1366×768 基线、独立组件和移动端边界。
 
 指南样例位于开发服务器的 `/statistics-preview.html`，仅在 Vite DEV 中渲染，未接入真实登录、导入或备份动作。它与贡献者数据沙盒是独立入口；真实统计的只读本地预览按 [统计调度说明](docs/STATISTICS_SCHEDULING.md) 准备，不代表生产 Worker 已启用。
+
+修改卡池时间时对齐 [时间管理合同](docs/POOL_SCHEDULE_MANAGEMENT.md)：限定武器三期规则与重构申领分开，数据库明确空值不由离线备份覆盖，重构期次来自后台设置。独立日历在另一仓库维护，两边分别验证与部署。活动名称、时间和图片应保留官方来源；维护开始与版本开启不能混用，未公布日期保持未知，限定武器既有估算规则除外。
+
+根配置按工具加载边界维护：CSS 处理在 `vite.config.js`，Tailwind 4 主题在 `src/index.css`；Prettier 选项在 `package.json.prettier`，测试初始化在 `tests/setup.js`。不再新建重复的 PostCSS／Tailwind JS 配置；抽奖子应用的 CSS 处理由构建脚本显式指定。整理配置后核对构建和相关测试，不批量格式化无关源码。
 
 ## 最低验证
 
@@ -60,6 +65,8 @@ npm run test:supabase-baseline:smoke
 - 桌面 Demo 改动同步 `docs/DESKTOP_HOME_DEMO.md`；区分本地验收、最终改动验证和正式发布，预览阶段不替换 README 的正式站截图。
 - 环境变量、部署方式、Supabase baseline、公共缓存版本和自动化入口变更时，请同步更新对应文档。
 - 如果改动会影响 GitHub 页面展示，优先更新 README 顶部、预览图和更新日志。
+- 发布事实写清对应提交、PR／CI、生产核验与测试时间；本地候选不写成已上线，旧验证数量不冒充本轮重跑。工作区 todo／handoff 位于仓库外，应同步任务入口但不复制私有运维信息进公开文档。
+- 迁移按文件内容与目标数据库合同核对，不仅比较编号。独立候选若与 main 同号，先重编号、同步引用并生成 baseline；已执行的手动数据修正不加入新环境默认部署。
 
 ## 提交建议
 

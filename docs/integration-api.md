@@ -8,7 +8,7 @@ These endpoints are not third-party `public.read` APIs. They are split by creden
 - Official bot query endpoints use an `official_bot` API key with `bot.self.read`.
 - Binding verification uses a provider-specific verifier secret, not the read-only bot key.
 
-During the authentication hardening transition, clients should send exactly one site-user credential. If Cookie and Bearer are both present, the local Phase B candidate requires the same user ID and rejects mismatches; the candidate is not yet merged or deployed. This platform-binding API is separate from GitHub / LinuxDo / QQ login identities. See `AUTH_SECURITY_HARDENING.md`.
+Authentication hardening is deployed through PR #14 and migrations 166–168. Clients should send exactly one site-user credential. When Cookie and Bearer are both present, both must resolve to the same user ID; mismatches are rejected. This platform-binding API is separate from GitHub / LinuxDo / QQ login identities. See [AUTH_SECURITY_HARDENING.md](AUTH_SECURITY_HARDENING.md).
 
 ## Site User Binding Endpoints
 

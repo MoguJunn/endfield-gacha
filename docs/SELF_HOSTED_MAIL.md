@@ -2,7 +2,7 @@
 
 本文档用于 `MAIL-SELFHOST-001` / `MAIL-ABUSE-001`。它定义选型、边界、基础设施、已落地的 provider-independent 防刷 / outbox / 队列处理器、受控 Auth 邮件入口和后续决策点；当前默认以 Stalwart 作为第一阶段自建邮件平台方向，生产真实发信仍由显式环境变量和紧急停发开关控制。
 
-> 认证边界：Phase A–D 已在本 worktree 本地完成邮箱唯一归属、一次性 challenge、首次设密能力、临时凭据认证层到期和 identity keyring，但尚未生产部署。SMTP、DNS 或测试邮件成功不能替代这些数据库能力、GitHub 真实浏览器回归或生产迁移验收。
+> 认证边界：Phase A–D、PR #14、migrations 166–168 及对应 API／前端已完成生产发布，覆盖邮箱归属、一次性 challenge、首次设密、临时凭据认证层到期和 identity keyring。后续认证迁移运行态按各自证据核对。认证部署与真实邮件投递开关独立；SMTP、DNS 或测试邮件成功不能替代 Session 边界验收，认证发布也不表示真实发信已开放。
 
 ## 目标
 
@@ -15,7 +15,7 @@
 
 - 数据库按自建站点数据库处理，不描述为官方数据库。
 - 当前账号恢复优先走受控同源自助密码重置邮件；风控命中、邮件不可用、投递失败、邮箱不可访问或用户需要人工核验时，再回退到人工审核链路。人工恢复申请始终返回通用 `received`，避免邮箱枚举。
-- `AUTH-003` 已补 provider-independent 降级闭环；Phase C 候选进一步把管理员临时凭据元数据与 Auth 密码更新原子写入，并通过 Auth session 门禁和站点 Session/Bearer 检查执行认证层到期。候选尚未生产部署。
+- `AUTH-003` 已补降级闭环；Phase C 已把临时凭据元数据与 Auth 密码更新原子写入，并通过 Auth Session 和站点 Session／Bearer 检查执行到期。该认证能力已发布，真实邮件仍受环境变量、运行期 lower gate、演练模式和紧急停发开关独立控制。
 - `AUTH-003` 已补受控同源 Auth 邮件入口：`/api/auth-email-action` 支持注册验证、密码重置和邮件登录，必须启用 `AUTH_MAIL_ACTIONS_ENABLED=true`、`MAIL_OUTBOX_WORKER_ENABLED=true` 且未命中 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH` 才会真实调用 provider adapter。
 - `AUTH-003` 也支持在 `ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时，把密码重置申请写入 `mail_outbox`。入队被防刷阻断、异常或状态回写失败时，申请仍保留人工恢复 fallback。
 - `api/_lib/mailTemplateRenderer.js` 是统一 HTML + plaintext 邮件模板入口。注册验证、邮件登录、密码重置、开发者 API 审核通知、工单回复通知、管理员告警、后台测试邮件和账号恢复队列邮件都应复用它，不再散落纯文本邮件。
@@ -127,116 +127,18 @@ Browser / Mobile UI
 | 管理员告警 | 中 | 已接入受控自告警 outbox，默认关闭 | 超管本人 + 事件幂等 | 后台 badge |
 | 营销 / 群发 | 禁止 | 不启用 | 不适用 | 不适用 |
 
-## 已落地的应用侧 scaffold
+## 已完成的应用侧能力
 
-Task 9 已加入 provider-independent 防刷与预算基础层：
+邮件防刷、持久预算、原子入队、队列处理器、Stalwart SMTP adapter、统一 HTML／纯文本模板、投递反馈和入站摘要均已实现。代码与测试入口统一见 [CODEMAP](CODEMAP.md)，环境变量与维护命令见 [PROJECT_GUIDE](PROJECT_GUIDE.md)，实际邮件服务器部署见 [Stalwart 指南](STALWART_DEPLOYMENT_GUIDE.md)。原 Task 9／18／19／25／26／27 的实施流水由 Git 历史追溯，不再与现行合同重复维护。
 
-- `api/_lib/mailAbuseGuards.js`
-  - 归一化收件邮箱和域名。
-  - 用 HMAC 生成 `recipient_email_hash`、域名 hash、预算桶 key 和去重 key。
-  - 输出统一决策：`queue`、`block`、`dedupe`。
-  - 支持全局紧急停发、事件禁用、域名暂停、suppression、幂等和多维预算桶。
-  - 提供 `sanitizeMailPayload()`，默认脱敏 Token、密码、API key、邮箱、`user_id`、`game_uid`、平台 ID 和原始记录字段。
-- `supabase/migrations/116_add_mail_outbox_and_abuse_controls.sql`
-  - 新增 `mail_outbox`、`mail_suppression`、`mail_abuse_budget_config`、`mail_abuse_budget_counters`、`mail_delivery_events`。
-  - 表默认启用 RLS，并显式撤销 `anon` / `authenticated` 权限。
-  - 保存收件人 hash、域名、脱敏 payload、guard decision 和 provider message hash，不保存明文收件邮箱或敏感 token。
-- `npm run test:mail-abuse-guards`
-  - 覆盖允许入队、紧急停发、域名暂停、suppression、幂等、预算超限和 payload 脱敏。
+- 入队 RPC `enqueue_mail_outbox_event()` 在同一事务中核对幂等、suppression、预算并写入队列；只授权 `service_role`。
+- Worker 条件领取到期 `queued` 行后置为 `sending`；收件人由受控业务上下文解析，不在 outbox 保存明文邮箱。管理员告警只面向当前超管本人。
+- 演练成功写 `dry_run_accepted`，任务重新排队，不标成已发送；真实传输成功写 `sent`，失败按重试与人工恢复边界处理。
+- 内部 Worker 接受 `MAIL_OUTBOX_WORKER_SECRET`／`CRON_SECRET`，反馈和入站分别使用 webhook secret。每日 cron、后台手动处理及测试邮件都继续遵守环境硬闸门与运行期限制。
+- 反馈只保存 hash／域名与脱敏事件，永久失败才停发；入站只保存摘要，不保留正文、附件、明文邮箱或自动转工单。
+- 恢复申请始终返回通用 `received`，入队失败保留人工恢复，删除账号申请不进入重置队列。临时凭据到期、Session 撤销与强制改密由 [认证合同](AUTH_SECURITY_HARDENING.md) 管理，普通状态清除不能替代真正改密。
 
-Task 18 已加入 provider-independent outbox 入队层：
-
-- `api/_lib/mailOutbox.js`
-  - 仅接受 service-role Supabase client。
-  - 统一执行幂等检查、suppression 读取、预算 counter 读取、payload 脱敏和 RPC 入队。
-  - 不包含 SMTP、JMAP、Stalwart SDK、Postal API 或任何真实发信逻辑。
-- `supabase/migrations/120_add_mail_outbox_enqueue_rpc.sql`
-  - 新增 `enqueue_mail_outbox_event()`。
-  - 在数据库事务内锁定预算桶、判断超限、写入 `mail_outbox`、递增 `mail_abuse_budget_counters`。
-  - 仅 grant 给 `service_role`，不授权 `anon` / `authenticated`。
-- `npm run test:mail-outbox-enqueue`
-  - 覆盖正常入队、幂等命中、suppression、预算超限、payload 脱敏和 RPC 权限边界。
-
-这些接口只供同源 API / worker 调用。当前唯一面向浏览器的发信入口是受控认证邮件路由 `/api/auth-email-action`，只允许注册验证、密码重置和邮件登录三类动作；项目仍不提供任意收件人 / 任意模板的公开“发送邮件”API。
-
-Task 25 已加入 provider-independent 队列处理器 / adapter 边界：
-
-- `api/_lib/mailProviderAdapter.js`
-  - 读取 `MAIL_PROVIDER`、`MAIL_WORKER_DRY_RUN`、发件人、Stalwart SMTP / JMAP 占位配置，以及后续 Postal API / SMTP 备选配置。
-  - 默认演练 provider 返回稳定的 provider message id hash 输入，不连接网络、不发送邮件。
-  - `MAIL_WORKER_DRY_RUN=false` 时支持内置 Stalwart SMTP transport；未配置 SMTP 主机、账号或密码会返回 `stalwart_smtp_not_configured`，不会伪装成功。
-- `api/_lib/mailOutboxWorker.js`
-  - 从 `mail_outbox` 读取 `status = queued` 且 `next_attempt_at <= now()` 的 due rows。
-  - 用条件更新把行 claim 为 `sending`，避免多个队列处理器同时处理同一行。
-  - 支持 `password_reset + account_recovery + auth.password-reset`、`developer_api_review + api_client + developer-api.review`、`ticket_reply + ticket + ticket.reply` 和 `admin_alert + profile + admin.alert`。因为 `mail_outbox` 不保存明文邮箱，队列处理器必须通过受控业务上下文解析收件人；管理员告警只能解析到当前超管 profile 邮箱。
-  - 演练成功时写入 `mail_delivery_events.event_type = dry_run_accepted`，并把 outbox 放回 `queued`、推迟 `next_attempt_at`，不把账号恢复状态改成“已发送”。
-  - live transport 成功时写入 `status = sent`、`provider_key`、`provider_message_id_hash`，并把恢复申请推进到 `mail_reset_sent`。
-  - live transport 不可用、模板不支持或重置链接生成失败时写入 `failed` 或重新排队，并把恢复申请推进到 `mail_reset_failed` 或保持 `mail_reset_queued`。
-- `scripts/run-mail-outbox-worker.mjs`
-  - 提供本地 / 受控任务入口：`npm run worker:mail-outbox`。
-  - 默认仍受 `MAIL_OUTBOX_WORKER_ENABLED` 和 `MAIL_WORKER_DRY_RUN` 控制。
-- `api/_routes/root/mail-outbox-worker.js`
-  - 提供内部 HTTP worker endpoint：`/api/mail-outbox-worker`。
-  - 通过 `Authorization: Bearer <secret>`、`x-mail-outbox-worker-secret`、`x-mail-worker-secret` 或 `x-cron-secret` 鉴权。
-  - accepted secrets 同时包含 `MAIL_OUTBOX_WORKER_SECRET` 和 `CRON_SECRET`，解决生产环境单独设置 worker secret 后 Vercel Cron 的 `Authorization: Bearer <CRON_SECRET>` 被拒绝的问题。
-  - `vercel.json` 已配置每日一次 `/api/mail-outbox-worker` cron；该 cron 只是触发队列处理，默认仍会因 `MAIL_OUTBOX_WORKER_ENABLED=false`、`MAIL_WORKER_DRY_RUN=true`（演练模式）或 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH=true`（紧急停发）安全跳过。
-- `npm run test:mail-outbox-worker`
-  - 覆盖未启用队列处理器、演练模式、账号恢复真实传输成功、开发者 API 审核通知解析、工单回复通知、管理员告警通知、真实传输缺配置失败、unsupported template failure、状态回写和脱敏边界。
-- `npm run test:mail-service-entrypoints`
-  - 覆盖内部队列处理 endpoint 鉴权、后台测试邮件入口、真实发送紧急停发、演练模式和投递事件脱敏。
-
-Task 26 已加入内部投递反馈 / suppression 回写基础层：
-
-- `api/_lib/mailDeliveryFeedback.js`
-  - 接收 provider 投递事件摘要，统一归类 `hard_bounce`、`complaint`、`invalid_recipient`、`domain_pause`。
-  - 只保存收件人 hash 或域名，不保存明文收件邮箱。
-  - 写入 `mail_delivery_events`，并在需要停发时插入或更新 `mail_suppression`。
-  - 如果有 outbox id，会把对应 `mail_outbox.status` 标为 `suppressed`，并写入脱敏错误摘要。
-- `api/_routes/root/mail-delivery-feedback.js`
-  - 仅支持 POST。
-  - 通过 `Authorization: Bearer <secret>` 或 `x-mail-webhook-secret` / `x-stalwart-webhook-secret` / `x-webhook-secret` 鉴权。
-  - secret 来源优先为 `MAIL_DELIVERY_WEBHOOK_SECRET`，其次兼容 `STALWART_WEBHOOK_SECRET` / `POSTAL_WEBHOOK_SECRET`。
-- `npm run test:mail-delivery-feedback`
-  - 覆盖 hard bounce 创建 suppression、complaint 更新 suppression、domain pause、普通 delivered 事件只写 delivery event、缺少 suppression target 拒绝、secret 鉴权和脱敏边界。
-
-Task 27 已加入内部入站邮件事件记录层：
-
-- `api/_lib/mailInboundEvents.js`
-  - 接收 Stalwart Webhooks / MTA Hooks 或受控桥接脚本提交的入站摘要。
-  - 只保存 sender / recipient hash、域名、subject hash、邮件大小、附件数量和脱敏 diagnostics。
-  - 不保存原始正文、附件、明文邮箱或 message-id。
-- `api/_routes/root/mail-inbound.js`
-  - 仅支持 POST。
-  - 通过 `Authorization: Bearer <secret>` 或 `x-mail-inbound-secret` / `x-stalwart-inbound-secret` / `x-webhook-secret` 鉴权。
-  - secret 来源优先为 `MAIL_INBOUND_WEBHOOK_SECRET`，其次兼容 `STALWART_INBOUND_WEBHOOK_SECRET` / `MAIL_DELIVERY_WEBHOOK_SECRET` / `STALWART_WEBHOOK_SECRET`。
-- `npm run test:mail-inbound`
-  - 覆盖入站摘要写入、明文邮箱 / subject / token 脱敏、缺少 envelope 拒绝和 secret 鉴权。
-
-Task 19 已把 provider-independent 账号恢复状态层接到可选 reset-mail outbox：
-
-- `api/_routes/root/account-recovery-request.js`
-  - 对未知邮箱、已有 pending 申请和新建申请返回同一通用 `received` 响应。
-  - 新申请记录 `delivery_channel = manual`、`next_step = manual_review_pending` 和脱敏 `recovery_audit`。
-  - 当 `ACCOUNT_RECOVERY_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true`，`password_reset` 申请会调用 `api/_lib/mailOutbox.js` 写入 `mail_outbox`。
-  - 入队成功或幂等命中后，申请更新为 `delivery_channel = mail_outbox`、`next_step = mail_reset_queued`，并保存 `mail_outbox_id` 和脱敏审计事件。
-  - 入队被预算 / suppression / 紧急停发等 guard 阻断、helper 异常或状态更新失败时，接口仍返回通用 `received`，申请保持或回落到 `manual_review_pending`。
-  - `delete_account` 申请不进入密码重置邮件队列。
-- `api/_routes/root/admin.js`
-  - 超管设置账号恢复临时密码后，记录临时密码过期时间、强制改密状态和审计事件。
-  - auth 密码更新成功但状态持久化失败时返回 `partial` 和 `warnings`，避免误报整体失败。
-- `api/_routes/root/account-security-state.js`
-  - 登录用户通过同源 API 读取/清除自己的强制改密状态。
-  - 状态来自私有 `account_security_states`，不写入公开 `profiles`。
-- `api/_lib/authSecurityGuards.js`
-  - 注册、登录、密码重置预检和账号恢复申请复用服务端风险桶。
-  - `AUTH_CAPTCHA_MODE=monitor|enforce` 时可接入 Turnstile / hCaptcha token；默认 `off` 不改变当前前端体验。
-  - 审计输出只包含请求者 / 邮箱 hash、风险原因、CAPTCHA 摘要和脱敏 metadata。
-- `supabase/migrations/117_add_account_recovery_state_metadata.sql`
-  - 扩展 `account_recovery_requests` 的 delivery / next-step / temporary-password metadata。
-  - 新增 `account_security_states`，仅用户本人可读，写入由服务端 service role 完成。
-- `supabase/migrations/119_add_auth_security_events.sql`
-  - 新增私有 `auth_security_events`，仅 service role 可写、超管可读。
-  - 不保存原始邮箱、密码、CAPTCHA token、`game_uid`、平台 ID 或用户私密标识。
+针对性验证入口为 `test:mail-abuse-guards`、`test:mail-outbox-enqueue`、`test:mail-outbox-worker`、`test:mail-service-entrypoints`、`test:mail-delivery-feedback`、`test:mail-inbound`。本地验证不等于生产已开启真实投递。
 
 自助密码重置已由 `/api/auth-email-action` 接管：在 `AUTH_MAIL_ACTIONS_ENABLED=true`、`MAIL_OUTBOX_WORKER_ENABLED=true` 且未命中 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH` 时，同源请求会先通过 CAPTCHA / 内存限流 / 账号存在性判断，再用 Supabase Admin `generateLink()` 生成一次性重置链接并通过当前 provider adapter 发送统一 HTML 邮件。未知邮箱仍返回通用状态，不暴露账号存在性。`account-recovery-request` 的 reset-mail outbox 只作为人工恢复申请链路中的可选队列能力保留；队列处理器可以在演练模式下验证队列和模板链路，也可以由后台“邮件状态”页手动触发。人工恢复继续作为风控命中、邮件不可用、投递失败、邮箱不可访问或 shared relay 被封时的 fallback。
 
@@ -322,9 +224,9 @@ mail_outbox
 - `DECISION-2`: Phase 1 只做入站事件脱敏记录，不做正文解析或邮件回复转工单。
 - `DECISION-3`: 优先使用当前自建 Supabase 服务器同机低频部署；独立发信子域；是否拆独立邮件 VPS 取决于后续资源和投递信誉验证。
 
-后续实现按以下默认设计继续：
+当前实现遵循以下设计，后续变更继续保持：
 
-- 先做 provider-independent `mail_outbox` / `notification_event` 和发送预算模型。
+- 已完成独立于 provider 的 `mail_outbox`、通知入队与发送预算模型；真实投递启用仍核对目标环境和运行期开关。
 - 预算判断以 `api/_lib/mailAbuseGuards.js` 为唯一入口，不在具体账号、工单或开发者 API 流程里各写一套。
 - 邮件平台 adapter 默认 provider 为 `stalwart`，但接口先只依赖 worker/adapter 抽象，不在公开 API 中绑定 Stalwart SDK。
 - Phase 1 不实现完整收信正文处理；工单回复仍走站内 `/api/tickets/reply`，入站邮件只作为脱敏事件进入后台观测。

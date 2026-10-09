@@ -1,8 +1,8 @@
 # 桌面首页、导航与主页切换
 
-Last reviewed: 2026-09-24
+Last reviewed: 2026-10-07
 
-当前补充对应 `v4.6.2` 本地候选：各桌面页统一首页响应式宽度，统计更新为单池／五类合池十图、头像选择与排序、深色和减少动态效果。本地实现与最终验证已完成，发布 PR 待创建并通过 CI；线上仍为 `v4.6.0`，生产统计迁移、Worker 与 v4 预热尚未执行，见 [RELEASE_4.6.2.md](RELEASE_4.6.2.md)。下述 v4.6.0 发布记录保留历史含义。
+当前为 v4.6.3。各桌面页统一宽度与单池／五类合池十图已在生产依赖就绪后随 PR #37 发布；独立版本导览随 PR #43 发布，封面直连由 `417ee9c4` 补充。当前与候选边界见 [近期交付](RECENT_DELIVERY_STATUS.md)，下述早期浏览器数字保留原阶段含义。
 
 ## 状态与主页切换
 
@@ -26,11 +26,11 @@ Last reviewed: 2026-09-24
 
 已在临时浏览器中将本地样式应用至正式页面，检查 1366×768、1920×900、1920×1080、2560×1440、3440×1440、3840×2160，无页面溢出或被检查容器裁切；另核对大屏英文活动文案并保留亮暗截图。2560×1440 下内容宽 1920px、卡片区约 778px。该验证只证明候选样式与当前页面的适配，不表示已部署；本次未运行完整应用构建。
 
-### 全桌面页面统一宽度（v4.6.2 候选）
+### 全桌面页面统一宽度（v4.6.2 已发布）
 
 `desktopPageLayout.css` 将以上首页宽度、水平留白统一到桌面各路由、顶栏与底栏，包含经典入口和长内容页；消除子页面额外最大宽度造成的正文不对齐。个人菜单按可用空间展示，不能挤压正文或制造横向滚动。十图统计的内容和弹层遵循同一壳层，深色样式及减少动态效果保持一致。
 
-本地真实浏览器已覆盖 1366～3840 宽度，合池工作区另覆盖 360～1920。此结果只证明候选布局通过检查，不代表本版本已经部署；首页的免纵向滚动合同仍只适用于首页。
+实现阶段真实浏览器覆盖 1366～3840 宽度，合池工作区另覆盖 360～1920，后续 PR #37 已完成发布；首页的免纵向滚动合同仍只适用于首页。
 
 ### 首页布局与尺寸
 
@@ -69,6 +69,7 @@ Last reviewed: 2026-09-24
 
 ## 维护入口
 
+- `src/components/home/CommunityActivitySection.jsx`、`VersionBriefingCard.jsx`、`src/utils/versionBriefing.js`：前瞻窗口结束后展示独立官方导览，下一次前瞻配置生效时切回；封面按后台中文版本名匹配官网公告并直连原图。
 - `src/GachaAnalyzer.jsx`、`src/components/app/DesktopAppRoutes.jsx`：主页偏好选择、桌面壳层、路由与通知接线。
 - `src/components/home/HomeLandingHeader.jsx`、`homeLandingDemo.css`：新版共享顶栏；本轮新增样式与交互按桌面分支限定。
 - `src/utils/homeExperience.js`、`src/utils/storageUtils.js`：默认偏好、旧链接兼容、查询清理与本地持久化；定向测试位于 `src/utils/__tests__/homeExperience.test.js`。
@@ -79,6 +80,8 @@ Last reviewed: 2026-09-24
 - `src/components/SummaryView.jsx`、`src/hooks/summary/useSummaryViewState.js`、`src/components/summary/CharacterCatalogView.jsx`：锁定个人 / 全服数据源与图鉴入口。
 
 版本组件只接收 `target / name / onSchedule / onAnnouncements / className`，不依赖特定版本立绘、页面 Store 或固定宣传素材。它自行维护秒级时钟，并通过 `data-version-state` 区分 `pending / upcoming / released`（待公布 / 即将开启 / 已上线）。主题通过 `--vc-surface / --vc-text / --vc-muted / --vc-accent / --vc-line / --vc-edge / --vc-tint` 覆盖；宿主负责选择经过校验的日期与版本名称，不应把历史默认日期显示成当前真实版本日程。
+
+上述合同属于版本开启倒计时。官方前瞻及新版本导览在社区活动区独立维护，不通过改造该倒计时组件替代。导览固定指向官方 `version_briefing/latest?source_from=official`；奖励条件按官方说明。后续修改同时检查中文／英文、窄窗与图片失败时入口是否仍可用。
 
 ## 验证记录与后续边界
 

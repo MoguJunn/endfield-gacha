@@ -4,6 +4,10 @@
 自建 Supabase PostgreSQL 的 `pg_cron + pg_net` 中，不使用 Vercel 高频 Cron，
 也不依赖可能延迟数十分钟的 GitHub Scheduled Workflow。
 
+当前主站为 v4.6.3。个人 owner/account 分析 Worker 与 v4 公共／个人统计的独立 Docker Worker 是不同链路，后者见 [STATISTICS_SCHEDULING.md](STATISTICS_SCHEDULING.md)。PR #39 已修正旧固定部署漏读重构规则导致的时间线分类；发布涉及分析能力时仍须核对本 Worker 的不可变部署地址，主站部署成功不能代替该核验。
+
+信物赠送修正 PR #42 的受影响分析范围已重建；后续武器三期与日历维护并未更改个人分析 schema。混合导入重复的进一步修正仍是待办，不能由这些发布推定历史已全部清理。当前交付见 [RECENT_DELIVERY_STATUS.md](RECENT_DELIVERY_STATUS.md)。
+
 ## 调度方式
 
 - migrations：178 建立定时调度，179/180 增加节流与优先级感知即时派发

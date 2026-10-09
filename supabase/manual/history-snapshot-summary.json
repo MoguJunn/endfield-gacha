@@ -1,9 +1,0 @@
-{
-  "exportedAt": "2026-03-30T15:09:03.909Z",
-  "totalRows": 603025,
-  "effectivePageSize": 1000,
-  "usingServiceRole": true,
-  "output": "D:\\Learning\\Endfield Gacha\\gacha-analyzer\\supabase\\manual\\history-snapshot-latest.ndjson",
-  "duplicateCompositeKeyCount": 0,
-  "topDuplicateKeys": []
-}

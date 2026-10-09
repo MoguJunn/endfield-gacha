@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
+import autoprefixer from 'autoprefixer';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, '..');
@@ -198,6 +199,12 @@ await build({
   root: lotteryRoot,
   configFile: resolve(lotteryRoot, 'vite.config.js'),
   base: '/lottery/',
+  // Keep the former parent PostCSS prefixing explicit; this app has no Tailwind input.
+  css: {
+    postcss: {
+      plugins: [autoprefixer()],
+    },
+  },
   build: {
     outDir: resolve(rootDir, 'dist', 'lottery'),
     emptyOutDir: false,

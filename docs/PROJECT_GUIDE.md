@@ -13,7 +13,7 @@
 - 个人分析按 owner/account revision 持久化快照，通过 Supabase `pg_cron + pg_net` 异步生成；活跃用户可即时派发，失败时保留上次成功结果。
 - 附加寻访支持重构寻访、重构申领和特殊寻访子类型，分类贯穿导入、分析、模拟器、管理端与桌面 / 移动展示。
 - 首页 bootstrap、公告、全服统计、卡池目录和阵容公开读取。
-- v4.6.2 候选提供单池与限定角色／限定武器／常驻武器／重构寻访／重构申领五类合池，十图、头像选择、分类排序与按范围迁移的旧指标／资源；合池首获逐账号逐期逐对象计算后再汇总，账号覆盖去重。
+- v4.6.2 已发布单池与限定角色／限定武器／常驻武器／重构寻访／重构申领五类合池，十图、头像选择、分类排序与按范围迁移的旧指标／资源；合池首获逐账号逐期逐对象计算后再汇总，账号覆盖去重。
 - 桌面端 / 移动端双入口、抽卡模拟器、分享卡和后台管理。
 - 运营自动化：公告、卡池轮换、Wiki catalog 的 job graph、partial、review bundle 和审计。
 - 可观测性：Vercel Analytics、Speed Insights、性能预算报告。
@@ -44,13 +44,17 @@ npm run dev
 
 新版桌面首页已随 `v4.6.0` 发布，并通过 PR #32 成为生产默认。直接访问 `/` 即可；新版首页引导区提供“切换至经典主页”，经典主页左下角提供“切换至新版主页”，偏好保存在当前浏览器的 `gacha_home_experience_v1`。旧 `/?home-demo=unified` 链接继续打开新版。主页偏好只选择界面，隔离演示数据仍由上面的贡献者沙盒配置提供。
 
-新版桌面以 1366×768 / 100% 缩放为基准。v4.6.2 候选将顶栏、各页主内容与底栏统一为首页响应式宽度：常规上限 1366px，1920px 以上采用 `clamp(1366px, 78vw, 1920px)`，3000px 以上采用 `min(74vw, 2560px)`。上方引导区填充剩余高度，卡片区保留当前寻访、原生抽奖、原生轮换和独立版本倒计时；较小窗口用分区页签。个人卡池分析位于 `/dashboard`，个人概览位于 `/dashboard?view=overview`，全服统计位于 `/summary`，两者锁定各自数据源。宽屏个人菜单在正文外侧且可收起。
+新版桌面以 1366×768 / 100% 缩放为基准。v4.6.2 已将顶栏、各页主内容与底栏统一为首页响应式宽度：常规上限 1366px，1920px 以上采用 `clamp(1366px, 78vw, 1920px)`，3000px 以上采用 `min(74vw, 2560px)`。上方引导区填充剩余高度，卡片区保留当前寻访、原生抽奖、原生轮换和独立版本倒计时；较小窗口用分区页签。个人卡池分析位于 `/dashboard`，个人概览位于 `/dashboard?view=overview`，全服统计位于 `/summary`，两者锁定各自数据源。宽屏个人菜单在正文外侧且可收起。
+
+前瞻结束后，首页社区活动区显示独立的「新版本导览」，链接固定官方导览页；下一次前瞻配置生效时恢复前瞻卡。切换版本前及时维护中文版本名，封面按名称匹配官网导览公告并直连官方 CDN；不需要手动下载大图。无匹配封面时仍保留导览入口，奖励与领取期限以官方说明为准。
 
 完整布局、导航 / 消息语义、主题接口与分阶段验证见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。移动端原行为保留，长内容页仍可滚动；桌面发布不表示全站治理完成。
 
 ### 分池统计与指南预览
 
 全服与个人统计读取 `public-statistics-v4` 快照，页面请求不扫描历史或触发计算。5/30/60 分钟刷新由常驻 Worker 调度，首次未就绪显示等待，已有结果保留真实计算时间。生产必须依次完成统计迁移、Worker 部署和公开／个人 v4 预热，随后才启用前端与 API；操作顺序及只读本地真实数据准备见 [STATISTICS_SCHEDULING.md](STATISTICS_SCHEDULING.md)。已有 owner/account 个人分析调度不替代该统计 Worker。
+
+现有生产环境已完成上述顺序并通过 PR #37 发布。此顺序用于新环境或下一次计算版本升级，不是当前仍待执行的操作。目录保存超时修复、武器关联迁移、重构日期补齐和维护截止纠正也已执行；以 [近期交付状态](RECENT_DELIVERY_STATUS.md) 与对应专题核对，避免重复写入。导出账号与 ID 修复已由 `c8af417d` 进入 main；数据工作台和复杂导出交互仍为候选或待办。
 
 开发服务器的 `/statistics-preview.html` 使用构造样例展示统计和指南，仅在 Vite DEV 中渲染。指南的游客、无记录、已有数据与导入待核对状态尚未连接真实业务动作，不作为生产教程入口。
 
@@ -196,6 +200,8 @@ TELEGRAM_OFFICIAL_BOT_LONG_POLL_SECONDS=20
 
 当前管理后台主链已收口到 Vercel Serverless `/api/admin`，并通过 `vercel.json` rewrite 兼容旧 `admin-*` 路径。不再要求额外部署同名 Supabase Edge Functions。
 
+以下 1.6.5 描述保留 v4.5.4 阶段的导入流程背景。09-24 独立后端部署记录已为 1.6.7，09-30 后续完成信物赠送同步；核对当前部署应同时查看 [重构部署记录](official-rerun-import.md) 和 [信物修正记录](OFFICIAL_TRUST_TOKEN_FIX.md)，不能只看包版本字符串。
+
 官方导入的数据获取仍由独立 CN / INTL 私有后端承接。`v4.5.4` 当前两端最后核对版本为 `1.6.5`：浏览器用 `POST import-full` 创建后台任务，只通过 `GET import-status` 轮询；后端先过滤情报书等非寻访事件，再把规范化结果写入 `official_import_tasks` 与 `official_import_staged_records`，并在内部调用 `commit_official_import_records()` 自动原子提交。当前浏览器主路径不再调用同步 `import-confirm`，旧逐条审阅接口仅保留兼容。正常记录直接写入；仍具备账号、区服、卡池、官方序号和时间作用域的未知角色 / 武器记录会保留并写入 `history_anomalies`，由前端在导入完成后提示用户现在或稍后核对；缺少安全定位字段的记录继续跳过。再次导入时，后端只会通过迁移 157 提供的 service-role-only RPC 修复与官方非寻访标记完整吻合的旧版四星未知占位；查询失败时增量导入会保守降级为完整抓取。私有后端镜像必须同时包含 `backend/lib/officialImportStaging.js`、`backend/lib/officialImportIncremental.js`、`shared/historyPity.js` 和 `shared/officialImportRecordNormalizer.js`；两个地区部署后都要核对 `/health`、容器版本、正常 CORS 预检和一次受控导入，不得只更新单一区域。
 
 邮件发送分为两层：认证邮件使用受控同源 `/api/auth-email-action`，支持注册验证、密码重置和邮件登录；通知类和人工恢复队列继续走 provider-independent outbox / 队列处理器。认证邮件入口必须同时启用 `AUTH_MAIL_ACTIONS_ENABLED=true`、`MAIL_OUTBOX_WORKER_ENABLED=true`，且未命中环境级紧急停发开关 `MAIL_OUTBOX_GLOBAL_KILL_SWITCH` 才会调用 provider adapter；它会先做 origin、CAPTCHA、内存限流、账号存在性判断和脱敏审计，未知邮箱的重置 / 邮件登录仍返回通用状态。当前 `api/_lib/mailOutbox.js` 只允许服务端 service-role 经过防刷、suppression、幂等和 `enqueue_mail_outbox_event()` RPC 写入私有 `mail_outbox`；`api/_lib/mailOutboxWorker.js` 和 `api/_lib/mailProviderAdapter.js` 已提供 Stalwart-first 的队列处理器 / provider 边界。`api/_lib/mailTemplateRenderer.js` 是统一 HTML + plaintext 邮件模板入口，注册验证、邮件登录、密码重置、账号恢复队列处理器、开发者 API 审核通知、工单回复通知、管理员告警和后台测试邮件都应复用它。开发者 API 审核结果已可在 `DEVELOPER_API_REVIEW_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时写入 outbox；工单 staff 回复已通过 `/api/tickets/reply` 服务端路由写入回复，并可在 `TICKET_REPLY_MAIL_OUTBOX_ENABLED=true` 且 `MAIL_OUTBOX_WORKER_ENABLED=true` 时为工单所有者写入 `ticket.reply` outbox；后台“邮件状态”页可在 `ADMIN_ALERT_MAIL_OUTBOX_ENABLED=true` 且队列处理器开启时把 `admin.alert` 受控入队给当前超级管理员自己的账号邮箱。通知类入队失败都不会阻断原业务操作，响应只回传 queued / deduped / disabled / skipped / blocked / error 等脱敏状态，不返回收件邮箱或 guard decision。`/api/mail-outbox-worker` 是内部队列处理 endpoint，同时接受 `MAIL_OUTBOX_WORKER_SECRET` 和 `CRON_SECRET` 鉴权；`vercel.json` 已配置每日一次 Vercel Cron 触发该 endpoint，外部 cron 或受控运维脚本可使用独立 worker secret，后台“邮件状态”页也能由超级管理员手动调用 `/api/admin?route=mail-outbox-drain` 处理到期队列。`/api/mail-delivery-feedback` 是内部投递反馈入口，用服务端 secret 接收单条 hard bounce / complaint / invalid recipient / domain pause，也能接收 Stalwart Telemetry Webhook `{ events: [...] }` 批量投递事件；永久失败会写入 `mail_suppression`，成功和临时失败只写入脱敏 `mail_delivery_events`。`/api/mail-inbound` 是内部入站邮件事件入口，用服务端 secret 接收 Stalwart Webhooks / MTA Hooks 或受控桥接脚本的入站摘要，并只写入脱敏 `mail_delivery_events`，不保存原始正文或自动生成工单。后台“站点健康”和“邮件状态”面板通过 `/api/admin?route=site-health` 汇总内容更新时间、公共缓存、自动化、邮件队列、入站事件、suppression、发送预算高水位和待处理事项；“邮件状态”页还提供超级管理员测试邮件入口，用当前 provider adapter 发送受控测试邮件，并只记录脱敏投递事件。邮件状态页可在线编辑 `mail_abuse_budget_config` 的窗口、上限和启用状态，并能展开查看最近失败 / suppressed outbox 的脱敏错误摘要。所有响应不返回原始邮箱、SMTP 密码、webhook secret、Stalwart 原始 event id / queue id 或预算 bucket hash。真实投递前必须先设置 `MAIL_ABUSE_HASH_SECRET`、保持环境级紧急停发开关可用，并确认 `docs/SELF_HOSTED_MAIL.md` 中的 DNS、suppression、预算和投递监控检查项完成。
@@ -222,7 +228,7 @@ npm run generate:supabase-baseline
 npm run test:supabase-baseline
 ```
 
-v4.6.2 候选 baseline 已纳入统计调度与五类合池迁移，本地验证覆盖 186 个迁移；新环境只执行 baseline，不再叠加其中已经包含的迁移。已有环境需对照真实执行清单按 [统计调度说明](STATISTICS_SCHEDULING.md) 追加缺失迁移，当前统计迁移尚未在生产执行。历史生产链包括主站 152–158、独立抽奖 160–165、认证 166–168 和正式导入修复 170；173–180 提供个人分析 revision、快照队列、活跃优先级、`pg_cron + pg_net` 调度和即时派发，181–183 提供附加寻访分类、重构卡池种子 / 官方 ID 晋升及 `reconstruction_claim` 子类。生产已只读核验个人分析调度和附加寻访最终数据库合同；仍不能只凭仓库文件尾号推定生产执行记录。历史异常回填脚本默认只读，只有同时提供 `--apply` 与脚本打印的精确确认快照时才允许写入。
+当前 baseline 包含 193 个迁移，覆盖到 `2026100701_weapon_character_pool_schedule.sql`；新环境只执行 baseline，不叠加其中已包含的迁移。现有生产的统计调度与五类合池迁移、Worker 和首次预热已完成，目录保存优化与武器关联也已部署。已有环境应对照真实执行清单补缺，运行顺序见 [统计调度说明](STATISTICS_SCHEDULING.md)。173–180 提供个人分析快照／队列／调度，181–183 提供附加寻访子类；官方历史期次与重构归并由后续迁移维护。文件存在、baseline 包含与生产执行分别核验，不能只按尾号猜测。历史异常回填默认只读，正式写入仍需脚本要求的精确确认快照。
 
 数据库体积治理的现状：远端 `history` 体积主要来自索引。删除字段或索引前必须先做线上读写路径、RPC 查询计划、回滚脚本和实际基准验证；本轮只整理 baseline 和迁移归档，不直接改生产表结构。
 
@@ -235,13 +241,20 @@ v4.6.2 候选 baseline 已纳入统计调度与五类合池迁移，本地验证
 
 ## Changelog 摘要
 
-### v4.6.2（发布准备）
+### v4.6.3 及后续维护
+
+- PR #43 发布后台会话刷新锁适配、目录保存计数复用、已有实体头像补图和独立版本导览；后续改为官网原图直连。
+- 限定武器支持同期角色关联与第三期截止填入；独立日历采用数据库日期，保留重构类型与后台期次。
+- 官方签到天地墨显改为 10 月 8 日 12:00 至 10 月 15 日 06:00，三海报用于四条活动；旧重构池按维护时间截止，版本仍在 12:00 开启。
+- 双语公告、运行时版本及自动部署已核验。统计重复数据修正仍为待办，数据工作台仍是本地候选；证据见 [RELEASE_4.6.3.md](RELEASE_4.6.3.md)。
+
+### v4.6.2（已发布）
 
 - 新增五类合池，按逐账号、逐期、逐对象首获后类别汇总，并对覆盖账号跨期去重；旧指标和资源按所选范围迁入 v4 快照。
 - 统计页提供十图、头像对象选择、分类排序、花费区间与覆盖率，完善深色主题和减少动态效果。
-- 全服与个人统计接入持久队列和 5/30/60 分钟检查；生产迁移、Worker 与 v4 预热待执行，预热后才能启用页面。
+- 全服与个人统计接入持久队列和 5/30/60 分钟检查；生产迁移、Worker 与首批 3,942 个快照预热后，经 PR #37 发布读端。
 - 各桌面页统一首页响应式宽度。指南仅提供开发预览，真实业务接入待完成。
-- 最终全量 269 文件／1,495 项单测、完整 ESLint、主应用与抽奖子应用构建、PGlite 统计 SQL 与 186 个迁移 baseline 验证通过；生产依赖官方 registry 审计 0 漏洞；草稿公告与发布阻塞见 [RELEASE_4.6.2.md](RELEASE_4.6.2.md)。发布 PR 待创建并通过 CI，合入 main 仍需维护者审查，线上版本与生产迁移均未变更。
+- 实现阶段与恢复候选的测试、构建、SQL、依赖审计及 CI 证据见 [RELEASE_4.6.2.md](RELEASE_4.6.2.md)；旧 186 个迁移验证数量保留历史含义，当前覆盖以 baseline 头部为准。
 
 ### v4.6.0
 

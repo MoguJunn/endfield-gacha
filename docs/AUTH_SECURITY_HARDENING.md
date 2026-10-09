@@ -1,5 +1,7 @@
 # 统一认证架构与安全加固计划
 
+当前主线为 v4.6.3 / `1fa670d0`，baseline 包含 193 个迁移；Phase A–D 与认证发布已完成。后台刷新锁适配另随 PR #43 发布，见 [SUPABASE_AUTH_LOCK_FIX.md](SUPABASE_AUTH_LOCK_FIX.md)。本文保留认证方案与历史验证，新的生产账号操作仍按具体任务处理，当前交付总览见 [RECENT_DELIVERY_STATUS.md](RECENT_DELIVERY_STATUS.md)。
+
 > 2026-08-03 发布后更新：认证迁移 166/167/168、PR #14 和对应 API/前端已经生产完成。本文后续部分保留发布前候选审查快照；新的 `169_add_oauth_email_artifact_merge.sql` 及配套接口只处理旧版邮箱验证流程产生、且经严格证据确认没有任何站内数据的 Auth 空壳。用户必须在当前 GitHub Session 中验证目标邮箱并再次明确确认；真实已有账号、证据不全或任何数据归属冲突继续安全拒绝并转人工处理。安全复核后进一步收口：可修复判定要求 operator 逐条人工批准、验证码预算按源用户+邮箱持久累计、确认阶段在数据库内重新原子占用并冻结空壳（含双方原生 Auth Session 撤销）、按数据库最终状态决策补偿、完成后支持会话交接重试；这些都已在临时 PostgreSQL 17 与专项测试中验证。
 
 > 跟进迁移 `171_allow_consumed_magiclink_email_artifact.sql`（2026-08-04 已生产应用）：识别旧缺陷的第二种精确形状——用户点击过旧 Magic Link、留下占位 bcrypt 密码与原生 Session/refresh token 的 email-only Auth 空壳。该形状要求独立的 operator 证据版本 `legacy_magiclink_consumed_v2`，并绑定：真实源用户、真实工单、super_admin 批准人、不可变的完整证据快照哈希（覆盖 Auth 用户、identities、sessions、refresh tokens、审计与邮件投递证据）。`service_role` 对批准表只读；claim 先锁定批准行再复核；refresh token 必须非空、未撤销、未轮换且每个 Session 恰好一条。任何自动形状检查均不把 bcrypt 外形当作 Magic Link 占位密码的唯一证明，证据快照在批准与 claim 时逐字节一致。
@@ -20,7 +22,9 @@
 3. **provider 使用独立协议 adapter。** LinuxDo 已完全脱离旧 Supabase Custom Provider 代理，固定使用当前 Connect 的授权码、PKCE S256、Basic Token 鉴权和 Bearer UserInfo；自动化通过不等于真实 provider 已验收，隔离浏览器闭环前保持开关关闭。
 4. **发布动作继续独立授权。** `AUTH-HARDEN-001` 完成不自动授权 push、合并、认证迁移、部署、账号修复脚本真实执行或生产 Auth 用户/账号归属修改；这些动作由 `AUTH-HARDEN-RELEASE-001` 分层推进。
 
-## 当前仓库事实
+## 2026-08-27 仓库事实（历史快照）
+
+以下版本、工作目录与 baseline 尾号仅解释当时的认证收口。2026-10-09 已将当前 main 和文档收回 `gacha-analyzer` 源目录；旧混合修改完整备份，独立候选继续隔离维护，不整体覆盖主线。当前迁移范围以 `supabase/README.md` 和 baseline 头部为准。
 
 - 生产版本文档口径仍是 `v4.5.4`；2026-08-27 主应用目录为干净的 `main@d186a425d5fb29aad940b4f08027744dfecbc602`，与 `origin/main` 一致，GitHub-connected Vercel Production Ready。
 - 当前生成 baseline 覆盖到 migration 183。已确认生产历史包括独立抽奖 160–165、认证 166–168 和正式导入修复 170；169–172 等后续合同的运行态仍需按具体任务实时核验，不从 Git 文件自动推定。
@@ -46,7 +50,7 @@
 
 | 阶段 | 状态 |
 | --- | --- |
-| 文档 / 任务账本 / 交接 | 已同步到 2026-08-27 当前主线与发布事实 |
+| 文档 / 任务账本 / 交接 | 本轮已补齐 v4.6.3、PR #43 与当前工作树入口；下述专项验证保留原时点 |
 | 认证实现入口 | 当前主站 `main`；Phase A–D 历史由 `5dd8505` 固化，旧认证 worktree 已闭拢 |
 | Phase A 代码（admin RPC + OAuth transaction） | **完成、合入并生产发布** |
 | Phase B 代码（双凭据、刷新凭据、session 撤销、兼容 JWT 回查） | **完成、合入并生产发布** |

@@ -66,9 +66,9 @@ flowchart LR
 
 `desktopPageLayout.css` 将首页响应式宽度统一到各桌面路由、顶栏与底栏：常规上限 1366px，1920px 以上为 `clamp(1366px, 78vw, 1920px)`，3000px 以上为 `min(74vw, 2560px)`；经典入口和长内容页使用同一壳层尺度。首页通过固定卡片区与可伸展引导区适配 1366×768，较小容器使用分区页签。`DesktopPageMotion` 以路径和个人 `view` 管理入场 / 滚动重置，其他查询参数不触发整页重挂载，并尊重减少动态效果。
 
-`DesktopMessageCenter` 与 `desktopMessageModel` 统一四类公告 / 通知呈现，继续使用现有持久通知数据及业务回调。`VersionCountdownCard` 只接收日期、名称和动作，通过独立 `--vc-*` 主题变量适配视觉，不与版本宣传素材或宿主 Store 耦合。详细合同与验证边界见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
+`DesktopMessageCenter` 与 `desktopMessageModel` 统一四类公告 / 通知呈现，继续使用现有持久通知数据及业务回调。`VersionCountdownCard` 只接收日期、名称和动作，通过独立 `--vc-*` 主题变量适配视觉。独立的 `VersionBriefingCard` 在前瞻结束后展示，下一次前瞻配置生效时恢复倒计时；`officialAnnouncementsFeed` 保留按中文版本名匹配的官网封面，浏览器直连官方 CDN 原图。详细合同与验证边界见 [DESKTOP_HOME_DEMO.md](DESKTOP_HOME_DEMO.md)。
 
-### 2.2 分池与合池统计（v4.6.2 候选）
+### 2.2 分池与合池统计（v4.6.2 已发布）
 
 `SummaryView` 和移动统计入口复用 `PoolStatisticsWorkspace`，提供单池及限定角色、限定武器、常驻武器、重构寻访、重构申领五类范围。十图、头像选择、分类排序与旧指标／资源读取同一选择范围。合池先逐账号、逐期、逐对象计算首次，再按当期身份汇总类别；账号覆盖跨期去重，不能相加各池账号数。
 
@@ -102,6 +102,8 @@ flowchart LR
 
 公共缓存只覆盖首屏、公告、全服统计、卡池目录、阵容和公开 catalog。用户私有数据、后台数据、个人排行和恢复工单不得进入该缓存层。
 
+主站版本日历 DTO 由 `versionCalendarSnapshot.js` 返回数据库日期及 `poolKind / extraSubtype / extraSeriesKey / extraSeriesPhase`；独立日历通过公开 API 合并，保留明确空值和后台期次。独立站的本地活动用于非卡池资料与离线备份。主站公共 CDN 为 `s-maxage=300, stale-while-revalidate=3600`，日历为 `s-maxage=60, stale-while-revalidate=300`；响应正文的 `source` 不能替代 `Age / X-Vercel-Cache` 等缓存头，数据库修正也不表示已打开页面实时重拉。
+
 ## 5. 数据库层
 
 Supabase 目录采用“baseline + 归档迁移 + 手工脚本”结构：
@@ -122,6 +124,8 @@ DB-OPTIMIZE-001 的当前结论：线上 `history` 体积主要来自索引，�
 个人分析数据库面由 173–180 提供：owner/scope revision、快照队列、catalog 依赖失效、活跃用户优先级、Worker lease、`pg_cron + pg_net` 调度、5 秒全局节流和优先级感知即时派发。常规 Worker 保持 `PERSONAL_ANALYSIS_WORKER_BACKFILL_ENABLED=false`，历史回填只能在维护窗口显式开启。
 
 附加寻访数据库面由 181–183 提供：`extra_subtype / extra_rule_profile / extra_series_key / extra_series_phase`，并把产品语义区分为 `reconstruction`、`reconstruction_claim` 和 `special`。相同分类贯穿可见卡池 RPC、管理写入、官方导入、版本绑定、分析与模拟器；旧 `type=extra` 仍作为粗粒度兼容类型。
+
+统计队列和五类合池迁移已随 PR #37 完成生产部署及首次预热。`2026100601_reuse_pool_counts_for_catalog_groups.sql` 使角色／阵容写入仅递增统计 revision，卡池／权限变化复用同事务单池计数生成组合计数，保留原超时与 ACL；`2026100701_weapon_character_pool_schedule.sql` 保存限定武器同期角色关联。两项均已有生产执行证据；baseline 当前包含 193 个迁移，不能由候选树的迁移尾号推断运行态。数据工作台仍为独立本地候选，尚未成为这里描述的生产数据入口。
 
 ## 6. 运营自动化
 

@@ -2,21 +2,27 @@
 
 仓库内的补充文档统一收口到 `docs/`：
 
-当前发布为 `v4.6.3`，PR #43 及导览原图直连修复已上线；发布事实见 `docs/RELEASE_4.6.3.md`，历史版本文档保留当时事实。
+当前发布为 `v4.6.3`，主站基线 `1fa670d0`、独立日历基线 `50cb595`。统计 PR #37、版本 PR #43 与后续导览、卡池日期、重构期次、签到和海报修复已上线；当前与候选边界统一见 `docs/RECENT_DELIVERY_STATUS.md`，历史版本文档保留当时事实。
 
+- `docs/RECENT_DELIVERY_STATUS.md`：近期主线提交、两仓库交付、验证证据与尚未上线的候选边界
+- `docs/REPOSITORY_LAYOUT.md`：公开源码、明确跟踪生成物、本地凭据／报告／恢复材料与本轮清理边界
 - `docs/ARCHITECTURE.md`：整体架构、公共 / 私有 / admin 边界、缓存、自动化和数据库分层
-- `docs/AUTH_SECURITY_HARDENING.md`：Phase A–D 本地候选、认证不变量、迁移重编号、真实浏览器回归和发布门禁
+- `docs/AUTH_SECURITY_HARDENING.md`：已发布的 Phase A–D、认证不变量、历史候选验证、迁移重编号与后续变更边界
 - `docs/PROJECT_GUIDE.md`：部署、环境变量、数据库维护、静态资源和 changelog 摘要
 - `docs/CODEMAP.md`：代码入口和主要模块索引
 - `docs/DESKTOP_HOME_DEMO.md`：默认新版桌面主页与经典版切换、1366×768 布局、个人与全服统计拆分、统一消息弹窗及独立版本主题接口
 - `docs/MOBILE_HOME_PLAN.md`：手机首页 P1 改版任务、内容顺序、触摸滚动与正式启用验收标准
 - `docs/RELEASE_4.6.0.md`：v4.6.0 交付范围、贡献署名、版本验证及运行时配置同步
-- `docs/RELEASE_4.6.2.md`：本轮五类合池、十图、旧指标迁移、全页宽度、已有验证与生产启用门禁
+- `docs/RELEASE_4.6.2.md`：已发布五类合池、十图、旧指标迁移、全页宽度及生产准备历史
 - `docs/RELEASE_4.6.3.md`：v4.6.3 发布及后续独立维护记录
-- `docs/POOL_SCHEDULE_MANAGEMENT.md`：限定武器池同期角色关联、三期截止时间填入及独立版本日历数据库同步
+- `docs/POOL_SCHEDULE_MANAGEMENT.md`：限定武器池同期关联、三期截止、数据库日期、重构期次、维护时间与官方日历来源
+- `docs/OFFICIAL_TRUST_TOKEN_FIX.md`：信物赠送合同、PR #42 与精确存量修正记录
+- `docs/official-rerun-import.md`：官方历史期次、重构正式 ID、两区私有后端与固定 Worker 部署核对
+- `docs/SUPABASE_AUTH_LOCK_FIX.md`：已发布后台零等待锁适配及 SDK 升级验证合同
+- `docs/SUMMER_LOTTERY_OPERATIONS.md`：抽奖资格、审计、履约与联系方式清理的运营规则
 - `docs/STATS_OBSERVATION_CONTRACT.md`：单池／合池首次样本、去重账号覆盖、旧指标与资源口径、理论边界
 - `docs/STATISTICS_SCHEDULING.md`：v4 快照、5/30/60 分钟调度、生产迁移和预热顺序、只读本地预览
-- `docs/STATS_BRANCH_SCOPE.md`：统计与指南实现范围、阶段提交和未完成边界
+- `docs/STATS_BRANCH_SCOPE.md`：旧统计分支的维护导航；历史范围与验证集中到 v4.6.2 发布记录
 - `docs/ONBOARDING_GUIDE_PLAN.md`：首次使用教程与首页指南优化任务；已有开发预览，真实业务动作待接入
 - `docs/PERSONAL_ANALYSIS_WORKER.md`：个人分析快照队列、Supabase `pg_cron + pg_net` 调度、应急入口与生产核验
 - `docs/CLOSEOUT_LEDGER.md`：已上线但仍依赖 placeholder / fallback / 隐藏入口的功能收口总账
@@ -28,8 +34,8 @@
 - `docs/developer-api-v1.zh-CN.md` / `docs/developer-api-v1.en-US.md`：开发者 API v1 双语 Wiki 源文档
 - `docs/integration-api.md`：平台绑定与官方 BOT 私有接口边界
 - `docs/screenshots/`：README 和发布页引用的产品截图
-- `docs/reviews/`：设计评审、架构审计、阶段性复盘
-- `docs/email-template/`：历史认证邮件模板与 SMTP 配置说明；后续账号邮件主线以 `docs/SELF_HOSTED_MAIL.md` 为准
+- 邮件模板现行实现：`api/_lib/mailTemplateRenderer.js`；配置与投递边界见 `docs/SELF_HOSTED_MAIL.md` 和 `docs/STALWART_DEPLOYMENT_GUIDE.md`，旧 Supabase HTML 模板与 SMTP 指南已移除
+- 初代设计审查只由 Git 历史保留；当前架构、权限与维护合同以上述专题为准
 
 公开文档的职责边界如下：
 

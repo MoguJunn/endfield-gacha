@@ -20,8 +20,10 @@
   - `rollbacks/`：回滚脚本，不应作为前向迁移执行
 - `docs/`
   - 迁移说明、历史功能指南
-- `functions/`
-  - 旧 Edge Functions 代码与说明，当前不是公开主链
+
+2026-10-09 文件整理：19 份一次性生成报告、计划／执行 SQL 和历史导出摘要已解除 Git 跟踪，文件仍保留本地并由忽略规则保护。后续按当前数据重新生成，不沿用旧报告作为执行依据；人工编写的修复／回滚脚本、脱敏 example 和完整迁移链仍跟踪。范围见 [仓库内容规范](../docs/REPOSITORY_LAYOUT.md)。
+
+初代管理 Edge Functions 已由同源管理 API 替代，旧源码与部署说明移出当前树，历史可由 Git 追溯。初代目录种子移至 `manual/legacy/20260117_initial_catalog_seed.sql`，只作为旧 ID 对照输入，不作为初始化执行步骤。
 
 ## 新环境部署
 
@@ -32,9 +34,22 @@
 
 2026-08-01 的真实本地 Supabase/PostgreSQL 17 空库导入已补齐两项此前静态检查未覆盖的边界：`archive/004_tickets_system.sql` 必须在表不存在时也能执行清理；Phase A/B 必须显式授予 `service_role` 访问 `profiles` 与私有 Session 撤销状态所需的 DML 权限，同时保持 `anon/authenticated` 对私有撤销状态的拒绝。`test:supabase-baseline:smoke` 与 `test:auth-hardening-phase-a` 已加入对应回归断言。
 
-v4.6.2 候选 baseline 已纳入 `2026092201_schedule_statistics_snapshots.sql` 和 `2026092401_group_statistics_snapshots.sql`，本地验证覆盖 186 个迁移；准确覆盖范围以 baseline 头部为准。不要再把已包含在 baseline 中的标准迁移重复叠加到同版本新环境。迁移 173–177 提供个人分析 owner/scope revision、安全租约、快照持久化、目录失效与活跃用户优先队列；迁移 178 在支持相应扩展的自建 Supabase 中通过 Vault、`pg_net` 与 `pg_cron` 每分钟触发一次 Worker；迁移 179/180 增加受节流保护的活跃用户即时派发，并避免入队前的 cron 调度错误阻塞新用户；迁移 181–183 增加附加寻访分类、首组重构寻访与重构申领数据，以及独立的重构申领产品子类。GitHub `workflow_dispatch` 仅作为人工应急入口。
+baseline 已纳入 `2026092201_schedule_statistics_snapshots.sql` 和 `2026092401_group_statistics_snapshots.sql`；实现阶段的 186 个迁移验证是历史记录，当前为 193 个，准确覆盖以 baseline 头部为准。不要把已包含的标准迁移重复叠加到同版本新环境。迁移 173–177 提供个人分析 owner/scope revision、安全租约、快照持久化、目录失效与活跃用户优先队列；迁移 178 在支持相应扩展的自建 Supabase 中通过 Vault、`pg_net` 与 `pg_cron` 每分钟触发一次 Worker；迁移 179/180 增加受节流保护的活跃用户即时派发，并避免入队前的 cron 调度错误阻塞新用户；迁移 181–183 增加附加寻访分类、首组重构寻访与重构申领数据，以及独立的重构申领产品子类。GitHub `workflow_dispatch` 仅作为人工应急入口。
 
-新增统计迁移提供 `statistics_jobs / statistics_snapshots / statistics_activity`、受影响范围失效、租约与修订保护，以及限定角色、限定武器、常驻武器、重构寻访、重构申领五类任务。生产统计迁移与常驻 Worker 尚未执行；须先完成公开单池、五类合池、旧统计及个人 `public-statistics-v4` 快照预热，再启用前端／API。运行顺序见 [统计调度说明](../docs/STATISTICS_SCHEDULING.md)，发布状态见 [v4.6.2 发布准备](../docs/RELEASE_4.6.2.md)。
+统计迁移提供 `statistics_jobs / statistics_snapshots / statistics_activity`、受影响范围失效、租约与修订保护，以及限定角色、限定武器、常驻武器、重构寻访、重构申领五类任务。现有生产迁移、常驻 Worker 与首批 3,942 个 v4 快照预热已经完成，PR #37 已发布读端。新环境与计算版本升级仍须先预热再启用；运行顺序见 [统计调度说明](../docs/STATISTICS_SCHEDULING.md)，历史证据见 [v4.6.2 发布记录](../docs/RELEASE_4.6.2.md)。
+
+## 近期迁移与手动修正
+
+| 文件 | 用途与状态 |
+| --- | --- |
+| `2026100601_reuse_pool_counts_for_catalog_groups.sql` | 已应用生产并随 PR #43 合入；目录保存不重复扫描历史，组合计数复用单池计数，原权限与超时保留。 |
+| `2026100701_weapon_character_pool_schedule.sql` | 已应用生产；持久保存限定武器的同期角色关联，15 个既有关联回填，不在迁移中重写截止日期。 |
+| `manual/data-backfill/20261007_fill_danqing_reconstruction_weapon_dates.sql` | 已在备份后针对细枝申领执行；目标为空、同系列同一期契约符合才补齐，不覆盖不同人工日期。 |
+| `manual/data-backfill/20261007_correct_reconstruction_maintenance_end.sql` | 已在备份后纠正两旧重构池为 10 月 15 日 06:00 截止；12:00 是新版本开启时间。 |
+
+两份手动数据脚本不进入 baseline，也不是每次部署的初始化步骤。重构期次公开属于 DTO 改动，不新增迁移。生产备份、校验与回退见私有任务档案，公开说明见 [卡池时间管理](../docs/POOL_SCHEDULE_MANAGEMENT.md)。
+
+独立数据工作台的候选迁移 `190_create_account_data_workbench.sql` / `191_admin_pool_catalog_roster_and_recalculation.sql` 尚未进入 main 或生产，并与主线现有编号冲突。正式集成必须重新编号、更新引用、重生成 baseline，并验证不会覆盖现有统计与管理员 RPC 修复；不能把两个分支的同号文件一起部署。
 
 ### migration 编号说明
 
@@ -47,6 +62,8 @@ v4.6.2 候选 baseline 已纳入 `2026092201_schedule_statistics_snapshots.sql` 
 - **其他 worktree 仍占用同号文件名（不得与本文件一起部署）：**
   - 主脏树性能线：`159_add_history_scope_read_models.sql`
   - 邮箱候选树：`159_bind_email_verification_to_target.sql`
+  - Vercel CPU 候选：`190_skip_idle_personal_analysis_dispatch.sql`，与主线抽奖 190 冲突；函数已生产修正，但源码集成前仍需重编号和更新 baseline。
+  - 数据工作台候选：`190_create_account_data_workbench.sql` / `191_admin_pool_catalog_roster_and_recalculation.sql`，均须在集成时重新分配编号。
 - 生产库没有主站应用级 migration ledger；166/167/168 的执行记录、迁移文件校验和、迁移前备份和迁移后核验结果保存在受限运维备份中。169 需另行授权和记录，性能线 159 仍未应用。
 
 `AUTH-HARDEN-001` Phase A–D、生产迁移 166/167/168、主线合入和 API/前端部署已经完成。迁移 169 及配套自助修复流程作为后续修复独立发布；LinuxDo provider 不新增数据库迁移，其实现保持在独立分支，真实浏览器验收前保持关闭且不阻塞本修复。
@@ -122,4 +139,4 @@ v4.6.2 候选 baseline 已纳入 `2026092201_schedule_statistics_snapshots.sql` 
 
 - 当前管理后台主链使用的是 Vercel Serverless `api/admin.js`，通过 `vercel.json` rewrite 兼容旧的 `admin-*` 路径
 - 不要在部署说明里再要求额外部署旧 Supabase Edge Function
-- `supabase/functions/` 仍保留其他确有需要的 Edge Function 说明，但它们不再是当前后台用户管理主路径
+- 旧 `supabase/functions/` 管理实现已移除；`/api/admin-delete-user` 等兼容 URL 仍由同源路由映射保留，不调用旧 Edge Function

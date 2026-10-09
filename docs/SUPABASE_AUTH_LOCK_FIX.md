@@ -1,5 +1,7 @@
 # Supabase 后台刷新锁竞争处理
 
+已由 `864acd17` 随 PR #43 合入并发布于 v4.6.3；主线和自动部署检查已通过。下述双标签页结果是实现阶段验证，后续升级 SDK 时按同一合同复核。当前交付见 [近期状态](RECENT_DELIVERY_STATUS.md)。
+
 ## 现象与范围
 
 `NavigatorLockAcquireTimeoutError: Acquiring an exclusive Navigator LockManager lock "lock:sb-…-auth-token" immediately failed` 可以在多标签页共享登录会话时出现。

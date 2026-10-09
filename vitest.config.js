@@ -10,7 +10,7 @@ export default defineConfig({
         url: 'http://localhost/',
       },
     },
-    setupFiles: './vitest.setup.js',
+    setupFiles: './tests/setup.js',
     globals: true,
     css: true,
     include: [
