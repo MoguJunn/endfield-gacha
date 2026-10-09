@@ -19,6 +19,7 @@
 - [认证与会话](AUTH_SECURITY_HARDENING.md)：身份归属、邮箱验证、凭据撤销与 provider 集成。
 - [浏览器认证锁](SUPABASE_AUTH_LOCK_FIX.md)：后台刷新与 SDK 升级验证。
 - [个人分析 Worker](PERSONAL_ANALYSIS_WORKER.md)、[统计快照调度](STATISTICS_SCHEDULING.md)：异步计算、部署与诊断。
+- [模拟器引擎](SIMULATOR_ENGINE.md)：统一水位、完整继承历史、增量资源、事务存档与版本迁移。
 - [数据与体验待完善项](CLOSEOUT_LEDGER.md)：可贡献的工作和现行数据审计工具。
 
 ## API 与官方数据
@@ -36,7 +37,7 @@
 
 ## 发布记录
 
-- [v4.6.4](RELEASE_4.6.4.md)：仓库／文档整理、本地统计与沙盒修复、验证及发布准备。
+- [v4.6.4](RELEASE_4.6.4.md)：模拟器完整重写、仓库／文档整理、本地统计与沙盒修复、验证及发布准备。
 - [v4.6.3](RELEASE_4.6.3.md)：官方版本导览、管理与后续日程维护。
 - [v4.6.2](RELEASE_4.6.2.md)：统计快照、五类合池、十图与桌面宽度。
 - [v4.6.0](RELEASE_4.6.0.md)：默认新版桌面与经典主页切换。
