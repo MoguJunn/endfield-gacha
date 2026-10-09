@@ -2,7 +2,7 @@
 
 这份文件只保留“从哪里开始读代码”的索引。系统边界、数据流、缓存和数据库分层详见 [ARCHITECTURE.md](ARCHITECTURE.md)；部署、环境变量和维护命令详见 [PROJECT_GUIDE.md](PROJECT_GUIDE.md)。
 
-当前索引对应 `v4.6.3` 主线，发布状态见 [RELEASE_4.6.3.md](RELEASE_4.6.3.md)。
+当前索引对应 `v4.6.4` 代码，版本准备与验证见 [RELEASE_4.6.4.md](RELEASE_4.6.4.md)。
 
 武器池时间管理入口：`shared/weaponPoolSchedule.js`（自动识别／三期截止预览）、`src/components/admin/pools/PoolEditDialog.jsx`（关联选择及一键填入）、`src/hooks/admin/usePools.js`（草稿和保存）、`supabase/migrations/2026100701_weapon_character_pool_schedule.sql`（持久关联与 RPC）。独立日历数据库时间优先规则位于 `endfield-version-calendar/lib/calendar-core.js`；说明见 [卡池时间管理](POOL_SCHEDULE_MANAGEMENT.md)。
 
@@ -49,6 +49,7 @@
 - 单池／合池工作区、十图与对象选择：`src/components/summary/PoolStatisticsWorkspace.jsx`、`PoolObservationCharts.jsx`、`StatisticsPoolList.jsx`。
 - 首次样本、保存记录适配与读数：`src/utils/poolObservationStats.js`、`storedPoolObservations.js`、`observationInsights.js`；五类范围白名单：`shared/statisticsScopes.js`。
 - 公共与个人快照读取：`api/_routes/root/stats.js`、`api/_lib/scheduledStatistics.js`、`personalStatisticsSnapshot.js`、`src/services/scheduledStatisticsService.js`。
+- 贡献者沙盒统计：`src/dev/contributorDemoStatistics.js`，从演示历史计算单池、合池与个人范围，开发模式外继续使用同源 API。
 - 定时计算与失效策略：`api/_lib/statisticsWorker.js`、`shared/statisticsRefreshPolicy.js`、`scripts/run-statistics-worker.mjs`、`scripts/systemd/endfield-statistics.*`。
 - 本地只读数据准备及验证：`scripts/prepare-statistics-local-preview.mjs`、`verify-statistics-schedule-sql.mjs`、`verify-pool-statistics-live.mjs`。
 - 指南与构造样例仅供 Vite DEV：`statistics-preview.html`、`src/dev/StatisticsExperiencePreview.jsx`、`statisticsPreviewData.js`；真实业务动作待接入。
@@ -142,7 +143,7 @@
 | 历史 v4.5.3 运行时版本与缓存失效 | `supabase/migrations/156_bump_site_version_453.sql` |
 | 官方非寻访事件旧占位精确修复 RPC | `supabase/migrations/157_repair_official_non_pull_artifact.sql` |
 | 历史 v4.5.4 运行时版本与缓存失效 | `supabase/migrations/158_bump_site_version_454.sql` |
-| 当前包与构建版本、发布事实 | `package.json`、`src/constants/appMeta.js`、`docs/RELEASE_4.6.3.md`、`docs/RECENT_DELIVERY_STATUS.md` |
+| 当前包与构建版本、发布准备 | `package.json`、`src/constants/appMeta.js`、`docs/RELEASE_4.6.4.md`、`docs/RECENT_DELIVERY_STATUS.md` |
 | 认证 Phase A/B | `supabase/migrations/166_harden_admin_profile_and_oauth_transactions.sql` |
 | 认证 Phase C/D | `supabase/migrations/167_harden_account_credentials_and_identity_keys.sql` |
 | 认证审查与旧邮箱空壳修复 | `supabase/migrations/168_close_auth_review_findings.sql`–`172_quarantine_oauth_email_artifact_atomically.sql` |
