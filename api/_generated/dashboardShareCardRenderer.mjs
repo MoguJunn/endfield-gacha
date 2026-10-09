@@ -4133,6 +4133,7 @@ var messages = {
   "simulator.toolbar.infiniteResources": "\u65E0\u9650\u8D44\u6E90",
   "simulator.toolbar.inheritAccount": "\u7EE7\u627F\u8D26\u53F7",
   "simulator.toolbar.inheritShort": "\u7EE7\u627F",
+  "simulator.toolbar.inheritLoading": "\u7EE7\u627F\u4E2D\u2026",
   "simulator.toolbar.inheritTitle": "\u9009\u62E9\u4E00\u4E2A\u8D26\u53F7\u5E76\u7EE7\u627F\u5176\u771F\u5B9E\u62BD\u5361\u8BB0\u5F55",
   "simulator.toolbar.share": "\u5206\u4EAB",
   "simulator.toolbar.shareBusy": "\u5904\u7406\u4E2D",

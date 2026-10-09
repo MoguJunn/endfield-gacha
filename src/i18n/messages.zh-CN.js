@@ -1788,6 +1788,7 @@ const messages = {
   "simulator.toolbar.infiniteResources": "无限资源",
   "simulator.toolbar.inheritAccount": "继承账号",
   "simulator.toolbar.inheritShort": "继承",
+  "simulator.toolbar.inheritLoading": "继承中…",
   "simulator.toolbar.inheritTitle": "选择一个账号并继承其真实抽卡记录",
   "simulator.toolbar.share": "分享",
   "simulator.toolbar.shareBusy": "处理中",
