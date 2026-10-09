@@ -120,7 +120,7 @@
 - `scripts/verify-group-statistics-live.mjs`：指定本地 `STATISTICS_BASE_URL` 后验证五组统计和响应式十图，需要已准备的页面与快照。
 - `scripts/verify-bootstrap-proxy.mjs`：历史本地集成验证，会读取本机环境并调用 API，按实际连接目标受控运行，不作为干净检出的默认测试。
 
-本轮退役脚本和本地生成报告范围见 [仓库内容规范](REPOSITORY_LAYOUT.md)，报告按当前输入生成，不提交某次生产快照作为公共测试夹具。
+生成报告和跟踪产物的范围见 [仓库结构](REPOSITORY_LAYOUT.md)。使用当前输入重新生成报告，公共测试采用脱敏夹具。
 
 ## Supabase 与资源
 
@@ -156,15 +156,15 @@
 | 静态头像 | `public/avatars/` |
 | 版本日历静态图 | `public/game-calendar/` |
 
-独立日历仓库的 `lib/calendar-core.js` 负责数据库日期优先、重构类型和期次及公开序列化；`lib/version-six.js` 维护已核对活动；`assets/events/OFFICIAL_SOURCES.md` 保存官方海报和日期来源。它们不在主站仓库的 `public/game-calendar/` 中维护。数据工作台代码尚在独立本地候选，不能据原目录存在相关文件推定主线已提供该路由。
+独立日历仓库的 `lib/calendar-core.js` 负责数据库日期优先、重构期次与序列化；`lib/version-six.js` 维护活动，`assets/events/OFFICIAL_SOURCES.md` 记录官方来源。主站 `public/game-calendar/` 不承担这些实现；手动补录工作台尚未作为正式路由提供。
 
 ## 仍需治理的复杂点
 
-- `SIM-004`：`src/features/simulator/useGachaSimulatorController.js` 仍承担较多模拟器 UI、资源、继承和分享状态。
-- `ARCH-021`：桌面 / 移动端 dashboard 与 settings 仍有重复控制器逻辑。
-- `DB-OPTIMIZE-001`：线上数据库体积治理要先做索引使用审计和查询计划验证，本轮未直接变更生产 schema 语义。
-- `AUTH-HARDEN-001`：Phase A–D、PR #14、邮箱/凭据状态机、安全属性专项和 GitHub 核心浏览器闭环已完成；生产数据库已确认 166–168，API / 主线已发布。LinuxDo 保持在独立分支 `feat/linuxdo-oauth`，已下调为 P3 且不阻塞认证发布。
-- `PERF-013 / UX-FLOW-001`：个人数据与分析可用性主链已由 PR #23–#25 收口；更广的桌面 / 移动重复控制器和视觉密度治理继续由 `ARCH-021`、`UI-*`、`MOBILE-006` 跟踪。
+- `src/features/simulator/useGachaSimulatorController.js` 仍承担较多 UI、资源、继承和分享状态，可进一步拆分。
+- 桌面／移动 dashboard 与 settings 可共享更多控制器逻辑。
+- 数据库体积优化先做索引审计、查询计划与读写基准，避免只按体积删除结构。
+- 认证变更遵循 [身份与会话合同](AUTH_SECURITY_HARDENING.md)，provider 在各自配置与验证完成后启用。
+- 体验改进与未发布功能见 [待完善项](CLOSEOUT_LEDGER.md)，个人分析快照合同见 [Worker 指南](PERSONAL_ANALYSIS_WORKER.md)。
 
 ## 独立导入后端兼容层
 

@@ -1,95 +1,66 @@
 # Endfield Gacha Analyzer
 
-《明日方舟：终末地》抽卡记录分析器。主站提供官方导入、公开统计、模拟器、移动端、后台管理、运营自动化和 Vercel 可观测性。
+《明日方舟：终末地》抽卡记录分析工具，支持记录导入、个人分析、全服统计、抽卡模拟与备份导出，适配桌面和手机浏览器。
 
 [![Version](https://img.shields.io/github/package-json/v/MoguJunn/endfield-gacha?filename=package.json)](https://github.com/MoguJunn/endfield-gacha/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![React](https://img.shields.io/badge/React-19-61DAFB.svg)
 ![Vite](https://img.shields.io/badge/Vite-7-646CFF.svg)
-![Supabase](https://img.shields.io/badge/Supabase-Cloud-3ECF8E.svg)
+![Supabase](https://img.shields.io/badge/Supabase-3ECF8E.svg)
 
-**在线站点**：[ef-gacha.mogujun.icu](https://ef-gacha.mogujun.icu/)
+**在线使用：[ef-gacha.mogujun.icu](https://ef-gacha.mogujun.icu/)** · [问题反馈](https://github.com/MoguJunn/endfield-gacha/issues) · [贡献指南](CONTRIBUTING.md)
 
-![Homepage](docs/screenshots/homepage.png)
+![首页预览](docs/screenshots/homepage.png)
 
-> 截图用于展示页面布局，画面中的版本与日期可能早于当前代码。徽章反映仓库版本，线上运行状态需以部署验证为准。
+截图展示页面布局，游戏版本与活动日期以网站和官方公告为准。
 
-## 当前版本
+## 可以做什么
 
-- 当前发布：`v4.6.3` / `Build 2026.10.06`。PR #37 已在生产迁移、Worker 与首批快照预热后恢复统计；PR #43 及后续导览、卡池管理和日历修复已发布。交付与候选边界见 [近期状态](docs/RECENT_DELIVERY_STATUS.md) 和 [4.6.3 发布记录](docs/RELEASE_4.6.3.md)。
-- 统计：单池与限定角色、限定武器、常驻武器、重构寻访、重构申领五类合池，提供十图、头像对象选择、分类排序、深色与减少动态效果；旧指标及资源概览随选择范围读取快照。合池先逐账号、逐期、逐对象计算首次，再汇总类别，账号覆盖跨期去重。
-- 调度：全服与个人统计只读 `public-statistics-v4` 快照；独立 Worker 已运行，读端已启用。桌面各页统一沿用首页响应式宽度；首次指南仍仅供开发预览。
-- 首页：前瞻结束后展示独立的官方版本导览，按中文版本名匹配官网封面并直连原图；下一次前瞻配置生效时恢复倒计时。
-- 卡池与日历：限定武器池支持同期角色池关联及第三期截止时间一键填入；独立日历采用数据库日期，正确显示重构寻访／申领与期次，已核对官方签到和活动海报。详见 [时间管理](docs/POOL_SCHEDULE_MANAGEMENT.md)。
-- 官方导入：浏览器提交 `import-full` 后只轮询 `import-status`；服务端内部暂存并自动原子写入，不再调用同步 `import-confirm`。官方情报书等非寻访事件不会写入历史；旧版未知占位仅在账号、区服、卡池、官方序号和时间完整吻合时自动修复。需要核对、存在漏池或云端刷新失败时，结果页会保留明确提示。
-- 历史维护：支持按账号、区服、卡池和序号精确编辑 / 删除，并提供异常记录提醒与后台复核。
-- 个人分析：owner/account 快照由 Supabase `pg_cron + pg_net` 异步生成；活跃用户可即时派发，页面使用轻量渐进检查并保留上次成功结果。
-- 仪表盘：详细日志按需挂载，时间线与卡池阵容复用缓存；附加寻访支持重构寻访、重构申领和特殊寻访子类型。
-- 公共数据：生产首屏统一走同源 `/api/*`，避免浏览器直连 Supabase 域名。
-- 缓存：`CACHE-001 / ARCH-022` 已接入 `public_cache_epoch`、公共响应 `meta`、前端快照与显式失效。
-- 自动化：`OPS-006` 已接入 job graph、partial 语义、重跑入口和审计详情。
-- 可观测性：Vercel Analytics + Speed Insights。
+- **导入与管理记录**：导入官方记录，按账号、区服与卡池查看；处理异常提醒，精确编辑或删除记录，并导出备份。
+- **查看个人分析**：了解抽数、出货、保底、资源与时间线，使用图鉴和分享卡回顾结果。
+- **查看全服统计**：提供单池和五类合池观测，区分样本数、参与账号数和对象首次获得情况。指标含义见 [统计说明](docs/STATS_OBSERVATION_CONTRACT.md)。
+- **规划与浏览日程**：使用抽卡模拟器，查看当前寻访、版本倒计时和官方版本导览；[独立日历](https://ef-cal.mogujun.icu/) 展示活动与卡池时间。
 
-## 快速开始
+当前发布版本为 **v4.6.3**。新版桌面首页默认启用，也可以切换到经典主页。近期变化见 [发布记录](docs/RELEASE_4.6.3.md)，开发中的功能见 [项目进展](docs/RECENT_DELIVERY_STATUS.md)。
+
+## 本地开发
+
+需要 Node.js `>=22.17.0 <27`、npm `>=10`；仓库记录的包管理器版本是 `npm@11.2.0`。
 
 ```bash
 git clone https://github.com/MoguJunn/endfield-gacha.git
 cd endfield-gacha
-npm install
+npm ci
 cp .env.contributor.example .env.local
 npm run dev
 ```
 
-Node.js 需要 `>=22.17.0 <27`，npm 建议使用仓库锁定的 `npm@11.2.0`。
-外部贡献者默认使用 `.env.contributor.example`。模板会开启仅 Vite DEV 生效的本地内容沙盒：无需数据库 key，卡池、角色、武器和阵容优先从正式站公共 GET 接口读取，并缓存最后一次成功目录；断网首启则使用仓库内可确认的真实最小目录。
+默认模板启用本地内容沙盒，无需数据库密钥。卡池和角色目录从公共只读接口读取，离线时使用缓存或内置最小目录。
 
-登录页会显示本地演示账号，也可以直接使用：
+登录页可填入公开演示身份：`demo-admin@local.invalid` / `frontend-demo`。公告、卡池、角色等修改仅保存到当前浏览器，可以刷新保留或一键重置。真实登录、邮件、官方导入和生产写入在沙盒中关闭；该身份不能访问真实用户数据。
 
-```text
-邮箱：demo-admin@local.invalid
-密码：frontend-demo
-```
+需要调试完整服务端功能时，请使用自己的隔离环境，参考 [开发与部署指南](docs/PROJECT_GUIDE.md)。
 
-该账号不是 Supabase 账号，也没有真实 token。登录后可以在完整管理界面中本地新增、编辑、启停和删除公告、卡池、阵容、角色、武器、版本时间线与站点配置；修改保存到独立 `localStorage` 沙盒，刷新仍保留，也可一键重置。沙盒启动时会清理同源残留认证、禁用真实 Supabase 客户端、OAuth、邮件验证码、官方代理导入和后台执行入口；公共目录、资源主机和公开站点配置均采用显式白名单。用户密码、真实用户数据删除、邮件、开奖、密钥和自动化执行保持隔离，不会访问生产写接口。
-
-## 桌面新版主页
-
-`v4.6.0` 起，已验收的桌面首页、导航和个人 / 全服统计拆分成为桌面端默认体验，以 1366×768 为基准，含统一消息弹窗和可收起个人菜单。首次访问默认使用新版；新版提供“切换至经典主页”，经典主页提供“切换至新版主页”，选择写入本地偏好并在后续访问保持。旧预览链接 `/?home-demo=unified` 继续兼容并总是打开新版。布局、路由、独立版本倒计时主题接口及验证范围见 [桌面 Demo 文档](docs/DESKTOP_HOME_DEMO.md)，历史发布证据见 [4.6.0 发布说明](docs/RELEASE_4.6.0.md)。`v4.6.2` 将首页响应式宽度扩展至其他桌面页；[首次使用指南](docs/ONBOARDING_GUIDE_PLAN.md) 已有开发预览，真实登录、导入和备份动作尚未接入。
-
-## 常用验证
+## 常用命令
 
 ```bash
-npm test
-npm run test:unit
-npm run lint
-npm run build
-npm run perf:report
+npm test                 # 公共数据与基础功能验证
+npm run test:unit        # 单元测试
+npm run lint             # 代码检查
+npm run build            # 主站和抽奖子应用构建
+npm run perf:report      # 构建资源预算
 ```
 
-数据库新环境默认执行 `supabase/baseline/000_complete_schema.sql`，不要把已合并进 baseline 的归档迁移重复叠加执行。
+## 进一步阅读
 
-## 文档入口
+- [文档导航](docs/README.md)：按使用、贡献、架构和部署查找说明。
+- [代码地图](docs/CODEMAP.md)与[架构](docs/ARCHITECTURE.md)：定位前端、API、缓存与后台计算入口。
+- [仓库结构](docs/REPOSITORY_LAYOUT.md)：了解目录职责、配置和生成文件。
+- [数据库指南](supabase/README.md)：新环境基线、前向迁移与手动 SQL 的使用范围。
+- [安全报告](SECURITY.md)：报告漏洞及保护私有数据。
 
-| 文档 | 用途 |
-|------|------|
-| [docs/RECENT_DELIVERY_STATUS.md](docs/RECENT_DELIVERY_STATUS.md) | 已上线交付、两仓库基线、候选与待办边界 |
-| [docs/RELEASE_4.6.3.md](docs/RELEASE_4.6.3.md) | 当前版本与后续维护证据 |
-| [docs/POOL_SCHEDULE_MANAGEMENT.md](docs/POOL_SCHEDULE_MANAGEMENT.md) | 武器三期、重构日历、官方时间与图片维护 |
-| [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md) | 部署、环境变量、数据库、维护命令 |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 整体架构、数据边界、缓存与自动化 |
-| [docs/CODEMAP.md](docs/CODEMAP.md) | 代码入口和主要模块索引 |
-| [docs/PERSONAL_ANALYSIS_WORKER.md](docs/PERSONAL_ANALYSIS_WORKER.md) | 个人分析快照、Worker 调度与生产核验 |
-| [supabase/README.md](supabase/README.md) | Supabase baseline、迁移归档和手工 SQL 边界 |
-| [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) | 发布检查清单 |
-| [docs/GIT_WORKFLOW.md](docs/GIT_WORKFLOW.md) | 从 `v4.4.1` 起执行的分支、提交和历史整理规则 |
+本仓库包含主站、API、数据库 schema、官方 BOT 与验证脚本。官方记录获取使用独立后端，`backend/` 只保留共享合同与测试所需代码，完整服务配置不在公开仓库中。
 
-## 仓库边界
+## 许可证
 
-- 公开仓库包含主站、Vercel API、Supabase schema、官方 BOT 运行层和验证脚本。
-- `backend/` 仅保留兼容 helper 与测试依赖，不代表完整私有后端主链。
-- 私有用户数据、后台数据、账号恢复、个人排行不进入公共缓存，响应策略保持 `no-store`。
-- 不提交生产密钥、私有代理、真实后端凭据或登录态数据。
-
-## License
-
-MIT License. 本项目为粉丝自制工具，与游戏官方无关；游戏内容版权归 Gryphline / HyperGryph 所有。
+[MIT License](LICENSE)。本项目为粉丝自制工具，与游戏官方无关；游戏内容版权归 Gryphline / HyperGryph 所有。

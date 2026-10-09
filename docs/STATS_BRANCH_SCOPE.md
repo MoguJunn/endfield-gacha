@@ -1,6 +1,6 @@
 # 统计与指南维护入口
 
-原 `feat/banner-stats-and-guide` 已随 PR #37 发布。分支提交、首次隔离范围、交付与验证统一收口到 [v4.6.2 发布记录](RELEASE_4.6.2.md)，本页保留旧链接的入口，不再重复维护阶段测试数字与文件清单。
+统计更新随 PR #37 发布，变化见 [v4.6.2 发布记录](RELEASE_4.6.2.md)。本页为旧链接提供现行专题导航。
 
 ## 当前维护
 
@@ -8,6 +8,6 @@
 - [统计调度](STATISTICS_SCHEDULING.md)：持久快照、Worker、部署顺序与只读预览。
 - [代码地图](CODEMAP.md)：算法、API、工作区与验证脚本的实际入口。
 - [首次指南计划](ONBOARDING_GUIDE_PLAN.md)：`/statistics-preview.html` 仍仅供 Vite DEV，真实登录／导入／备份与完成状态尚未接入。
-- [近期状态](RECENT_DELIVERY_STATUS.md)：已上线统计、未实施重复修正、独立数据工作台和导出任务的当前边界。
+- [项目进展](RECENT_DELIVERY_STATUS.md)：已发布功能、已知限制和开发方向。
 
-主站当前 main 已在源目录维护，旧分支与混合候选只作历史追溯。数据工作台集成须合并现行 `SummaryView`、Stats API 和数据库合同，不用旧分支整体覆盖。
+修改统计或整合新数据入口时，同时核对 `SummaryView`、Stats API 与数据库合同。

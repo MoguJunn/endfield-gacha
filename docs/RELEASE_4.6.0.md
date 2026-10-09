@@ -1,6 +1,6 @@
 # v4.6.0 发布说明
 
-本次将已验收的桌面前端纳入主线，主站版本统一为 `4.6.0`；PR #32 随后完成默认新版主页与新旧切换。首次使用教程与首页指南优化已登记为 `ONBOARDING-GUIDE-001`，仍待开始。
+v4.6.0 更新桌面首页与导航；PR #32 随后完成默认新版主页与新旧切换。首次使用指南仍在开发，设计见 [指南方案](ONBOARDING_GUIDE_PLAN.md)。
 
 ## 交付范围
 
@@ -14,12 +14,12 @@
 ## 发布结果
 
 - [PR #31](https://github.com/MoguJunn/endfield-gacha/pull/31) 合并提交为 `9babb6c3`，标签 `v4.6.0` 保留在该提交。
-- [PR #32](https://github.com/MoguJunn/endfield-gacha/pull/32) 将主页切换修复合并至 `fca9314b`，本地 main 与 origin/main 已同步。修复分支经祖先关系核验后已删除本地与远端引用。
+- [PR #32](https://github.com/MoguJunn/endfield-gacha/pull/32) 将主页切换修复合并至 `fca9314b`。
 - 两轮 PR 与主线 CI 均通过，GitHub 自动触发的生产部署已 Ready，正式域名已核对指向 PR #32 部署。标签没有随修复移动。
 
 ## 共同贡献
 
-[Neptune-520](https://github.com/Neptune-520) 共同参与本轮前端改动。整合后的前端提交及最终合并提交保留：
+[Neptune-520](https://github.com/Neptune-520) 共同参与前端改动，提交保留共同作者署名：
 
 ```text
 Co-authored-by: Neptune-520 <69883987+Neptune-520@users.noreply.github.com>
@@ -27,7 +27,7 @@ Co-authored-by: Neptune-520 <69883987+Neptune-520@users.noreply.github.com>
 
 ## 验证
 
-PR #31 在从已提交代码建立的隔离工作树中完成：
+PR #31 的发布验证包括：
 
 - ESLint 通过。
 - `npm test` 公共验证链通过，包含 baseline 内容与覆盖范围检查。
@@ -35,7 +35,7 @@ PR #31 在从已提交代码建立的隔离工作树中完成：
 - `npm run build` 完整通过，包含字体准备、分享渲染器生成、主站与抽奖子应用。
 - 构建没有产生需要额外提交的受跟踪生成文件。
 
-原工作区中未提交的英文同步、验证码和旧文档候选不属于本次发布。之前混合工作树的英文名断言失败不出现在本次隔离测试中。GitHub CI、合并提交与部署证据在发布 PR 及工作区交接文档中追踪，不用历史结果冒充当前线上验证。
+这些数量对应发布时的代码，CI 与部署证据见关联 PR，不代表之后版本的运行状态。
 
 PR #32 另通过主页偏好与消息中心 8 项定向测试、完整 lint、包含抽奖子应用的完整构建及 CI。生产构建浏览器验证覆盖默认新版、切换、刷新保持及旧链接兼容；正式站点验证默认新版、双向切换和经典偏好刷新保持。浏览器测试在临时上下文中预设启动校验的有效时间，仅验证进入站点后的页面交互，不作为真实验证码验证证据。
 
@@ -43,6 +43,6 @@ PR #32 另通过主页偏好与消息中心 8 项定向测试、完整 lint、�
 
 页面优先读取后台 `site_config.site_version`，包版本仅为缺省值；更新 Git 不会自动修改这两项配置。
 
-生产部署 Ready 后，已按用户单独确认，在事务中将 `site_version` 更新为 `v4.6.0`、`build_info` 更新为 `Build 2026.09.05`，并刷新 `public_cache_epoch`。当次公开 bootstrap 核验返回正确版本，缓存版本为 `1788625791811`，partial / stale 均为 false；该缓存值为版本同步时快照，后续内容发布可继续更新。此操作仅更新发布元数据，不涉及 schema 迁移或用户数据。
+部署后在事务中同步 `site_version=v4.6.0`、`build_info=Build 2026.09.05` 并刷新 `public_cache_epoch`；公开 bootstrap 返回对应版本。发布元数据与代码部署分别维护，不从旧迁移里的版本默认值判断当前版本。
 
 新安装环境执行现有 baseline 后也应通过后台设置当前站点版本。迁移 158 与 baseline 中的历史版本记录用于重建既有迁移链，不修改其历史内容。
