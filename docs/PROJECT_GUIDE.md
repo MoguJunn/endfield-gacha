@@ -20,6 +20,8 @@ npm run dev
 
 该身份没有数据库用户、Bearer token 或生产权限。沙盒禁用真实认证、OAuth、邮件、身份绑定、官方导入和后台执行，目录请求不携带凭据。生产构建不会激活沙盒。
 
+沙盒个人／合池统计和模拟器继承使用本地演示历史。模拟器会话与结果保存到 IndexedDB，内容编辑与目录缓存仍在独立 localStorage；清理网站存储会删除这些本地数据。完整模拟器合同见 [SIMULATOR_ENGINE.md](SIMULATOR_ENGINE.md)。
+
 只读镜像可用 `VITE_CONTRIBUTOR_CATALOG_API_BASE` 配置，额外资源与目录主机需加入明确白名单。调试真实认证或 RLS 时，关闭沙盒并使用自己的隔离 Supabase。
 
 ### 页面入口
@@ -27,6 +29,7 @@ npm run dev
 - `/`：默认新版桌面首页，可切换经典主页并保存浏览器偏好。
 - `/dashboard`：个人卡池分析；`?view=overview` 打开个人概览。
 - `/summary`：全服统计，私有数据读取失败不应阻塞该页面。
+- `/simulator`：桌面模拟器；`/m/simulator` 保持使用桌面版的引导提示。
 - `/m/`：手机入口；`/m/stats` 为手机统计。
 - `/statistics-preview.html`：开发专用统计与指南样例，按钮不执行真实登录、导入或备份。
 
@@ -45,6 +48,8 @@ npm run dev
 
 `VITE_PUBLIC_DATA_DIRECT_SUPABASE_FALLBACK` 默认关闭，生产公共读取使用同源 API。浏览器 Realtime 也默认关闭，仅在隔离环境需要时启用。变更环境后重新启动开发服务器，生产前端变量变化需要重新构建。
 
+Vite 开发及构建预览的 API 环境按项目目录加载，不依赖启动进程的工作目录；运行 npm 仍应以仓库目录为准。`.agent-tmp` 测试生成物已从开发监视范围排除，避免浏览器临时文件锁导致预览退出。
+
 ## 验证
 
 ```bash
@@ -59,16 +64,20 @@ npm run perf:report
 
 沙盒浏览器验证使用 `npm run test:contributor-demo:ui`，运行前启动开发服务器。需要数据库的检查使用临时 PostgreSQL 或隔离环境，不直接以生产配置运行测试。纯文档修改核对引用与差异即可。
 
+模拟器专项检查为 `npm run test:simulator-v2:ui`、`npm run test:simulator-v2:sql`；浏览器检查需启动 DEV 内容沙盒，SQL 检查使用新建隔离实例。`node scripts/benchmark-simulator.mjs` 生成合成计算与载荷基准，不读取生产用户数据。
+
 ## 自建部署
 
 1. 配置 Supabase/PostgreSQL，按 [数据库指南](../supabase/README.md) 执行完整 baseline；不要重复执行已包含的历史迁移。
 2. 在服务端配置 Supabase secret、会话密钥与所需功能变量；浏览器只接收公开变量。
-3. 配置个人分析队列及 `pg_cron + pg_net` 调度，确认受保护 Worker 可以领取并发布任务。
+3. 配置个人分析 schema 3 队列及 `pg_cron + pg_net` 调度。部署目标 Worker 后同步 Vault 中不可变 `personal_analysis_worker_url`，确认可以领取并发布匹配版本的任务；不能只验证 HTTP 200。
 4. 按 [统计调度](STATISTICS_SCHEDULING.md) 部署常驻统计 Worker，并完成对应计算版本的公开／个人快照预热。
 5. 构建并部署主站与 API，配置 `vercel.json` 的路由和响应头；数据库必须先于依赖新字段／RPC 的代码。
 6. 核对正式域名、版本、公共页面、认证边界、快照读取与缓存失效。需要的邮件、BOT 和代理逐项配置及验证。
 
 仓库默认使用 GitHub-connected Vercel：推送 `main` 触发生产构建。发布前准备数据库与后台计算，发布后确认部署 Ready 和正式域名指向正确版本，流程见 [发布检查](RELEASE_CHECKLIST.md)。
+
+当前 v4.6.4 已发布，既有自托管环境已应用模拟器迁移并重建快照，生产个人分析调度已同步至新部署，见 [发布记录](RELEASE_4.6.4.md)。其他已有环境升级时核对 `2026100901_simulator_inheritance_v2.sql` 是否缺失；它递增修订以触发重建，已执行环境不要重跑。运行版本优先读取 `site_config.site_version`，发布时同步 `build_info` 和公共缓存，再核对中英文公告及实际页面。
 
 管理后台使用同源 `/api/admin`，兼容 URL 由路由表映射；无需部署旧 Supabase 管理 Edge Functions。
 

@@ -5,7 +5,7 @@
 ## 主要目录
 
 - `src/`：桌面与移动界面、状态、业务服务、资源和组件测试。
-- `shared/`：前后端共用的数据类型、寻访规则与规范化逻辑。
+- `shared/`：前后端共用的数据类型、寻访规则与规范化逻辑；`shared/simulator/` 包含纯函数引擎、记录分类与紧凑历史编码。
 - `api/`：公共读取、认证、私有账号数据、管理和 Worker 接口。
 - `bots/official/`：官方 BOT 适配器与运行入口。
 - `backend/`：官方导入共享合同及测试依赖，完整记录获取服务独立维护。
@@ -27,6 +27,8 @@
 `api/_generated/dashboardShareCardRenderer.mjs` 是明确跟踪的生成物。分享组件变化后运行 `npm run share:renderer`，将对应生成差异一起提交。
 
 字体源与许可证进入仓库，自动分片由 `fonts:prepare` 生成。`dist/`、依赖目录、覆盖率和浏览器测试报告不提交。`statistics-preview.html` 是开发预览入口，尚未接入生产不代表它已废弃。
+
+`.agent-tmp/` 保存专项浏览器与数据库验证的临时产物，Vite 已忽略该目录的文件监视。模拟器的实际会话与历史位于浏览器 IndexedDB，既有 localStorage 迁移源保留；这些数据不属于仓库文件，也不随 Git 同步。导出记录仍按用户数据保护，架构见 [模拟器合同](SIMULATOR_ENGINE.md)。
 
 历史迁移参与基线重建，手写修复和回滚脚本保留其用途；数据库审计 JSON、用户导出和某次输入生成的执行 SQL 留在本地。脱敏示例可以提交。
 

@@ -23,6 +23,7 @@ Node.js 与 npm 要求见 [README](README.md)。默认贡献者模板提供本�
 - 首页布局、导航和消息交互：[桌面界面合同](docs/DESKTOP_HOME_DEMO.md)。
 - 统计定义与调度：[观测合同](docs/STATS_OBSERVATION_CONTRACT.md)、[快照调度](docs/STATISTICS_SCHEDULING.md)。
 - 卡池日期和官方来源：[时间管理](docs/POOL_SCHEDULE_MANAGEMENT.md)。
+- 模拟器纯函数、继承和存档：[引擎合同](docs/SIMULATOR_ENGINE.md)，前后端共享代码位于 `shared/simulator/`。
 
 `/statistics-preview.html` 是开发预览，指南按钮尚未连接真实登录、导入或备份。请按 [项目进展](docs/RECENT_DELIVERY_STATUS.md) 区分可用功能和设计方案。
 
@@ -40,6 +41,8 @@ git diff --check
 优先覆盖受影响的合同。公共 API、缓存或自动化变更补运行 `npm test` 和相应 `test:*` 脚本；认证变更运行 `test:auth-hardening-phase-a`、`test:auth-hardening-phase-cd` 并验证相关 Session／provider 行为。
 
 数据库迁移需重新生成并验证 baseline，必要时使用临时 PostgreSQL 做真实执行验证，见 [数据库指南](supabase/README.md)。文档修改检查链接、命令和内容一致性即可；在 PR 中说明已执行的检查和环境限制。
+
+模拟器修改优先运行对应引擎、继承、资源或存档单测，改动事务、目录投影或契约时补运行 `npm run test:simulator-v2:sql`；界面流程使用已启动的 DEV 内容沙盒运行 `npm run test:simulator-v2:ui`。保留真实历史查看与导出、零抽池共享水位、账号／区服隔离、免费／情报书进度和失败回滚合同，不能以旧类接口仍在为由新增另一套抽取实现。
 
 ## 文件与文档
 

@@ -8,7 +8,7 @@
 ![Vite](https://img.shields.io/badge/Vite-7-646CFF.svg)
 ![Supabase](https://img.shields.io/badge/Supabase-3ECF8E.svg)
 
-**在线使用：[ef-gacha.mogujun.icu](https://ef-gacha.mogujun.icu/)** · [问题反馈](https://github.com/MoguJunn/endfield-gacha/issues) · [贡献指南](CONTRIBUTING.md)
+**在线使用：[ef-gacha.mogujun.icu](https://ef-gacha.mogujun.icu/)** · [备用网址](https://ef.nepst.cn/) · [问题反馈](https://github.com/MoguJunn/endfield-gacha/issues) · [贡献指南](CONTRIBUTING.md)
 
 ![首页预览](docs/screenshots/homepage.png)
 
@@ -19,9 +19,10 @@
 - **导入与管理记录**：导入官方记录，按账号、区服与卡池查看；处理异常提醒，精确编辑或删除记录，并导出备份。
 - **查看个人分析**：了解抽数、出货、保底、资源与时间线，使用图鉴和分享卡回顾结果。
 - **查看全服统计**：提供单池和五类合池观测，区分样本数、参与账号数和对象首次获得情况。指标含义见 [统计说明](docs/STATS_OBSERVATION_CONTRACT.md)。
+- **继续模拟寻访**：继承所选账号的完整历史和保底进度，查看、统计与导出真实及模拟结果；资源增量计算，本地存档按用户、账号和区服隔离。手机端仍引导使用电脑端模拟器。
 - **规划与浏览日程**：使用抽卡模拟器，查看当前寻访、版本倒计时和官方版本导览；[独立日历](https://ef-cal.mogujun.icu/) 展示活动与卡池时间。
 
-当前仓库版本为 **v4.6.4**。新版桌面首页默认启用，也可以切换到经典主页。变化与发布准备见 [版本说明](docs/RELEASE_4.6.4.md)，线上版本以站点显示为准，开发中的功能见 [项目进展](docs/RECENT_DELIVERY_STATUS.md)。
+**v4.6.4 已于 2026-10-09 发布**，构建标识为 `Build 2026.10.09`，包含模拟器完整重写。新版桌面首页默认启用，也可以切换到经典主页。变化与验证见 [发布记录](docs/RELEASE_4.6.4.md)，功能边界见 [项目进展](docs/RECENT_DELIVERY_STATUS.md)。模拟器存档属于当前浏览器，清理网站数据前请导出需要保留的记录。
 
 ## 本地开发
 
@@ -57,6 +58,7 @@ npm run perf:report      # 构建资源预算
 - [代码地图](docs/CODEMAP.md)与[架构](docs/ARCHITECTURE.md)：定位前端、API、缓存与后台计算入口。
 - [仓库结构](docs/REPOSITORY_LAYOUT.md)：了解目录职责、配置和生成文件。
 - [数据库指南](supabase/README.md)：新环境基线、前向迁移与手动 SQL 的使用范围。
+- [模拟器合同](docs/SIMULATOR_ENGINE.md)：保底作用域、完整继承历史、资源和事务存档。
 - [安全报告](SECURITY.md)：报告漏洞及保护私有数据。
 
 本仓库包含主站、API、数据库 schema、官方 BOT 与验证脚本。官方记录获取使用独立后端，`backend/` 只保留共享合同与测试所需代码，完整服务配置不在公开仓库中。

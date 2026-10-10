@@ -2,7 +2,7 @@
 
 这是下一次发布的可复用模板。只勾选本次实际执行的项目，并记录提交、日期和结果；按变更范围选择验证，不继承旧版本的勾选状态。
 
-历史变化见 [v4.6.0](RELEASE_4.6.0.md)、[v4.6.2](RELEASE_4.6.2.md)、[v4.6.3](RELEASE_4.6.3.md)。功能状态见 [项目进展](RECENT_DELIVERY_STATUS.md)，认证要求见 [认证专题](AUTH_SECURITY_HARDENING.md)。
+历史变化见 [v4.6.0](RELEASE_4.6.0.md)、[v4.6.2](RELEASE_4.6.2.md)、[v4.6.3](RELEASE_4.6.3.md)、[v4.6.4](RELEASE_4.6.4.md)。功能状态见 [项目进展](RECENT_DELIVERY_STATUS.md)，认证要求见 [认证专题](AUTH_SECURITY_HARDENING.md)。
 
 ## 代码与文件范围
 
@@ -34,6 +34,8 @@
 - [ ] 相关 RPC 保持 owner、权限、timeout、原子保存、revision／lease 和作用域边界。
 - [ ] 统计读端启用前，迁移、Worker 和对应计算版本快照已准备好，按 [调度合同](STATISTICS_SCHEDULING.md) 执行。
 - [ ] 个人分析 schema version、投影字段与 Worker 输出一致，按 [Worker 合同](PERSONAL_ANALYSIS_WORKER.md) 核验。
+- [ ] 涉及模拟器继承时核对个人 schema 3、继承合同 2、编码 1／会话 2；覆盖零抽池共享水位、完整历史、免费／情报书使用和存档失败回滚，必要时运行 `test:simulator-v2:sql`／`test:simulator-v2:ui`。
+- [ ] 备份并同步个人分析 Vault 的不可变部署 URL，确认真实发布成功而非只有 HTTP 200；核对应急 Workflow 地址。已应用的快照失效迁移不重复执行。
 - [ ] 已执行的手动数据修正不作为新环境初始化或常规发布步骤再次运行。
 
 ## 认证与私有用户数据
@@ -57,4 +59,6 @@
 - [ ] GitHub-connected Vercel 部署成功，Production Ready，正式域名指向目标部署。
 - [ ] 数据库先于依赖新字段／RPC 的 API；旧 Worker 切换、预热和恢复顺序有记录。
 - [ ] 正式页面和受影响 API 已按实际权限验证，没有把登录跳转当作成功。
+- [ ] `site_config.site_version`、`build_info` 与公共缓存版本已同步；中英文公告已发布并保留历史，两个正式域名的正文和版本与本次交付一致。
+- [ ] 发布结果记录到对应版本说明及维护者交接文档，包含合并提交、CI／部署、迁移执行、快照及调度验证；不把尚未执行的操作写成已完成。
 - [ ] 如有风险，备份、回退与后续观察范围明确，不把一次通过写成长期无异常保证。

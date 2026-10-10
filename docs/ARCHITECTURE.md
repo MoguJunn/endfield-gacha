@@ -1,6 +1,6 @@
 # Architecture
 
-本文档描述 `v4.6.4` 代码架构，包括默认新版桌面主页与经典主页切换、分池／合池统计快照。版本变化与发布准备见 [RELEASE_4.6.4.md](RELEASE_4.6.4.md)。独立 CN / INTL 后端承接官方数据获取、规范化、内部暂存与原子写入。
+本文档描述已发布的 `v4.6.4` 架构，包括默认新版桌面主页与经典主页切换、分池／合池统计、共享模拟器引擎与事务存档。上线证据见 [RELEASE_4.6.4.md](RELEASE_4.6.4.md)。独立 CN / INTL 后端承接官方数据获取、规范化、内部暂存与原子写入。
 
 限定武器池通过 `pools.character_pool_id` 保存同期限定角色池；后台共用 `shared/weaponPoolSchedule.js` 识别与预览三期截止时间，经管理员填入和既有 RPC 原子保存，不自动追写截止日期。独立版本日历读取主站数据库时间，卡池时间不再由本地备份覆盖；缓存和操作边界见 [卡池时间管理](POOL_SCHEDULE_MANAGEMENT.md)。
 
@@ -23,6 +23,10 @@ flowchart LR
   AnalysisApi --> AnalysisSnapshot["personal_analysis_snapshots"]
   AnalysisScheduler["Supabase pg_cron + pg_net"] --> AnalysisWorker["/api/personal-analysis-worker"]
   AnalysisWorker --> AnalysisSnapshot
+  Browser --> InheritanceApi["/api/account-gacha-data\nsimulator-inheritance mode"]
+  InheritanceApi --> AnalysisSnapshot
+  Browser --> Simulator["shared/simulator\n纯函数引擎与增量账本"]
+  Simulator --> SimulatorSave["IndexedDB\n会话与历史事务"]
   PublicApi --> PublicCache["Serverless public cache"]
   PublicCache --> SupabaseDb["Supabase PostgreSQL"]
   Admin["Admin UI"] --> AdminApi["Protected admin API"]
@@ -53,10 +57,7 @@ flowchart LR
 | 私有读取 / 写入 | `src/services/accountGachaDataService.js`、`src/hooks/app/useCloudSync.js`、`src/utils/cloudDataSync.js` | 个人分析读取、历史分页、精确变更、池信息和 owner 隔离同步 |
 | 官方导入 | `src/features/import/useOfficialImportController.js`、`src/features/import/ImportManager.jsx` | 创建 `import-full` 后台任务、轮询 `import-status`、结果刷新、导入后异常提示，以及兼容期遗留审阅元数据清理 |
 
-当前仍需后续治理的前端复杂点：
-
-- 模拟器已分为共享纯引擎、专用继承投影、IndexedDB 事务仓库、展示与分享适配；资源增量累计，scope 状态统一装配。个人快照 schema 3 与部署要求见 [模拟器合同](SIMULATOR_ENGINE.md)。
-- 桌面／移动 dashboard、settings 仍可进一步共享控制器逻辑。
+模拟器已分为共享纯引擎、专用继承投影、IndexedDB 事务仓库、展示与分享适配；资源增量累计，scope 状态统一装配。个人快照 schema 3 与部署要求见 [模拟器合同](SIMULATOR_ENGINE.md)。桌面／移动 dashboard、settings 仍可进一步共享控制器逻辑。
 
 ### 2.1 新版桌面主页与经典主页切换
 
@@ -76,6 +77,12 @@ flowchart LR
 
 详情见 [统计合同](STATS_OBSERVATION_CONTRACT.md) 与 [调度说明](STATISTICS_SCHEDULING.md)。指南仅存在于 Vite DEV 的 `/statistics-preview.html`，不属于生产业务路由。
 
+### 2.3 模拟器与完整历史继承（v4.6.4 已发布）
+
+`shared/simulator/engine.js` 以外部随机源、时间与目录执行纯函数命令。普通限定共享五星／六星水位，单池目标与重构系列进度由能力解析指定；零抽池通过同一 selector 读取状态。免费、情报书和赠送记录统一分类，资源与持有数在追加时累计，账本读取不扫描全部历史。
+
+专用继承 GET 只读匹配账号、来源、契约与修订的 schema 3 快照，返回合同 2 的状态和编码 1 的完整历史；普通分析不附带它。游客本地历史也通过相同投影继承。会话按用户／完整游戏账号键隔离，IndexedDB 同一事务校验 revision 并保存状态与历史，成功后更新 UI；旧 localStorage 只读迁移并保留原键。移动端保持引导提示。
+
 ## 3. API 层
 
 | 路径 | 入口 | 说明 |
@@ -85,7 +92,7 @@ flowchart LR
 | 后台 API | `api/_routes/root/admin.js` | 管理面板统一入口 |
 | 自动化 API | `api/_routes/root/ops-automation.js`、`api/_lib/runOpsAutomation.js` | cron、manual、job graph、review bundle |
 | BOT / 开发者 API | `api/_routes/dev/**/*`、`api/_routes/integrations/**/*` | 受保护只读接口和平台绑定 |
-| 账号历史与个人分析 | `api/_routes/root/account-gacha-data.js` | 私有历史分页、owner/account 快照投影、活跃排队、精确编辑 / 删除和别名解析 |
+| 账号历史与个人分析 | `api/_routes/root/account-gacha-data.js` | 私有历史分页、owner/account 分析与模拟器专用继承、活跃排队、精确编辑 / 删除和别名解析 |
 | 个人分析 Worker | `api/_routes/root/personal-analysis-worker.js`、`api/_lib/personalAnalysisWorker.js` | 受保护 Worker、按用户领取 owner/scope、构建并发布 revision 快照 |
 | 历史异常 | `api/_routes/root/history-anomalies.js`、`admin-history-anomalies.js` | 用户当前作用域提醒与超级管理员复核 |
 | 认证与会话 | `api/_routes/root/auth-oauth.js`、`api/_lib/oauthProviders.js`、`auth-session.js`、`account-email-action.js`、`account-email-verify.js`、`account-password-setup.js`、`account-security-state.js` | OAuth transaction、provider 编排、统一站点 Session、邮箱归属、首次设密与凭据状态 |
@@ -110,7 +117,7 @@ Supabase 目录采用“baseline + 归档迁移 + 手工脚本”结构：
 
 - `supabase/baseline/000_complete_schema.sql`：新环境唯一默认入口。
 - `supabase/archive/migrations/`：已合并进 baseline 的标准迁移，仅用于审计和重建 baseline。
-- `supabase/migrations/`：未来新增且尚未合并的前向迁移。
+- `supabase/migrations/`：活跃标准迁移与后续前向变更，其中部分已包含在 baseline。
 - `supabase/manual/`：危险、回滚、回填和历史诊断脚本，不进默认部署链。
 
 评估 `history` 体积时区分表与索引。字段或索引删除前核对查询计划、读写路径、实际引用、基准与回退措施，不能仅按历史日期删除迁移或结构。
@@ -158,6 +165,7 @@ npm run perf:report
 npm run test:supabase-baseline
 npm run test:supabase-baseline:smoke
 npm run test:personal-analysis-queue
+npm run test:simulator-v2:sql
 npm run test:auth-hardening-phase-a
 npm run test:auth-hardening-phase-cd
 npm run test:public-api-boundary

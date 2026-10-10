@@ -2,7 +2,7 @@
 
 这份文件只保留“从哪里开始读代码”的索引。系统边界、数据流、缓存和数据库分层详见 [ARCHITECTURE.md](ARCHITECTURE.md)；部署、环境变量和维护命令详见 [PROJECT_GUIDE.md](PROJECT_GUIDE.md)。
 
-当前索引对应 `v4.6.4` 代码，版本准备与验证见 [RELEASE_4.6.4.md](RELEASE_4.6.4.md)。
+当前索引对应已发布的 `v4.6.4` 代码，变更与上线验证见 [RELEASE_4.6.4.md](RELEASE_4.6.4.md)。
 
 武器池时间管理入口：`shared/weaponPoolSchedule.js`（自动识别／三期截止预览）、`src/components/admin/pools/PoolEditDialog.jsx`（关联选择及一键填入）、`src/hooks/admin/usePools.js`（草稿和保存）、`supabase/migrations/2026100701_weapon_character_pool_schedule.sql`（持久关联与 RPC）。独立日历数据库时间优先规则位于 `endfield-version-calendar/lib/calendar-core.js`；说明见 [卡池时间管理](POOL_SCHEDULE_MANAGEMENT.md)。
 
@@ -55,6 +55,16 @@
 - 指南与构造样例仅供 Vite DEV：`statistics-preview.html`、`src/dev/StatisticsExperiencePreview.jsx`、`statisticsPreviewData.js`；真实业务动作待接入。
 - 全桌面页面宽度与动效：`src/components/app/desktopPageLayout.css`、`DesktopPageMotion.jsx`，共用首页响应式尺度。
 
+### 模拟器引擎、继承与存档
+
+- 纯函数命令、保底作用域与增量资源：`shared/simulator/engine.js`；记录分类／顺序／展示适配：`records.js`；完整历史编解码：`historyCodec.js`（后两者在同目录）。
+- 完整目录与账号继承投影：`src/features/simulator/inheritanceProjection.js`；既有继承 API 适配：`simulatorInheritance.js`。
+- IndexedDB 事务、revision 竞争与历史追加：`src/features/simulator/simulatorRepository.js`；已知 localStorage 只读迁移：`simulatorLegacyMigration.js`。
+- 页面流程、只读视图与分享：`src/features/simulator/useGachaSimulatorController.js`、`simulatorSessionView.js`、`useSimulatorSharing.js`。
+- 旧模拟类与概率执行适配：`src/utils/gachaSimulator.js`、`probabilityEngine.js`、`simulatorLegacyAdapter.js`；偏好与导出：`simulatorStorage.js`。
+- 继承读取：`src/services/accountGachaDataService.js` 的 `loadSimulatorInheritance()` 与服务端 `api/_routes/root/account-gacha-data.js` 的 `mode=simulator-inheritance`；Worker 快照装配：`src/utils/personalAnalysisSnapshot.js`。
+- 专项测试：`src/features/simulator/__tests__/`、`scripts/verify-simulator-v2-playwright.mjs`、`verify-simulator-inheritance-v2-sql.mjs`、`benchmark-simulator.mjs`（后两者在 `scripts/`）。合同见 [SIMULATOR_ENGINE.md](SIMULATOR_ENGINE.md)。
+
 ## 状态与数据
 
 | 范围 | 文件 |
@@ -91,7 +101,7 @@
 | 第三方一键登录 / 桥接 | `src/services/authOAuthService.js`、`src/services/authIdentityService.js`、`src/components/auth/AuthCallbackPage.jsx`、`src/components/settings/LoginIdentitiesSection.jsx`、`api/_routes/root/auth-oauth.js`、`api/_lib/oauthProviders.js`、`api/_lib/oauthState.js`、`src/hooks/auth/useOAuthCallbackNotice.js` |
 | Identity hash keyring / 统一认证解析 | `api/_lib/identityHash.js`、`api/_lib/siteAuth.js`、`api/_lib/siteSession.js`、`api/_routes/root/auth-session.js` |
 | bootstrap / stats / announcements / pool-rosters | `api/_routes/root/*.js` |
-| 私有账号历史 / 精确编辑删除 | `api/_routes/root/account-gacha-data.js` |
+| 私有账号历史 / 精确编辑删除 / 模拟器专用继承 | `api/_routes/root/account-gacha-data.js` |
 | 个人分析 Worker / 队列构建 | `api/_routes/root/personal-analysis-worker.js`、`api/_lib/personalAnalysisWorker.js` |
 | 用户异常提醒 / 后台异常复核 | `api/_routes/root/history-anomalies.js`、`api/_routes/root/admin-history-anomalies.js` |
 | 后台管理 | `api/_routes/root/admin.js` |
@@ -143,7 +153,7 @@
 | 历史 v4.5.3 运行时版本与缓存失效 | `supabase/migrations/156_bump_site_version_453.sql` |
 | 官方非寻访事件旧占位精确修复 RPC | `supabase/migrations/157_repair_official_non_pull_artifact.sql` |
 | 历史 v4.5.4 运行时版本与缓存失效 | `supabase/migrations/158_bump_site_version_454.sql` |
-| 当前包与构建版本、发布准备 | `package.json`、`src/constants/appMeta.js`、`docs/RELEASE_4.6.4.md`、`docs/RECENT_DELIVERY_STATUS.md` |
+| 当前包与构建版本、发布记录 | `package.json`、`src/constants/appMeta.js`、`docs/RELEASE_4.6.4.md`、`docs/RECENT_DELIVERY_STATUS.md` |
 | 认证 Phase A/B | `supabase/migrations/166_harden_admin_profile_and_oauth_transactions.sql` |
 | 认证 Phase C/D | `supabase/migrations/167_harden_account_credentials_and_identity_keys.sql` |
 | 认证审查与旧邮箱空壳修复 | `supabase/migrations/168_close_auth_review_findings.sql`–`172_quarantine_oauth_email_artifact_atomically.sql` |
@@ -153,6 +163,7 @@
 | 统计队列与五类合池 v4 快照 | `supabase/migrations/2026092201_schedule_statistics_snapshots.sql`、`2026092401_group_statistics_snapshots.sql` |
 | 目录保存复用单池计数 | `supabase/migrations/2026100601_reuse_pool_counts_for_catalog_groups.sql` |
 | 限定武器同期角色关联 | `supabase/migrations/2026100701_weapon_character_pool_schedule.sql`、`supabase/tests/weapon-character-pool-schedule.sql` |
+| 个人分析 schema 3 / 模拟器继承合同 2 | `supabase/migrations/2026100901_simulator_inheritance_v2.sql`、`scripts/verify-simulator-inheritance-v2-sql.mjs` |
 | 已执行的重构日期与维护截止修正 | `supabase/manual/data-backfill/20261007_fill_danqing_reconstruction_weapon_dates.sql`、`20261007_correct_reconstruction_maintenance_end.sql` |
 | 静态头像 | `public/avatars/` |
 | 版本日历静态图 | `public/game-calendar/` |

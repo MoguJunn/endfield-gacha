@@ -1,6 +1,6 @@
 # 数据库 Schema 与迁移指南
 
-新环境入口是 `baseline/000_complete_schema.sql`。当前基线包含 193 个迁移，覆盖 `archive/001_init_tables.sql` 至 `active/2026100701_weapon_character_pool_schedule.sql`；精确范围以文件头和生成校验为准。
+新环境入口是 `baseline/000_complete_schema.sql`。当前基线包含 194 个迁移，覆盖 `archive/001_init_tables.sql` 至 `active/2026100901_simulator_inheritance_v2.sql`；精确范围以文件头和生成校验为准。
 
 ## 目录职责
 
@@ -30,9 +30,12 @@
 npm run generate:supabase-baseline
 npm run test:supabase-baseline
 npm run test:supabase-baseline:smoke
+npm run test:simulator-v2:sql
 ```
 
 前两条从归档与活跃迁移生成并核对覆盖内容，第三条在临时 PostgreSQL 中真实执行，需要可用的 Docker 环境。路径统一为 POSIX 格式，以兼容 Windows 和 Linux CI。
+
+模拟器专项 SQL 使用全新一次性 PostgreSQL 实例验证迁移、ACL/RLS、租约、版本和目录失效，默认 Docker；也可显式设置 `SIMULATOR_PG_BIN` 为本机 PostgreSQL 的绝对 bin 路径，创建独立集群后验证并停止。该脚本不会连接已有数据库，CI 已登记此项检查。
 
 迁移保持唯一编号，整合多个分支前检查冲突、更新引用并重生成基线。不要用旧分支的完整 baseline 覆盖现行来源，也不要把回滚 SQL 放进标准链。
 
@@ -57,6 +60,10 @@ npm run test:supabase-baseline:smoke
 统计迁移 `2026092201`／`2026092401` 提供任务、快照、活动与五类合池。公开 GET 只读结果，不扫描历史；`refresh_public_analytics_cache()` 排队计算，旧缓存与新版快照同事务发布。调度与预热见 [统计说明](../docs/STATISTICS_SCHEDULING.md)，个人投影见 [Worker 指南](../docs/PERSONAL_ANALYSIS_WORKER.md)。
 
 `2026100601` 复用单池计数处理目录保存，保留原权限与超时；`2026100701` 提供 `pools.character_pool_id`，持久保存限定武器的同期角色关联。两份 `manual/data-backfill/20261007_*.sql` 是特定日期修正，不能作为新环境通用种子重复执行，操作合同见 [卡池时间管理](../docs/POOL_SCHEDULE_MANAGEMENT.md)。
+
+`2026100901_simulator_inheritance_v2.sql` 将个人 owner/scope 状态升为 schema 3，使存量快照排队重建，并让完整卡池目录变化失效个人结果，覆盖零抽池的情报书相邻目标。旧快照、来源身份、ACL 与活动租约保留，旧 schema 作业不能发布。既有自托管环境已于 v4.6.4 发布前应用并完成重建；重复执行会再次递增 revision，不能把它作为每次发布的常规步骤。
+
+升级其他已有环境时，先备份并核对默认值、具名触发器和执行记录，再应用尚缺迁移；随后使用 schema 3 Worker 重建，检查账号继承合同 2／历史编码 1 及实际任务发布。个人分析调度的 Vault URL 固定到不可变部署，须与新 Worker 代码同步切换，不能只部署网站。流程见 [模拟器合同](../docs/SIMULATOR_ENGINE.md#验证与部署) 和 [Worker 指南](../docs/PERSONAL_ANALYSIS_WORKER.md)。
 
 `site_config.public_cache_epoch` 是公共缓存版本源。用户历史、个人分析、恢复和后台数据不得进入公共缓存。管理员写入通过同源 API，不需旧管理 Edge Functions。
 
