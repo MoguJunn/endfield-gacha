@@ -132,7 +132,7 @@ Supabase 目录采用“baseline + 归档迁移 + 手工脚本”结构：
 
 附加寻访数据库面由 181–183 提供：`extra_subtype / extra_rule_profile / extra_series_key / extra_series_phase`，并把产品语义区分为 `reconstruction`、`reconstruction_claim` 和 `special`。相同分类贯穿可见卡池 RPC、管理写入、官方导入、版本绑定、分析与模拟器；旧 `type=extra` 仍作为粗粒度兼容类型。
 
-统计队列和五类合池由 PR #37 引入。`2026100601_reuse_pool_counts_for_catalog_groups.sql` 使角色／阵容写入仅递增统计 revision，卡池／权限变化复用同事务单池计数生成组合计数，保留原超时与 ACL；`2026100701_weapon_character_pool_schedule.sql` 保存限定武器同期角色关联。`2026100901_simulator_inheritance_v2.sql` 更新个人分析快照 schema 3 与目录失效，baseline 当前包含 194 个迁移；手动补录工作台尚未成为正式数据入口。
+统计队列和五类合池由 PR #37 引入。`2026100601_reuse_pool_counts_for_catalog_groups.sql` 使角色／阵容写入仅递增统计 revision，卡池／权限变化复用同事务单池计数生成组合计数，保留原超时与 ACL；`2026100701_weapon_character_pool_schedule.sql` 保存限定武器同期角色关联。`2026100901_simulator_inheritance_v2.sql` 更新个人分析快照 schema 3 与目录失效；`2026101101_complete_pool_roster_reads.sql` 为后台和公开 API 提供单值 JSON 完整阵容，避免 REST 行数截断，详见 [阵容读取](POOL_ROSTER_READS.md)。baseline 当前包含 195 个迁移，手动补录工作台尚未成为正式数据入口。
 
 ## 6. 运营自动化
 

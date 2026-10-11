@@ -67,6 +67,6 @@ node scripts/benchmark-simulator.mjs
 
 SQL 验证默认 Docker，也可显式设置 `SIMULATOR_PG_BIN` 指向本机 PostgreSQL 的绝对 bin 路径；两条路径都创建全新实例并在结束后停止，不能指向已有数据库。
 
-已有数据库部署前需应用 `2026100901_simulator_inheritance_v2.sql`，由 schema 3 Worker 重建个人快照；新环境使用包含 194 迁移的完整 baseline。迁移保留旧快照、ACL、来源与租约，通过修订失效避免旧作业发布。先在隔离环境验证，正式执行及 Worker／主站切换按发布流程操作。代码合入不表示生产已应用迁移，构建中继承暂不可用。
+已有数据库部署前需应用 `2026100901_simulator_inheritance_v2.sql`，由 schema 3 Worker 重建个人快照；新环境使用当前完整 baseline，精确覆盖见 [数据库指南](../supabase/README.md)。迁移保留旧快照、ACL、来源与租约，通过修订失效避免旧作业发布。先在隔离环境验证，正式执行及 Worker／主站切换按发布流程操作。代码合入不表示生产已应用迁移，构建中继承暂不可用。
 
 既有自托管环境已完成本次迁移、存量重建及主站发布，个人分析调度已切换至该版本的不可变生产 URL；不要重复执行递增 revision 的迁移。其他环境升级时，备份并核对实际执行记录，部署 schema 3 Worker 后同步 Vault `personal_analysis_worker_url`，验证真实任务成功发布再确认继承就绪。详情见 [Worker 指南](PERSONAL_ANALYSIS_WORKER.md)；独立全服统计 Worker 的 `public-statistics-v4` 版本不由此修改。

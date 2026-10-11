@@ -23,6 +23,7 @@
 - [浏览器认证锁](SUPABASE_AUTH_LOCK_FIX.md)：后台刷新与 SDK 升级验证。
 - [个人分析 Worker](PERSONAL_ANALYSIS_WORKER.md)、[统计快照调度](STATISTICS_SCHEDULING.md)：异步计算、部署与诊断。
 - [模拟器引擎](SIMULATOR_ENGINE.md)：统一水位、完整继承历史、增量资源、事务存档与版本迁移。
+- [卡池阵容读取](POOL_ROSTER_READS.md)：超过 1,000 条关系的完整读取、后台失败反馈与工作台接口合同。
 - [数据与体验待完善项](CLOSEOUT_LEDGER.md)：可贡献的工作和现行数据审计工具。
 
 ## API 与官方数据

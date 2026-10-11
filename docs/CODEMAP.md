@@ -116,6 +116,7 @@
 | 邮件 worker / webhook 验证 / 手动入口 | `scripts/verify-mail-outbox-worker.mjs`、`scripts/verify-mail-delivery-feedback.mjs`、`scripts/verify-mail-inbound.mjs`、`scripts/verify-mail-service-entrypoints.mjs`、`scripts/run-mail-outbox-worker.mjs` |
 | 公共 API / cache 验证 | `scripts/verify-public-api-boundary.mjs`、`scripts/verify-bootstrap-cache-partial.mjs`、`scripts/verify-public-pool-analytics-cache.mjs` |
 | baseline / 数据库验证 | `scripts/verify-supabase-baseline.mjs`、`scripts/verify-supabase-baseline-smoke.mjs` |
+| 卡池阵容完整读取验证 | `api/_lib/poolRosterRead.js`、`scripts/verify-complete-pool-rosters.mjs`、`supabase/tests/complete-pool-roster-reads.sql` |
 | 个人分析队列 SQL 合同 | `scripts/verify-personal-analysis-queue-sql.mjs` |
 | 认证 Phase A/B 与 C/D 专项 | `scripts/verify-auth-hardening-phase-a.mjs`、`scripts/verify-auth-hardening-phase-cd.mjs` |
 | 历史批量删除歧义保护验证 | `scripts/verify-history-batch-delete-guard.mjs` |
@@ -164,6 +165,7 @@
 | 目录保存复用单池计数 | `supabase/migrations/2026100601_reuse_pool_counts_for_catalog_groups.sql` |
 | 限定武器同期角色关联 | `supabase/migrations/2026100701_weapon_character_pool_schedule.sql`、`supabase/tests/weapon-character-pool-schedule.sql` |
 | 个人分析 schema 3 / 模拟器继承合同 2 | `supabase/migrations/2026100901_simulator_inheritance_v2.sql`、`scripts/verify-simulator-inheritance-v2-sql.mjs` |
+| 卡池阵容完整读取 | `supabase/migrations/2026101101_complete_pool_roster_reads.sql`、`api/_routes/root/pool-rosters.js`、`api/_routes/root/admin-pools.js` |
 | 已执行的重构日期与维护截止修正 | `supabase/manual/data-backfill/20261007_fill_danqing_reconstruction_weapon_dates.sql`、`20261007_correct_reconstruction_maintenance_end.sql` |
 | 静态头像 | `public/avatars/` |
 | 版本日历静态图 | `public/game-calendar/` |

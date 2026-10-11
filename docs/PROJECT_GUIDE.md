@@ -66,6 +66,8 @@ npm run perf:report
 
 模拟器专项检查为 `npm run test:simulator-v2:ui`、`npm run test:simulator-v2:sql`；浏览器检查需启动 DEV 内容沙盒，SQL 检查使用新建隔离实例。`node scripts/benchmark-simulator.mjs` 生成合成计算与载荷基准，不读取生产用户数据。
 
+卡池阵容完整读取使用 `npm run test:pool-rosters:sql`，验证超过 1,000 条关系、零历史卡池、范围读取、服务角色权限和重复迁移。后台／公开 API 回归还需覆盖名单读取失败时的 503、缓存 stale 和后台重试提示，详见 [阵容读取合同](POOL_ROSTER_READS.md)。
+
 ## 自建部署
 
 1. 配置 Supabase/PostgreSQL，按 [数据库指南](../supabase/README.md) 执行完整 baseline；不要重复执行已包含的历史迁移。
@@ -77,7 +79,7 @@ npm run perf:report
 
 仓库默认使用 GitHub-connected Vercel：推送 `main` 触发生产构建。发布前准备数据库与后台计算，发布后确认部署 Ready 和正式域名指向正确版本，流程见 [发布检查](RELEASE_CHECKLIST.md)。
 
-当前 v4.6.4 已发布，既有自托管环境已应用模拟器迁移并重建快照，生产个人分析调度已同步至新部署，见 [发布记录](RELEASE_4.6.4.md)。其他已有环境升级时核对 `2026100901_simulator_inheritance_v2.sql` 是否缺失；它递增修订以触发重建，已执行环境不要重跑。运行版本优先读取 `site_config.site_version`，发布时同步 `build_info` 和公共缓存，再核对中英文公告及实际页面。
+当前 v4.6.4 已发布，既有自托管环境已应用模拟器迁移并重建快照，生产个人分析调度已同步至新部署，见 [发布记录](RELEASE_4.6.4.md)。其他已有环境升级时核对 `2026100901_simulator_inheritance_v2.sql` 与 `2026101101_complete_pool_roster_reads.sql` 是否缺失；前者递增修订以触发重建，后者新增服务端完整阵容读取，已执行环境不要重跑。运行版本优先读取 `site_config.site_version`，发布时同步 `build_info`、公共缓存和阵容接口缓存，再核对中英文公告及实际页面。
 
 管理后台使用同源 `/api/admin`，兼容 URL 由路由表映射；无需部署旧 Supabase 管理 Edge Functions。
 

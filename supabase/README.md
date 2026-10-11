@@ -1,6 +1,6 @@
 # 数据库 Schema 与迁移指南
 
-新环境入口是 `baseline/000_complete_schema.sql`。当前基线包含 194 个迁移，覆盖 `archive/001_init_tables.sql` 至 `active/2026100901_simulator_inheritance_v2.sql`；精确范围以文件头和生成校验为准。
+新环境入口是 `baseline/000_complete_schema.sql`。当前基线包含 195 个迁移，覆盖 `archive/001_init_tables.sql` 至 `active/2026101101_complete_pool_roster_reads.sql`；精确范围以文件头和生成校验为准。
 
 ## 目录职责
 
@@ -66,6 +66,8 @@ npm run test:simulator-v2:sql
 升级其他已有环境时，先备份并核对默认值、具名触发器和执行记录，再应用尚缺迁移；随后使用 schema 3 Worker 重建，检查账号继承合同 2／历史编码 1 及实际任务发布。个人分析调度的 Vault URL 固定到不可变部署，须与新 Worker 代码同步切换，不能只部署网站。流程见 [模拟器合同](../docs/SIMULATOR_ENGINE.md#验证与部署) 和 [Worker 指南](../docs/PERSONAL_ANALYSIS_WORKER.md)。
 
 `site_config.public_cache_epoch` 是公共缓存版本源。用户历史、个人分析、恢复和后台数据不得进入公共缓存。管理员写入通过同源 API，不需旧管理 Edge Functions。
+
+`2026101101_complete_pool_roster_reads.sql` 提供仅服务端可调用的单值 JSON 阵容读取，避免超过 1,000 条关系后被 REST 截断；不改变全库 API 上限或已有配置。现有环境已应用，API 升级与客户端失败合同见 [阵容完整读取](../docs/POOL_ROSTER_READS.md)，隔离 SQL 验证为 `npm run test:pool-rosters:sql`。
 
 ## 数据审计与修复
 
