@@ -1,6 +1,7 @@
 import { getSupabaseAdminClient } from '../../_lib/authAdmin.js';
 import { rejectDisallowedBrowserOrigin } from '../../_lib/http.js';
 import { requireSuperAdminUser } from '../../_lib/siteAuth.js';
+import { readCompletePoolRoster } from '../../_lib/poolRosterRead.js';
 import { buildManualCharacterId, buildManualPoolId } from '../../../src/utils/canonicalEntityUtils.js';
 import { resolvePoolCapabilities } from '../../../src/utils/poolCapabilities.js';
 import { isTargetSixStarHistoryRecord } from '../../../src/utils/poolScopedHistory.js';
@@ -300,13 +301,10 @@ async function loadCharacters(adminClient) {
 }
 
 async function loadAllPoolCharacters(adminClient) {
-  const { data, error } = await adminClient
-    .from('pool_characters')
-    .select('pool_id, character_id, is_up');
-  if (error) throw error;
+  const data = await readCompletePoolRoster(adminClient);
 
   const grouped = {};
-  (Array.isArray(data) ? data : []).forEach((row) => {
+  data.forEach((row) => {
     if (!grouped[row.pool_id]) grouped[row.pool_id] = [];
     grouped[row.pool_id].push({
       character_id: row.character_id,
@@ -318,12 +316,8 @@ async function loadAllPoolCharacters(adminClient) {
 
 async function loadPoolCharactersForEdit(adminClient, poolId) {
   if (!poolId) return [];
-  const { data, error } = await adminClient
-    .from('pool_characters')
-    .select('character_id, is_up')
-    .eq('pool_id', poolId);
-  if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  const rows = await readCompletePoolRoster(adminClient, [poolId]);
+  return rows.map(({ character_id, is_up }) => ({ character_id, is_up }));
 }
 
 async function saveManagedCharacterWithAliases(adminClient, characterData) {

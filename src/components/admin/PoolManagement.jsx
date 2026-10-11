@@ -235,6 +235,9 @@ const PoolManagement = ({ showToast, service = null, configAdapter = null, sandb
     // 状态
     loading,
     actionLoading,
+    rosterLoading,
+    rosterError,
+    reloadRoster,
 
     // 搜索筛选排序
     searchQuery,
@@ -475,6 +478,13 @@ const PoolManagement = ({ showToast, service = null, configAdapter = null, sandb
               </button>
             </div>
 
+            {rosterError && !rosterLoading && (
+              <div role="alert" className="mt-3 flex items-center justify-between gap-3 border border-amber-200 p-3 text-xs text-amber-700 dark:border-amber-900 dark:text-amber-300">
+                <span>卡池名单读取失败，暂不能判断配置内容。{rosterError}</span>
+                <PanelToolbarButton onClick={reloadRoster}>重新读取名单</PanelToolbarButton>
+              </div>
+            )}
+
             {/* 卡池列表 */}
             <div className="mt-3">
               {filteredPools.length === 0 ? (
@@ -500,6 +510,8 @@ const PoolManagement = ({ showToast, service = null, configAdapter = null, sandb
                         pool={pool}
                         poolCharacters={poolCharacters}
                         characters={characters}
+                        rosterLoading={rosterLoading}
+                        rosterError={rosterError}
                         actionLoading={actionLoading}
                         onEdit={startEdit}
                         onDelete={handleDeletePool}

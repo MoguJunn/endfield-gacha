@@ -79,7 +79,12 @@ const getPoolStatus = (pool) => {
 /**
  * 卡池角色一览组件
  */
-const PoolCharacterList = ({ pool, poolCharacters, characters }) => {
+const PoolCharacterList = ({ pool, poolCharacters, characters, rosterLoading, rosterError }) => {
+  if (rosterLoading || rosterError) {
+    return <p className="mt-2.5 border-t border-zinc-100 pt-2.5 text-[11px] text-slate-500 dark:border-zinc-800 dark:text-zinc-400">
+      {rosterLoading ? '正在读取卡池名单…' : '卡池名单读取失败，请重试'}
+    </p>;
+  }
   const poolCharIds = (poolCharacters[pool.pool_id] || []).map((pc) => pc.character_id);
   const poolChars = characters.filter((c) => poolCharIds.includes(c.id));
   const featuredCharacterSet = new Set(getPoolFeaturedNames(pool, { entities: characters }));
@@ -177,7 +182,7 @@ const PoolCharacterList = ({ pool, poolCharacters, characters }) => {
 /**
  * 卡池卡片组件
  */
-const PoolCard = ({ pool, poolCharacters, characters, actionLoading, onEdit, onDelete, onPreviewPush }) => {
+const PoolCard = ({ pool, poolCharacters, characters, rosterLoading = false, rosterError = '', actionLoading, onEdit, onDelete, onPreviewPush }) => {
   const featuredCharacters = getPoolFeaturedNames(pool, { entities: characters });
   const singleUpCharacter = featuredCharacters[0] || '';
   const poolStatus = getPoolStatus(pool);
@@ -269,20 +274,20 @@ const PoolCard = ({ pool, poolCharacters, characters, actionLoading, onEdit, onD
         )}
 
         {/* 卡池角色一览 */}
-        <PoolCharacterList pool={pool} poolCharacters={poolCharacters} characters={characters} />
+        <PoolCharacterList pool={pool} poolCharacters={poolCharacters} characters={characters} rosterLoading={rosterLoading} rosterError={rosterError} />
 
         {/* 操作按钮 */}
         <div className="mt-2.5 flex items-center gap-2 border-t border-zinc-100 pt-2.5 dark:border-zinc-800">
           {onPreviewPush && (
             <PanelToolbarButton
               onClick={() => onPreviewPush(pool)}
-              disabled={actionLoading === pool.pool_id || actionLoading === 'pool-push'}
+              disabled={rosterLoading || Boolean(rosterError) || actionLoading === pool.pool_id || actionLoading === 'pool-push'}
             >
               <Send size={12} />
               预览推送
             </PanelToolbarButton>
           )}
-          <PanelToolbarButton onClick={() => onEdit(pool)} disabled={actionLoading === pool.pool_id}>
+          <PanelToolbarButton onClick={() => onEdit(pool)} disabled={rosterLoading || Boolean(rosterError) || actionLoading === pool.pool_id}>
             <Edit2 size={12} />
             编辑
           </PanelToolbarButton>

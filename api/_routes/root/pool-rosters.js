@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { rejectDisallowedBrowserOrigin } from '../../_lib/http.js';
+import { readCompletePoolRoster } from '../../_lib/poolRosterRead.js';
 import {
   buildPublicCacheKey,
   PUBLIC_CACHE_CONTROL,
@@ -76,29 +77,8 @@ function groupPoolRosterRows(rows = [], poolIds = []) {
 }
 
 async function fetchPoolRosterPayload(supabase, poolIds) {
-  const { data, error } = await supabase
-    .from('pool_characters')
-    .select(`
-      pool_id,
-      character_id,
-      is_up,
-      characters (
-        id,
-        name,
-        rarity,
-        type,
-        is_limited,
-        aliases,
-        pool_config
-      )
-    `)
-    .in('pool_id', poolIds);
-
-  if (error) {
-    throw error;
-  }
-
-  return groupPoolRosterRows(data || [], poolIds);
+  const rows = await readCompletePoolRoster(supabase, poolIds);
+  return groupPoolRosterRows(rows, poolIds);
 }
 
 async function getFreshPayload(supabase, poolIds, cacheKey) {
@@ -170,6 +150,10 @@ export default async function handler(req, res) {
   }
 
   if (!supabase) {
+    if (!cached) {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(503).json({ success: false, code: 'pool_rosters_unavailable', error: '卡池名单暂不可用，请重试' });
+    }
     return sendPublicJson(res, {
       cached: true,
       partial: true,
@@ -201,6 +185,10 @@ export default async function handler(req, res) {
       lastFetch: cacheByKey.get(cacheKey)?.lastFetch || Date.now()
     });
   } catch (error) {
+    if (!cached) {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(503).json({ success: false, code: 'pool_rosters_unavailable', error: '卡池名单读取失败，请重试' });
+    }
     return sendPublicJson(res, {
       cached: Boolean(cached),
       partial: true,

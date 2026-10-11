@@ -81,6 +81,15 @@ describe('PoolManagement', () => {
     expect(screen.getByTestId('version-manager')).toHaveTextContent('版本时间线管理 · 1 个卡池');
   });
 
+  it('shows an explicit roster failure and retries both roster dependencies', () => {
+    const reloadRoster = vi.fn();
+    usePools.mockReturnValue({ ...usePools(), rosterError: 'catalog offline', rosterLoading: false, reloadRoster });
+    render(<PoolManagement showToast={vi.fn()} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('暂不能判断配置内容');
+    fireEvent.click(screen.getByRole('button', { name: '重新读取名单' }));
+    expect(reloadRoster).toHaveBeenCalledTimes(1);
+  });
+
   it('saves, previews, and confirms a pool push with the signed preview token', async () => {
     const handleSavePool = vi.fn().mockResolvedValue({
       success: true,

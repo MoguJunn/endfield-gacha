@@ -167,6 +167,10 @@ function createAdminClient() {
     from: vi.fn((table) => new AdminPoolsQuery(adminClient, table)),
     rpc: vi.fn(async (name, payload) => {
       state.rpcCalls.push({ name, payload });
+      if (name === 'read_pool_roster_catalog') {
+        const rows = state.poolCharacters.filter((row) => payload.p_pool_ids === null || payload.p_pool_ids.includes(row.pool_id));
+        return { data: { rowCount: rows.length, rows }, error: null };
+      }
       return { data: null, error: null };
     }),
     __executeQuery(query) {
@@ -262,6 +266,47 @@ describe('/api/admin-pools', () => {
         }),
       ],
     });
+  });
+
+  it('loads every roster relation beyond the REST row limit, including pools without history', async () => {
+    const client = createAdminClient();
+    client.__state.poolCharacters = Array.from({ length: 1227 }, (_, index) => ({
+      pool_id: index < 1000 ? 'older-pool' : 'zero-history-pool',
+      character_id: `entity-${index}`, is_up: index === 1226,
+    }));
+    mocks.getSupabaseAdminClient.mockReturnValue(client);
+    configureSuperAdminAuth(client);
+    const res = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ url: '/api/admin-pools?mode=pool-characters' }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data['older-pool']).toHaveLength(1000);
+    expect(res.body.data['zero-history-pool']).toHaveLength(227);
+    expect(res.body.data['zero-history-pool'].at(-1)).toEqual({ character_id: 'entity-1226', is_up: true });
+    expect(client.rpc).toHaveBeenCalledWith('read_pool_roster_catalog', { p_pool_ids: null });
+    expect(client.from).not.toHaveBeenCalledWith('history');
+  });
+
+  it('reads an edit roster from the complete scoped contract', async () => {
+    const client = createAdminClient();
+    mocks.getSupabaseAdminClient.mockReturnValue(client);
+    configureSuperAdminAuth(client);
+    const res = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ url: '/api/admin-pools?mode=pool-characters-for-edit&poolId=pool-1' }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data).toEqual([{ character_id: 'char-1', is_up: true }]);
+    expect(client.rpc).toHaveBeenCalledWith('read_pool_roster_catalog', { p_pool_ids: ['pool-1'] });
+  });
+
+  it('rejects an incomplete roster instead of publishing it as an empty configuration', async () => {
+    const client = createAdminClient();
+    client.rpc.mockResolvedValue({ data: { rowCount: 1227, rows: [] }, error: null });
+    mocks.getSupabaseAdminClient.mockReturnValue(client);
+    configureSuperAdminAuth(client);
+    const res = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ url: '/api/admin-pools?mode=pool-characters' }), res);
+    expect(res.statusCode).toBe(500);
+    expect(res.body.success).toBe(false);
+    expect(res.body.data).toBeUndefined();
   });
 
   it('creates manual pools on behalf of the authenticated super admin only', async () => {

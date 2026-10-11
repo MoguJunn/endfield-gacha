@@ -404,9 +404,13 @@ export const usePools = (showToast, {
 
   // 角色数据状态
   const [characters, setCharacters] = useState([]);
+  const [charactersLoading, setCharactersLoading] = useState(true);
+  const [charactersError, setCharactersError] = useState('');
 
   // 池子-角色关联数据
   const [poolCharacters, setPoolCharacters] = useState({});
+  const [poolCharactersLoading, setPoolCharactersLoading] = useState(true);
+  const [poolCharactersError, setPoolCharactersError] = useState('');
   const [editingPoolCharacters, setEditingPoolCharacters] = useState([]);
   const [editingPoolOriginalCharacters, setEditingPoolOriginalCharacters] = useState([]);
 
@@ -442,18 +446,36 @@ export const usePools = (showToast, {
   }, [service, showToast]);
 
   const loadCharactersData = useCallback(async () => {
-    const result = await service.loadCharacters();
-    if (result.success) {
+    setCharactersLoading(true);
+    setCharactersError('');
+    try {
+      const result = await service.loadCharacters();
+      if (!result.success) throw new Error(result.error);
       setCharacters(result.data);
+    } catch (error) {
+      setCharactersError(error.message || '角色目录读取失败');
+    } finally {
+      setCharactersLoading(false);
     }
   }, [service]);
 
   const loadAllPoolCharactersData = useCallback(async () => {
-    const result = await service.loadAllPoolCharacters();
-    if (result.success) {
+    setPoolCharactersLoading(true);
+    setPoolCharactersError('');
+    try {
+      const result = await service.loadAllPoolCharacters();
+      if (!result.success) throw new Error(result.error);
       setPoolCharacters(result.data);
+    } catch (error) {
+      setPoolCharactersError(error.message || '卡池名单读取失败');
+    } finally {
+      setPoolCharactersLoading(false);
     }
   }, [service]);
+
+  const reloadRoster = useCallback(() => Promise.all([
+    loadCharactersData(), loadAllPoolCharactersData(),
+  ]), [loadCharactersData, loadAllPoolCharactersData]);
 
   // 初始加载
   useEffect(() => {
@@ -531,6 +553,10 @@ export const usePools = (showToast, {
     };
 
     const result = await service.loadPoolCharactersForEdit(pool.pool_id);
+    if (!result.success) {
+      showToast('读取卡池名单失败，未打开编辑: ' + result.error, 'error');
+      return;
+    }
     setEditingPoolCharacters(result.data);
     setEditingPoolOriginalCharacters(result.data);
     const featuredCharacterLabels = Array.isArray(pool.featured_characters)
@@ -559,7 +585,7 @@ export const usePools = (showToast, {
     });
     setEditingPool(pool);
     setShowEditDialog(true);
-  }, [characters, service]);
+  }, [characters, service, showToast]);
 
   const startCreate = useCallback(() => {
     setPoolForm(INITIAL_POOL_FORM);
@@ -870,6 +896,9 @@ export const usePools = (showToast, {
     // 状态
     loading,
     actionLoading,
+    rosterLoading: charactersLoading || poolCharactersLoading,
+    rosterError: charactersError || poolCharactersError,
+    reloadRoster,
 
     // 搜索筛选排序
     searchQuery,

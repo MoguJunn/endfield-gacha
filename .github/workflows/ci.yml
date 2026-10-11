@@ -47,6 +47,9 @@ jobs:
       - name: Simulator inheritance v2 SQL behavior
         run: npm run test:simulator-v2:sql
 
+      - name: Complete pool roster SQL behavior
+        run: npm run test:pool-rosters:sql
+
       - name: Official rerun period and promotion SQL behavior
         run: node scripts/verify-supabase-baseline-smoke.mjs --history-pool-version
 
