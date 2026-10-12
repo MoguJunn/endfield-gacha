@@ -89,14 +89,16 @@ afterEach(() => {
 });
 
 describe('AuthModalView responsive registration layout', () => {
-  it('keeps the dialog inside the viewport with a dedicated scroll region', () => {
+  it('keeps registration actions in the bounded dialog with a compact persistent header', () => {
     render(<AuthModalView {...createProps()} />);
 
     const dialog = screen.getByRole('dialog', { name: 'REGISTER' });
     const scrollRegion = screen.getByTestId('auth-modal-scroll-region');
 
-    expect(dialog).toHaveClass('max-h-[calc(100dvh-1rem)]', 'flex-col', 'overflow-hidden');
-    expect(scrollRegion).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto', 'p-4', 'sm:p-6');
+    expect(dialog).toHaveClass('app-modal-panel');
+    expect(scrollRegion).toHaveClass('p-4', 'sm:p-6');
+    expect(scrollRegion).not.toHaveClass('overflow-y-auto');
+    expect(screen.getByText('注册后可以先进入网站使用；邮箱验证可稍后在设置页完成。')).toBeInTheDocument();
     expect(screen.getByTestId('auth-captcha-box')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '等待验证' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '关闭账号窗口' })).toBeEnabled();

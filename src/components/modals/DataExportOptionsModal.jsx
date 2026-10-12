@@ -190,11 +190,11 @@ export default function DataExportOptionsModal({
 
   const modal = (
     <div
-      className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-slate-950/70 p-4 py-8 backdrop-blur-md"
+      className="app-modal-backdrop fixed inset-0 z-[95] bg-slate-950/70 backdrop-blur-md"
       onClick={onClose}
     >
       <div
-        className="relative my-auto w-full max-w-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-[#101012]"
+        className="app-modal-panel w-full max-w-3xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-[#101012]"
         style={{ clipPath: 'polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px))' }}
         onClick={(event) => event.stopPropagation()}
         role="dialog"
@@ -202,13 +202,13 @@ export default function DataExportOptionsModal({
         aria-label={t('records.export.configTitle')}
       >
         <div className="absolute left-0 top-0 h-1 w-full bg-yellow-500" />
-        <div className="flex items-start justify-between gap-4 border-b border-zinc-200 bg-slate-50 px-6 py-5 dark:border-zinc-800 dark:bg-zinc-950">
-          <div>
-            <h2 className="flex items-center gap-2 text-xl font-black text-slate-900 dark:text-zinc-50">
-              <Filter size={18} />
+        <div className="app-modal-header flex items-center justify-between gap-3 border-b border-zinc-200 bg-slate-50 p-3 dark:border-zinc-800 dark:bg-zinc-950 sm:px-6 sm:py-4">
+          <div className="min-w-0 flex-1">
+            <h2 className="flex items-center gap-2 text-lg font-black text-slate-900 dark:text-zinc-50 sm:text-xl">
+              <Filter size={18} className="shrink-0" />
               {t('records.export.configTitle')}
             </h2>
-            <p className="mt-1 text-xs text-slate-500 dark:text-zinc-400">
+            <p className="app-modal-header-description mt-1 text-xs text-slate-500 dark:text-zinc-400">
               {t('records.export.configDescription')}
             </p>
           </div>
@@ -216,15 +216,17 @@ export default function DataExportOptionsModal({
             <button
               type="button"
               onClick={resetAndClearCompletion}
-              className="inline-flex items-center gap-1.5 border border-zinc-200 px-2.5 py-2 text-[11px] font-bold text-slate-500 transition-colors hover:border-yellow-500 hover:text-yellow-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-yellow-500 dark:hover:text-endfield-yellow"
+              aria-label={t('records.export.reset')}
+              title={t('records.export.reset')}
+              className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 border border-zinc-200 px-2.5 py-2 text-[11px] font-bold text-slate-500 transition-colors hover:border-yellow-500 hover:text-yellow-600 dark:border-zinc-800 dark:text-zinc-400 dark:hover:border-yellow-500 dark:hover:text-endfield-yellow"
             >
               <RotateCcw size={12} />
-              {t('records.export.reset')}
+              <span className="hidden sm:inline">{t('records.export.reset')}</span>
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="border border-transparent p-2 text-slate-400 transition-colors hover:border-red-500 hover:bg-red-500/10 hover:text-red-500"
+              className="app-modal-icon-button border border-transparent text-slate-400 transition-colors hover:border-red-500 hover:bg-red-500/10 hover:text-red-500"
               aria-label={t('common.close')}
               title={t('common.close')}
             >
@@ -233,7 +235,7 @@ export default function DataExportOptionsModal({
           </div>
         </div>
 
-        <div className="grid gap-4 p-6 md:grid-cols-2">
+        <div className="grid gap-4 p-4 sm:p-6 md:grid-cols-2">
           <div className="space-y-2">
             <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-500">
               {t('records.export.poolScope')}
@@ -323,7 +325,7 @@ export default function DataExportOptionsModal({
           </div>
         </div>
 
-        <div className="border-t border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-[#101012]">
+        <div className="border-t border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-[#101012] sm:p-6">
           <div className="mb-4 flex items-start gap-2 border border-amber-300/70 bg-amber-50 px-3 py-2.5 text-[11px] leading-5 text-amber-800 dark:border-amber-700/50 dark:bg-amber-950/20 dark:text-amber-300">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />
             <div>

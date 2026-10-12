@@ -110,18 +110,17 @@ export default function AuthModalView({
 
   return (
     <div
-      className="auth-modal-backdrop-enter fixed inset-0 z-[80] overflow-y-auto overscroll-contain bg-black/65 p-2 backdrop-blur-sm sm:p-4"
+      className="app-modal-backdrop auth-modal-backdrop-enter fixed inset-0 z-[80] bg-black/65 backdrop-blur-sm"
       onClick={onClose}
     >
-      <div className="flex min-h-full items-start justify-center sm:items-center">
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="auth-modal-title"
-        className="auth-modal-panel-enter my-auto flex max-h-[calc(100dvh-1rem)] w-full max-w-lg flex-col overflow-hidden rounded-none border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 sm:max-h-[calc(100dvh-2rem)]"
+        className="app-modal-panel auth-modal-panel-enter w-full max-w-lg rounded-none border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="relative shrink-0 border-b-4 border-endfield-yellow bg-gradient-to-r from-zinc-900 to-zinc-800 p-4 text-white dark:from-zinc-950 dark:to-zinc-900 sm:p-6">
+        <div className="app-modal-header border-b-4 border-endfield-yellow bg-gradient-to-r from-zinc-900 to-zinc-800 p-4 text-white dark:from-zinc-950 dark:to-zinc-900 sm:p-6">
           <div className="absolute inset-0 opacity-10 pointer-events-none">
             <div
               className="absolute inset-0"
@@ -140,19 +139,19 @@ export default function AuthModalView({
               event.stopPropagation();
               onClose();
             }}
-            className="absolute right-3 top-3 z-50 p-1.5 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white sm:right-4 sm:top-4"
+            className="app-modal-icon-button absolute right-2 top-2 z-50 text-zinc-400 transition-colors hover:bg-white/10 hover:text-white sm:right-4 sm:top-4"
           >
             <X size={20} />
           </button>
 
-          <div className="relative z-10">
-            <div className="mb-1.5 flex items-center gap-2.5 sm:mb-2 sm:gap-3">
+          <div className="relative z-10 pr-10">
+            <div className="flex items-center gap-2.5 sm:gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center bg-endfield-yellow sm:h-10 sm:w-10">
                 {mode === 'login' ? <LogIn size={20} className="text-black" /> :
                   mode === 'register' ? <UserPlus size={20} className="text-black" /> :
                     <KeyRound size={20} className="text-black" />}
               </div>
-              <div>
+              <div className="min-w-0">
                 <h2 id="auth-modal-title" className="font-mono text-base font-bold tracking-tight sm:text-xl">
                   {mode === 'login' ? 'SIGN IN' : mode === 'register' ? 'REGISTER' : 'ACCOUNT RECOVERY'}
                 </h2>
@@ -165,24 +164,24 @@ export default function AuthModalView({
                 </p>
               </div>
             </div>
-            <p className="mt-2 pr-6 text-xs leading-relaxed text-zinc-300 sm:mt-3 sm:pr-0 sm:text-sm">
-              {mode === 'login'
-                ? tt('登录以同步你的抽卡数据到云端', 'Sign in to sync your pull history to the cloud.')
-                : mode === 'register'
-                  ? tt('注册后可以先进入网站使用；邮箱验证可稍后在设置页完成。', 'You can use the site right after registration. Email verification can be completed later in Settings.')
-                  : tt(
-                    '输入邮箱地址，系统会优先发送密码重置邮件。多次收不到邮件时，再提交人工恢复申请。',
-                    'Enter your email address. We will send a password reset email first. Use manual recovery only if emails repeatedly do not arrive.'
-                  )}
-            </p>
           </div>
         </div>
 
         <form
           onSubmit={onSubmit}
           data-testid="auth-modal-scroll-region"
-          className="auth-modal-scroll-region min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain bg-slate-50 p-4 max-sm:[&_input:not([type='checkbox'])]:!py-2.5 dark:bg-zinc-950 sm:space-y-4 sm:p-6"
+          className="space-y-3 bg-slate-50 p-4 max-sm:[&_input:not([type='checkbox'])]:!py-2.5 dark:bg-zinc-950 sm:space-y-4 sm:p-6"
         >
+          <p className="text-xs leading-relaxed text-slate-500 dark:text-zinc-400 sm:text-sm">
+            {mode === 'login'
+              ? tt('登录以同步你的抽卡数据到云端', 'Sign in to sync your pull history to the cloud.')
+              : mode === 'register'
+                ? tt('注册后可以先进入网站使用；邮箱验证可稍后在设置页完成。', 'You can use the site right after registration. Email verification can be completed later in Settings.')
+                : tt(
+                  '输入邮箱地址，系统会优先发送密码重置邮件。多次收不到邮件时，再提交人工恢复申请。',
+                  'Enter your email address. We will send a password reset email first. Use manual recovery only if emails repeatedly do not arrive.'
+                )}
+          </p>
           {message && (
             <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 px-4 py-3 rounded-none text-sm">
               <div className="flex items-start gap-2">
@@ -864,7 +863,6 @@ export default function AuthModalView({
             )}
           </p>
         </div>}
-      </div>
       </div>
     </div>
   );

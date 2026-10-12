@@ -27,13 +27,14 @@ vi.mock('react-router-dom', async () => {
 
 vi.mock('../../../stores', () => ({
   useAuthStore: (selector) => selector({ user: harness.user }),
-  usePoolStore: (selector) => selector({
-    pools: [{ id: 'pool-1', name: '测试卡池' }],
-    currentPoolId: 'pool-1',
-    setPools: harness.setPools,
-    switchPool: harness.switchPool,
-    switchGameAccount: harness.switchGameAccount,
-  }),
+  usePoolStore: (selector) =>
+    selector({
+      pools: [{ id: 'pool-1', name: '测试卡池' }],
+      currentPoolId: 'pool-1',
+      setPools: harness.setPools,
+      switchPool: harness.switchPool,
+      switchGameAccount: harness.switchGameAccount,
+    }),
   useHistoryStore: (selector) => selector({ setHistory: harness.setHistory }),
 }));
 
@@ -83,29 +84,30 @@ vi.mock('../importShared.js', () => ({
 
 vi.mock('../../../i18n/index.js', () => ({
   useI18n: () => ({
-    t: (key, values = {}) => ({
-      'import.refreshFailedAfterSave': '记录已保存，但云端刷新失败',
-      'import.warning.title': '导入完成，但有事项需要留意',
-      'import.warning.skippedRecords': `有 ${values.count} 条记录未安全写入`,
-      'import.warning.anomalyReminderFailed': '待核对提醒创建失败',
-      'import.anomaly.title': `有 ${values.count} 条异常记录`,
-      'import.anomaly.desc': '只展示异常记录',
-      'import.anomaly.recordLabel': '异常记录',
-      'import.anomaly.unknownItem': '未知角色或武器',
-      'import.anomaly.missingIdentity': '官方记录缺少可识别的角色或武器信息',
-      'import.anomaly.poolLabel': '卡池',
-      'import.anomaly.seqLabel': '官方序号',
-      'import.anomaly.timeLabel': '记录时间',
-      'import.anomaly.actionHint': '前往详细记录处理',
-      'import.anomaly.later': '稍后处理',
-      'import.anomaly.openDetails': '前往详细记录',
-      'import.partialTitle': '部分卡池未完整获取',
-      'import.partialDesc': '请检查以下卡池',
-      'import.partialSuccess': '部分成功',
-      'import.partialFailed': '获取失败',
-      'import.partialFallback': '仅获取到部分记录',
-      'import.failedFallback': '未获取到记录',
-    }[key] || key),
+    t: (key, values = {}) =>
+      ({
+        'import.refreshFailedAfterSave': '记录已保存，但云端刷新失败',
+        'import.warning.title': '导入完成，但有事项需要留意',
+        'import.warning.skippedRecords': `有 ${values.count} 条记录未安全写入`,
+        'import.warning.anomalyReminderFailed': '待核对提醒创建失败',
+        'import.anomaly.title': `有 ${values.count} 条异常记录`,
+        'import.anomaly.desc': '只展示异常记录',
+        'import.anomaly.recordLabel': '异常记录',
+        'import.anomaly.unknownItem': '未知角色或武器',
+        'import.anomaly.missingIdentity': '官方记录缺少可识别的角色或武器信息',
+        'import.anomaly.poolLabel': '卡池',
+        'import.anomaly.seqLabel': '官方序号',
+        'import.anomaly.timeLabel': '记录时间',
+        'import.anomaly.actionHint': '前往详细记录处理',
+        'import.anomaly.later': '稍后处理',
+        'import.anomaly.openDetails': '前往详细记录',
+        'import.partialTitle': '部分卡池未完整获取',
+        'import.partialDesc': '请检查以下卡池',
+        'import.partialSuccess': '部分成功',
+        'import.partialFailed': '获取失败',
+        'import.partialFallback': '仅获取到部分记录',
+        'import.failedFallback': '未获取到记录',
+      })[key] || key,
     locale: 'zh-CN',
     formatNumber: String,
     formatDateTime: String,
@@ -167,6 +169,18 @@ describe('ImportManager completion behavior', () => {
     harness.notifyOfficialBotImportUpdated.mockResolvedValue({});
   });
 
+  it('未登录时正常展示导入窗口和登录提示，不读取账号安全状态', () => {
+    harness.user = null;
+    const onClose = vi.fn();
+    render(<ImportManager isOpen onClose={onClose} />);
+
+    expect(screen.getByRole('dialog', { name: 'import.title' })).toBeInTheDocument();
+    expect(screen.getByText('import.needLogin')).toBeInTheDocument();
+    expect(harness.loadAccountSecurityState).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it('正常导入完成后自动结束，并且完成与关闭回调各调用一次', async () => {
     const onClose = vi.fn();
     const onImportComplete = vi.fn();
@@ -199,14 +213,16 @@ describe('ImportManager completion behavior', () => {
     harness.result = makeResult({
       anomalyRecords: 1,
       anomalyPoolIds: ['pool-1'],
-      anomalyItems: [{
-        recordId: 'record-1',
-        poolId: 'pool-1',
-        seqId: '42',
-        issueCode: 'OFFICIAL_IMPORT_UNKNOWN_ITEM',
-        itemName: '未知角色或武器',
-        message: '后端中文说明不应直接显示',
-      }],
+      anomalyItems: [
+        {
+          recordId: 'record-1',
+          poolId: 'pool-1',
+          seqId: '42',
+          issueCode: 'OFFICIAL_IMPORT_UNKNOWN_ITEM',
+          itemName: '未知角色或武器',
+          message: '后端中文说明不应直接显示',
+        },
+      ],
       warnings: ['有 1 条已导入记录需要后续核对。'],
     });
     const onClose = vi.fn();
@@ -229,18 +245,22 @@ describe('ImportManager completion behavior', () => {
   it('异常记录与部分获取同时出现时，两类信息都会展示', async () => {
     harness.result = makeResult({
       anomalyRecords: 1,
-      anomalyItems: [{
-        recordId: 'record-1',
-        poolId: 'pool-1',
-        seqId: '42',
-        issueCode: 'OFFICIAL_IMPORT_UNKNOWN_ITEM',
-        itemName: '未知角色或武器',
-      }],
-      partialPools: [{
-        poolType: 'limited',
-        records: 5,
-        error: '请求中途停止',
-      }],
+      anomalyItems: [
+        {
+          recordId: 'record-1',
+          poolId: 'pool-1',
+          seqId: '42',
+          issueCode: 'OFFICIAL_IMPORT_UNKNOWN_ITEM',
+          itemName: '未知角色或武器',
+        },
+      ],
+      partialPools: [
+        {
+          poolType: 'limited',
+          records: 5,
+          error: '请求中途停止',
+        },
+      ],
     });
 
     render(<ImportManager isOpen onClose={vi.fn()} onImportComplete={vi.fn()} />);

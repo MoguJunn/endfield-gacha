@@ -1,5 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, Trash2, AlertCircle, Upload, CheckCircle2, User, Cloud, CloudOff, RefreshCw, Star, Layers, Search, HelpCircle, ExternalLink, ArrowRight } from 'lucide-react';
+import {
+  X,
+  Trash2,
+  AlertCircle,
+  Upload,
+  CheckCircle2,
+  User,
+  Cloud,
+  CloudOff,
+  RefreshCw,
+  Star,
+  Layers,
+  Search,
+  HelpCircle,
+  ExternalLink,
+  ArrowRight,
+} from 'lucide-react';
 import AuthModal from '../../AuthModal';
 import { Toast, ConfirmDialog } from '../ui';
 import { useUIStore, useAuthStore, useHistoryStore } from '../../stores';
@@ -15,7 +31,7 @@ const DEFAULT_POOL_FORM = {
   type: 'limited',
   isLimitedWeapon: true,
   drawerName: '',
-  selectedCharName: ''
+  selectedCharName: '',
 };
 
 function normalizeEditablePoolType(type) {
@@ -42,7 +58,7 @@ function getInitialPoolForm(modalState) {
       type: normalizeEditablePoolType(modalState.data.type),
       isLimitedWeapon: modalState.data.isLimitedWeapon !== false,
       drawerName: '',
-      selectedCharName: ''
+      selectedCharName: '',
     };
   }
 
@@ -59,14 +75,14 @@ function formatImportDateRange(preview, formatDateTime, t) {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   });
   const end = formatDateTime(preview.endMs, {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   });
 
   return start === end ? start : `${start} - ${end}`;
@@ -103,7 +119,7 @@ function buildImportVerificationResult(importAccount, selectedAccount, t) {
     return {
       tone: 'idle',
       canImport: false,
-      message: t('modals.import.verifyPending')
+      message: t('modals.import.verifyPending'),
     };
   }
 
@@ -117,7 +133,7 @@ function buildImportVerificationResult(importAccount, selectedAccount, t) {
     return {
       tone: 'success',
       canImport: true,
-      message: t('modals.import.verifyMatchedMissingAccount')
+      message: t('modals.import.verifyMatchedMissingAccount'),
     };
   }
 
@@ -127,8 +143,8 @@ function buildImportVerificationResult(importAccount, selectedAccount, t) {
       canImport: false,
       message: t('modals.import.verifyMismatch', {
         imported: importedGameUid,
-        verified: verifiedGameUid
-      })
+        verified: verifiedGameUid,
+      }),
     };
   }
 
@@ -138,15 +154,15 @@ function buildImportVerificationResult(importAccount, selectedAccount, t) {
       canImport: true,
       message: t('modals.import.verifyNicknameDifferent', {
         imported: importedNickName,
-        verified: verifiedNickName
-      })
+        verified: verifiedNickName,
+      }),
     };
   }
 
   return {
     tone: 'success',
     canImport: true,
-    message: t('modals.import.verifyMatched')
+    message: t('modals.import.verifyMatched'),
   };
 }
 
@@ -154,7 +170,7 @@ function normalizeVerifiedImportAccounts(accounts = [], source = 'cn') {
   return (Array.isArray(accounts) ? accounts : []).map((account) => ({
     ...account,
     source,
-    serverTag: account.serverTag || buildGameAccountServerTag(account)
+    serverTag: account.serverTag || buildGameAccountServerTag(account),
   }));
 }
 
@@ -224,21 +240,21 @@ export default function GachaModals({
   showMigrateModal,
   setShowMigrateModal,
   migrateLocalToCloud,
-  canEdit
+  canEdit,
 }) {
   const { t, locale, formatNumber, formatDateTime } = useI18n();
   // 从 stores 获取状态
-  const user = useAuthStore(state => state.user);
-  const setUser = useAuthStore(state => state.setUser);
-  const showAuthModal = useAuthStore(state => state.showAuthModal);
-  const closeAuthModal = useAuthStore(state => state.closeAuthModal);
-  const syncing = useAuthStore(state => state.syncing);
-  const syncError = useAuthStore(state => state.syncError);
+  const user = useAuthStore((state) => state.user);
+  const setUser = useAuthStore((state) => state.setUser);
+  const showAuthModal = useAuthStore((state) => state.showAuthModal);
+  const closeAuthModal = useAuthStore((state) => state.closeAuthModal);
+  const syncing = useAuthStore((state) => state.syncing);
+  const syncError = useAuthStore((state) => state.syncError);
 
-  const modalState = useUIStore(state => state.modalState);
-  const setModalState = useUIStore(state => state.setModalState);
+  const modalState = useUIStore((state) => state.modalState);
+  const setModalState = useUIStore((state) => state.setModalState);
 
-  const history = useHistoryStore(state => state.history);
+  const history = useHistoryStore((state) => state.history);
   const [poolForm, setPoolForm] = useState(DEFAULT_POOL_FORM);
   const [importAccountForm, setImportAccountForm] = useState({ gameUid: '', nickName: '' });
   const [importManualAccountMode, setImportManualAccountMode] = useState(false);
@@ -250,7 +266,7 @@ export default function GachaModals({
     status: 'idle',
     accounts: [],
     selectedAccount: null,
-    error: ''
+    error: '',
   });
   const importPreview = useMemo(() => buildPendingImportPreview(pendingImport), [pendingImport]);
   const canOverrideImportAccount = importPreview.accountCount <= 1;
@@ -258,10 +274,11 @@ export default function GachaModals({
     () => buildImportVerificationResult(importPreview.primaryAccount, importVerifyState.selectedAccount, t),
     [importPreview.primaryAccount, importVerifyState.selectedAccount, t]
   );
-  const importAccountReady = !pendingImport
-    || !canOverrideImportAccount
-    || (importManualAccountMode
-      ? (importAccountForm.gameUid.trim() && importAccountForm.nickName.trim())
+  const importAccountReady =
+    !pendingImport ||
+    !canOverrideImportAccount ||
+    (importManualAccountMode
+      ? importAccountForm.gameUid.trim() && importAccountForm.nickName.trim()
       : importVerificationResult.canImport);
   const importDateRange = useMemo(
     () => formatImportDateRange(importPreview, formatDateTime, t),
@@ -287,7 +304,7 @@ export default function GachaModals({
           status: 'idle',
           accounts: [],
           selectedAccount: null,
-          error: ''
+          error: '',
         });
       });
       return;
@@ -297,7 +314,7 @@ export default function GachaModals({
     queueMicrotask(() => {
       setImportAccountForm({
         gameUid: primaryAccount?.gameUid || '',
-        nickName: primaryAccount?.nickName || ''
+        nickName: primaryAccount?.nickName || '',
       });
       setImportManualAccountMode(false);
       setShowImportAccountVerifyModal(false);
@@ -308,7 +325,7 @@ export default function GachaModals({
         status: 'idle',
         accounts: [],
         selectedAccount: null,
-        error: ''
+        error: '',
       });
     });
   }, [pendingImport]);
@@ -319,7 +336,7 @@ export default function GachaModals({
   };
 
   const applyAutoPoolName = (updates) => {
-    setPoolForm(prev => {
+    setPoolForm((prev) => {
       const next = { ...prev, ...updates };
       return { ...next, name: buildPoolName(next.type, next.selectedCharName, next.drawerName, t) };
     });
@@ -339,86 +356,87 @@ export default function GachaModals({
       return;
     }
 
-    setImportVerifyState(prev => ({
+    setImportVerifyState((prev) => ({
       ...prev,
       selectedAccount: account,
       status: 'verified',
-      error: ''
+      error: '',
     }));
     setImportManualAccountMode(false);
     setImportAccountForm({
       gameUid: normalizeComparableGameUid(account.gameUid),
-      nickName: account.nickName || normalizeComparableGameUid(account.gameUid)
+      nickName: account.nickName || normalizeComparableGameUid(account.gameUid),
     });
   };
 
   const verifyImportAccount = async () => {
     const { token } = parseImportVerifyTokenInput(importVerifyState.tokenInput);
     if (!token) {
-      setImportVerifyState(prev => ({
+      setImportVerifyState((prev) => ({
         ...prev,
         status: 'error',
-        error: t('import.error.emptyToken')
+        error: t('import.error.emptyToken'),
       }));
       return;
     }
 
     if (token.length !== 24) {
-      setImportVerifyState(prev => ({
+      setImportVerifyState((prev) => ({
         ...prev,
         status: 'error',
-        error: t('import.error.tokenLength', { length: token.length })
+        error: t('import.error.tokenLength', { length: token.length }),
       }));
       return;
     }
 
-    setImportVerifyState(prev => ({
+    setImportVerifyState((prev) => ({
       ...prev,
       tokenInput: token,
       status: 'checking',
       accounts: [],
       selectedAccount: null,
-      error: ''
+      error: '',
     }));
 
     try {
       const result = await fetchAccountsList(token, null, importVerifyState.source);
       const accounts = normalizeVerifiedImportAccounts(result?.accounts || [], importVerifyState.source);
       if (accounts.length === 0) {
-        setImportVerifyState(prev => ({
+        setImportVerifyState((prev) => ({
           ...prev,
           status: 'error',
           accounts: [],
-          error: t('modals.import.verifyNoAccounts')
+          error: t('modals.import.verifyNoAccounts'),
         }));
         return;
       }
 
-      setImportVerifyState(prev => ({
+      setImportVerifyState((prev) => ({
         ...prev,
         status: accounts.length === 1 ? 'verified' : 'selecting',
         accounts,
         selectedAccount: accounts.length === 1 ? accounts[0] : null,
-        error: ''
+        error: '',
       }));
 
       if (accounts.length === 1) {
         selectVerifiedImportAccount(accounts[0]);
       }
     } catch (verifyError) {
-      setImportVerifyState(prev => ({
+      setImportVerifyState((prev) => ({
         ...prev,
         status: 'error',
         accounts: [],
         selectedAccount: null,
-        error: verifyError?.message || t('modals.import.verifyFailed')
+        error: verifyError?.message || t('modals.import.verifyFailed'),
       }));
     }
   };
 
   const importVerifyStep = getImportVerifyStep(importVerifyState.status);
   const importVerifyProgress = getImportVerifyProgress(importVerifyState.status);
-  const importVerifyStatusMessage = importVerifyState.error || getImportVerifyStatusMessage(importVerifyState.status, t);
+  const importVerifyStatusMessage =
+    importVerifyState.error || getImportVerifyStatusMessage(importVerifyState.status, t);
   const importVerifyGuides = {
     cn: {
       bindingTitle: t('import.source.cn.bindingTitle'),
@@ -428,7 +446,7 @@ export default function GachaModals({
       tokenTitle: t('import.source.cn.tokenTitle'),
       tokenDesc: t('import.source.cn.tokenDesc'),
       tokenUrl: 'https://web-api.hypergryph.com/account/info/hg',
-      tokenHost: 'web-api.hypergryph.com'
+      tokenHost: 'web-api.hypergryph.com',
     },
     intl: {
       bindingTitle: t('import.source.intl.bindingTitle'),
@@ -438,8 +456,8 @@ export default function GachaModals({
       tokenTitle: t('import.source.intl.tokenTitle'),
       tokenDesc: t('import.source.intl.tokenDesc'),
       tokenUrl: 'https://web-api.gryphline.com/cookie_store/account_token',
-      tokenHost: 'web-api.gryphline.com'
-    }
+      tokenHost: 'web-api.gryphline.com',
+    },
   };
   const importVerifyGuide = importVerifyGuides[importVerifyState.source] || importVerifyGuides.cn;
 
@@ -447,20 +465,31 @@ export default function GachaModals({
     <>
       {/* 创建/编辑卡池弹窗 */}
       {(modalState.type === 'createPool' || modalState.type === 'editPool') && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-sm overflow-hidden animate-scale-up">
-            <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex justify-between items-center">
+        <div className="app-modal-backdrop fixed inset-0 z-50 bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={modalState.type === 'createPool' ? t('modals.pool.createTitle') : t('modals.pool.editTitle')}
+            className="app-modal-panel bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-sm animate-scale-up"
+          >
+            <div className="app-modal-header p-3 sm:p-4 border-b border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex gap-2 justify-between items-center">
               <h3 className="font-bold text-slate-700 dark:text-zinc-300">
                 {modalState.type === 'createPool' ? t('modals.pool.createTitle') : t('modals.pool.editTitle')}
               </h3>
-              <button onClick={closePoolFormModal} className="text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:text-zinc-400 transition-colors">
+              <button
+                onClick={closePoolFormModal}
+                aria-label={t('common.close')}
+                className="app-modal-icon-button text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:text-zinc-400 transition-colors"
+              >
                 <X size={20} />
               </button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-4 sm:p-6 space-y-4">
               {modalState.type === 'createPool' && (
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 dark:text-zinc-500 uppercase mb-2">{t('modals.pool.quickPick')}</label>
+                  <label className="block text-xs font-bold text-slate-500 dark:text-zinc-500 uppercase mb-2">
+                    {t('modals.pool.quickPick')}
+                  </label>
                   <div className="grid grid-cols-2 gap-2 max-h-32 overflow-y-auto">
                     {PRESET_POOLS.map((preset, idx) => (
                       <button
@@ -478,14 +507,21 @@ export default function GachaModals({
 
               {modalState.type === 'editPool' && (
                 <div>
-                  <label className="block text-sm font-medium text-slate-600 dark:text-zinc-400 mb-2">{t('modals.pool.creator')}</label>
+                  <label className="block text-sm font-medium text-slate-600 dark:text-zinc-400 mb-2">
+                    {t('modals.pool.creator')}
+                  </label>
                   <div className="flex items-center gap-2 px-4 py-2 border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-none">
                     <User size={16} />
-                    <span>{modalState.data?.creator_username || (user ? buildUsernameHandle(user) : t('settings.mobile.unnamedUser'))}</span>
+                    <span>
+                      {modalState.data?.creator_username ||
+                        (user ? buildUsernameHandle(user) : t('settings.mobile.unnamedUser'))}
+                    </span>
                     {modalState.data?.created_at && (
                       <span className="text-xs text-zinc-400 dark:text-zinc-500 ml-auto">
                         {t('modals.pool.createdAt', {
-                          value: new Date(modalState.data.created_at).toLocaleDateString(locale === 'en-US' ? 'en-US' : 'zh-CN')
+                          value: new Date(modalState.data.created_at).toLocaleDateString(
+                            locale === 'en-US' ? 'en-US' : 'zh-CN'
+                          ),
                         })}
                       </span>
                     )}
@@ -494,17 +530,19 @@ export default function GachaModals({
               )}
 
               <div>
-                <label className="block text-sm font-medium text-slate-600 dark:text-zinc-400 mb-2">{t('modals.pool.drawer')}</label>
+                <label className="block text-sm font-medium text-slate-600 dark:text-zinc-400 mb-2">
+                  {t('modals.pool.drawer')}
+                </label>
                 {knownDrawers.length > 0 && (
                   <div className="flex flex-wrap gap-1.5 mb-2">
-                    {knownDrawers.map(drawer => (
+                    {knownDrawers.map((drawer) => (
                       <button
                         key={drawer}
                         onClick={() => {
                           if (modalState.type === 'createPool') {
                             applyAutoPoolName({ drawerName: drawer });
                           } else {
-                            setPoolForm(prev => ({ ...prev, drawerName: drawer }));
+                            setPoolForm((prev) => ({ ...prev, drawerName: drawer }));
                           }
                         }}
                         className={`text-xs px-2 py-1 rounded-none border transition-colors ${
@@ -513,7 +551,8 @@ export default function GachaModals({
                             : 'bg-slate-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:bg-yellow-50 dark:hover:bg-yellow-900/20 hover:border-yellow-300 dark:hover:border-yellow-700'
                         }`}
                       >
-                        <User size={10} className="inline mr-1" />{drawer}
+                        <User size={10} className="inline mr-1" />
+                        {drawer}
                       </button>
                     ))}
                   </div>
@@ -525,20 +564,26 @@ export default function GachaModals({
                     if (modalState.type === 'createPool') {
                       applyAutoPoolName({ drawerName: e.target.value });
                     } else {
-                      setPoolForm(prev => ({ ...prev, drawerName: e.target.value }));
+                      setPoolForm((prev) => ({ ...prev, drawerName: e.target.value }));
                     }
                   }}
-                  placeholder={knownDrawers.length > 0 ? t('modals.pool.drawerPlaceholderWithKnown') : t('modals.pool.drawerPlaceholder')}
+                  placeholder={
+                    knownDrawers.length > 0
+                      ? t('modals.pool.drawerPlaceholderWithKnown')
+                      : t('modals.pool.drawerPlaceholder')
+                  }
                   className="w-full px-4 py-2 border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 rounded-none focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 outline-none transition-all"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-600 dark:text-zinc-400 mb-2">{t('modals.pool.name')}</label>
+                <label className="block text-sm font-medium text-slate-600 dark:text-zinc-400 mb-2">
+                  {t('modals.pool.name')}
+                </label>
                 <input
                   type="text"
                   value={poolForm.name}
-                  onChange={(e) => setPoolForm(prev => ({ ...prev, name: e.target.value }))}
+                  onChange={(e) => setPoolForm((prev) => ({ ...prev, name: e.target.value }))}
                   placeholder={t('modals.pool.namePlaceholder')}
                   className="w-full px-4 py-2 border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 rounded-none focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 outline-none transition-all"
                   onKeyDown={(e) => e.key === 'Enter' && submitPoolForm()}
@@ -546,10 +591,15 @@ export default function GachaModals({
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-600 dark:text-zinc-400 mb-2">{t('modals.pool.typeLabel')}</label>
-                <div className="flex gap-3">
-                  {['limited', 'standard', 'weapon'].map(type => (
-                    <label key={type} className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-none border cursor-pointer transition-all ${poolForm.type === type ? (type === 'weapon' ? 'bg-slate-800 border-slate-600 text-white' : type === 'limited' ? 'bg-orange-50 border-orange-500 text-orange-700' : 'bg-yellow-50 dark:bg-yellow-900/20 border-indigo-500 text-yellow-700 dark:text-yellow-300') + ' font-bold ring-1' : 'border-zinc-200 dark:border-zinc-800 text-slate-500 dark:text-zinc-500 hover:bg-slate-50 dark:bg-zinc-950'}`}>
+                <label className="block text-sm font-medium text-slate-600 dark:text-zinc-400 mb-2">
+                  {t('modals.pool.typeLabel')}
+                </label>
+                <div className="grid grid-cols-1 gap-2 min-[400px]:grid-cols-3">
+                  {['limited', 'standard', 'weapon'].map((type) => (
+                    <label
+                      key={type}
+                      className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-none border cursor-pointer transition-all ${poolForm.type === type ? (type === 'weapon' ? 'bg-slate-800 border-slate-600 text-white' : type === 'limited' ? 'bg-orange-50 border-orange-500 text-orange-700' : 'bg-yellow-50 dark:bg-yellow-900/20 border-indigo-500 text-yellow-700 dark:text-yellow-300') + ' font-bold ring-1' : 'border-zinc-200 dark:border-zinc-800 text-slate-500 dark:text-zinc-500 hover:bg-slate-50 dark:bg-zinc-950'}`}
+                    >
                       <input
                         type="radio"
                         name="poolType"
@@ -559,7 +609,7 @@ export default function GachaModals({
                           if (modalState.type === 'createPool') {
                             applyAutoPoolName({ type });
                           } else {
-                            setPoolForm(prev => ({ ...prev, type }));
+                            setPoolForm((prev) => ({ ...prev, type }));
                           }
                         }}
                         className="hidden"
@@ -574,23 +624,36 @@ export default function GachaModals({
                 <p className="text-xs text-slate-400 dark:text-zinc-500 mt-2">
                   {poolForm.type === 'limited' && t('modals.pool.typeHint.limited')}
                   {poolForm.type === 'standard' && t('modals.pool.typeHint.standard')}
-                  {poolForm.type === 'weapon' && (poolForm.isLimitedWeapon
-                    ? t('modals.pool.typeHint.weaponLimited')
-                    : t('modals.pool.typeHint.weaponStandard')
-                  )}
+                  {poolForm.type === 'weapon' &&
+                    (poolForm.isLimitedWeapon
+                      ? t('modals.pool.typeHint.weaponLimited')
+                      : t('modals.pool.typeHint.weaponStandard'))}
                 </p>
 
                 {poolForm.type === 'weapon' && (
                   <div className="mt-3 p-3 bg-slate-50 dark:bg-zinc-800 rounded-none border border-zinc-200 dark:border-zinc-700">
                     <label className="flex items-center justify-between cursor-pointer">
                       <div>
-                        <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">{t('modals.pool.limitedWeaponToggle')}</span>
-                        <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">{t('modals.pool.limitedWeaponHint')}</p>
+                        <span className="text-sm font-medium text-slate-700 dark:text-zinc-300">
+                          {t('modals.pool.limitedWeaponToggle')}
+                        </span>
+                        <p className="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">
+                          {t('modals.pool.limitedWeaponHint')}
+                        </p>
                       </div>
                       <div className="relative">
-                        <input type="checkbox" checked={poolForm.isLimitedWeapon} onChange={(e) => setPoolForm(prev => ({ ...prev, isLimitedWeapon: e.target.checked }))} className="sr-only" />
-                        <div className={`w-11 h-6 rounded-full transition-colors ${poolForm.isLimitedWeapon ? 'bg-orange-500' : 'bg-slate-300 dark:bg-zinc-600'}`}>
-                          <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${poolForm.isLimitedWeapon ? 'translate-x-5' : ''}`}></div>
+                        <input
+                          type="checkbox"
+                          checked={poolForm.isLimitedWeapon}
+                          onChange={(e) => setPoolForm((prev) => ({ ...prev, isLimitedWeapon: e.target.checked }))}
+                          className="sr-only"
+                        />
+                        <div
+                          className={`w-11 h-6 rounded-full transition-colors ${poolForm.isLimitedWeapon ? 'bg-orange-500' : 'bg-slate-300 dark:bg-zinc-600'}`}
+                        >
+                          <div
+                            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${poolForm.isLimitedWeapon ? 'translate-x-5' : ''}`}
+                          ></div>
                         </div>
                       </div>
                     </label>
@@ -598,9 +661,18 @@ export default function GachaModals({
                 )}
               </div>
             </div>
-            <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex gap-3 justify-end">
-              <button onClick={closePoolFormModal} className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:text-zinc-100 hover:bg-slate-200 rounded-none transition-colors">{t('common.cancel')}</button>
-              <button onClick={submitPoolForm} disabled={!poolForm.name.trim()} className="px-4 py-2 text-sm font-bold text-white bg-endfield-yellow text-black hover:bg-yellow-400 font-bold uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed rounded-none shadow-sm transition-all">
+            <div className="app-modal-actions p-4 border-t border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex flex-wrap gap-3 justify-end">
+              <button
+                onClick={closePoolFormModal}
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:text-zinc-100 hover:bg-slate-200 rounded-none transition-colors"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={submitPoolForm}
+                disabled={!poolForm.name.trim()}
+                className="px-4 py-2 text-sm font-bold text-white bg-endfield-yellow text-black hover:bg-yellow-400 font-bold uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed rounded-none shadow-sm transition-all"
+              >
                 {modalState.type === 'createPool' ? t('modals.pool.createAction') : t('modals.pool.saveAction')}
               </button>
             </div>
@@ -610,21 +682,35 @@ export default function GachaModals({
 
       {/* 删除卡池确认弹窗 */}
       {modalState.type === 'deletePool' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-sm overflow-hidden animate-scale-up">
+        <div className="app-modal-backdrop fixed inset-0 z-50 bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div className="app-modal-panel bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-sm animate-scale-up">
             <div className="p-6 text-center">
-              <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 text-red-500 rounded-sm flex items-center justify-center mx-auto mb-4"><Trash2 size={24} /></div>
-              <h3 className="text-lg font-bold text-slate-800 dark:text-zinc-100 mb-2">{t('modals.deletePool.title')}</h3>
+              <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 text-red-500 rounded-sm flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={24} />
+              </div>
+              <h3 className="text-lg font-bold text-slate-800 dark:text-zinc-100 mb-2">
+                {t('modals.deletePool.title')}
+              </h3>
               <p className="text-sm text-slate-500 dark:text-zinc-500 whitespace-pre-line">
                 {t('modals.deletePool.message', {
                   name: modalState.data?.name,
-                  count: (history || []).filter(h => h.poolId === modalState.data?.id).length
+                  count: (history || []).filter((h) => h.poolId === modalState.data?.id).length,
                 })}
               </p>
             </div>
             <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex gap-3 justify-center">
-              <button onClick={closeModalAndClear} className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-none transition-colors">{t('common.cancel')}</button>
-              <button onClick={confirmDeletePool} className="px-4 py-2 text-sm font-bold text-white bg-red-500 hover:bg-red-600 rounded-none shadow-sm transition-all">{t('modals.deletePool.confirm')}</button>
+              <button
+                onClick={closeModalAndClear}
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-none transition-colors"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={confirmDeletePool}
+                className="px-4 py-2 text-sm font-bold text-white bg-red-500 hover:bg-red-600 rounded-none shadow-sm transition-all"
+              >
+                {t('modals.deletePool.confirm')}
+              </button>
             </div>
           </div>
         </div>
@@ -635,15 +721,29 @@ export default function GachaModals({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-sm overflow-hidden animate-scale-up">
             <div className="p-6 text-center">
-              <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 text-red-500 rounded-sm flex items-center justify-center mx-auto mb-4"><AlertCircle size={24} /></div>
-              <h3 className="text-lg font-bold text-slate-800 dark:text-zinc-100 mb-2">{t('modals.deleteData.title')}</h3>
+              <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 text-red-500 rounded-sm flex items-center justify-center mx-auto mb-4">
+                <AlertCircle size={24} />
+              </div>
+              <h3 className="text-lg font-bold text-slate-800 dark:text-zinc-100 mb-2">
+                {t('modals.deleteData.title')}
+              </h3>
               <p className="text-sm text-slate-500 dark:text-zinc-500 whitespace-pre-line">
                 {t('modals.deleteData.message', { name: modalState.data?.poolName })}
               </p>
             </div>
             <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex gap-3 justify-center">
-              <button onClick={closeModalAndClear} className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-none transition-colors">{t('modals.deleteData.cancel')}</button>
-              <button onClick={confirmDeleteData} className="px-4 py-2 text-sm font-bold text-white bg-red-500 hover:bg-red-600 rounded-none shadow-sm transition-all">{t('modals.deleteData.confirm')}</button>
+              <button
+                onClick={closeModalAndClear}
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-none transition-colors"
+              >
+                {t('modals.deleteData.cancel')}
+              </button>
+              <button
+                onClick={confirmDeleteData}
+                className="px-4 py-2 text-sm font-bold text-white bg-red-500 hover:bg-red-600 rounded-none shadow-sm transition-all"
+              >
+                {t('modals.deleteData.confirm')}
+              </button>
             </div>
           </div>
         </div>
@@ -651,16 +751,33 @@ export default function GachaModals({
 
       {/* 删除单条记录确认 */}
       {modalState.type === 'deleteItem' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in" style={{zIndex: 60}}>
-          <div className="bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-sm overflow-hidden animate-scale-up">
+        <div
+          className="app-modal-backdrop fixed inset-0 z-50 bg-black/50 backdrop-blur-sm animate-fade-in"
+          style={{ zIndex: 60 }}
+        >
+          <div className="app-modal-panel bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-sm animate-scale-up">
             <div className="p-6 text-center">
-              <div className="w-12 h-12 bg-red-100 text-red-500 rounded-sm flex items-center justify-center mx-auto mb-4"><Trash2 size={24} /></div>
-              <h3 className="text-lg font-bold text-slate-800 dark:text-zinc-100 mb-2">{t('modals.deleteItem.title')}</h3>
+              <div className="w-12 h-12 bg-red-100 text-red-500 rounded-sm flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={24} />
+              </div>
+              <h3 className="text-lg font-bold text-slate-800 dark:text-zinc-100 mb-2">
+                {t('modals.deleteItem.title')}
+              </h3>
               <p className="text-sm text-slate-500 dark:text-zinc-500">{t('modals.deleteItem.message')}</p>
             </div>
             <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex gap-3 justify-center">
-              <button onClick={() => setModalState({ type: null, data: null })} className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:text-zinc-100 hover:bg-slate-200 rounded-none transition-colors">{t('common.cancel')}</button>
-              <button onClick={confirmRealDeleteItem} className="px-4 py-2 text-sm font-bold text-white bg-red-500 hover:bg-red-600 rounded-none shadow-sm transition-all">{t('modals.deleteItem.confirm')}</button>
+              <button
+                onClick={() => setModalState({ type: null, data: null })}
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:text-zinc-100 hover:bg-slate-200 rounded-none transition-colors"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={confirmRealDeleteItem}
+                className="px-4 py-2 text-sm font-bold text-white bg-red-500 hover:bg-red-600 rounded-none shadow-sm transition-all"
+              >
+                {t('modals.deleteItem.confirm')}
+              </button>
             </div>
           </div>
         </div>
@@ -668,16 +785,30 @@ export default function GachaModals({
 
       {/* 删除整组确认 */}
       {modalState.type === 'deleteGroup' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-sm overflow-hidden animate-scale-up">
+        <div className="app-modal-backdrop fixed inset-0 z-50 bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div className="app-modal-panel bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-sm animate-scale-up">
             <div className="p-6 text-center">
-              <div className="w-12 h-12 bg-red-100 text-red-500 rounded-sm flex items-center justify-center mx-auto mb-4"><Trash2 size={24} /></div>
-              <h3 className="text-lg font-bold text-slate-800 dark:text-zinc-100 mb-2">{t('modals.deleteGroup.title', { count: modalState.data?.length || 0 })}</h3>
+              <div className="w-12 h-12 bg-red-100 text-red-500 rounded-sm flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={24} />
+              </div>
+              <h3 className="text-lg font-bold text-slate-800 dark:text-zinc-100 mb-2">
+                {t('modals.deleteGroup.title', { count: modalState.data?.length || 0 })}
+              </h3>
               <p className="text-sm text-slate-500 dark:text-zinc-500">{t('modals.deleteGroup.message')}</p>
             </div>
             <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex gap-3 justify-center">
-              <button onClick={closeModalAndClear} className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:text-zinc-100 hover:bg-slate-200 rounded-none transition-colors">{t('common.cancel')}</button>
-              <button onClick={confirmRealDeleteGroup} className="px-4 py-2 text-sm font-bold text-white bg-red-500 hover:bg-red-600 rounded-none shadow-sm transition-all">{t('modals.deleteGroup.confirm')}</button>
+              <button
+                onClick={closeModalAndClear}
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:text-zinc-100 hover:bg-slate-200 rounded-none transition-colors"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={confirmRealDeleteGroup}
+                className="px-4 py-2 text-sm font-bold text-white bg-red-500 hover:bg-red-600 rounded-none shadow-sm transition-all"
+              >
+                {t('modals.deleteGroup.confirm')}
+              </button>
             </div>
           </div>
         </div>
@@ -693,25 +824,55 @@ export default function GachaModals({
 
       {/* 数据迁移弹窗 */}
       {showMigrateModal && canEdit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-sm overflow-hidden animate-scale-up">
+        <div className="app-modal-backdrop fixed inset-0 z-50 bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div className="app-modal-panel bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-sm animate-scale-up">
             <div className="p-6 text-center">
-              <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 rounded-sm flex items-center justify-center mx-auto mb-4"><Cloud size={24} /></div>
+              <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 rounded-sm flex items-center justify-center mx-auto mb-4">
+                <Cloud size={24} />
+              </div>
               <h3 className="text-lg font-bold text-slate-800 dark:text-zinc-100 mb-2">{t('modals.migrate.title')}</h3>
               <p className="text-sm text-slate-500 dark:text-zinc-500 whitespace-pre-line">
                 {t('modals.migrate.message', { count: (history || []).length })}
               </p>
               {syncing && (
                 <div className="mt-4 flex items-center justify-center gap-2 text-yellow-600 dark:text-endfield-yellow">
-                  <RefreshCw size={16} className="animate-spin" /><span className="text-sm">{t('settings.syncing')}</span>
+                  <RefreshCw size={16} className="animate-spin" />
+                  <span className="text-sm">{t('settings.syncing')}</span>
                 </div>
               )}
-              {syncError && <div className="mt-4 text-sm text-red-500 bg-red-50 dark:bg-red-900/20 p-2 rounded-none">{t('modals.migrate.error', { value: syncError })}</div>}
+              {syncError && (
+                <div className="mt-4 text-sm text-red-500 bg-red-50 dark:bg-red-900/20 p-2 rounded-none">
+                  {t('modals.migrate.error', { value: syncError })}
+                </div>
+              )}
             </div>
             <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex gap-3 justify-center">
-              <button onClick={() => setShowMigrateModal(false)} disabled={syncing} className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-none transition-colors disabled:opacity-50">{t('modals.migrate.skip')}</button>
-              <button onClick={async () => { const success = await migrateLocalToCloud(); if (success) setShowMigrateModal(false); }} disabled={syncing} className="px-4 py-2 text-sm font-bold bg-endfield-yellow text-black hover:bg-yellow-400 uppercase tracking-wider rounded-none shadow-sm transition-all disabled:opacity-50 flex items-center gap-2">
-                {syncing ? (<><RefreshCw size={16} className="animate-spin" />{t('modals.migrate.progress')}</>) : (<><Cloud size={16} />{t('modals.migrate.confirm')}</>)}
+              <button
+                onClick={() => setShowMigrateModal(false)}
+                disabled={syncing}
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-none transition-colors disabled:opacity-50"
+              >
+                {t('modals.migrate.skip')}
+              </button>
+              <button
+                onClick={async () => {
+                  const success = await migrateLocalToCloud();
+                  if (success) setShowMigrateModal(false);
+                }}
+                disabled={syncing}
+                className="px-4 py-2 text-sm font-bold bg-endfield-yellow text-black hover:bg-yellow-400 uppercase tracking-wider rounded-none shadow-sm transition-all disabled:opacity-50 flex items-center gap-2"
+              >
+                {syncing ? (
+                  <>
+                    <RefreshCw size={16} className="animate-spin" />
+                    {t('modals.migrate.progress')}
+                  </>
+                ) : (
+                  <>
+                    <Cloud size={16} />
+                    {t('modals.migrate.confirm')}
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -720,38 +881,52 @@ export default function GachaModals({
 
       {/* 导入确认弹窗 */}
       {pendingImport && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden animate-scale-up flex flex-col">
-            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex items-start gap-4">
-              <div className="w-12 h-12 bg-blue-100 dark:bg-blue-950/40 text-blue-500 rounded-sm flex items-center justify-center shrink-0"><Upload size={24} /></div>
+        <div className="app-modal-backdrop fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('modals.import.title')}
+            className="app-modal-panel bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-3xl animate-scale-up"
+          >
+            <div className="app-modal-header p-3 sm:p-5 border-b border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex items-start gap-3">
+              <div className="hidden sm:flex w-12 h-12 bg-blue-100 dark:bg-blue-950/40 text-blue-500 rounded-sm items-center justify-center shrink-0">
+                <Upload size={24} />
+              </div>
               <div className="min-w-0 flex-1">
                 <h3 className="text-lg font-bold text-slate-800 dark:text-zinc-100">{t('modals.import.title')}</h3>
                 <p className="text-xs text-slate-500 dark:text-zinc-500 mt-1">
                   {t('modals.import.source', { value: importPreview.sourceLabel || '-' })}
                 </p>
-                <p className="text-xs text-slate-500 dark:text-zinc-500 mt-1">
-                  {t('modals.import.dateRange', { value: importDateRange })}
-                </p>
               </div>
               <button
                 onClick={() => setPendingImport(null)}
-                className="p-2 text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 transition-colors"
+                className="app-modal-icon-button text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 transition-colors"
                 aria-label={t('common.cancel')}
               >
                 <X size={18} />
               </button>
             </div>
-            <div className="p-5 space-y-5 overflow-y-auto">
+            <div className="p-4 sm:p-5 space-y-5">
+              <p className="text-xs text-slate-500 dark:text-zinc-500">
+                {t('modals.import.dateRange', { value: importDateRange })}
+              </p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
                   [t('modals.import.totalPulls'), importPreview.historyCount],
                   [t('modals.import.poolCount'), importPreview.poolCount],
                   [t('modals.import.sixStarCount'), importPreview.rarityCounts[6] || 0],
-                  [t('modals.import.fiveStarCount'), importPreview.rarityCounts[5] || 0]
+                  [t('modals.import.fiveStarCount'), importPreview.rarityCounts[5] || 0],
                 ].map(([label, value]) => (
-                  <div key={label} className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3">
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-500">{label}</div>
-                    <div className="text-2xl font-black text-slate-900 dark:text-zinc-100 mt-1">{formatNumber(value)}</div>
+                  <div
+                    key={label}
+                    className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-3"
+                  >
+                    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-500">
+                      {label}
+                    </div>
+                    <div className="text-2xl font-black text-slate-900 dark:text-zinc-100 mt-1">
+                      {formatNumber(value)}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -761,8 +936,12 @@ export default function GachaModals({
                   <div className="flex items-start gap-3">
                     <AlertCircle size={18} className="mt-0.5 shrink-0 text-amber-700 dark:text-amber-300" />
                     <div>
-                      <h4 className="text-sm font-black text-amber-900 dark:text-amber-200">{t('modals.import.missingAccountInfoTitle')}</h4>
-                      <p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-300">{t('modals.import.missingAccountInfoDesc')}</p>
+                      <h4 className="text-sm font-black text-amber-900 dark:text-amber-200">
+                        {t('modals.import.missingAccountInfoTitle')}
+                      </h4>
+                      <p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-300">
+                        {t('modals.import.missingAccountInfoDesc')}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -772,7 +951,9 @@ export default function GachaModals({
                 <div className="flex items-start gap-3">
                   <User size={18} className="text-yellow-700 dark:text-endfield-yellow mt-0.5 shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <h4 className="text-sm font-black text-slate-900 dark:text-zinc-100">{t('modals.import.accountTitle')}</h4>
+                    <h4 className="text-sm font-black text-slate-900 dark:text-zinc-100">
+                      {t('modals.import.accountTitle')}
+                    </h4>
                     <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1">
                       {importPreview.accountInfoMissing
                         ? t('modals.import.accountMissingDesc')
@@ -787,23 +968,40 @@ export default function GachaModals({
                   <>
                     <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-stretch">
                       <div className="border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/60 px-3 py-2">
-                        <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-500">{t('modals.import.detectedAccount')}</div>
-                        <div className="mt-1 text-sm font-black text-slate-900 dark:text-zinc-100">
-                          {importPreview.accountInfoMissing ? t('modals.import.noAccountInFile') : (importPreview.primaryAccount?.nickName || '-')}
+                        <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-500">
+                          {t('modals.import.detectedAccount')}
                         </div>
-                        <div className="text-xs text-slate-500 dark:text-zinc-500">UID {normalizeComparableGameUid(importPreview.primaryAccount?.gameUid) || '-'}</div>
+                        <div className="mt-1 text-sm font-black text-slate-900 dark:text-zinc-100">
+                          {importPreview.accountInfoMissing
+                            ? t('modals.import.noAccountInFile')
+                            : importPreview.primaryAccount?.nickName || '-'}
+                        </div>
+                        <div className="text-xs text-slate-500 dark:text-zinc-500">
+                          UID {normalizeComparableGameUid(importPreview.primaryAccount?.gameUid) || '-'}
+                        </div>
                       </div>
-                      <div className={`border px-3 py-2 ${getImportVerifyToneClasses(importManualAccountMode ? 'warning' : importVerificationResult.tone)}`}>
+                      <div
+                        className={`border px-3 py-2 ${getImportVerifyToneClasses(importManualAccountMode ? 'warning' : importVerificationResult.tone)}`}
+                      >
                         <div className="text-[11px] font-bold uppercase tracking-widest opacity-75">
-                          {importManualAccountMode ? t('modals.import.manualStatus') : (importVerificationResult.canImport ? t('modals.import.verifyDone') : t('modals.import.verifyRequired'))}
+                          {importManualAccountMode
+                            ? t('modals.import.manualStatus')
+                            : importVerificationResult.canImport
+                              ? t('modals.import.verifyDone')
+                              : t('modals.import.verifyRequired')}
                         </div>
                         <div className="mt-1 text-sm font-black">
                           {importManualAccountMode
-                            ? (importAccountForm.nickName || '-')
-                            : (importVerifyState.selectedAccount?.nickName || t('modals.import.verifyPendingShort'))}
+                            ? importAccountForm.nickName || '-'
+                            : importVerifyState.selectedAccount?.nickName || t('modals.import.verifyPendingShort')}
                         </div>
                         <div className="text-xs opacity-80">
-                          UID {normalizeComparableGameUid(importManualAccountMode ? importAccountForm.gameUid : importVerifyState.selectedAccount?.gameUid) || '-'}
+                          UID{' '}
+                          {normalizeComparableGameUid(
+                            importManualAccountMode
+                              ? importAccountForm.gameUid
+                              : importVerifyState.selectedAccount?.gameUid
+                          ) || '-'}
                         </div>
                       </div>
                       <button
@@ -811,27 +1009,42 @@ export default function GachaModals({
                         onClick={() => setShowImportAccountVerifyModal(true)}
                         className="px-4 py-2 bg-endfield-yellow text-black text-xs font-black uppercase tracking-widest hover:bg-yellow-400 transition-colors flex items-center justify-center gap-2"
                       >
-                        {importVerificationResult.canImport || importManualAccountMode ? t('modals.import.verifyReset') : t('modals.import.verifyOpen')}
+                        {importVerificationResult.canImport || importManualAccountMode
+                          ? t('modals.import.verifyReset')
+                          : t('modals.import.verifyOpen')}
                         <ArrowRight size={14} />
                       </button>
                     </div>
 
                     {(importVerifyState.selectedAccount || importVerifyState.error || importManualAccountMode) && (
-                      <div className={`mt-3 border px-3 py-2 text-xs font-bold ${
-                        importManualAccountMode
-                          ? getImportVerifyToneClasses('warning')
-                          : getImportVerifyToneClasses(importVerifyState.error ? 'error' : importVerificationResult.tone)
-                      }`}>
-                        {importManualAccountMode ? t('modals.import.manualReady') : (importVerifyState.error || importVerificationResult.message)}
+                      <div
+                        className={`mt-3 border px-3 py-2 text-xs font-bold ${
+                          importManualAccountMode
+                            ? getImportVerifyToneClasses('warning')
+                            : getImportVerifyToneClasses(
+                                importVerifyState.error ? 'error' : importVerificationResult.tone
+                              )
+                        }`}
+                      >
+                        {importManualAccountMode
+                          ? t('modals.import.manualReady')
+                          : importVerifyState.error || importVerificationResult.message}
                       </div>
                     )}
-                    <p className="text-[11px] text-slate-500 dark:text-zinc-500 mt-3">{t('modals.import.accountGuide')}</p>
+                    <p className="text-[11px] text-slate-500 dark:text-zinc-500 mt-3">
+                      {t('modals.import.accountGuide')}
+                    </p>
                   </>
                 ) : (
                   <div className="mt-4 grid md:grid-cols-2 gap-2">
                     {importPreview.accounts.map((account) => (
-                      <div key={`${account.gameUid || ''}:${account.nickName || ''}`} className="border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/60 px-3 py-2">
-                        <div className="text-sm font-bold text-slate-900 dark:text-zinc-100">{account.nickName || '-'}</div>
+                      <div
+                        key={`${account.gameUid || ''}:${account.nickName || ''}`}
+                        className="border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/60 px-3 py-2"
+                      >
+                        <div className="text-sm font-bold text-slate-900 dark:text-zinc-100">
+                          {account.nickName || '-'}
+                        </div>
                         <div className="text-xs text-slate-500 dark:text-zinc-500">UID {account.gameUid || '-'}</div>
                       </div>
                     ))}
@@ -842,14 +1055,22 @@ export default function GachaModals({
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-4">
                   <h4 className="text-sm font-black text-slate-900 dark:text-zinc-100 mb-3 flex items-center gap-2">
-                    <Star size={16} className="text-yellow-500" />{t('modals.import.sixStarDrops')}
+                    <Star size={16} className="text-yellow-500" />
+                    {t('modals.import.sixStarDrops')}
                   </h4>
                   {importPreview.sixStarDrops.length > 0 ? (
                     <div className="grid grid-cols-2 gap-2">
                       {importPreview.sixStarDrops.map((drop) => (
-                        <div key={drop.name} className="flex items-center justify-between gap-2 bg-slate-100 dark:bg-zinc-900 px-3 py-2">
-                          <span className="text-sm font-bold text-slate-800 dark:text-zinc-100 truncate">{drop.name}</span>
-                          <span className="text-xs font-black text-yellow-600 dark:text-endfield-yellow shrink-0">x{formatNumber(drop.count)}</span>
+                        <div
+                          key={drop.name}
+                          className="flex items-center justify-between gap-2 bg-slate-100 dark:bg-zinc-900 px-3 py-2"
+                        >
+                          <span className="text-sm font-bold text-slate-800 dark:text-zinc-100 truncate">
+                            {drop.name}
+                          </span>
+                          <span className="text-xs font-black text-yellow-600 dark:text-endfield-yellow shrink-0">
+                            x{formatNumber(drop.count)}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -860,13 +1081,18 @@ export default function GachaModals({
 
                 <div className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-4">
                   <h4 className="text-sm font-black text-slate-900 dark:text-zinc-100 mb-3 flex items-center gap-2">
-                    <Layers size={16} className="text-blue-500" />{t('modals.import.poolBreakdown')}
+                    <Layers size={16} className="text-blue-500" />
+                    {t('modals.import.poolBreakdown')}
                   </h4>
                   <div className="space-y-2">
                     {importPreview.poolBreakdown.map((pool) => (
                       <div key={pool.name} className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-bold text-slate-700 dark:text-zinc-200 truncate">{pool.name}</span>
-                        <span className="text-xs font-black text-slate-500 dark:text-zinc-400 shrink-0">{formatNumber(pool.count)}</span>
+                        <span className="text-sm font-bold text-slate-700 dark:text-zinc-200 truncate">
+                          {pool.name}
+                        </span>
+                        <span className="text-xs font-black text-slate-500 dark:text-zinc-400 shrink-0">
+                          {formatNumber(pool.count)}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -876,14 +1102,23 @@ export default function GachaModals({
               <div className="text-xs space-y-2">
                 <p className="text-slate-500 dark:text-zinc-500">{t('modals.import.skipDuplicate')}</p>
                 {pendingImport.willSyncToCloud ? (
-                  <p className="text-green-600 dark:text-green-400 flex items-center gap-1"><Cloud size={14} /> {t('modals.import.cloudSync')}</p>
+                  <p className="text-green-600 dark:text-green-400 flex items-center gap-1">
+                    <Cloud size={14} /> {t('modals.import.cloudSync')}
+                  </p>
                 ) : (
-                  <p className="text-amber-600 dark:text-amber-400 flex items-center gap-1"><CloudOff size={14} /> {t('modals.import.localOnly')}</p>
+                  <p className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                    <CloudOff size={14} /> {t('modals.import.localOnly')}
+                  </p>
                 )}
               </div>
             </div>
-            <div className="p-4 border-t border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex gap-3 justify-end">
-              <button onClick={() => setPendingImport(null)} className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-none transition-colors">{t('common.cancel')}</button>
+            <div className="app-modal-actions p-4 border-t border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex flex-wrap gap-3 justify-end">
+              <button
+                onClick={() => setPendingImport(null)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-none transition-colors"
+              >
+                {t('common.cancel')}
+              </button>
               <button
                 onClick={() => confirmImport({ accountOverride: canOverrideImportAccount ? importAccountForm : null })}
                 disabled={syncing || !importAccountReady}
@@ -898,22 +1133,26 @@ export default function GachaModals({
       )}
 
       {pendingImport && canOverrideImportAccount && showImportAccountVerifyModal && (
-        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-2xl max-h-[92vh] overflow-hidden animate-scale-up flex flex-col">
-            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex items-start gap-4">
-              <div className="w-12 h-12 bg-yellow-100 dark:bg-yellow-950/40 text-yellow-600 dark:text-endfield-yellow rounded-sm flex items-center justify-center shrink-0">
+        <div className="app-modal-backdrop fixed inset-0 z-[130] bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('modals.import.verifyModalTitle')}
+            className="app-modal-panel bg-white dark:bg-zinc-900 rounded-none shadow-2xl w-full max-w-2xl animate-scale-up"
+          >
+            <div className="app-modal-header p-3 sm:p-5 border-b border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex items-start gap-3">
+              <div className="hidden sm:flex w-12 h-12 bg-yellow-100 dark:bg-yellow-950/40 text-yellow-600 dark:text-endfield-yellow rounded-sm items-center justify-center shrink-0">
                 <User size={24} />
               </div>
               <div className="min-w-0 flex-1">
-                <h3 className="text-lg font-bold text-slate-800 dark:text-zinc-100">{t('modals.import.verifyModalTitle')}</h3>
-                <p className="text-xs text-slate-500 dark:text-zinc-500 mt-1">
-                  {t('modals.import.verifyModalDesc')}
-                </p>
+                <h3 className="text-lg font-bold text-slate-800 dark:text-zinc-100">
+                  {t('modals.import.verifyModalTitle')}
+                </h3>
               </div>
               <button
                 onClick={() => setShowImportAccountVerifyModal(false)}
                 disabled={importVerifyState.status === 'checking'}
-                className="p-2 text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50"
+                className="app-modal-icon-button text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50"
                 aria-label={t('common.cancel')}
               >
                 <X size={18} />
@@ -921,46 +1160,65 @@ export default function GachaModals({
             </div>
 
             <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#111113] transition-colors">
-              <div className="flex items-center justify-between text-[11px] uppercase tracking-widest">
+              <div className="grid grid-cols-3 gap-2 text-[11px] uppercase tracking-wide sm:tracking-widest">
                 {[
                   [1, t('modals.import.verifyStepToken')],
                   [2, t('modals.import.verifyStepAccount')],
-                  [3, t('modals.import.verifyStepConfirm')]
-                ].map(([step, label], index, items) => (
+                  [3, t('modals.import.verifyStepConfirm')],
+                ].map(([step, label]) => (
                   <React.Fragment key={step}>
-                    <div className={`flex items-center gap-2 transition-colors ${
-                      importVerifyStep >= step
-                        ? 'text-yellow-600 dark:text-yellow-500 font-bold'
-                        : 'text-slate-400 dark:text-zinc-500'
-                    }`}>
-                      <span className={`w-6 h-6 flex items-center justify-center border transition-colors ${
-                        importVerifyStep >= step ? 'border-yellow-500 bg-yellow-500/10' : 'border-current'
-                      }`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)' }}>
+                    <div
+                      className={`flex min-w-0 items-center gap-2 transition-colors ${
+                        importVerifyStep >= step
+                          ? 'text-yellow-600 dark:text-yellow-500 font-bold'
+                          : 'text-slate-400 dark:text-zinc-500'
+                      }`}
+                    >
+                      <span
+                        className={`w-6 h-6 shrink-0 flex items-center justify-center border transition-colors ${
+                          importVerifyStep >= step ? 'border-yellow-500 bg-yellow-500/10' : 'border-current'
+                        }`}
+                        style={{
+                          clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)',
+                        }}
+                      >
                         {step}
                       </span>
                       <span>{label}</span>
                     </div>
-                    {index < items.length - 1 && <div className="h-px flex-1 mx-4 border-b border-solid border-zinc-300 dark:border-zinc-800" />}
                   </React.Fragment>
                 ))}
               </div>
             </div>
 
-            <div className="p-5 space-y-4 overflow-y-auto">
+            <div className="p-4 sm:p-5 space-y-4">
+              <p className="text-xs text-slate-500 dark:text-zinc-500">{t('modals.import.verifyModalDesc')}</p>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="border border-zinc-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950/40 p-3">
-                  <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-500">{t('modals.import.detectedAccount')}</div>
-                  <div className="mt-1 text-sm font-black text-slate-900 dark:text-zinc-100">
-                    {importPreview.accountInfoMissing ? t('modals.import.noAccountInFile') : (importPreview.primaryAccount?.nickName || '-')}
+                  <div className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-zinc-500">
+                    {t('modals.import.detectedAccount')}
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-zinc-500">UID {normalizeComparableGameUid(importPreview.primaryAccount?.gameUid) || '-'}</div>
+                  <div className="mt-1 text-sm font-black text-slate-900 dark:text-zinc-100">
+                    {importPreview.accountInfoMissing
+                      ? t('modals.import.noAccountInFile')
+                      : importPreview.primaryAccount?.nickName || '-'}
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-zinc-500">
+                    UID {normalizeComparableGameUid(importPreview.primaryAccount?.gameUid) || '-'}
+                  </div>
                 </div>
                 <div className={`border p-3 ${getImportVerifyToneClasses(importVerificationResult.tone)}`}>
                   <div className="text-[11px] font-bold uppercase tracking-widest opacity-75">
-                    {importVerificationResult.canImport ? t('modals.import.verifyDone') : t('modals.import.verifyRequired')}
+                    {importVerificationResult.canImport
+                      ? t('modals.import.verifyDone')
+                      : t('modals.import.verifyRequired')}
                   </div>
-                  <div className="mt-1 text-sm font-black">{importVerifyState.selectedAccount?.nickName || t('modals.import.verifyPendingShort')}</div>
-                  <div className="text-xs opacity-80">UID {normalizeComparableGameUid(importVerifyState.selectedAccount?.gameUid) || '-'}</div>
+                  <div className="mt-1 text-sm font-black">
+                    {importVerifyState.selectedAccount?.nickName || t('modals.import.verifyPendingShort')}
+                  </div>
+                  <div className="text-xs opacity-80">
+                    UID {normalizeComparableGameUid(importVerifyState.selectedAccount?.gameUid) || '-'}
+                  </div>
                 </div>
               </div>
 
@@ -976,7 +1234,10 @@ export default function GachaModals({
                   </span>
                   <span className="text-yellow-600 dark:text-yellow-500 font-bold">{importVerifyProgress}%</span>
                 </div>
-                <div className="h-1.5 w-full bg-slate-200 dark:bg-zinc-900 relative overflow-hidden transition-colors" style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%)' }}>
+                <div
+                  className="h-1.5 w-full bg-slate-200 dark:bg-zinc-900 relative overflow-hidden transition-colors"
+                  style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%)' }}
+                >
                   <div
                     className={`h-full transition-all duration-300 ${importVerifyState.status === 'error' ? 'bg-red-500' : 'bg-yellow-500'}`}
                     style={{ width: `${importVerifyProgress}%` }}
@@ -985,24 +1246,29 @@ export default function GachaModals({
                 <div className="mt-2 text-xs text-slate-600 dark:text-zinc-400">{importVerifyStatusMessage}</div>
               </div>
 
-              <div className="bg-slate-50 dark:bg-zinc-950/40 border border-zinc-200 dark:border-zinc-800 p-4 sm:p-5 transition-colors" style={{ clipPath: 'polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%)' }}>
+              <div
+                className="bg-slate-50 dark:bg-zinc-950/40 border border-zinc-200 dark:border-zinc-800 p-4 sm:p-5 transition-colors"
+                style={{ clipPath: 'polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%)' }}
+              >
                 <div className="mb-4">
                   <div className="text-[11px] text-slate-600 dark:text-zinc-400 font-bold uppercase tracking-widest mb-3">
                     {t('import.official.sourceLabel')}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 gap-2 min-[400px]:grid-cols-2 sm:gap-3">
                     {['cn', 'intl'].map((sourceKey) => (
                       <button
                         key={sourceKey}
                         type="button"
-                        onClick={() => setImportVerifyState(prev => ({
-                          ...prev,
-                          source: sourceKey,
-                          status: 'idle',
-                          accounts: [],
-                          selectedAccount: null,
-                          error: ''
-                        }))}
+                        onClick={() =>
+                          setImportVerifyState((prev) => ({
+                            ...prev,
+                            source: sourceKey,
+                            status: 'idle',
+                            accounts: [],
+                            selectedAccount: null,
+                            error: '',
+                          }))
+                        }
                         disabled={importVerifyState.status === 'checking'}
                         className={`border p-4 text-left transition-all duration-300 relative group overflow-hidden disabled:opacity-60 ${
                           importVerifyState.source === sourceKey
@@ -1011,14 +1277,27 @@ export default function GachaModals({
                         }`}
                         style={{ clipPath: 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%)' }}
                       >
-                        <div className={`absolute inset-y-0 left-0 w-1 transition-transform duration-300 origin-bottom ${importVerifyState.source === sourceKey ? 'bg-yellow-500 scale-y-100' : 'bg-zinc-400 dark:bg-zinc-600 scale-y-0 group-hover:scale-y-100'}`} />
-                        <div className={`text-sm font-bold tracking-widest uppercase transition-colors relative z-10 ${importVerifyState.source === sourceKey ? 'text-yellow-600 dark:text-yellow-500' : 'text-slate-800 dark:text-zinc-200 group-hover:text-yellow-600 dark:group-hover:text-yellow-500'}`}>
+                        <div
+                          className={`absolute inset-y-0 left-0 w-1 transition-transform duration-300 origin-bottom ${importVerifyState.source === sourceKey ? 'bg-yellow-500 scale-y-100' : 'bg-zinc-400 dark:bg-zinc-600 scale-y-0 group-hover:scale-y-100'}`}
+                        />
+                        <div
+                          className={`text-sm font-bold tracking-widest uppercase transition-colors relative z-10 ${importVerifyState.source === sourceKey ? 'text-yellow-600 dark:text-yellow-500' : 'text-slate-800 dark:text-zinc-200 group-hover:text-yellow-600 dark:group-hover:text-yellow-500'}`}
+                        >
                           {sourceKey === 'intl' ? t('import.source.intl.label') : t('import.source.cn.label')}
                         </div>
                         <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-1.5 relative z-10">
-                          {sourceKey === 'intl' ? t('import.source.intl.description') : t('import.source.cn.description')}
+                          {sourceKey === 'intl'
+                            ? t('import.source.intl.description')
+                            : t('import.source.cn.description')}
                         </div>
-                        {importVerifyState.source === sourceKey && <div className="absolute top-2 right-2 w-2 h-2 bg-yellow-500 animate-pulse" style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%)' }} />}
+                        {importVerifyState.source === sourceKey && (
+                          <div
+                            className="absolute top-2 right-2 w-2 h-2 bg-yellow-500 animate-pulse"
+                            style={{
+                              clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%)',
+                            }}
+                          />
+                        )}
                       </button>
                     ))}
                   </div>
@@ -1031,22 +1310,43 @@ export default function GachaModals({
 
                 <div className="space-y-4 pt-2 text-xs text-slate-500 dark:text-zinc-400">
                   {[
-                    [1, importVerifyGuide.bindingTitle, importVerifyGuide.bindingDesc, importVerifyGuide.bindingUrl, importVerifyGuide.bindingHost],
-                    [2, importVerifyGuide.tokenTitle, importVerifyGuide.tokenDesc, importVerifyGuide.tokenUrl, importVerifyGuide.tokenHost],
-                    [3, t('modals.import.verifyNoFetchTitle'), t('modals.import.verifyNoFetchDesc'), null, null]
+                    [
+                      1,
+                      importVerifyGuide.bindingTitle,
+                      importVerifyGuide.bindingDesc,
+                      importVerifyGuide.bindingUrl,
+                      importVerifyGuide.bindingHost,
+                    ],
+                    [
+                      2,
+                      importVerifyGuide.tokenTitle,
+                      importVerifyGuide.tokenDesc,
+                      importVerifyGuide.tokenUrl,
+                      importVerifyGuide.tokenHost,
+                    ],
+                    [3, t('modals.import.verifyNoFetchTitle'), t('modals.import.verifyNoFetchDesc'), null, null],
                   ].map(([step, title, desc, href, host]) => (
                     <div key={step} className="flex gap-3">
                       <div
                         className="w-5 h-5 flex-shrink-0 bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-600 flex items-center justify-center text-slate-600 dark:text-zinc-300"
-                        style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%)' }}
+                        style={{
+                          clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%)',
+                        }}
                       >
                         {step}
                       </div>
                       <div>
-                        <p className="text-slate-800 dark:text-zinc-300 font-bold mb-1 uppercase tracking-widest">{title}</p>
+                        <p className="text-slate-800 dark:text-zinc-300 font-bold mb-1 uppercase tracking-widest">
+                          {title}
+                        </p>
                         <p className="mb-1 text-slate-500 dark:text-zinc-500">{desc}</p>
                         {href && (
-                          <a href={href} target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 flex items-center gap-1 underline">
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 flex items-center gap-1 underline"
+                          >
                             {host} <ExternalLink size={10} />
                           </a>
                         )}
@@ -1067,19 +1367,21 @@ export default function GachaModals({
                       value={importVerifyState.tokenInput}
                       onChange={(event) => {
                         const { token, fromJson } = parseImportVerifyTokenInput(event.target.value);
-                        setImportVerifyState(prev => ({
+                        setImportVerifyState((prev) => ({
                           ...prev,
                           tokenInput: token || event.target.value,
                           autoDetected: fromJson,
                           status: 'idle',
                           accounts: [],
                           selectedAccount: null,
-                          error: ''
+                          error: '',
                         }));
                       }}
                       disabled={importVerifyState.status === 'checking'}
                       className="w-full bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 p-4 font-mono text-center text-lg text-slate-800 dark:text-white focus:border-yellow-500 dark:focus:border-yellow-500 focus:outline-none transition-colors placeholder:text-slate-300 dark:placeholder:text-zinc-700 shadow-inner disabled:opacity-60"
-                      style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%)' }}
+                      style={{
+                        clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%)',
+                      }}
                       placeholder={t('modals.import.verifyTokenPlaceholder')}
                     />
                     <div className="absolute right-3 top-[38px] text-[10px] text-slate-400 dark:text-zinc-600 font-mono pointer-events-none">
@@ -1099,10 +1401,15 @@ export default function GachaModals({
                 )}
 
                 {importVerifyState.accounts.length > 1 && (
-                  <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 p-4 transition-colors" style={{ clipPath: 'polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%)' }}>
+                  <div
+                    className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 p-4 transition-colors"
+                    style={{ clipPath: 'polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%)' }}
+                  >
                     <div className="flex items-center gap-2 mb-3">
                       <User className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                      <span className="text-blue-700 dark:text-blue-400 font-bold uppercase tracking-widest text-sm">{t('import.official.multipleAccounts')}</span>
+                      <span className="text-blue-700 dark:text-blue-400 font-bold uppercase tracking-widest text-sm">
+                        {t('import.official.multipleAccounts')}
+                      </span>
                     </div>
                     <p className="text-slate-600 dark:text-zinc-400 text-xs mb-4">
                       {t('modals.import.verifySelectAccount')}
@@ -1118,24 +1425,41 @@ export default function GachaModals({
                               ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/20'
                               : 'border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:border-yellow-500/50'
                           }`}
-                          style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%)' }}
+                          style={{
+                            clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%)',
+                          }}
                         >
-                          <div className="w-12 h-12 flex items-center justify-center shrink-0 border border-black/10 dark:border-white/10 bg-amber-100 dark:bg-amber-800/50" style={{ clipPath: 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)' }}>
+                          <div
+                            className="w-12 h-12 flex items-center justify-center shrink-0 border border-black/10 dark:border-white/10 bg-amber-100 dark:bg-amber-800/50"
+                            style={{ clipPath: 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)' }}
+                          >
                             <User size={24} className="text-amber-600 dark:text-amber-400" />
                           </div>
                           <div className="flex-1 min-w-0 z-10 relative">
                             <div className="flex items-center gap-2 mb-1">
-                              <span className="font-bold text-slate-800 dark:text-white truncate">{account.nickName || '-'}</span>
-                              <span className="shrink-0 text-[10px] px-2 py-0.5 font-bold uppercase tracking-wider bg-amber-500 dark:bg-amber-600 text-white" style={{ clipPath: 'polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 0 100%)' }}>
-                                {account.serverTag ? localizeGameAccountServerTag(account.serverTag, locale) : account.channelName}
+                              <span className="font-bold text-slate-800 dark:text-white truncate">
+                                {account.nickName || '-'}
+                              </span>
+                              <span
+                                className="shrink-0 text-[10px] px-2 py-0.5 font-bold uppercase tracking-wider bg-amber-500 dark:bg-amber-600 text-white"
+                                style={{ clipPath: 'polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 0 100%)' }}
+                              >
+                                {account.serverTag
+                                  ? localizeGameAccountServerTag(account.serverTag, locale)
+                                  : account.channelName}
                               </span>
                             </div>
                             <p className="text-xs text-slate-500 dark:text-zinc-500 font-mono flex items-center gap-1">
                               <span className="text-[9px] uppercase tracking-widest">UID</span>
-                              <span className="text-slate-700 dark:text-zinc-300 font-bold">{normalizeComparableGameUid(account.gameUid) || '-'}</span>
+                              <span className="text-slate-700 dark:text-zinc-300 font-bold">
+                                {normalizeComparableGameUid(account.gameUid) || '-'}
+                              </span>
                             </p>
                           </div>
-                          <ArrowRight size={20} className="text-slate-400 dark:text-zinc-500 group-hover:translate-x-1 group-hover:text-slate-800 dark:group-hover:text-white transition-all z-10 relative" />
+                          <ArrowRight
+                            size={20}
+                            className="text-slate-400 dark:text-zinc-500 group-hover:translate-x-1 group-hover:text-slate-800 dark:group-hover:text-white transition-all z-10 relative"
+                          />
                         </button>
                       ))}
                     </div>
@@ -1143,7 +1467,9 @@ export default function GachaModals({
                 )}
 
                 {(importVerifyState.selectedAccount || importVerifyState.error) && (
-                  <div className={`border px-3 py-2 text-xs font-bold ${getImportVerifyToneClasses(importVerifyState.error ? 'error' : importVerificationResult.tone)}`}>
+                  <div
+                    className={`border px-3 py-2 text-xs font-bold ${getImportVerifyToneClasses(importVerifyState.error ? 'error' : importVerificationResult.tone)}`}
+                  >
                     {importVerifyState.error || importVerificationResult.message}
                   </div>
                 )}
@@ -1157,7 +1483,9 @@ export default function GachaModals({
                 >
                   <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 ease-in-out" />
                   <span className="relative z-10">
-                    {importVerifyState.status === 'checking' ? t('modals.import.verifyProgress') : t('modals.import.verifyAction')}
+                    {importVerifyState.status === 'checking'
+                      ? t('modals.import.verifyProgress')
+                      : t('modals.import.verifyAction')}
                   </span>
                   {importVerifyState.status === 'checking' ? (
                     <RefreshCw size={16} className="animate-spin relative z-10" />
@@ -1170,7 +1498,7 @@ export default function GachaModals({
               <div className="border-t border-zinc-200 dark:border-zinc-800 pt-4">
                 <button
                   type="button"
-                  onClick={() => setImportManualAccountMode(prev => !prev)}
+                  onClick={() => setImportManualAccountMode((prev) => !prev)}
                   className="text-[11px] font-bold uppercase tracking-widest text-slate-500 underline-offset-4 hover:text-slate-900 hover:underline dark:text-zinc-500 dark:hover:text-zinc-100"
                 >
                   {importManualAccountMode ? t('modals.import.manualHide') : t('modals.import.manualShow')}
@@ -1178,22 +1506,32 @@ export default function GachaModals({
 
                 {importManualAccountMode && (
                   <div className="mt-3 border border-zinc-300 dark:border-zinc-700 bg-white/70 dark:bg-zinc-950/40 p-3">
-                    <p className="mb-3 text-[11px] text-slate-500 dark:text-zinc-500">{t('modals.import.manualDesc')}</p>
+                    <p className="mb-3 text-[11px] text-slate-500 dark:text-zinc-500">
+                      {t('modals.import.manualDesc')}
+                    </p>
                     <div className="grid md:grid-cols-2 gap-3">
                       <label className="block">
-                        <span className="block text-xs font-bold text-slate-600 dark:text-zinc-400 mb-1">{t('modals.import.uidLabel')}</span>
+                        <span className="block text-xs font-bold text-slate-600 dark:text-zinc-400 mb-1">
+                          {t('modals.import.uidLabel')}
+                        </span>
                         <input
                           value={importAccountForm.gameUid}
-                          onChange={(event) => setImportAccountForm(prev => ({ ...prev, gameUid: event.target.value }))}
+                          onChange={(event) =>
+                            setImportAccountForm((prev) => ({ ...prev, gameUid: event.target.value }))
+                          }
                           placeholder={t('modals.import.uidPlaceholder')}
                           className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm font-bold text-slate-900 dark:text-zinc-100 outline-none focus:border-yellow-500"
                         />
                       </label>
                       <label className="block">
-                        <span className="block text-xs font-bold text-slate-600 dark:text-zinc-400 mb-1">{t('modals.import.nickNameLabel')}</span>
+                        <span className="block text-xs font-bold text-slate-600 dark:text-zinc-400 mb-1">
+                          {t('modals.import.nickNameLabel')}
+                        </span>
                         <input
                           value={importAccountForm.nickName}
-                          onChange={(event) => setImportAccountForm(prev => ({ ...prev, nickName: event.target.value }))}
+                          onChange={(event) =>
+                            setImportAccountForm((prev) => ({ ...prev, nickName: event.target.value }))
+                          }
                           placeholder={t('modals.import.nickNamePlaceholder')}
                           className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm font-bold text-slate-900 dark:text-zinc-100 outline-none focus:border-yellow-500"
                         />

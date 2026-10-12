@@ -227,7 +227,7 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
   const switchPool = usePoolStore(state => state.switchPool);
   const switchGameAccount = usePoolStore(state => state.switchGameAccount);
   const { refreshPersonalData } = useCloudSync({ showToast: () => {} });
-  const accountSecurityState = accountSecuritySnapshot?.userId === user?.id
+  const accountSecurityState = accountSecuritySnapshot && accountSecuritySnapshot.userId === user?.id
     ? accountSecuritySnapshot.state
     : null;
   const officialImportBlocked = Boolean(
@@ -665,9 +665,12 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
   if (!isOpen) return null;
 
   const modal = (
-    <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-900/60 p-4 py-6 backdrop-blur-md transition-colors dark:bg-black/80">
+    <div className="app-modal-backdrop fixed inset-0 z-[80] bg-slate-900/60 backdrop-blur-md transition-colors dark:bg-black/80">
       <div 
-        className="relative my-auto w-full max-w-2xl bg-white shadow-[0_0_40px_rgba(0,0,0,0.7)] transition-colors dark:bg-[#111113] border border-zinc-300 dark:border-zinc-800"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('import.title')}
+        className="app-modal-panel w-full max-w-2xl bg-white shadow-[0_0_40px_rgba(0,0,0,0.7)] transition-colors dark:bg-[#111113] border border-zinc-300 dark:border-zinc-800"
         style={{ clipPath: 'polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px))' }}
       >
         {/* Decorator Lines */}
@@ -676,24 +679,20 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
         <div className="absolute top-0 left-0 h-full w-1 bg-yellow-500 z-20" />
 
         {/* Header */}
-        <div className="sticky top-0 z-10 flex flex-col gap-4 border-b border-zinc-200 bg-slate-50/95 p-6 backdrop-blur transition-colors dark:border-zinc-800 dark:bg-[#151518]/95 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex min-w-0 flex-1 flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
-            <h2 className="text-2xl font-black text-slate-800 dark:text-white uppercase tracking-widest pl-2">
+        <div className="app-modal-header flex items-center justify-between gap-3 border-b border-zinc-200 bg-slate-50 p-3 transition-colors dark:border-zinc-800 dark:bg-[#151518] sm:px-6 sm:py-4">
+          <div className="min-w-0">
+            <h2 className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-wider sm:text-2xl">
               {t('import.title')}
             </h2>
-            <div 
-              className="flex min-w-0 items-start gap-2 border border-amber-500/50 bg-amber-500/10 px-4 py-2.5 text-[11px] leading-5 text-amber-900 transition-colors dark:border-yellow-500/30 dark:bg-yellow-500/10 dark:text-yellow-500"
-              style={{ clipPath: 'polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%)' }}
-            >
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <p className="min-w-0 tracking-tight">{t('import.retentionNotice')}</p>
-            </div>
           </div>
-          <div className="flex items-center gap-3 self-end sm:self-auto">
+          <div className="flex shrink-0 items-center gap-1">
             <button
+              type="button"
               onClick={() => setShowGuide(!showGuide)}
-              className="p-2 border border-transparent hover:border-yellow-500 hover:bg-yellow-500/10 text-slate-400 dark:text-zinc-500 hover:text-yellow-600 dark:hover:text-yellow-500 transition-all duration-200 rounded-full"
+              className="app-modal-icon-button border border-transparent hover:border-yellow-500 hover:bg-yellow-500/10 text-slate-400 dark:text-zinc-500 hover:text-yellow-600 dark:hover:text-yellow-500 transition-all duration-200"
               title={t('header.helpTitle')}
+              aria-label={t('header.helpTitle')}
+              aria-expanded={showGuide}
             >
               <HelpCircle className="w-5 h-5" />
             </button>
@@ -701,7 +700,7 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
               type="button"
               aria-label={t('common.close')}
               onClick={handleClose}
-              className="p-2 border border-transparent hover:border-red-500 hover:bg-red-500/10 text-slate-400 dark:text-zinc-500 hover:text-red-600 dark:hover:text-red-500 transition-all duration-200"
+              className="app-modal-icon-button border border-transparent hover:border-red-500 hover:bg-red-500/10 text-slate-400 dark:text-zinc-500 hover:text-red-600 dark:hover:text-red-500 transition-all duration-200"
               style={{ clipPath: 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)' }}
               disabled={isImportBusy}
             >
@@ -710,42 +709,43 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
           </div>
         </div>
 
-        {/* Steps Indicator (Always Visible) */}
-        <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#111113] transition-colors">
-           <div className="flex items-center justify-between text-xs uppercase tracking-widest pl-2">
+        <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#111113] transition-colors sm:px-6">
+           <div className="grid grid-cols-3 gap-2 text-[11px] uppercase tracking-wide sm:text-xs sm:tracking-widest">
               {/* 步骤1 */}
-              <div className={`flex items-center gap-3 transition-colors ${
+              <div className={`flex min-w-0 items-center gap-2 transition-colors ${
                 importStatus === ImportStatus.IDLE && fetchStatus === 'idle'
                   ? 'text-yellow-600 dark:text-yellow-500 font-bold'
                   : 'text-slate-400 dark:text-zinc-500'
               }`}>
-                 <span className={`w-6 h-6 flex items-center justify-center border transition-colors ${importStatus === ImportStatus.IDLE && fetchStatus === 'idle' ? 'border-yellow-500 bg-yellow-500/10' : 'border-current'}`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)' }}>1</span>
+                 <span className={`w-6 h-6 shrink-0 flex items-center justify-center border transition-colors ${importStatus === ImportStatus.IDLE && fetchStatus === 'idle' ? 'border-yellow-500 bg-yellow-500/10' : 'border-current'}`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)' }}>1</span>
                  <span>{t('import.step.token')}</span>
               </div>
-              <div className="h-px flex-1 mx-6 border-b border-solid border-zinc-300 dark:border-zinc-800"></div>
               {/* 步骤2 */}
-              <div className={`flex items-center gap-3 transition-colors ${
+              <div className={`flex min-w-0 items-center gap-2 transition-colors ${
                 ['authenticating', 'fetching', 'processing', 'success'].includes(fetchStatus) && importStatus === ImportStatus.IDLE
                   ? 'text-yellow-600 dark:text-yellow-500 font-bold'
                   : 'text-slate-400 dark:text-zinc-500'
               }`}>
-                 <span className={`w-6 h-6 flex items-center justify-center border transition-colors ${['authenticating', 'fetching', 'processing', 'success'].includes(fetchStatus) && importStatus === ImportStatus.IDLE ? 'border-yellow-500 bg-yellow-500/10' : 'border-current'}`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)' }}>2</span>
+                 <span className={`w-6 h-6 shrink-0 flex items-center justify-center border transition-colors ${['authenticating', 'fetching', 'processing', 'success'].includes(fetchStatus) && importStatus === ImportStatus.IDLE ? 'border-yellow-500 bg-yellow-500/10' : 'border-current'}`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)' }}>2</span>
                  <span>{t('import.step.fetch')}</span>
               </div>
-              <div className="h-px flex-1 mx-6 border-b border-solid border-zinc-300 dark:border-zinc-800"></div>
               {/* 步骤3 */}
-              <div className={`flex items-center gap-3 transition-colors ${
+              <div className={`flex min-w-0 items-center gap-2 transition-colors ${
                 importStatus === ImportStatus.SAVING || importStatus === ImportStatus.SUCCESS
                   ? 'text-yellow-600 dark:text-yellow-500 font-bold'
                   : 'text-slate-400 dark:text-zinc-500'
               }`}>
-                 <span className={`w-6 h-6 flex items-center justify-center border transition-colors ${importStatus === ImportStatus.SAVING || importStatus === ImportStatus.SUCCESS ? 'border-yellow-500 bg-yellow-500/10' : 'border-current'}`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)' }}>3</span>
+                 <span className={`w-6 h-6 shrink-0 flex items-center justify-center border transition-colors ${importStatus === ImportStatus.SAVING || importStatus === ImportStatus.SUCCESS ? 'border-yellow-500 bg-yellow-500/10' : 'border-current'}`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)' }}>3</span>
                  <span>{t('import.step.save')}</span>
               </div>
            </div>
         </div>
 
-        <div className="p-6 relative">
+        <div className="p-4 relative sm:p-6">
+          <div className="mb-4 flex items-start gap-2 border border-amber-500/50 bg-amber-500/10 p-3 text-xs leading-5 text-amber-900 dark:border-yellow-500/30 dark:bg-yellow-500/10 dark:text-yellow-500">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <p className="min-w-0">{t('import.retentionNotice')}</p>
+          </div>
           {/* 未登录提示 */}
           {!user && (
             <div className="mb-6 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 p-4 transition-colors" style={{ clipPath: 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%)' }}>
@@ -892,7 +892,7 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
               </div>
 
               {/* 统计网格 */}
-              <div className="grid grid-cols-3 gap-1">
+              <div className="grid grid-cols-3 gap-1 [&>div]:min-w-0 [&>div]:px-2 sm:[&>div]:px-4">
                 <div className="bg-slate-100 dark:bg-zinc-800 p-4 text-center transition-colors">
                   <p className="text-xs text-slate-500 dark:text-zinc-500 uppercase tracking-widest">{t('import.summary.total')}</p>
                   <p className="text-xl font-bold text-slate-800 dark:text-white mt-1">{formatNumber(importResult.summary?.total || 0)}</p>

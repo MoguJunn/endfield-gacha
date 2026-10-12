@@ -269,20 +269,20 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in" onClick={onClose}>
-      <div className="max-h-[92vh] w-full max-w-6xl overflow-y-auto bg-white shadow-2xl animate-scale-up dark:bg-zinc-900" onClick={e => e.stopPropagation()}>
-        <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex justify-between items-center">
-          <div>
+    <div className="app-modal-backdrop fixed inset-0 z-50 bg-black/50 backdrop-blur-sm animate-fade-in" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label={t('records.editor.title')} className="app-modal-panel w-full max-w-6xl bg-white shadow-2xl animate-scale-up dark:bg-zinc-900" onClick={e => e.stopPropagation()}>
+        <div className="app-modal-header p-3 sm:p-4 border-b border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex gap-3 justify-between items-center">
+          <div className="min-w-0">
             <h3 className="font-bold text-slate-700 dark:text-zinc-300">{t('records.editor.title')}</h3>
-            <p className="mt-1 text-xs text-zinc-500">{t('records.editor.subtitle')}</p>
+            <p className="app-modal-header-description mt-1 text-xs text-zinc-500">{t('records.editor.subtitle')}</p>
           </div>
-          <button type="button" aria-label={t('records.editor.close')} disabled={saving} onClick={onClose} className="text-slate-400 transition-colors hover:text-slate-600 disabled:opacity-40 dark:text-zinc-500 dark:hover:text-zinc-400">
+          <button type="button" aria-label={t('records.editor.close')} disabled={saving} onClick={onClose} className="app-modal-icon-button text-slate-400 transition-colors hover:text-slate-600 disabled:opacity-40 dark:text-zinc-500 dark:hover:text-zinc-400">
             <X size={20} />
           </button>
         </div>
 
         <div className="grid lg:grid-cols-[minmax(18rem,0.85fr)_minmax(0,1.35fr)]">
-          <section className="space-y-6 border-b border-zinc-200 p-5 dark:border-zinc-800 sm:p-6 lg:border-b-0 lg:border-r">
+          <section className="min-w-0 space-y-6 border-b border-zinc-200 p-4 dark:border-zinc-800 sm:p-6 lg:border-b-0 lg:border-r">
             <div className="space-y-5">
               <label className="block space-y-2 text-xs font-bold text-zinc-500">
                 {t('records.editor.timestamp')}
@@ -378,7 +378,7 @@ const EditItemModal = React.memo(({ item, onClose, onUpdate, onDelete, pools = [
             </div>
           </section>
 
-          <section className="min-w-0 space-y-4 p-5 sm:p-6">
+          <section className="min-w-0 space-y-4 p-4 sm:p-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <div className="text-xs font-black text-zinc-700 dark:text-zinc-200">{t('records.editor.target')}</div>

@@ -1,0 +1,88 @@
+/* Shared viewport bounds for the public account and data dialogs. The panel
+   scrolls as a whole so even very short zoomed viewports can reach every action. */
+body:has(.app-modal-backdrop) {
+  overflow: hidden;
+}
+
+.app-modal-backdrop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  height: 100dvh;
+  padding: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right))
+    max(0.75rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left));
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+.app-modal-panel {
+  position: relative;
+  min-width: 0;
+  max-height: 100%;
+  margin-block: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  scrollbar-gutter: stable;
+  scroll-padding-top: 7rem;
+}
+
+.app-modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+.app-modal-panel :where(input, textarea, select) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app-modal-icon-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+@media (max-width: 640px) {
+  .app-modal-backdrop {
+    padding: max(0.5rem, env(safe-area-inset-top)) max(0.5rem, env(safe-area-inset-right))
+      max(0.5rem, env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
+  }
+
+  .app-modal-panel :where(button, a) {
+    min-height: 2.75rem;
+  }
+
+  /* iOS zooms a focused field when its text is smaller than 16px. */
+  .app-modal-panel :where(input:not([type='checkbox']):not([type='radio']), textarea, select) {
+    font-size: 16px;
+  }
+
+  .app-modal-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-modal-actions > button {
+    min-width: 0;
+    justify-content: center;
+  }
+}
+
+@media (max-height: 480px) {
+  .app-modal-panel {
+    scroll-padding-top: 5rem;
+  }
+
+  .app-modal-header {
+    padding-block: 0.5rem;
+  }
+
+  .app-modal-header-description {
+    display: none;
+  }
+}

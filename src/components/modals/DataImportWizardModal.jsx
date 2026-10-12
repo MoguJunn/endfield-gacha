@@ -94,28 +94,31 @@ export default function DataImportWizardModal({
   }
 
   const modal = (
-    <div className="fixed inset-0 z-[95] flex items-start justify-center overflow-y-auto bg-slate-950/70 p-4 py-8 backdrop-blur-md">
+    <div className="app-modal-backdrop fixed inset-0 z-[95] bg-slate-950/70 backdrop-blur-md">
       <div
-        className="relative my-auto w-full max-w-5xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-[#101012]"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('import.fileWizard.title')}
+        className="app-modal-panel w-full max-w-5xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-[#101012]"
         style={{ clipPath: 'polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px))' }}
       >
         <div className="absolute left-0 top-0 h-1 w-full bg-yellow-500" />
-        <div className="flex items-start justify-between gap-4 border-b border-zinc-200 bg-slate-50 px-6 py-5 dark:border-zinc-800 dark:bg-zinc-950">
-          <div>
-            <h2 className="text-xl font-black text-slate-900 dark:text-zinc-50">{t('import.fileWizard.title')}</h2>
-            <p className="mt-1 text-xs text-slate-500 dark:text-zinc-400">{t('import.fileWizard.subtitle')}</p>
+        <div className="app-modal-header flex items-center justify-between gap-3 border-b border-zinc-200 bg-slate-50 p-3 dark:border-zinc-800 dark:bg-zinc-950 sm:px-6 sm:py-4">
+          <div className="min-w-0">
+            <h2 className="text-lg font-black text-slate-900 dark:text-zinc-50 sm:text-xl">{t('import.fileWizard.title')}</h2>
+            <p className="app-modal-header-description mt-1 text-xs text-slate-500 dark:text-zinc-400">{t('import.fileWizard.subtitle')}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="border border-transparent p-2 text-slate-400 transition-colors hover:border-red-500 hover:bg-red-500/10 hover:text-red-500"
+            className="app-modal-icon-button border border-transparent text-slate-400 transition-colors hover:border-red-500 hover:bg-red-500/10 hover:text-red-500"
             aria-label={t('common.close')}
           >
             <X size={20} />
           </button>
         </div>
 
-        <div className="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 p-4 sm:gap-4 sm:p-6 md:grid-cols-2 xl:grid-cols-4">
           <ImportSourceCard
             icon={Database}
             title={t('import.fileWizard.internal.title')}
@@ -170,7 +173,7 @@ export default function DataImportWizardModal({
           />
         </div>
 
-        <div className="border-t border-zinc-200 px-6 py-4 text-[11px] leading-5 text-slate-500 dark:border-zinc-800 dark:text-zinc-500">
+        <div className="border-t border-zinc-200 px-4 py-4 text-[11px] leading-5 text-slate-500 dark:border-zinc-800 dark:text-zinc-500 sm:px-6">
           {t('import.fileWizard.footer')}
         </div>
       </div>
