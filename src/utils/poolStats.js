@@ -5,6 +5,8 @@ import { createHitIntervalTracker, recordHitIntervalHit, recordHitIntervalPull }
 import { buildQuotaLedgerFromHistory } from './quotaEconomy.js';
 import { buildCapabilityAwarePoolResourceSummary, buildPoolResourceSummary } from './resourceEconomy.js';
 import { resolvePoolCapabilities } from './poolCapabilities.js';
+import { isStatisticsHistoryRecord, statisticsHistory, statisticsScopeKey } from '../../shared/statisticsEligibility.js';
+import { prepareStatisticsContinuity } from './statisticsContinuity.js';
 import {
   buildOneTimeTargetGuaranteeState,
   buildPaidTimelinePityMap,
@@ -134,6 +136,19 @@ export function buildPoolStats({
   includeFreePullsInStats = false,
   resolveCharacter = resolveCharacterRecordByName,
 }) {
+  const rowKey = row => `${statisticsScopeKey(row)}:${getHistoryRecordKey(row)}`;
+  const sourceHistory = accountHistory || [...new Map([...allLimitedHistory, ...(normalizedCurrentPoolHistory || [])].map(row => [rowKey(row), row])).values()];
+  const continuity = prepareStatisticsContinuity({ history: sourceHistory, pools: poolCatalog.length ? poolCatalog : [...selectedPools, currentPool] }).history;
+  const byId = new Map(continuity.map(row => [rowKey(row), row.statisticsContinuity]));
+  const annotate = rows => rows.map(row => byId.get(rowKey(row)) ? { ...row, statisticsContinuity: byId.get(rowKey(row)) } : row);
+  normalizedCurrentPoolHistory = annotate(normalizedCurrentPoolHistory || []);
+  allLimitedHistory = annotate(allLimitedHistory);
+  if (Array.isArray(accountHistory)) accountHistory = annotate(accountHistory);
+  const exclusions = [...allLimitedHistory, ...(accountHistory || []), ...(normalizedCurrentPoolHistory || [])]
+    .filter(row => !isStatisticsHistoryRecord(row));
+  normalizedCurrentPoolHistory = statisticsHistory(normalizedCurrentPoolHistory, { exclusions });
+  allLimitedHistory = statisticsHistory(allLimitedHistory, { exclusions });
+  if (Array.isArray(accountHistory)) accountHistory = statisticsHistory(accountHistory, { exclusions });
   const currentPoolCapabilities = resolvePoolCapabilities(currentPool);
   const isLimitedPool = currentPoolCapabilities.basePoolType === 'limited';
   const isWeaponPool = currentPoolCapabilities.basePoolType === 'weapon';
@@ -366,6 +381,7 @@ export function buildPoolStats({
   let tempCounter = 0;
   let targetScopeTotal = 0;
   let limitedScopeTotal = 0;
+  let unknownInheritedIntervalCount = 0;
 
   validPullsList.forEach((pull) => {
     const isFree = isFreePull(pull);
@@ -392,7 +408,8 @@ export function buildPoolStats({
         : null;
       const fallbackSixStarCount = isFree ? 30 : tempCounter;
       const effectiveSixStarCount =
-        Number.isFinite(inheritedSixStarCount) && inheritedSixStarCount > 0
+        pull.statisticsContinuity?.interrupted && !isFree ? pull.statisticsContinuity.sixStarPity
+          : Number.isFinite(inheritedSixStarCount) && inheritedSixStarCount > 0
           ? inheritedSixStarCount
           : fallbackSixStarCount;
       const pullRecord = {
@@ -401,7 +418,8 @@ export function buildPoolStats({
         isGuaranteed: isGuaranteedPull(pull),
         isSpark,
       };
-      sixStarPulls.push(pullRecord);
+      if (pull.statisticsContinuity?.sixStarKnown === false && !isFree) unknownInheritedIntervalCount++;
+      else sixStarPulls.push(pullRecord);
       if (isUp) {
         upSixStarHits.push(pullRecord);
         recordHitIntervalHit(targetSixStarIntervalTracker, { isSpark });
@@ -417,13 +435,13 @@ export function buildPoolStats({
   });
 
   const pullCounts = sixStarPulls.map((s) => s.count);
-  const maxPityRecorded = pullCounts.length > 0 ? Math.max(...pullCounts) : 0;
-  const minPityRecorded = pullCounts.length > 0 ? Math.min(...pullCounts) : 0;
+  const maxPityRecorded = pullCounts.length > 0 ? Math.max(...pullCounts) : unknownInheritedIntervalCount ? null : 0;
+  const minPityRecorded = pullCounts.length > 0 ? Math.min(...pullCounts) : unknownInheritedIntervalCount ? null : 0;
   const avgPityRecorded =
-    pullCounts.length > 0 ? (pullCounts.reduce((a, b) => a + b, 0) / pullCounts.length).toFixed(1) : 0;
+    pullCounts.length > 0 ? (pullCounts.reduce((a, b) => a + b, 0) / pullCounts.length).toFixed(1) : unknownInheritedIntervalCount ? null : 0;
 
   const avgAllSixStar =
-    pullCounts.length > 0 ? (pullCounts.reduce((sum, value) => sum + value, 0) / pullCounts.length).toFixed(2) : '0';
+    pullCounts.length > 0 ? (pullCounts.reduce((sum, value) => sum + value, 0) / pullCounts.length).toFixed(2) : unknownInheritedIntervalCount ? null : '0';
 
   const sparkCount = upSixStarHits.filter((p) => p.isSpark).length;
   const upHitCount = upSixStarHits.length;
@@ -598,6 +616,30 @@ export function buildPoolStats({
         pity5: stats.currentPity5,
         isInherited: false,
       };
+
+  const lastPaid = (usesInheritedPity ? scopedPityTimeline : normalizedCurrentPoolHistory)
+    .filter(row => !isGiftPull(row) && !isFreePull(row))
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)).at(-1);
+  const trust = lastPaid?.statisticsContinuity;
+  if (trust?.interrupted) {
+    effectivePity.pity6 = trust.currentPity6;
+    effectivePity.pity5 = trust.currentPity5;
+    stats.currentPity = trust.currentPity6;
+    stats.currentPity5 = trust.currentPity5;
+    inheritedPityInfo.inheritedPity = trust.currentPity6;
+    inheritedPityInfo.inheritedPity5 = trust.currentPity5;
+    if (trust.currentPity6 === null) stats.currentProbability = null;
+  }
+  const unknownCopyHistoryCount = normalizedCurrentPoolHistory.filter(row => row.statisticsContinuity?.copyHistoryKnown === false).length;
+  const cumulativeHistoryKnown = !normalizedCurrentPoolHistory.some(row => row.statisticsContinuity?.cumulativeHistoryKnown === false);
+  if (!cumulativeHistoryKnown) {
+    stats.rewardPaidTotal = null;
+    stats.rewardFreePullCount = null;
+    stats.gifts = { count: null, limitedCount: null, standardCount: null };
+  }
+  if (unknownInheritedIntervalCount || unknownCopyHistoryCount || trust?.interrupted || !cumulativeHistoryKnown) {
+    stats.statisticsContinuity = { unknownInheritedIntervalCount, unknownCopyHistoryCount, cumulativeHistoryKnown };
+  }
 
   return {
     stats,

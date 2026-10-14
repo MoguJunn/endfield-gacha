@@ -268,6 +268,11 @@ export function buildOneTimeTargetGuaranteeState({
   });
   const poolLookup = buildPoolLookup(pools, pool);
   const guaranteedRecordKeys = new Set();
+  if (timeline.some(record => record.statisticsContinuity?.cumulativeHistoryKnown === false)) {
+    return { supported: true, pity: null,
+      hasReceivedGuaranteedLimited: timeline.some(record => isTargetPull(record, resolveRecordPool(record, poolLookup, pool) || pool)) ? true : null,
+      guaranteedRecordKeys, timeline, historyIncomplete: true };
+  }
   let pity = 0;
   let hasReceivedGuaranteedLimited = false;
 
@@ -306,6 +311,11 @@ export function calculatePaidTimelinePity(timeline = []) {
 
   (Array.isArray(timeline) ? timeline : []).forEach((record) => {
     const rarity = Number(record?.rarity) || 0;
+    if (record.statisticsContinuity?.interrupted) {
+      sixStarPity = record.statisticsContinuity.currentPity6;
+      fiveStarPity = record.statisticsContinuity.currentPity5;
+      return;
+    }
     sixStarPity = rarity >= 6 ? 0 : sixStarPity + 1;
     fiveStarPity = rarity >= 5 ? 0 : fiveStarPity + 1;
   });
@@ -326,8 +336,8 @@ export function buildPaidTimelinePityMap(timeline = []) {
 
     if (rarity >= 5 && recordKey) {
       pityMap.set(recordKey, {
-        sixStarPity: rarity >= 6 ? sixStarPity : null,
-        fiveStarPity,
+        sixStarPity: rarity >= 6 ? record.statisticsContinuity?.interrupted ? record.statisticsContinuity.sixStarPity : sixStarPity : null,
+        fiveStarPity: record.statisticsContinuity?.interrupted ? record.statisticsContinuity.fiveStarPity : fiveStarPity,
       });
     }
 

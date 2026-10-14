@@ -1,4 +1,4 @@
-export const STATISTICS_SNAPSHOT_VERSION = 'public-statistics-v4';
+export const STATISTICS_SNAPSHOT_VERSION = 'public-statistics-v6';
 
 // Activity measures uploads/edits now, never the in-game pull timestamp.
 export function statisticsRefreshMinutes({ contributors10m = 0, changedRows10m = 0, changedRows60m = 0 } = {}) {

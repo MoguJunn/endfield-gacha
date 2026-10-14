@@ -17,6 +17,10 @@ function calculatePity(history = [], rarityThreshold = 6) {
       continue;
     }
 
+    if (item.statisticsContinuity?.interrupted) {
+      return rarityThreshold === 6 ? item.statisticsContinuity.currentPity6 : item.statisticsContinuity.currentPity5;
+    }
+
     if (Number(item?.rarity) >= rarityThreshold) {
       break;
     }
@@ -36,8 +40,10 @@ export function getPoolAnalysisPityState(currentPool, stats = {}, effectivePity 
   const usesInheritedPity = capabilities.pityScope === 'shared' || capabilities.pityScope === 'series';
   const maxPity6 = Number(capabilities.rules.sixStarPity || 80);
   const maxPity5 = Number(capabilities.rules.fiveStarPity || 10);
-  const displayPity6 = usesInheritedPity ? (effectivePity?.pity6 ?? stats.currentPity ?? 0) : (stats.currentPity ?? 0);
-  const displayPity5 = usesInheritedPity ? (effectivePity?.pity5 ?? stats.currentPity5 ?? 0) : (stats.currentPity5 ?? 0);
+  const displayPity6 = usesInheritedPity && effectivePity && 'pity6' in effectivePity
+    ? effectivePity.pity6 : 'currentPity' in stats ? stats.currentPity : 0;
+  const displayPity5 = usesInheritedPity && effectivePity && 'pity5' in effectivePity
+    ? effectivePity.pity5 : 'currentPity5' in stats ? stats.currentPity5 : 0;
 
   return {
     normalizedType,

@@ -17,6 +17,7 @@ import {
 } from './quotaEconomy.js';
 import { buildResourceSummaryFromAggregates, DEFAULT_RESOURCE_RULES } from './resourceEconomy.js';
 import { statisticsTargetReferences } from '../../shared/statisticsScopes.js';
+import { prepareStatisticsContinuity } from './statisticsContinuity.js';
 
 // 与 storedPoolObservations 相同的有效稀有度集合，invalid 记录一律不进入统计。
 const VALID_RARITIES = [4, 5, 6];
@@ -236,6 +237,7 @@ function createPoolContribution() {
     unknownTargetCount: 0,
     giftCount: 0,
     missingSeriesSixStarCount: 0,
+    unknownCopyHistoryCount: 0,
     quota: createEmptyQuotaSummary(),
     resourceAggregate: createEmptyResourceAggregate(),
   };
@@ -334,7 +336,8 @@ function addExclusionCount(exclusionCountsByAccount, account, reason, rawPoolId,
  *
  * 生命周期仅限本次计算：返回对象不持有原始/规范化历史记录，也不做跨任务缓存。
  */
-export function prepareScopedLegacyStatistics({ history = [], pools = [], characters = [] } = {}) {
+export function prepareScopedLegacyStatistics({ history = [], pools = [], characters = [], exclusions = [] } = {}) {
+  history = prepareStatisticsContinuity({ history, pools, exclusions }).history;
   const poolLookup = buildPoolLookup(pools);
   const catalogIndex = buildCatalogIndex(characters);
   const resolvePool = createPoolResolver();
@@ -475,6 +478,11 @@ export function prepareScopedLegacyStatistics({ history = [], pools = [], charac
         continue;
       }
 
+      if (row.statisticsContinuity?.copyHistoryKnown === false) {
+        if (!gift) contribution.unknownCopyHistoryCount += 1;
+        continue;
+      }
+
       const copyNumber = (copies.get(identity.key) || 0) + 1;
       copies.set(identity.key, copyNumber);
       if (!gift) {
@@ -497,7 +505,8 @@ export function prepareScopedLegacyStatistics({ history = [], pools = [], charac
         const { capabilities, targetReferences } = resolvePool(pool);
         bucketEntries.push({
           canonicalPoolId: String(getPoolRecordId(pool)),
-          interval,
+          interval: row.statisticsContinuity?.interrupted ? row.statisticsContinuity.sixStarPity : interval,
+          unknown: row.statisticsContinuity?.sixStarKnown === false,
           isBucketLead,
           classification: classifySixStarTarget(row, capabilities, targetReferences, catalogIndex),
         });
@@ -555,6 +564,8 @@ export function prepareScopedLegacyStatistics({ history = [], pools = [], charac
     let intervalCount = 0;
     let boundaryIntervalCount = 0;
     let missingSeriesIntervalCount = 0;
+    let unknownInheritedIntervalCount = 0;
+    let unknownCopyHistoryCount = 0;
     let participatingAccounts = 0;
 
     // accountKey 指定时只合并该账号；未指定时合并全部账号。范围只影响合并，
@@ -586,6 +597,7 @@ export function prepareScopedLegacyStatistics({ history = [], pools = [], charac
         unknownTargetCount += contribution.unknownTargetCount;
         giftCount += contribution.giftCount;
         missingSeriesIntervalCount += contribution.missingSeriesSixStarCount;
+        unknownCopyHistoryCount += contribution.unknownCopyHistoryCount;
         addQuota(quota, contribution.quota);
         addResourceAggregate(resourceAggregate, contribution.resourceAggregate);
       }
@@ -602,6 +614,8 @@ export function prepareScopedLegacyStatistics({ history = [], pools = [], charac
         if (!members.has(entry.canonicalPoolId)) {
           continue;
         }
+
+        if (entry.unknown) { unknownInheritedIntervalCount += 1; continue; }
 
         intervalSum += entry.interval;
         intervalCount += 1;
@@ -674,6 +688,9 @@ export function prepareScopedLegacyStatistics({ history = [], pools = [], charac
         intervalCount,
         boundaryIntervalCount,
         missingSeriesIntervalCount,
+        unknownInheritedIntervalCount,
+        unknownCopyHistoryCount,
+        resourceHistoryComplete: unknownCopyHistoryCount === 0,
         excludedRecords: Object.values(exclusions).reduce((sum, count) => sum + count, 0),
         exclusions,
       },
@@ -694,9 +711,9 @@ export function prepareScopedLegacyStatistics({ history = [], pools = [], charac
  * 多个范围复用逐池贡献时，先 prepare 再多次 build。
  */
 export function buildScopedLegacyStatistics({
-  history = [], pools = [], characters = [], memberPoolIds = [], accountKey = null,
+  history = [], pools = [], characters = [], memberPoolIds = [], accountKey = null, exclusions = [],
 } = {}) {
-  return prepareScopedLegacyStatistics({ history, pools, characters }).build({ memberPoolIds, accountKey });
+  return prepareScopedLegacyStatistics({ history, pools, characters, exclusions }).build({ memberPoolIds, accountKey });
 }
 
 export default buildScopedLegacyStatistics;

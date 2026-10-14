@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 
-import { resolveCharacterAliasMap, resolvePoolAliasMap } from '../../shared/idAliasService.js';
+import { resolveAliasValue, resolveCharacterAliasMap, resolvePoolAliasMap } from '../../shared/idAliasService.js';
 import { formatAccountGachaHistoryRows } from '../../src/utils/accountGachaHistoryFormat.js';
 import { buildPersonalAnalysisSnapshots } from '../../src/utils/personalAnalysisSnapshot.js';
+import { loadWorkbenchEntriesForAnalytics } from './dataWorkbenchAnalytics.js';
 
 const HISTORY_FIELDS = [
   'id',
@@ -29,6 +30,7 @@ const HISTORY_FIELDS = [
   'batch_id',
   'is_info_book',
   'edit_version',
+  'statistics_excluded',
 ].join(', ');
 
 const POOL_FIELDS = [
@@ -66,7 +68,7 @@ const CHARACTER_FIELDS = [
 ].join(', ');
 
 const ERROR_CODE_PATTERN = /[^A-Za-z0-9_.:-]+/g;
-export const PERSONAL_ANALYSIS_SCHEMA_VERSION = 3;
+export const PERSONAL_ANALYSIS_SCHEMA_VERSION = 5;
 
 function readEnvironment() {
   return globalThis.process?.env || {};
@@ -230,24 +232,25 @@ export async function loadPersonalAnalysisModel(adminClient, userId, config = {}
     maxHistoryPages: parseInteger(config.maxHistoryPages, 100, { min: 1, max: 500 }),
     historyPageConcurrency: parseInteger(config.historyPageConcurrency, 2, { min: 1, max: 4 }),
   };
-  const rawHistory = await loadHistory(adminClient, userId, normalizedModelConfig);
+  const [rawHistory, workbench, statisticsExclusions] = await Promise.all([
+    loadHistory(adminClient, userId, normalizedModelConfig),
+    loadWorkbenchEntriesForAnalytics(adminClient, userId),
+    callRpc(adminClient, 'read_account_statistics_exclusions', { p_user_id: userId }),
+  ]);
+  if (!Array.isArray(statisticsExclusions)) throw new Error('Account statistics exclusions unavailable');
   const [poolAliasMap, characterAliasMap] = await Promise.all([
-    resolvePoolAliasMap(
-      adminClient,
-      rawHistory.map((row) => row?.pool_id)
-    ),
-    resolveCharacterAliasMap(
-      adminClient,
-      rawHistory.map((row) => row?.character_id)
-    ),
+    resolvePoolAliasMap(adminClient, [...rawHistory.map((row) => row?.pool_id), ...workbench.entries.map(row => row.pool_id), ...statisticsExclusions.map(row => row.pool_id)]),
+    resolveCharacterAliasMap(adminClient, [...rawHistory.map((row) => row?.character_id), ...workbench.entries.map(row => row.values?.entityId)]),
   ]);
   const history = formatAccountGachaHistoryRows(rawHistory, {
     poolAliasMap,
     characterAliasMap,
   });
+  const workbenchEntries = workbench.entries.map(row => ({ ...row, pool_id: resolveAliasValue(poolAliasMap, row.pool_id), values: { ...row.values, ...(row.values?.entityId ? { entityId: resolveAliasValue(characterAliasMap, row.values.entityId) } : {}) } }));
   const [pools, characters] = await Promise.all([loadPools(adminClient, userId), loadCharacters(adminClient)]);
 
-  return buildPersonalAnalysisSnapshots({ history, pools, characters, userId });
+  return buildPersonalAnalysisSnapshots({ history, pools, characters, userId, workbenchEntries,
+    statisticsExclusions: statisticsExclusions.map(row => ({ ...row, pool_id: resolveAliasValue(poolAliasMap, row.pool_id) })) });
 }
 
 function normalizeClaimedJobs(claimed) {
