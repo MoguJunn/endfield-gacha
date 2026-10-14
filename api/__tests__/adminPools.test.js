@@ -20,7 +20,7 @@ vi.mock('../_lib/siteAuth.js', () => ({
   requireSuperAdminUser: mocks.requireSuperAdminUser,
 }));
 
-import adminPoolsHandler from '../_routes/root/admin-pools.js';
+import adminPoolsHandler, { __internal } from '../_routes/root/admin-pools.js';
 
 function createJsonResponseRecorder() {
   return {
@@ -63,6 +63,7 @@ function createRequest({
 function matchesFilters(row, filters) {
   return filters.every((filter) => {
     if (filter.op === 'eq') return row?.[filter.column] === filter.value;
+    if (filter.op === 'in') return filter.value.includes(row?.[filter.column]);
     return true;
   });
 }
@@ -104,6 +105,16 @@ class AdminPoolsQuery {
     return this;
   }
 
+  in(column, value) {
+    this.filters.push({ op: 'in', column, value });
+    return this;
+  }
+
+  range(from, to) {
+    this.page = { from, to };
+    return this;
+  }
+
   order() {
     return this;
   }
@@ -121,6 +132,8 @@ function createAdminClient() {
       {
         pool_id: 'pool-1',
         name: '测试卡池',
+        type: 'limited',
+        up_character: '测试角色',
         created_at: '2026-06-01T00:00:00.000Z',
       },
     ],
@@ -146,6 +159,10 @@ function createAdminClient() {
     history: [
       {
         record_id: 1,
+        id: '1',
+        user_id: 'user-a',
+        game_uid: 'account-a',
+        server_id: 'cn',
         pool_id: 'pool-1',
         rarity: 6,
         character_name: '测试角色',
@@ -154,6 +171,10 @@ function createAdminClient() {
       },
       {
         record_id: 2,
+        id: '2',
+        user_id: 'user-b',
+        game_uid: 'account-b',
+        server_id: 'intl',
         pool_id: 'pool-1',
         rarity: 6,
         character_name: '常驻角色',
@@ -170,6 +191,15 @@ function createAdminClient() {
       if (name === 'read_pool_roster_catalog') {
         const rows = state.poolCharacters.filter((row) => payload.p_pool_ids === null || payload.p_pool_ids.includes(row.pool_id));
         return { data: { rowCount: rows.length, rows }, error: null };
+      }
+      if (name === 'admin_pool_recalculation_snapshot') {
+        return { data: { pools: state.pools, records: state.history, previewToken: 'snapshot-1' }, error: null };
+      }
+      if (name === 'admin_apply_pool_recalculation') {
+        for (const update of payload.p_updates) {
+          state.history = state.history.map((row) => row.record_id === update.record_id && row.user_id === update.user_id
+            ? { ...row, is_standard: update.is_standard } : row);
+        }
       }
       return { data: null, error: null };
     }),
@@ -204,7 +234,9 @@ function createAdminClient() {
           state.poolCharacters.push(...rows);
           return { data: rows, error: null };
         }
-        return { data: state.poolCharacters.filter((row) => matchesFilters(row, query.filters)), error: null };
+        const rows = state.poolCharacters.filter(row => matchesFilters(row, query.filters))
+          .sort((a, b) => a.pool_id.localeCompare(b.pool_id) || a.character_id.localeCompare(b.character_id));
+        return { data: query.page ? rows.slice(query.page.from, query.page.to + 1) : rows, count: rows.length, error: null };
       }
 
       if (query.table === 'history') {
@@ -344,7 +376,7 @@ describe('/api/admin-pools', () => {
       isNew: true,
       addedCount: 1,
     });
-    const rpcCall = adminClient.__state.rpcCalls.find((call) => call.name === 'admin_upsert_pool_with_aliases');
+    const rpcCall = adminClient.__state.rpcCalls.find((call) => call.name === 'admin_save_pool_catalog');
     expect(rpcCall).toBeTruthy();
     expect(rpcCall.payload.p_insert_payload).toMatchObject({
       name: '新卡池',
@@ -411,7 +443,7 @@ describe('/api/admin-pools', () => {
     await adminPoolsHandler(req, res);
 
     expect(res.statusCode).toBe(200);
-    const rpcCall = adminClient.__state.rpcCalls.find((call) => call.name === 'admin_upsert_pool_with_aliases');
+    const rpcCall = adminClient.__state.rpcCalls.find((call) => call.name === 'admin_save_pool_catalog');
     expect(rpcCall.payload.p_insert_payload).toMatchObject({
       type: 'extra',
       extra_subtype: 'reconstruction_claim',
@@ -522,7 +554,7 @@ describe('/api/admin-pools', () => {
     expect(res.statusCode).toBe(200);
     expect(adminClient.__state.rpcCalls).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        name: 'admin_upsert_pool_with_aliases',
+        name: 'admin_save_pool_catalog',
         payload: expect.objectContaining({
           p_insert_payload: expect.objectContaining({
             extra_subtype: 'special',
@@ -560,7 +592,7 @@ describe('/api/admin-pools', () => {
     ]);
   });
 
-  it('recalculates limited pool off-rate flags server-side', async () => {
+  it('previews without writes then applies scoped changes from authoritative server pools', async () => {
     const adminClient = createAdminClient();
     mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
     configureSuperAdminAuth(adminClient);
@@ -586,20 +618,24 @@ describe('/api/admin-pools', () => {
       success: true,
       changedCount: 2,
     });
-    expect(adminClient.__state.calls).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        table: 'history',
-        operation: 'update',
-        payload: { is_standard: false },
-        filters: [{ op: 'eq', column: 'record_id', value: 1 }],
-      }),
-      expect.objectContaining({
-        table: 'history',
-        operation: 'update',
-        payload: { is_standard: true },
-        filters: [{ op: 'eq', column: 'record_id', value: 2 }],
-      }),
-    ]));
+    expect(res.body.scope).toEqual({
+      kind: 'all-users-six-star', recordCount: 2, affectedPoolIds: ['pool-1'], affectedUserCount: 2,
+    });
+    expect(adminClient.__state.history[0].is_standard).toBe(true);
+    expect(adminClient.__state.rpcCalls.map((call) => call.name)).toEqual(['admin_pool_recalculation_snapshot']);
+    const applyRes = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ method: 'POST', body: {
+      action: 'recalculateIsStandard', mode: 'apply', previewToken: res.body.previewToken,
+      pools: [{ pool_id: 'pool-1', type: 'standard' }],
+    } }), applyRes);
+    expect(applyRes.statusCode).toBe(200);
+    expect(adminClient.__state.rpcCalls.at(-1)).toMatchObject({
+      name: 'admin_apply_pool_recalculation', payload: { p_preview_token: 'snapshot-1', p_updates: [
+        { id: '1', user_id: 'user-a', game_uid: 'account-a', server_id: 'cn', pool_id: 'pool-1', record_id: 1, is_standard: false },
+        { id: '2', user_id: 'user-b', game_uid: 'account-b', server_id: 'intl', pool_id: 'pool-1', record_id: 2, is_standard: true },
+      ] },
+    });
+    expect(adminClient.__state.calls.some((call) => call.table === 'history' && call.operation === 'update')).toBe(false);
   });
 
   it('recalculates extra pools from capabilities without treating unknown profiles as targets', async () => {
@@ -625,6 +661,8 @@ describe('/api/admin-pools', () => {
       method: 'POST',
       body: {
         action: 'recalculateIsStandard',
+        mode: 'apply',
+        previewToken: 'snapshot-1',
         pools: [
           {
             pool_id: 'recon-character',
@@ -664,7 +702,7 @@ describe('/api/admin-pools', () => {
       },
     });
     const res = createJsonResponseRecorder();
-
+    adminClient.__state.pools = req.body.pools;
     await adminPoolsHandler(req, res);
 
     expect(res.statusCode).toBe(200);
@@ -690,14 +728,151 @@ describe('/api/admin-pools', () => {
       ]));
   });
 
-  it('rejects non-super-admin requests before returning pool data', async () => {
+  it.each([
+    [{ name: '' }, 'pool_name_invalid'],
+    [{ pool_id: 'limited' }, 'pool_id_invalid'],
+    [{ pool_id: 'bad id' }, 'pool_id_invalid'],
+    [{ start_time: 'bad-date' }, 'pool_time_invalid'],
+    [{ start_time: '2026-09-20', end_time: '2026-09-19' }, 'pool_time_range_invalid'],
+    [{ roster_status: 'complete' }, 'pool_roster_confirmation_required'],
+    [{ roster_status: 'invented' }, 'pool_roster_status_invalid'],
+    [{ roster_status: 'missing' }, 'pool_roster_status_mismatch'],
+  ])('rejects invalid pool fields %j', async (fields, code) => {
+    const adminClient = mocks.getSupabaseAdminClient();
+    const res = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ method: 'POST', body: {
+      action: 'savePool', poolData: { name: '新卡池', type: 'limited', ...fields },
+      editingPoolCharacters: [{ character_id: 'char-1' }],
+    } }), res);
+    expect(res.body.code).toBe(code);
+    expect(adminClient.rpc).not.toHaveBeenCalled();
+  });
+
+  it('rejects browser-forged entity types and only confirms complete rosters explicitly', async () => {
+    const adminClient = mocks.getSupabaseAdminClient();
+    const body = { action: 'savePool', poolData: { name: '新卡池', type: 'limited', roster_status: 'complete' },
+      confirmRosterComplete: true, characters: [{ id: 'weapon-1', type: 'character', rarity: 6 }],
+      editingPoolCharacters: [{ character_id: 'weapon-1' }] };
+    const invalid = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ method: 'POST', body }), invalid);
+    expect(invalid.body.code).toBe('pool_roster_entity_invalid');
+    const valid = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ method: 'POST', body: {
+      ...body, editingPoolCharacters: [{ character_id: 'char-1' }],
+    } }), valid);
+    expect(valid.statusCode).toBe(200);
+    expect(adminClient.__state.rpcCalls.at(-1).payload.p_insert_payload.roster_status).toBe('complete');
+    expect(adminClient.__state.calls.some((call) => call.table === 'pool_characters')).toBe(false);
+  });
+
+  it('does not infer complete from a nonempty roster and resolves UP marks from the pool', async () => {
+    const adminClient = mocks.getSupabaseAdminClient();
+    const res = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ method: 'POST', body: {
+      action: 'savePool', poolData: { name: '新卡池', type: 'limited', up_character: '测试角色二' },
+      editingPoolCharacters: [{ character_id: 'char-1', is_up: true }, { character_id: 'char-2', is_up: false }],
+    } }), res);
+    expect(res.statusCode).toBe(200);
+    expect(adminClient.__state.rpcCalls.at(-1).payload).toMatchObject({
+      p_insert_payload: { roster_status: 'partial' },
+      p_pool_character_rows: [{ character_id: 'char-1', is_up: false }, { character_id: 'char-2', is_up: true }],
+    });
+  });
+
+  it('rejects omitted rosters instead of silently clearing existing data', async () => {
+    const client = mocks.getSupabaseAdminClient();
+    const res = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ method: 'POST', body: {
+      action: 'savePool', editingPool: client.__state.pools[0], poolData: { name: '保留名单', type: 'limited' },
+    } }), res);
+    expect(res.body.code).toBe('pool_roster_required');
+    expect(client.rpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ type: 'standard', up_character: '测试角色' }, [{ character_id: 'char-1' }], 'pool_up_not_allowed'],
+    [{ type: 'limited', featured_characters: ['测试角色二'] }, [{ character_id: 'char-1' }], 'pool_featured_not_allowed'],
+    [{ type: 'limited', up_character: '不存在' }, [{ character_id: 'char-1' }], 'pool_up_roster_invalid'],
+    [{ type: 'limited', roster_status: 'partial' }, [], 'pool_roster_status_mismatch'],
+    [{ type: 'limited', roster_status: 'complete' }, [], 'pool_roster_complete_empty'],
+  ])('rejects roster and UP contradictions %j', async (fields, rows, code) => {
+    const res = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ method: 'POST', body: {
+      action: 'savePool', poolData: { name: '名单校验', ...fields }, editingPoolCharacters: rows,
+      confirmRosterComplete: true,
+    } }), res);
+    expect(res.body.code).toBe(code);
+    expect(mocks.getSupabaseAdminClient().rpc).not.toHaveBeenCalled();
+  });
+
+  it('canonicalizes UP entity IDs before storing the pool', async () => {
+    const client = mocks.getSupabaseAdminClient();
+    const res = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ method: 'POST', body: {
+      action: 'savePool', poolData: { name: 'ID目标', type: 'limited', up_character: 'char-1' },
+      editingPoolCharacters: [{ character_id: 'char-1' }],
+    } }), res);
+    expect(res.statusCode).toBe(200);
+    expect(client.__state.rpcCalls[0].payload.p_insert_payload.up_character).toBe('测试角色');
+  });
+
+  it('returns an actionable conflict when a self alias belongs to another pool', async () => {
+    const client = mocks.getSupabaseAdminClient();
+    client.rpc.mockResolvedValueOnce({ error: { message: 'pool_alias_conflict' } });
+    const res = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ method: 'POST', body: {
+      action: 'savePool', poolData: { name: '别名校验', type: 'limited' }, editingPoolCharacters: [],
+    } }), res);
+    expect(res.statusCode).toBe(409);
+    expect(res.body.code).toBe('pool_alias_conflict');
+  });
+
+  it('recalculates by identity or exact catalog aliases without substring matches', () => {
+    const pools = new Map([['pool-a', { type: 'limited', up_character: '角色A',
+      up_character_id: 'char-a', up_character_aliases: ['旧名A'] }]]);
+    const record = { pool_id: 'pool-a', rarity: 6, is_standard: false };
+    expect(__internal.calculateIsStandard({ ...record, character_name: '角色A改' }, pools)).toBe(true);
+    expect(__internal.calculateIsStandard({ ...record, character_name: '旧名A' }, pools)).toBe(false);
+    expect(__internal.calculateIsStandard({ ...record, character_id: 'char-a', character_name: '另一旧名' }, pools)).toBe(false);
+    expect(__internal.calculateIsStandard({ ...record, character_id: 'char-b', character_name: '角色A' }, pools)).toBe(true);
+    expect(__internal.calculateIsStandard({ ...record, pool_id: 'unknown', is_standard: null }, pools)).toBeNull();
+  });
+
+  it.each([
+    [null, 400, 'recalculate_preview_required'],
+    ['old-token', 409, 'recalculate_preview_stale'],
+  ])('blocks unpreviewed or stale global applications', async (previewToken, status, code) => {
+    const adminClient = mocks.getSupabaseAdminClient();
+    const res = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ method: 'POST', body: {
+      action: 'recalculateIsStandard', mode: 'apply', previewToken,
+    } }), res);
+    expect(res.statusCode).toBe(status);
+    expect(res.body.code).toBe(code);
+    expect(adminClient.__state.rpcCalls.some((call) => call.name === 'admin_apply_pool_recalculation')).toBe(false);
+  });
+
+  it('returns a stale-preview conflict when the SQL transaction detects a later race', async () => {
+    const adminClient = mocks.getSupabaseAdminClient();
+    adminClient.rpc.mockResolvedValueOnce({ data: {
+      pools: adminClient.__state.pools, records: adminClient.__state.history, previewToken: 'snapshot-1',
+    }, error: null }).mockResolvedValueOnce({ error: { message: 'recalculate_preview_stale' } });
+    const res = createJsonResponseRecorder();
+    await adminPoolsHandler(createRequest({ method: 'POST', body: {
+      action: 'recalculateIsStandard', mode: 'apply', previewToken: 'snapshot-1',
+    } }), res);
+    expect(res.statusCode).toBe(409);
+    expect(res.body.code).toBe('recalculate_preview_stale');
+  });
+
+  it.each(['GET', 'POST', 'DELETE'])('rejects non-super-admin %s requests before accessing public data', async (method) => {
     mocks.requireSuperAdminUser.mockResolvedValue({
       ok: false,
       status: 403,
       error: 'Super admin role required',
       code: 'super_admin_required',
     });
-    const req = createRequest();
+    const req = createRequest({ method, body: { action: 'savePool' } });
     const res = createJsonResponseRecorder();
 
     await adminPoolsHandler(req, res);
@@ -708,5 +883,7 @@ describe('/api/admin-pools', () => {
       error: 'Super admin role required',
       code: 'super_admin_required',
     });
+    expect(mocks.getSupabaseAdminClient().from).not.toHaveBeenCalled();
+    expect(mocks.getSupabaseAdminClient().rpc).not.toHaveBeenCalled();
   });
 });
