@@ -87,6 +87,7 @@ describe('poolTimelineView', () => {
     expect(section.totalPulls).toBe(3);
     expect(section.entries).toHaveLength(1);
     expect(section.entries[0].pulls).toBe(34);
+    expect(section.entries[0]).toMatchObject({ localPulls: 3, inheritedPulls: 31 });
     expect(section.avgSixStarPulls).toBe(34);
     expect(section.avgUpPulls).toBe(34);
   });
@@ -225,6 +226,83 @@ describe('poolTimelineView', () => {
     expect(section.sixStarCount).toBe(3);
     expect(section.upSixStarCount).toBe(2);
     expect(section.winRate).toBe(50);
+    expect(section.entries.find((entry) => entry.sourceRecordKeys.includes('l2')).guaranteePulls).toBe(120);
+  });
+
+  it('marks the first target at 120 paid pulls without confusing the six-star interval or free pulls', () => {
+    const pool = { id: 'limited', type: 'limited', name: '限定寻访', up_character: '当期UP' };
+    const start = Date.parse('2026-04-17T10:00:00Z');
+    const paidHistory = Array.from({ length: 120 }, (_, index) => ({
+      id: `paid-${index + 1}`, poolId: pool.id, seqId: String(index + 1), timestamp: start + index * 1000,
+      rarity: index === 69 || index === 119 ? 6 : 4,
+      item_name: index === 119 ? '当期UP' : '常驻角色', isStandard: index !== 119,
+    }));
+    const freeHistory = Array.from({ length: 10 }, (_, index) => ({
+      id: `free-${index + 1}`, poolId: pool.id, timestamp: start + 20500 + index,
+      rarity: index === 9 ? 6 : 4, item_name: '当期UP', isStandard: false, isFree: true,
+    }));
+    const section = buildSinglePoolTimelineSection({ pool, history: [...paidHistory, ...freeHistory] });
+    const guaranteed = section.entries.find((entry) => entry.sourceRecordKeys.includes('paid-120'));
+    const previous = section.entries.find((entry) => entry.sourceRecordKeys.includes('paid-70'));
+
+    expect(guaranteed).toMatchObject({ guaranteePulls: 120, pulls: 50, inheritedPulls: 0 });
+    expect(previous.guaranteePulls).toBeNull();
+    expect(section.entries.find((entry) => entry.stageKind === 'gift').guaranteePulls).toBeUndefined();
+    expect(section.totalPulls).toBe(120);
+
+    paidHistory[59] = { ...paidHistory[59], rarity: 6, item_name: '当期UP', isStandard: false };
+    const earlyTarget = buildSinglePoolTimelineSection({ pool, history: paidHistory });
+    expect(earlyTarget.entries.every((entry) => !entry.guaranteePulls)).toBe(true);
+  });
+
+  it('does not attribute later six-star milestones to the previous banner', () => {
+    const pool = { id: 'limited', type: 'limited', up_character: '当期UP' };
+    const history = [
+      { id: 'first', poolId: pool.id, rarity: 6, item_name: '当期UP', timestamp: 1776420000000 },
+      { id: 'second', poolId: pool.id, rarity: 6, item_name: '当期UP', timestamp: 1776420010000 },
+    ];
+    const section = buildSinglePoolTimelineSection({
+      pool, history, crossPoolPityMap: new Map([
+        ['first', { sixStarPity: 21 }], ['second', { sixStarPity: 1 }],
+      ]),
+    });
+    expect(section.entries.find((entry) => entry.sourceRecordKeys.includes('first')).inheritedPulls).toBe(20);
+    expect(section.entries.find((entry) => entry.sourceRecordKeys.includes('second')).inheritedPulls).toBe(0);
+  });
+
+  it('keeps an entire weapon ten-pull together, including drops after a six-star, without changing intervals', () => {
+    const pool = { id: 'weapon', type: 'weapon', up_character: '当期武器' };
+    const history = Array.from({ length: 20 }, (_, index) => ({
+      id: `weapon-${index + 1}`, poolId: pool.id, seqId: String(index + 1),
+      timestamp: 1776420000000 + Math.floor(index / 10) * 10000,
+      batchId: `weapon-ten-${Math.floor(index / 10)}`,
+      rarity: [13, 18].includes(index) ? 6 : [10, 15, 19].includes(index) ? 5 : 4,
+      item_name: `武器${index + 1}`, isStandard: index !== 18,
+    }));
+    const section = buildSinglePoolTimelineSection({ pool, history });
+    const milestones = section.entries.filter((entry) => entry.highestRarity >= 6);
+    expect(milestones.map((entry) => entry.pulls)).toEqual([5, 14]);
+    expect(milestones[0].weaponBatch).toEqual(milestones[1].weaponBatch);
+    expect(milestones[0].weaponBatch).toMatchObject({
+      size: 10, isCompleteTenPull: true, sixStarCount: 2, fiveStarCount: 3,
+    });
+    expect(milestones[0].weaponBatch.slots.map((slot) => slot.rarity)).toEqual([5, 4, 4, 6, 4, 5, 4, 4, 6, 5]);
+    expect(section.entries[0]).toMatchObject({ isCurrentStage: true, pulls: 1 });
+    expect(section.entries[0].weaponBatch).toBeUndefined();
+  });
+
+  it('shows the latest weapon ten-pull even if it contains no six-star, and labels partial batches honestly', () => {
+    const pool = { id: 'weapon', type: 'weapon' };
+    const history = Array.from({ length: 10 }, (_, index) => ({
+      id: `weapon-${index + 1}`, poolId: pool.id, seqId: String(index + 1),
+      timestamp: 1776420000000, rarity: index === 9 ? 5 : 4, item_name: '武器',
+    }));
+    const complete = buildSinglePoolTimelineSection({ pool, history });
+    expect(complete.entries[0].weaponBatch).toMatchObject({
+      size: 10, isCompleteTenPull: true, sixStarCount: 0, fiveStarCount: 1,
+    });
+    const partial = buildSinglePoolTimelineSection({ pool, history: history.slice(4) });
+    expect(partial.entries[0].weaponBatch).toMatchObject({ size: 6, isCompleteTenPull: false });
   });
 
   it('annotates adjacent six-star milestones from the same ten-pull batch', () => {
