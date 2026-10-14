@@ -1,0 +1,32 @@
+{
+  "sdkVersion": "0.4.2",
+  "models": [
+    "PP-OCRv6_tiny_det",
+    "PP-OCRv6_small_rec"
+  ],
+  "wasmFiles": [
+    "ort-wasm-simd-threaded.jsep.wasm"
+  ],
+  "resources": [
+    {
+      "file": "paddleocr.mjs",
+      "bytes": 10895779
+    },
+    {
+      "file": "PP-OCRv6_tiny_det_onnx_infer.tar",
+      "bytes": 1783808
+    },
+    {
+      "file": "PP-OCRv6_small_rec_onnx_infer.tar",
+      "bytes": 21312512
+    },
+    {
+      "file": "wasm/ort-wasm-simd-threaded.jsep.wasm",
+      "bytes": 26239907
+    },
+    {
+      "file": "wasm/ort-wasm-simd-threaded.jsep.mjs",
+      "bytes": 46489
+    }
+  ]
+}
