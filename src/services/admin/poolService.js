@@ -223,7 +223,7 @@ export const createUpCharacter = async (
   return result.character;
 };
 
-export const savePool = async (poolData, editingPool, characters, editingPoolCharacters = []) => {
+export const savePool = async (poolData, editingPool, characters, editingPoolCharacters = [], options = {}) => {
   try {
     const result = await requestAdminPools({
       method: 'POST',
@@ -233,6 +233,7 @@ export const savePool = async (poolData, editingPool, characters, editingPoolCha
         editingPool,
         characters,
         editingPoolCharacters,
+        confirmRosterComplete: options.confirmRosterComplete === true,
       },
       label: 'admin-pool-save',
     });
@@ -260,13 +261,14 @@ export const deletePool = async (poolId) => {
   }
 };
 
-export const recalculateIsStandard = async (pools) => {
+export const recalculateIsStandard = async ({ mode = 'preview', previewToken = null } = {}) => {
   try {
     const result = await requestAdminPools({
       method: 'POST',
       body: {
         action: 'recalculateIsStandard',
-        pools,
+        mode,
+        ...(previewToken ? { previewToken } : {}),
       },
       label: 'admin-pool-recalculate-is-standard',
       retries: 0,
@@ -274,6 +276,8 @@ export const recalculateIsStandard = async (pools) => {
     return {
       success: true,
       changedCount: Number(result.changedCount) || 0,
+      previewToken: result.previewToken,
+      scope: result.scope,
       message: result.message || '',
     };
   } catch (error) {

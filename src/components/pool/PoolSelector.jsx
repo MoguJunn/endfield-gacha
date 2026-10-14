@@ -1,7 +1,8 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import React, { lazy, Suspense, useCallback, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Download, Upload, User, Search, X, ChevronDown, HelpCircle } from 'lucide-react';
 import ImportManager from '../../features/import/ImportManager';
+import ImportMethodDialog from '../../features/import/ImportMethodDialog.jsx';
 import { getImportAnomalyCount } from '../../features/import/importCompletionPolicy.js';
 import PoolGroupCardRail from './PoolGroupCardRail';
 import { getPoolGroupId } from '../../utils/poolSelectorDisplay';
@@ -22,6 +23,9 @@ import {
   localizeGameAccountServerTag,
 } from '../../utils/gameAccountMetadata.js';
 import { usePoolScopeSelectorState } from '../../hooks/app/usePoolScopeSelectorState.js';
+import { useImportMethodSelection } from '../../hooks/app/useImportMethodSelection.js';
+
+const WorkbenchFileImport = lazy(() => import('../../features/data-workbench/WorkbenchFileImport.jsx'));
 
 function getFreshnessToneClasses(tone) {
   switch (tone) {
@@ -67,10 +71,9 @@ function CompactFreshnessCard({ label, title, badgeText, metaText, detailText, t
 const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
   const { t, locale, formatNumber } = useI18n();
   const navigate = useNavigate();
-  const location = useLocation();
 
   // UI状态
-  const [showImportManager, setShowImportManager] = useState(false);
+  const importSelection = useImportMethodSelection({ onOpenFileImport: onOpenImportWizard });
   const [searchQuery, setSearchQuery] = useState('');
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   const [showAccountHelp, setShowAccountHelp] = useState(false);
@@ -149,39 +152,6 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
     totalPart,
     pulls: formatNumber(totalPulls),
   });
-  const importRequestedByQuery = useMemo(() => {
-    const searchParams = new URLSearchParams(location.search);
-    return searchParams.get('import') === 'open';
-  }, [location.search]);
-  const isImportManagerOpen = showImportManager || importRequestedByQuery;
-
-  const closeImportManager = useCallback(() => {
-    setShowImportManager(false);
-
-    if (!importRequestedByQuery) {
-      return;
-    }
-
-    const searchParams = new URLSearchParams(location.search);
-    searchParams.delete('import');
-    const nextSearch = searchParams.toString();
-
-    navigate(
-      {
-        pathname: location.pathname,
-        search: nextSearch ? `?${nextSearch}` : '',
-      },
-      { replace: true }
-    );
-  }, [importRequestedByQuery, location.pathname, location.search, navigate]);
-
-  const handleOpenFileImport = useCallback(() => {
-    closeImportManager();
-    if (typeof onOpenImportWizard === 'function') {
-      onOpenImportWizard();
-    }
-  }, [closeImportManager, onOpenImportWizard]);
-
   const handleOpenServerLabelSettings = useCallback(() => {
     setShowAccountHelp(false);
     setShowAccountDropdown(false);
@@ -203,7 +173,8 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
             <>
               <button
                 id="guide-import-btn"
-                onClick={() => setShowImportManager(true)}
+                type="button"
+                onClick={importSelection.openChooser}
                 className="flex items-center gap-2 px-4 py-2 bg-yellow-500 hover:bg-yellow-400 text-black text-[11px] font-bold uppercase tracking-widest transition-all duration-300 hover:shadow-[0_0_15px_rgba(234,179,8,0.4)] active:scale-95 group relative overflow-hidden"
                 style={{ clipPath: 'polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%)' }}
               >
@@ -212,7 +183,7 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
                   size={14}
                   className="group-hover:-translate-y-0.5 transition-transform duration-300 relative z-10"
                 />
-                <span className="relative z-10">{t('pool.selector.import')}</span>
+                <span className="relative z-10">{locale === 'en-US' ? 'Import & correct' : '导入与补录'}</span>
               </button>
               {typeof onOpenExportOptions === 'function' && (
                 <button
@@ -493,12 +464,19 @@ const PoolSelector = ({ onOpenImportWizard, onOpenExportOptions }) => {
         </div>
       )}
 
-      {/* 导入管理器 */}
-      {isImportManagerOpen && (
+      {importSelection.method === 'choose' && (
+        <ImportMethodDialog onClose={importSelection.close} onOfficial={importSelection.chooseOfficial}
+          onFile={importSelection.chooseFile} onManual={importSelection.chooseManual} />
+      )}
+      {importSelection.method === 'file' && (
+        <Suspense fallback={null}><WorkbenchFileImport onClose={importSelection.close} /></Suspense>
+      )}
+      {/* 保留官方导入的账号选择、获取与完成流程 */}
+      {importSelection.method === 'official' && (
         <ImportManager
-          isOpen={isImportManagerOpen}
-          onClose={closeImportManager}
-          onOpenFileImport={handleOpenFileImport}
+          isOpen
+          onClose={importSelection.close}
+          onOpenFileImport={importSelection.chooseFile}
           onImportComplete={(result) => {
             navigate(getDesktopPathForTab('dashboard'), {
               state: {

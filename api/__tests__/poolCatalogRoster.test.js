@@ -88,7 +88,7 @@ describe('pool catalog six-star roster', () => {
     expect(rosterMap.get('empty-a')).toEqual([]);
   });
 
-  it('marks only non-empty database rosters as complete', () => {
+  it('requires explicit confirmation and a non-empty roster for completeness', () => {
     const rosterMap = new Map([
       ['limited-a', [{ id: 'char-a', name: '角色A', type: 'character', is_up: false }]],
       ['empty-a', []],
@@ -99,8 +99,15 @@ describe('pool catalog six-star roster', () => {
       up_character: '角色A',
     }, rosterMap)).toMatchObject({
       six_star_entities: [{ id: 'char-a', name: '角色A', type: 'character', is_up: true }],
-      six_star_roster_complete: true,
+      roster_status: 'partial',
+      six_star_roster_complete: false,
     });
+    expect(attachPoolSixStarRoster({ pool_id: 'limited-a', roster_status: 'complete' }, rosterMap))
+      .toMatchObject({ roster_status: 'complete', six_star_roster_complete: true });
+    expect(attachPoolSixStarRoster({ pool_id: 'limited-a', roster_status: 'partial' }, rosterMap))
+      .toMatchObject({ six_star_roster_complete: false });
+    expect(attachPoolSixStarRoster({ pool_id: 'empty-a', roster_status: 'complete' }, rosterMap))
+      .toMatchObject({ six_star_roster_complete: false });
     expect(attachPoolSixStarRoster({ pool_id: 'empty-a' }, rosterMap)).toMatchObject({
       six_star_entities: [],
       six_star_roster_complete: false,

@@ -8,6 +8,9 @@ import { invalidatePublicCache } from '../../services/admin/publicCacheService';
 import { useAuthStore } from '../../stores';
 import { characterCache } from '../../utils/characterUtils';
 import { identifyWeaponCharacterPool } from '../../../shared/weaponPoolSchedule.js';
+import { resolvePoolRosterStatus } from '../../../shared/poolRosterStatus.js';
+import { isReservedPoolTypeId } from '../../../shared/poolIdValidation.js';
+import { buildManualCharacterId, buildManualPoolId } from '../../utils/canonicalEntityUtils.js';
 import {
   canonicalizeExtraPoolSubtype,
   getExpectedExtraPoolSubtype,
@@ -15,6 +18,9 @@ import {
 
 // 表单初始状态
 export const INITIAL_POOL_FORM = {
+  pool_id: '',
+  roster_status: 'missing',
+  confirm_roster_complete: false,
   name: '',
   name_en: '',
   type: 'limited',
@@ -127,7 +133,6 @@ export function normalizeDraftPoolCharacters(
   featuredNames = [],
   extraRuleProfile = null
 ) {
-  const normalizedPoolType = normalizePoolType(poolType);
   const expectedType = getExpectedCharacterType(poolType, extraRuleProfile);
   const validCharactersById = new Map(
     (Array.isArray(characters) ? characters : [])
@@ -147,14 +152,12 @@ export function normalizeDraftPoolCharacters(
 
     dedupedRows.set(characterId, {
       character_id: characterId,
-      is_up: normalizedPoolType === 'extra'
-        ? featuredNameSet.has(character.name)
-        : Boolean(row?.is_up) || featuredNameSet.has(character.name),
+      is_up: featuredNameSet.has(character.name) || featuredNameSet.has(character.id),
     });
   });
 
   featuredNameSet.forEach((name) => {
-    const character = validCharactersByName.get(name);
+    const character = validCharactersById.get(name) || validCharactersByName.get(name);
     if (character) {
       dedupedRows.set(character.id, {
         character_id: character.id,
@@ -200,6 +203,8 @@ export function buildPoolDataFromForm(poolForm = {}, pools = []) {
     featuredCharacters,
     upCharacterName,
     poolData: {
+      ...(normalizeText(poolForm.pool_id) ? { pool_id: normalizeText(poolForm.pool_id) } : {}),
+      roster_status: poolForm.roster_status || 'partial',
       name: normalizeText(poolForm.name),
       name_en: normalizeNullableText(poolForm.name_en),
       type: normalizedPoolType,
@@ -297,28 +302,33 @@ export function buildPoolDraftDiff({
   characters = [],
   pools = [],
 } = {}) {
-  const { normalizedPoolType, featuredCharacters, upCharacterName, poolData } = buildPoolDataFromForm(poolForm, pools);
+  const { normalizedPoolType, expectedCharacterType, featuredCharacters, upCharacterName, poolData } = buildPoolDataFromForm(poolForm, pools);
+  poolData.pool_id = poolData.pool_id || editingPool?.pool_id || buildManualPoolId({
+    type: poolData.type, name: poolData.name, upCharacter: poolData.up_character,
+    startTime: poolData.start_time, endTime: poolData.end_time,
+  });
   const featuredNamesForSave = normalizedPoolType === 'extra' ? featuredCharacters : [upCharacterName].filter(Boolean);
+  const createsUpCharacter = upCharacterName && (
+    ['limited', 'weapon'].includes(normalizedPoolType)
+    || ['reconstruction_character_v1', 'reconstruction_weapon_v1'].includes(poolData.extra_rule_profile)
+  ) && !characters.some((character) => character.type === expectedCharacterType
+    && (character.name === upCharacterName || character.id === upCharacterName));
+  const previewCharacters = createsUpCharacter ? [...characters, {
+    id: buildManualCharacterId(upCharacterName, expectedCharacterType),
+    name: upCharacterName, type: expectedCharacterType, rarity: 6,
+  }] : characters;
   const normalizedCurrentRows = normalizeDraftPoolCharacters(
     editingPoolCharacters,
-    characters,
+    previewCharacters,
     normalizedPoolType,
     featuredNamesForSave,
     poolData.extra_rule_profile
   );
-  const normalizedOriginalRows = editingPool
-    ? normalizeDraftPoolCharacters(
-        originalPoolCharacters,
-        characters,
-        normalizePoolType(editingPool.type),
-        Array.isArray(editingPool.featured_characters)
-          ? editingPool.featured_characters
-          : [editingPool.up_character].filter(Boolean),
-        editingPool.extra_rule_profile
-      )
-    : [];
+  const normalizedOriginalRows = editingPool ? originalPoolCharacters : [];
 
   const fieldLabels = {
+    pool_id: '卡池 ID',
+    roster_status: '名单完整性',
     name: '卡池名称',
     name_en: '英文名称',
     type: '卡池类型',
@@ -334,22 +344,29 @@ export function buildPoolDraftDiff({
     end_time: '结束时间',
     character_pool_id: '同期限定角色池',
     is_limited_weapon: '限定武器',
+    locked: '锁定状态',
   };
   const fieldChanges = [];
 
   if (editingPool) {
     Object.entries(fieldLabels).forEach(([key, label]) => {
-      if (!areValuesEqual(editingPool[key], poolData[key])) {
+      const before = key === 'roster_status'
+        ? resolvePoolRosterStatus(editingPool[key], originalPoolCharacters)
+        : key === 'locked' ? Boolean(editingPool[key])
+          : ['start_time', 'end_time'].includes(key) ? normalizeDateInput(editingPool[key]) : editingPool[key];
+      if (!areValuesEqual(before, poolData[key])) {
         fieldChanges.push({
           key,
           label,
-          before: normalizeComparableValue(editingPool[key]),
+          before: normalizeComparableValue(before),
           after: normalizeComparableValue(poolData[key]),
         });
       }
     });
   } else {
     [
+      'pool_id',
+      'roster_status',
       'name',
       'type',
       'extra_subtype',
@@ -374,7 +391,7 @@ export function buildPoolDraftDiff({
     });
   }
 
-  const roster = buildRosterDiff(normalizedCurrentRows, normalizedOriginalRows, characters);
+  const roster = buildRosterDiff(normalizedCurrentRows, normalizedOriginalRows, previewCharacters);
 
   return {
     mode: editingPool ? 'edit' : 'create',
@@ -423,7 +440,15 @@ export const usePools = (showToast, {
   // 编辑对话框状态
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [editingPool, setEditingPool] = useState(null);
-  const [poolForm, setPoolForm] = useState(INITIAL_POOL_FORM);
+  const [poolForm, setPoolFormState] = useState(INITIAL_POOL_FORM);
+  const setPoolForm = useCallback((update) => {
+    setPoolFormState((previous) => {
+      const next = typeof update === 'function' ? update(previous) : update;
+      const changedRosterContext = ['type', 'up_character', 'featured_characters_text', 'start_time', 'end_time',
+        'extra_rule_profile', 'extra_series_key', 'extra_series_phase'].some((key) => next[key] !== previous[key]);
+      return changedRosterContext ? { ...next, confirm_roster_complete: false } : next;
+    });
+  }, []);
 
   const ensureSuperAdmin = useCallback(() => {
     if (userRole !== 'super_admin') {
@@ -525,7 +550,8 @@ export const usePools = (showToast, {
   const checkUpCharacterExists = useCallback(
     (upCharacterName, expectedType = null) => {
       if (!upCharacterName || !upCharacterName.trim()) return true;
-      return characters.some((c) => c.name === upCharacterName.trim() && (!expectedType || c.type === expectedType));
+      return characters.some((c) => (c.name === upCharacterName.trim() || c.id === upCharacterName.trim())
+        && (!expectedType || c.type === expectedType));
     },
     [characters]
   );
@@ -537,7 +563,7 @@ export const usePools = (showToast, {
     setEditingPoolCharacters([]);
     setEditingPoolOriginalCharacters([]);
     setShowEditDialog(false);
-  }, []);
+  }, [setPoolForm]);
 
   // 开始编辑
   const startEdit = useCallback(async (pool) => {
@@ -566,6 +592,9 @@ export const usePools = (showToast, {
       : [];
 
     setPoolForm({
+      pool_id: pool.pool_id,
+      roster_status: resolvePoolRosterStatus(pool.roster_status, result.data),
+      confirm_roster_complete: false,
       name: pool.name || '',
       name_en: pool.name_en || '',
       type: pool.type || 'limited',
@@ -585,7 +614,7 @@ export const usePools = (showToast, {
     });
     setEditingPool(pool);
     setShowEditDialog(true);
-  }, [characters, service, showToast]);
+  }, [characters, service, setPoolForm, showToast]);
 
   const startCreate = useCallback(() => {
     setPoolForm(INITIAL_POOL_FORM);
@@ -593,7 +622,7 @@ export const usePools = (showToast, {
     setEditingPoolCharacters([]);
     setEditingPoolOriginalCharacters([]);
     setShowEditDialog(true);
-  }, []);
+  }, [setPoolForm]);
 
   const poolDraftDiff = useMemo(
     () =>
@@ -614,6 +643,32 @@ export const usePools = (showToast, {
 
     if (!poolForm.name.trim()) {
       showToast('卡池名称不能为空', 'error');
+      return null;
+    }
+    if (poolForm.name.trim().length > 120) {
+      showToast('卡池名称不能超过 120 字', 'error');
+      return null;
+    }
+    if (poolForm.pool_id && (
+      !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,199}$/u.test(poolForm.pool_id.trim()) || isReservedPoolTypeId(poolForm.pool_id)
+    )) {
+      showToast('卡池 ID 无效或使用了类型保留字', 'error');
+      return null;
+    }
+    if (['start_time', 'end_time'].some((key) => poolForm[key] && !normalizeDateInput(poolForm[key]))) {
+      showToast('卡池时间格式无效', 'error');
+      return null;
+    }
+    if (poolForm.start_time && poolForm.end_time && new Date(poolForm.start_time) >= new Date(poolForm.end_time)) {
+      showToast('结束时间必须晚于开始时间', 'error');
+      return null;
+    }
+    if (poolForm.roster_status === 'complete' && !poolForm.confirm_roster_complete) {
+      showToast('请明确确认本期完整名单已核对', 'error');
+      return null;
+    }
+    if ((poolForm.roster_status === 'missing') !== (poolDraftDiff.currentRows.length === 0)) {
+      showToast(poolDraftDiff.currentRows.length ? '已有名单请标记为不完整或确认完整' : '尚未录入名单，请标记为名单缺失', 'error');
       return null;
     }
 
@@ -730,7 +785,9 @@ export const usePools = (showToast, {
 
       const { poolData } = buildPoolDataFromForm(poolForm, pools);
 
-      const result = await service.savePool(poolData, editingPool, charactersForSave, editingPoolCharactersForSave);
+      const result = await service.savePool(poolData, editingPool, charactersForSave, editingPoolCharactersForSave, {
+        confirmRosterComplete: poolForm.confirm_roster_complete === true,
+      });
 
       if (result.success) {
         if (result.isNew) {
@@ -757,6 +814,7 @@ export const usePools = (showToast, {
   }, [
     poolForm,
     pools,
+    poolDraftDiff,
     editingPool,
     editingPoolCharacters,
     characters,
@@ -803,7 +861,23 @@ export const usePools = (showToast, {
 
     setActionLoading('recalculate');
 
-    const result = await service.recalculateIsStandard(pools);
+    const preview = await service.recalculateIsStandard({ mode: 'preview' });
+    if (!preview.success || preview.changedCount === 0) {
+      showToast(preview.success ? (preview.message || '所有记录已是最新状态，无需更新') : '预览失败: ' + preview.error,
+        preview.success ? 'info' : 'error');
+      setActionLoading(null);
+      return;
+    }
+    const scope = preview.scope;
+    if (!preview.previewToken || !scope || !window.confirm(
+      `全服重算预览：扫描所有用户的 ${scope.recordCount} 条六星记录，` +
+      `将更新 ${scope.affectedUserCount} 位用户的 ${preview.changedCount} 条记录。\n` +
+      `涉及卡池：${scope.affectedPoolIds.join('、')}\n确认应用本次预览？范围变化后将要求重新预览。`
+    )) {
+      setActionLoading(null);
+      return;
+    }
+    const result = await service.recalculateIsStandard({ mode: 'apply', previewToken: preview.previewToken });
     if (result.success) {
       if (result.changedCount === 0) {
         showToast(result.message || '所有记录已是最新状态，无需更新', 'info');
@@ -816,7 +890,7 @@ export const usePools = (showToast, {
     }
 
     setActionLoading(null);
-  }, [ensureSuperAdmin, invalidateCache, pools, service, showToast]);
+  }, [ensureSuperAdmin, invalidateCache, service, showToast]);
 
   // 角色池子管理操作
   const toggleCharacterInPool = useCallback(
@@ -832,8 +906,10 @@ export const usePools = (showToast, {
       setEditingPoolCharacters((prev) =>
         isInPool ? prev.filter((pc) => pc.character_id !== char.id) : [...prev, { character_id: char.id, is_up: isUp }]
       );
+      setPoolForm((prev) => ({ ...prev, confirm_roster_complete: false,
+        roster_status: !isInPool && prev.roster_status === 'missing' ? 'partial' : prev.roster_status }));
     },
-    [ensureSuperAdmin, poolForm.featured_characters_text, poolForm.type, poolForm.up_character]
+    [ensureSuperAdmin, poolForm.featured_characters_text, poolForm.type, poolForm.up_character, setPoolForm]
   );
 
   const addAllCharactersToPool = useCallback(
@@ -857,6 +933,8 @@ export const usePools = (showToast, {
         ...prev,
         ...toAdd.map((c) => ({ character_id: c.id, is_up: featuredCharacterSet.has(c.name) })),
       ]);
+      setPoolForm((prev) => ({ ...prev, confirm_roster_complete: false,
+        roster_status: prev.roster_status === 'missing' ? 'partial' : prev.roster_status }));
     },
     [
       ensureSuperAdmin,
@@ -865,6 +943,7 @@ export const usePools = (showToast, {
       poolForm.type,
       poolForm.up_character,
       showToast,
+      setPoolForm,
     ]
   );
 
@@ -882,8 +961,9 @@ export const usePools = (showToast, {
 
       const removeIds = toRemove.map((c) => c.id);
       setEditingPoolCharacters((prev) => prev.filter((pc) => !removeIds.includes(pc.character_id)));
+      setPoolForm((prev) => ({ ...prev, confirm_roster_complete: false }));
     },
-    [ensureSuperAdmin, editingPoolCharacters, showToast]
+    [ensureSuperAdmin, editingPoolCharacters, setPoolForm, showToast]
   );
 
   return {

@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { useAuthStore } from '../../../stores/index.js';
 
 vi.mock('../../../services/admin/poolService.js', () => ({}));
 
@@ -20,6 +22,7 @@ import {
   buildPoolDataFromForm,
   buildPoolDraftDiff,
   normalizeDraftPoolCharacters,
+  usePools,
 } from '../usePools.js';
 
 const characters = [
@@ -176,7 +179,7 @@ describe('usePools draft helpers', () => {
       },
       originalPoolCharacters: [
         { character_id: 'char_a', is_up: true },
-        { character_id: 'char_c', is_up: false },
+        { character_id: 'char_c', is_up: true },
       ],
       editingPoolCharacters: [
         { character_id: 'char_b', is_up: false },
@@ -192,7 +195,79 @@ describe('usePools draft helpers', () => {
     expect(diff.roster.upChanged.map(item => item.id)).toEqual(['char_c']);
     expect(diff.currentRows).toEqual([
       { character_id: 'char_b', is_up: true },
-      { character_id: 'char_c', is_up: true },
+      { character_id: 'char_c', is_up: false },
     ]);
+  });
+
+  it('shows automatic UP creation and completeness in the save diff', () => {
+    const diff = buildPoolDraftDiff({ poolForm: {
+      name: '新名单', type: 'limited', up_character: '新角色', roster_status: 'partial',
+    }, characters });
+    expect(diff.roster.added).toEqual([expect.objectContaining({ name: '新角色', is_up: true })]);
+    expect(diff.currentRows[0].character_id).toBe(diff.roster.added[0].id);
+    expect(diff.fieldChanges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: 'roster_status', after: 'partial' }),
+      expect.objectContaining({ key: 'pool_id', after: diff.poolData.pool_id }),
+    ]));
+  });
+
+  it('includes an existing UP referenced by ID in the projected roster', () => {
+    expect(normalizeDraftPoolCharacters([], characters, 'limited', ['char_a']))
+      .toEqual([{ character_id: 'char_a', is_up: true }]);
+  });
+});
+
+describe('usePools confirmation and independent recalculation', () => {
+  function setup() {
+    useAuthStore.mockImplementation((selector) => selector({ userRole: 'super_admin' }));
+    const pool = { pool_id: 'pool-a', name: '测试池', type: 'limited', up_character: '莱万汀', roster_status: 'complete' };
+    const service = {
+      loadPools: vi.fn().mockResolvedValue({ success: true, data: [pool] }),
+      loadCharacters: vi.fn().mockResolvedValue({ success: true, data: characters }),
+      loadAllPoolCharacters: vi.fn().mockResolvedValue({ success: true, data: {} }),
+      loadPoolCharactersForEdit: vi.fn().mockResolvedValue({ success: true, data: [{ character_id: 'char_a', is_up: true }] }),
+      savePool: vi.fn().mockResolvedValue({ success: true, poolId: 'pool-a', addedCount: 1 }),
+      recalculateIsStandard: vi.fn(),
+    };
+    const showToast = vi.fn();
+    const invalidateCache = vi.fn();
+    const refreshCharacterCatalog = vi.fn();
+    const hook = renderHook(() => usePools(showToast, { service, invalidateCache, refreshCharacterCatalog }));
+    return { ...hook, pool, service, showToast, invalidateCache };
+  }
+
+  it('requires confirmation again after editing UP context or roster and saves without recalculation', async () => {
+    const { result, pool, service } = setup();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { await result.current.startEdit(pool); });
+    await act(async () => { await result.current.handleSavePool(); });
+    expect(service.savePool).not.toHaveBeenCalled();
+    act(() => result.current.setPoolForm((form) => ({ ...form, confirm_roster_complete: true })));
+    act(() => result.current.toggleCharacterInPool(characters[1], false));
+    expect(result.current.poolForm.confirm_roster_complete).toBe(false);
+    act(() => result.current.setPoolForm((form) => ({ ...form, confirm_roster_complete: true })));
+    act(() => result.current.setPoolForm((form) => ({ ...form, start_time: '2026-09-19T12:00' })));
+    expect(result.current.poolForm.confirm_roster_complete).toBe(false);
+    act(() => result.current.setPoolForm((form) => ({ ...form, confirm_roster_complete: true })));
+    await act(async () => { await result.current.handleSavePool(); });
+    expect(service.savePool).toHaveBeenCalledWith(expect.objectContaining({ roster_status: 'complete' }),
+      pool, characters, expect.any(Array), { confirmRosterComplete: true });
+    expect(service.recalculateIsStandard).not.toHaveBeenCalled();
+  });
+
+  it('previews scope before confirmation and applies only its token', async () => {
+    const { result, service, invalidateCache } = setup();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    service.recalculateIsStandard.mockResolvedValueOnce({ success: true, changedCount: 2, previewToken: 'token',
+      scope: { recordCount: 10, affectedUserCount: 1, affectedPoolIds: ['pool-a'] } })
+      .mockResolvedValueOnce({ success: true, changedCount: 2 });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await act(async () => { await result.current.handleRecalculateIsStandard(); });
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('10 条六星记录'));
+    expect(service.recalculateIsStandard.mock.calls).toEqual([
+      [{ mode: 'preview' }], [{ mode: 'apply', previewToken: 'token' }],
+    ]);
+    expect(invalidateCache).toHaveBeenCalledWith('stats', 'admin:pool:recalculate-is-standard');
+    confirm.mockRestore();
   });
 });

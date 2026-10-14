@@ -185,6 +185,7 @@ describe('poolService same-origin API client', () => {
         editingPool: null,
         characters: [{ id: 'char-1', name: '测试角色', type: 'character' }],
         editingPoolCharacters: [{ character_id: 'char-1', is_up: true }],
+        confirmRosterComplete: false,
       }),
     }, expect.objectContaining({
       label: 'admin-pool-save',
@@ -283,7 +284,7 @@ describe('poolService same-origin API client', () => {
       });
 
     await expect(deletePool('pool-1')).resolves.toEqual({ success: true });
-    await expect(recalculateIsStandard([{ pool_id: 'pool-1' }])).resolves.toMatchObject({
+    await expect(recalculateIsStandard()).resolves.toMatchObject({
       success: true,
       changedCount: 2,
     });
@@ -298,11 +299,22 @@ describe('poolService same-origin API client', () => {
       method: 'POST',
       body: JSON.stringify({
         action: 'recalculateIsStandard',
-        pools: [{ pool_id: 'pool-1' }],
+        mode: 'preview',
       }),
     }), expect.objectContaining({
       label: 'admin-pool-recalculate-is-standard',
     }));
+  });
+
+  it('forwards explicit roster confirmation and the preview token without browser pool definitions', async () => {
+    await savePool({ name: '确认名单', type: 'limited', roster_status: 'complete' }, null, [], [], {
+      confirmRosterComplete: true,
+    });
+    expect(JSON.parse(fetchJsonWithTimeout.mock.calls[0][1].body).confirmRosterComplete).toBe(true);
+    await recalculateIsStandard({ mode: 'apply', previewToken: 'verified-snapshot' });
+    expect(JSON.parse(fetchJsonWithTimeout.mock.calls[1][1].body)).toEqual({
+      action: 'recalculateIsStandard', mode: 'apply', previewToken: 'verified-snapshot',
+    });
   });
 
   it('returns readable failures when the admin route rejects the request', async () => {

@@ -1,3 +1,5 @@
+import { resolvePoolRosterStatus } from '../../shared/poolRosterStatus.js';
+
 function normalizeEntityType(value) {
   return value === 'weapon' ? 'weapon' : value === 'character' ? 'character' : null;
 }
@@ -91,7 +93,8 @@ export function attachPoolSixStarRoster(record, rosterMap) {
 
   return {
     ...record,
+    roster_status: resolvePoolRosterStatus(record?.roster_status, normalizedEntities),
     six_star_entities: normalizedEntities,
-    six_star_roster_complete: normalizedEntities.length > 0,
+    six_star_roster_complete: record?.roster_status === 'complete' && normalizedEntities.length > 0,
   };
 }

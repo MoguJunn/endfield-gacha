@@ -19,6 +19,7 @@ const PUBLIC_POOL_KEYS = new Set([
   'start_time',
   'end_time',
   'featured_characters',
+  'roster_status',
   'six_star_entities',
   'six_star_roster_complete',
 ]);

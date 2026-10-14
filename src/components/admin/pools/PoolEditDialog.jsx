@@ -17,6 +17,7 @@ import DateTimePicker from '../../common/DateTimePicker';
 import { PanelToolbarButton } from '../panels/shared/PanelUi.jsx';
 import { getPoolFeaturedNames } from '../../../utils/poolFeaturedResolver.js';
 import { getLimitedCharacterTimeline, identifyWeaponCharacterPool, resolveWeaponPoolSchedule } from '../../../../shared/weaponPoolSchedule.js';
+import { POOL_ROSTER_STATUS_LABELS } from '../../../../shared/poolRosterStatus.js';
 
 const FIELD_INPUT_CLASS =
   'w-full border bg-white px-3 py-1.5 text-xs text-slate-700 outline-none transition-colors focus:border-amber-500 dark:bg-zinc-900 dark:text-zinc-300 dark:focus:border-endfield-yellow';
@@ -160,6 +161,7 @@ function formatDiffValue(value) {
   if (value === null || value === undefined || value === '') return '空';
 
   const text = String(value);
+  if (POOL_ROSTER_STATUS_LABELS[text]) return POOL_ROSTER_STATUS_LABELS[text];
   if (/^\d{4}-\d{2}-\d{2}T/.test(text)) {
     const date = new Date(text);
     if (!Number.isNaN(date.getTime())) {
@@ -177,11 +179,8 @@ function formatDiffValue(value) {
   return text;
 }
 
-function summarizeNames(items = [], limit = 4) {
-  const names = items.map((item) => item?.name || item?.id).filter(Boolean);
-  if (names.length === 0) return '';
-  const visible = names.slice(0, limit).join('、');
-  return names.length > limit ? `${visible} 等 ${names.length} 项` : visible;
+function summarizeNames(items = []) {
+  return items.map((item) => `${item?.name || item?.id}${item?.is_up ? ' [UP]' : ''}`).filter(Boolean).join('、');
 }
 
 const PoolDraftDiffPreview = ({ diff }) => {
@@ -225,7 +224,7 @@ const PoolDraftDiffPreview = ({ diff }) => {
 
       {fieldChanges.length > 0 && (
         <div className="space-y-1">
-          {fieldChanges.slice(0, 5).map((change) => (
+          {fieldChanges.map((change) => (
             <div key={change.key} className="grid grid-cols-[5rem_1fr] gap-2 text-[11px]">
               <span className="text-slate-500 dark:text-zinc-500">{change.label}</span>
               <span className="break-all">
@@ -235,11 +234,6 @@ const PoolDraftDiffPreview = ({ diff }) => {
               </span>
             </div>
           ))}
-          {fieldChanges.length > 5 && (
-            <div className="text-[11px] text-slate-400 dark:text-zinc-500">
-              另有 {fieldChanges.length - 5} 个字段变化
-            </div>
-          )}
         </div>
       )}
 
@@ -247,7 +241,8 @@ const PoolDraftDiffPreview = ({ diff }) => {
         <div className="space-y-1 text-[11px] text-slate-500 dark:text-zinc-500">
           {roster.added?.length > 0 && <div>新增：{summarizeNames(roster.added)}</div>}
           {roster.removed?.length > 0 && <div>移除：{summarizeNames(roster.removed)}</div>}
-          {roster.upChanged?.length > 0 && <div>UP 变化：{summarizeNames(roster.upChanged)}</div>}
+          {roster.upChanged?.length > 0 && <div>UP 变化：{roster.upChanged.map((item) =>
+            `${item.name}（${item.before ? 'UP' : '非UP'} → ${item.after ? 'UP' : '非UP'}）`).join('、')}</div>}
         </div>
       )}
     </div>
@@ -465,12 +460,40 @@ const PoolEditDialog = ({
                   基本信息
                 </h4>
 
+                <div>
+                  <label htmlFor="admin-pool-id" className={FIELD_LABEL_CLASS}>卡池 ID</label>
+                  <input id="admin-pool-id" value={poolForm.pool_id || ''} disabled={Boolean(editingPool)}
+                    onChange={(e) => setPoolForm((prev) => ({ ...prev, pool_id: e.target.value }))}
+                    placeholder="留空自动生成；创建后不可修改" maxLength={200}
+                    className={`${FIELD_INPUT_CLASS} ${FIELD_BORDER_CLASS}`} />
+                </div>
+
+                <div>
+                  <label htmlFor="admin-roster-status" className={FIELD_LABEL_CLASS}>名单完整性</label>
+                  <select id="admin-roster-status" value={poolForm.roster_status || 'partial'}
+                    onChange={(e) => setPoolForm((prev) => ({
+                      ...prev, roster_status: e.target.value, confirm_roster_complete: false,
+                    }))} className={`${FIELD_INPUT_CLASS} ${FIELD_BORDER_CLASS}`}>
+                    {Object.entries(POOL_ROSTER_STATUS_LABELS).map(([value, label]) =>
+                      <option key={value} value={value}>{label}</option>)}
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">历史名单或仅有 UP 项时请选择不完整；完整状态会用于公共卡池展示。</p>
+                  {poolForm.roster_status === 'complete' && (
+                    <label className="mt-2 flex gap-2 text-xs text-slate-600 dark:text-zinc-300">
+                      <input type="checkbox" checked={poolForm.confirm_roster_complete === true}
+                        onChange={(e) => setPoolForm((prev) => ({ ...prev, confirm_roster_complete: e.target.checked }))} />
+                      我已核对本期完整名单（包含非 UP 项）
+                    </label>
+                  )}
+                </div>
+
                 {/* 卡池名称 */}
                 <div>
                   <label className={FIELD_LABEL_CLASS}>卡池名称 *</label>
                   <input
                     type="text"
                     value={poolForm.name}
+                    maxLength={120}
                     onChange={(e) => setPoolForm((prev) => ({ ...prev, name: e.target.value }))}
                     placeholder="例如：终末序曲 - 莱万汀UP"
                     className={`${FIELD_INPUT_CLASS} ${FIELD_BORDER_CLASS}`}
@@ -796,6 +819,12 @@ const PoolEditDialog = ({
                   )}
 
                   <PoolDraftDiffPreview diff={poolDraftDiff} />
+                  {editingPool && poolDraftDiff?.fieldChanges?.some((change) =>
+                    ['type', 'up_character', 'featured_characters', 'extra_rule_profile'].includes(change.key)) && (
+                    <p className="border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+                      本次修改可能影响历史记录分类。保存后，请使用卡池管理中的独立重算操作先查看受影响范围，再确认应用。
+                    </p>
+                  )}
 
                   <div className="max-h-[48vh] space-y-2.5 overflow-y-auto pr-1">
                     {/* 按稀有度分组 */}
