@@ -1,0 +1,170 @@
+.wb-input-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.wb-input-flow h3 {
+  font-size: 17px;
+  font-weight: 750;
+  margin: 0 0 10px;
+}
+.wb-input-flow h4 {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+.wb-input-flow p {
+  margin: 8px 0 12px;
+}
+.wb-input-flow label {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  font-size: 12px;
+  min-width: 0;
+}
+.wb-input-flow .wb-input-help,
+.wb-input-flow small {
+  color: var(--wb-muted);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.wb-input-flow .wb-input-help {
+  display: block;
+}
+.wb-input-flow .wb-input-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.wb-input-flow .wb-input-intro p {
+  margin: 0;
+}
+.wb-input-flow .wb-input-countdown {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--wb-accent);
+  background: var(--wb-soft);
+}
+.wb-input-flow .wb-input-pool-selection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wb-input-flow .wb-input-pool-selection label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--wb-line);
+}
+.wb-input-flow .wb-input-pool-selection small {
+  display: block;
+}
+.wb-input-flow .wb-input-selection-actions,
+.wb-input-flow .wb-input-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 10px 0;
+}
+.wb-input-flow .wb-input-step-heading,
+.wb-input-flow .wb-input-row-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.wb-input-flow .wb-input-step-heading h3 {
+  margin-top: 7px;
+}
+.wb-input-flow .wb-input-pool-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.wb-input-flow .wb-input-question {
+  padding-top: 18px;
+  border-top: 1px solid var(--wb-line);
+}
+.wb-input-flow .wb-input-question > summary {
+  font-size: 12px;
+  font-weight: 650;
+  padding: 3px 0;
+}
+.wb-input-flow .wb-input-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.wb-input-flow .wb-input-acquisition {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 15px;
+  border: 1px solid var(--wb-line);
+  margin: 12px 0;
+  background: var(--wb-soft);
+}
+.wb-input-flow .wb-input-row-actions {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+.wb-input-flow .wb-input-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+}
+.wb-input-flow .wb-input-review > article {
+  border: 1px solid var(--wb-line);
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.wb-input-flow .wb-input-review > article p {
+  font-size: 12px;
+}
+.wb-input-flow .wb-input-details {
+  margin-top: 12px;
+  font-size: 12px;
+}
+.wb-input-flow .wb-input-code {
+  font-family: var(--font-code);
+  line-height: 1.6;
+}
+.wb-input-flow .wb-input-upload {
+  position: relative;
+  display: inline-flex;
+  flex-direction: row;
+  cursor: pointer;
+  overflow: hidden;
+}
+.wb-input-flow .wb-input-upload input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.wb-input-flow .wb-input-upload:focus-within {
+  outline: 2px solid var(--wb-focus);
+  outline-offset: 3px;
+}
+.wb-input-flow .wb-input-json-label {
+  margin: 14px 0;
+}
+@media (max-width: 560px) {
+  .wb-input-flow .wb-input-pair {
+    grid-template-columns: 1fr;
+  }
+  .wb-input-flow .wb-input-acquisition {
+    padding: 12px;
+  }
+  .wb-input-flow .wb-input-actions > .wb-button {
+    width: 100%;
+  }
+}

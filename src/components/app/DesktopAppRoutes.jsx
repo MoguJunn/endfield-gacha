@@ -16,6 +16,7 @@ const SettingsPanel = lazy(() => import('../SettingsPanel'));
 const DeveloperApiDocsPage = lazy(() => import('../docs/DeveloperApiDocsPage'));
 const AboutPanel = lazy(() => import('../AboutPanel'));
 const TicketPanel = lazy(() => import('../TicketPanel'));
+const DataWorkbenchPage = lazy(() => import('../../features/data-workbench/DataWorkbenchPage.jsx'));
 
 function TabPanelFallback({ label = '正在加载模块...' }) {
   return (
@@ -78,6 +79,11 @@ export default function DesktopAppRoutes({
 
   return (
     <Routes>
+      <Route path="data-workbench" element={<RouteContent latestHome={latestHome} fallback={<TabPanelFallback label={tt('正在加载导入／修改…', 'Loading data workbench…')} />}>
+        <PersonalWorkspace latestHome={latestHome} user={user} onRetryPersonalData={onRetryPersonalData}>
+          <DataWorkbenchPage onOpenFileImport={openImportWizard} />
+        </PersonalWorkspace>
+      </RouteContent>} />
       <Route
         index
         element={

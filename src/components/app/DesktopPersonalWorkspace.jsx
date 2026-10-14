@@ -1,10 +1,11 @@
 import React, { lazy, Suspense, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { BarChart3, LayoutDashboard, LogIn, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { BarChart3, LayoutDashboard, LogIn, PanelLeftClose, PanelLeftOpen, PenLine } from 'lucide-react';
 import { useI18n } from '../../i18n/index.js';
 import useAuthStore from '../../stores/useAuthStore.js';
 import { readBooleanStorageValue, writeBooleanStorageValue } from '../../utils/storageUtils.js';
 import PersonalDataBoundary from './PersonalDataBoundary.jsx';
+import WorkbenchBetaBadge from '../../features/import/WorkbenchBetaBadge.jsx';
 import './desktopPageLayout.css';
 
 const SummaryView = lazy(() => import('../SummaryView.jsx'));
@@ -16,6 +17,7 @@ export default function DesktopPersonalWorkspace({ children, user, onRetryPerson
   const openAuthModal = useAuthStore((s) => s.openAuthModal);
   const [collapsed, setCollapsed] = useState(() => readBooleanStorageValue(SIDEBAR_COLLAPSED_KEY));
   const overview = new URLSearchParams(location.search).get('view') === 'overview';
+  const workbench = location.pathname === '/data-workbench';
   const tt = (zh, en) => (isEnglish ? en : zh);
   const toggleLabel = collapsed ? tt('展开个人导航', 'Expand personal navigation') : tt('收起个人导航', 'Collapse personal navigation');
   const toggleSidebar = () => {
@@ -26,6 +28,7 @@ export default function DesktopPersonalWorkspace({ children, user, onRetryPerson
   const sections = [
     { id: 'overview', label: tt('个人概览', 'Personal overview'), icon: LayoutDashboard },
     { id: 'banners', label: tt('卡池分析', 'Banner analysis'), icon: BarChart3 },
+    { id: 'workbench', label: tt('导入／修改', 'Import / edit'), icon: PenLine },
   ];
   return (
     <div className="dp-personal-workspace">
@@ -49,25 +52,25 @@ export default function DesktopPersonalWorkspace({ children, user, onRetryPerson
             {sections.map(({ id, label, icon }) => (
               <Link
                 key={id}
-                to={`/dashboard${id === 'overview' ? '?view=overview' : ''}`}
-                aria-current={overview === (id === 'overview') ? 'page' : undefined}
-                aria-label={label}
-                title={label}
+                to={id === 'workbench' ? '/data-workbench' : `/dashboard${id === 'overview' ? '?view=overview' : ''}`}
+                aria-current={(workbench ? id === 'workbench' : id !== 'workbench' && overview === (id === 'overview')) ? 'page' : undefined}
+                aria-label={id === 'workbench' ? `${label} · ${tt('测试版', 'BETA')}` : label}
+                title={id === 'workbench' ? `${label} · ${tt('测试版', 'BETA')}` : label}
               >
-                {React.createElement(icon, { size: 16 })}<span>{label}</span>
+                {React.createElement(icon, { size: 16 })}<span className="inline-flex items-center gap-2">{label}{id === 'workbench' && <WorkbenchBetaBadge />}</span>
               </Link>
             ))}
           </nav>
         </aside>
       </div>
       <div className="dp-personal-content">
-        <header className="dp-workspace-heading">
+        {!workbench && <header className="dp-workspace-heading">
           <h1>{overview ? tt('个人概览', 'Personal overview') : tt('个人卡池分析', 'Personal banner analysis')}</h1>
           <p>{overview
             ? tt('查看个人寻访统计、资源与角色图鉴。', 'Your pull statistics, resources and character collection.')
             : tt('选择游戏账号与卡池，查看保底进度和寻访记录。', 'Choose an account and banner to view pity progress and pull history.')}</p>
-        </header>
-        {overview ? user ? (
+        </header>}
+        {overview && !workbench ? user ? (
           <PersonalDataBoundary user={user} onRetry={onRetryPersonalData}>
             <Suspense fallback={<p className="p-8 text-center text-sm text-zinc-500">{tt('正在加载个人概览…', 'Loading personal overview…')}</p>}>
               <SummaryView lockedDataSource="local" />

@@ -3,6 +3,7 @@ import { normalizeGameAccountMetadata } from './gameAccountMetadata.js';
 import { detectImportFormat, prepareImportPayload } from './dataFormatRegistry.js';
 import { canonicalizeExtraPoolSubtype } from '../../shared/extraPoolSubtype.js';
 import { getRecordPoolVersion } from '../../shared/poolVersion.js';
+import { readWorkbenchSupplements } from './workbenchTransfer.js';
 
 const MAX_IMPORT_ERRORS = 10;
 const VALID_POOL_TYPES = new Set([
@@ -295,6 +296,8 @@ function normalizeImportedHistoryRecord(record, context) {
       is_new: normalizeBoolean(record?.isNew ?? record?.is_new) === true,
       isFree: normalizeBoolean(record?.isFree ?? record?.is_free) === true,
       is_free: normalizeBoolean(record?.isFree ?? record?.is_free) === true,
+      isInfoBook: normalizeBoolean(record?.isInfoBook ?? record?.is_info_book) === true,
+      is_info_book: normalizeBoolean(record?.isInfoBook ?? record?.is_info_book) === true,
       gameUid: metadata?.gameUid || normalizeString(record?.gameUid || record?.game_uid),
       game_uid: metadata?.gameUid || normalizeString(record?.gameUid || record?.game_uid),
       nickName: metadata?.nickName || normalizeString(record?.nickName || record?.nick_name),
@@ -307,6 +310,8 @@ function normalizeImportedHistoryRecord(record, context) {
       channel_master_id: metadata?.channelMasterId || null,
       serverId: metadata?.serverId || null,
       server_id: metadata?.serverId || null,
+      serverScope: normalizeString(record?.serverScope || record?.server_scope),
+      server_scope: normalizeString(record?.serverScope || record?.server_scope),
       region: metadata?.region || null,
       isOfficial: metadata?.isOfficial ?? null,
       is_official: metadata?.isOfficial ?? null,
@@ -319,10 +324,12 @@ export function getHistoryImportDedupKey(record) {
   const seqId = normalizeString(record?.seqId || record?.seq_id);
   const gameUid = normalizeString(record?.gameUid || record?.game_uid);
   const poolId = normalizeString(record?.poolId || record?.pool_id);
+  const serverScope = normalizeString(record?.serverScope || record?.server_scope);
+  const serverPrefix = serverScope ? `server:${serverScope}:` : '';
   if (seqId) {
     const accountPrefix = gameUid ? `uid:${gameUid}:` : '';
     const poolPrefix = poolId ? `pool:${poolId}:` : '';
-    return `${accountPrefix}${poolPrefix}seq:${seqId}`;
+    return `${serverPrefix}${accountPrefix}${poolPrefix}seq:${seqId}`;
   }
 
   const recordId = normalizeRecordIdValue(record?.id ?? record?.record_id);
@@ -330,7 +337,7 @@ export function getHistoryImportDedupKey(record) {
     return null;
   }
 
-  return gameUid ? `uid:${gameUid}:id:${String(recordId)}` : `id:${String(recordId)}`;
+  return `${serverPrefix}${gameUid ? `uid:${gameUid}:id:${String(recordId)}` : `id:${String(recordId)}`}`;
 }
 
 export function validateAndNormalizeImportData(data, options = {}) {
@@ -434,8 +441,14 @@ export function validateAndNormalizeImportData(data, options = {}) {
     normalizedHistory.push(normalized.value);
   });
 
+  let workbenchEntries = [];
+  try {
+    workbenchEntries = readWorkbenchSupplements(sourceData, { currentUserId, knownPoolIds });
+  } catch (error) {
+    errors.push(error.message);
+  }
   const normalizedAccounts = Array.from(accountLookup.values())
-    .filter((account) => normalizedHistory.some((record) => record.gameUid === account.gameUid));
+    .filter((account) => [...normalizedHistory, ...workbenchEntries].some((record) => record.gameUid === account.gameUid));
 
   if (errors.length > MAX_IMPORT_ERRORS) {
     const totalErrors = errors.length;
@@ -449,6 +462,7 @@ export function validateAndNormalizeImportData(data, options = {}) {
     stats: {
       poolCount: normalizedPools.length,
       historyCount: normalizedHistory.length,
+      supplementCount: workbenchEntries.length,
       accountCount: normalizedAccounts.length
     },
     normalizedData: {
@@ -462,6 +476,7 @@ export function validateAndNormalizeImportData(data, options = {}) {
       summary: sourceData.summary || null,
       pools: normalizedPools,
       history: normalizedHistory,
+      workbenchEntries,
       accounts: normalizedAccounts
     }
   };

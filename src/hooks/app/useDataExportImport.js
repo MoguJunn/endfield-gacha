@@ -22,6 +22,7 @@ import { buildImportResultNotification } from '../../utils/notificationModel.js'
 import { resolveImportResultActionHref } from '../../utils/importResultSummary.js';
 import { characterCache } from '../../utils/characterUtils.js';
 import { useI18n } from '../../i18n/index.js';
+import { validateWorkbenchPoolOperations } from '../../../shared/workbenchPoolAvailability.js';
 
 function normalizeImportAccountOverride(accountOverride = null) {
   if (!accountOverride || typeof accountOverride !== 'object') {
@@ -57,7 +58,8 @@ function applyImportAccountOverride(importedData, accountOverride = null) {
       game_uid: normalizedAccount.gameUid,
       nickName: normalizedAccount.nickName,
       nick_name: normalizedAccount.nickName
-    }))
+    })),
+    workbenchEntries: (importedData.workbenchEntries || []).map(entry => ({ ...entry, gameUid: normalizedAccount.gameUid }))
   };
 }
 
@@ -215,6 +217,11 @@ export function useDataExportImport({
         }
       }
 
+      let workbenchEntries = [];
+      if (user && formatId === 'internal_json_v3') {
+        const { loadWorkbenchEntriesForExport } = await import('../../services/workbenchTransferService.js');
+        workbenchEntries = await loadWorkbenchEntriesForExport([...(analysisAccounts || []), ...exportHistory]);
+      }
       await characterCache.load();
       const payload = buildExportPayload({
         history: exportHistory,
@@ -223,9 +230,10 @@ export function useDataExportImport({
         currentGameUid,
         currentUserId: user?.id || null,
         characterCatalog: characterCache.getAll(),
+        workbenchEntries,
         options: normalizedOptions
       });
-      if (payload.history.length === 0) {
+      if (payload.history.length === 0 && !payload.supplements?.workbenchEntries?.length) {
         showToast('所选条件下无数据可导出', 'warning');
         return false;
       }
@@ -375,6 +383,19 @@ export function useDataExportImport({
     const { getHistoryImportDedupKey } = await import('../../utils/dataImport.js');
     const { willSyncToCloud } = pendingImport;
     const importedData = applyImportAccountOverride(pendingImport.data, options.accountOverride);
+    const authoritativePools = [...(pools || []), ...(importedData.pools || []).filter(pool => !(pools || []).some(existing => existing.id === pool.id))];
+    const availability = validateWorkbenchPoolOperations({
+      entries: [...(importedData.history || []), ...(importedData.workbenchEntries || [])], pools: authoritativePools,
+    });
+    if (availability.length) {
+      showToast(`${availability.map(item => item.message).join('；')}导入预览已保留。`, 'warning');
+      return;
+    }
+    const supplementCount = importedData.workbenchEntries?.length || 0;
+    if (supplementCount && (!willSyncToCloud || !user)) {
+      showToast('补录数据需要登录后由服务器校验保存，导入预览已保留。', 'warning');
+      return;
+    }
 
     const newPools = [...(pools || [])];
     const existingPoolIds = new Set(newPools.map(pool => pool?.id).filter(Boolean));
@@ -461,9 +482,9 @@ export function useDataExportImport({
     if (preferredImportedGameUid) {
       switchGameAccount(preferredImportedGameUid);
     }
-    setPendingImport(null);
+    if (!supplementCount) setPendingImport(null);
 
-    if (willSyncToCloud && (addedPools.length > 0 || addedHistory.length > 0)) {
+    if (willSyncToCloud && (addedPools.length > 0 || addedHistory.length > 0 || supplementCount > 0)) {
       setSyncing(true);
       try {
         for (const pool of addedPools) {
@@ -475,6 +496,10 @@ export function useDataExportImport({
           const batch = addedHistory.slice(i, i + batchSize);
           // eslint-disable-next-line no-await-in-loop -- imported history batches are intentionally serialized
           await saveHistoryToCloud(batch);
+        }
+        if (supplementCount) {
+          const { importWorkbenchEntries } = await import('../../services/workbenchTransferService.js');
+          await importWorkbenchEntries(importedData.workbenchEntries);
         }
 
         if (typeof refreshPersonalData === 'function' && user) {
@@ -492,12 +517,13 @@ export function useDataExportImport({
           }
         }
 
+        setPendingImport(null);
         const duplicateHistory = Math.max((importedData.history?.length || 0) - addedHistory.length, 0);
         const completedAt = new Date().toISOString();
         showToast({
           type: 'success',
           title: '导入成功',
-          message: `导入完成：新增 ${addedHistory.length} 条记录，跳过 ${duplicateHistory} 条重复记录，已同步到云端。`,
+          message: `导入完成：新增 ${addedHistory.length} 条记录，跳过 ${duplicateHistory} 条重复记录${supplementCount ? `，${supplementCount} 条补录已校验保存` : ''}，已同步到云端。`,
           source: 'import.confirm',
           actions: [viewImportedDataAction]
         });
@@ -512,7 +538,7 @@ export function useDataExportImport({
         showToast({
           type: 'warning',
           title: '部分成功',
-          message: `已在本机新增 ${addedHistory.length} 条记录，但云端同步失败。稍后刷新或重新登录后可再尝试同步。`,
+          message: supplementCount ? `云端保存未全部完成：${syncError.message}。补录预览已保留，可核对后重试。` : `已在本机新增 ${addedHistory.length} 条记录，但云端同步失败。稍后刷新或重新登录后可再尝试同步。`,
           source: 'import.cloudSync',
           diagnostic: {
             phase: 'file_import_cloud_sync',

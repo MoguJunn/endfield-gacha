@@ -30,6 +30,9 @@ export default function ScopedLegacyStatisticsPanel({ legacy, weapon, locale, t,
     [t('武库配额获得', 'Arsenal quota gained'), resources?.arsenalGained],
   ];
   return <section className="ex-scoped-legacy" aria-label={t('范围内常规统计', 'Regular statistics in scope')}>
+    {(legacy.meta?.unknownInheritedIntervalCount > 0 || legacy.meta?.unknownCopyHistoryCount > 0) && <p role="note" className="ex-coverage-note">
+      {t('此前卡池的记录已退出统计。当前池的正常记录仍计入抽数和星级数量；继承垫抽未知的六星间隔不参与平均值与分布，遇到可信的六星重置后恢复后续区间。持有历史不完整的重复获取与溢出配额不计入，资源明细仅包含可核实部分。', 'Earlier banner records are excluded. Normal records in this banner still contribute result and rarity counts. Six-star intervals with unknown carry-over are omitted from averages and distributions until a verified six-star reset. Copy-dependent and overflow quota with incomplete ownership history is omitted; resource details include only verified contributions.')}
+    </p>}
     {section !== 'resources' && <><div className="ex-section-heading"><span><Gauge size={18} aria-hidden="true" /></span><div>
       <h2>{t('常规抽取与六星', 'Regular results and six-stars')}</h2>
       <p>{t('随当前卡池／分组及账号范围变化', 'Follows the selected banner or group and game account')}</p>
@@ -56,6 +59,7 @@ export default function ScopedLegacyStatisticsPanel({ legacy, weapon, locale, t,
     {section !== 'metrics' && legacy.meta && <details className="ex-record-details"><summary>{t('常规统计口径与记录边界', 'Regular statistics methodology and record boundaries')}</summary>
       <p>{t('基于已存记录，未验证历史前缀完整；起始间隔从已存记录起点计算，缺失记录可能使结果偏低。', 'Based on stored history; the preceding history has not been verified. Initial intervals start at the stored prefix, so missing records may understate intervals.')}</p>
       <p>{t('有效间隔', 'Valid intervals')}：{number(legacy.meta.intervalCount)} · {t('起始边界间隔', 'Initial boundary intervals')}：{number(legacy.meta.boundaryIntervalCount)}</p>
+      <p>{t('继承垫抽未知的间隔', 'Intervals with unknown carry-over')}：{number(legacy.meta.unknownInheritedIntervalCount || 0)} · {t('持有历史不完整的配额记录', 'Quota records with incomplete ownership history')}：{number(legacy.meta.unknownCopyHistoryCount || 0)}</p>
       <p>{t('系列信息不足的间隔', 'Intervals missing series information')}：{number(legacy.meta.missingSeriesIntervalCount)} · {t('排除记录', 'Excluded records')}：{number(legacy.meta.excludedRecords)}</p>
     </details>}
   </section>;

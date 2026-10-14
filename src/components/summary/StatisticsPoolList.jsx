@@ -3,8 +3,9 @@ import { ChevronDown, Search, Layers, Swords } from 'lucide-react';
 import { buildPoolSelectorGroups } from '../../utils/poolSelectorDisplay.js';
 import { characterCache, getCharacterAvatarUrl } from '../../utils/characterUtils.js';
 import { STATISTICS_GROUPS, getStatisticsGroupPools } from '../../../shared/statisticsScopes.js';
+import './statisticsPoolList.css';
 
-export default function StatisticsPoolList({ pools, counts, scope, onSelect, locale, t }) {
+export default function StatisticsPoolList({ pools, counts, scope, onSelect, locale, t, allowGroups = true }) {
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState({});
   const [directoryReady, setDirectoryReady] = useState(() => characterCache.loaded);
@@ -21,7 +22,7 @@ export default function StatisticsPoolList({ pools, counts, scope, onSelect, loc
       placeholder={t('搜索卡池或 UP', 'Search banners or UP')} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
     {groups.map((group) => {
       const closed = !query && collapsed[group.groupId];
-      const aggregate = STATISTICS_GROUPS.find((item) => item.type === group.type && item.subtype === group.subtype);
+      const aggregate = allowGroups && STATISTICS_GROUPS.find((item) => item.type === group.type && item.subtype === group.subtype);
       const members = aggregate ? getStatisticsGroupPools(pools, aggregate.key) : [];
       const total = members.every((item) => Number.isFinite(counts[item.id]))
         ? members.reduce((sum, item) => sum + counts[item.id], 0) : null;

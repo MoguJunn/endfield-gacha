@@ -3,6 +3,7 @@ import accountEmailActionHandler from './root/account-email-action.js';
 import accountEmailMergeHandler from './root/account-email-merge.js';
 import accountEmailVerifyHandler from './root/account-email-verify.js';
 import accountGachaDataHandler from './root/account-gacha-data.js';
+import dataWorkbenchHandler from './root/data-workbench.js';
 import accountLastSeenHandler from './root/account-last-seen.js';
 import accountPasswordSetupHandler from './root/account-password-setup.js';
 import accountProfileHandler from './root/account-profile.js';
@@ -111,6 +112,7 @@ export const API_ROUTE_ENTRIES = [
   ['/api/account-email-merge', accountEmailMergeHandler],
   ['/api/account-email-verify', accountEmailVerifyHandler],
   ['/api/account-gacha-data', accountGachaDataHandler],
+  ['/api/data-workbench', dataWorkbenchHandler],
   ['/api/account-last-seen', accountLastSeenHandler],
   ['/api/account-password-setup', accountPasswordSetupHandler],
   ['/api/account-profile', accountProfileHandler],

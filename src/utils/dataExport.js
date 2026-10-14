@@ -18,6 +18,7 @@ import {
 import { getDataFormatById } from './dataFormatRegistry.js';
 import { getCanonicalExtraPoolSubtype } from '../../shared/extraPoolSubtype.js';
 import { getRecordPoolVersion } from '../../shared/poolVersion.js';
+import { serializeWorkbenchEntry, WORKBENCH_TRANSFER_VERSION } from './workbenchTransfer.js';
 
 export const EXPORT_SCHEMA_VERSION = '3.0.0';
 export const EXPORT_FORMAT_ID = 'internal_json_v3';
@@ -83,13 +84,18 @@ function getHistoryRecordItemId(record) {
     .find(Boolean) || '';
 }
 
+function withExplicitServerScope(record) {
+  const scope = record?.serverScope ?? record?.server_scope;
+  return scope && scope !== 'legacy' && !record?.serverId && !record?.server_id ? { ...record, serverId: scope } : record;
+}
+
 function getHistoryAccountSelectionValue(record) {
   const explicitAccountKey = record?.accountKey || record?.account_key;
   if (explicitAccountKey) {
     return String(explicitAccountKey).trim();
   }
 
-  return getHistoryRecordAccountKey(record) || getHistoryGameUid(record) || null;
+  return getHistoryRecordAccountKey(withExplicitServerScope(record)) || getHistoryGameUid(record) || null;
 }
 
 function isHistoryRecordInAccountScope(record, selectedAccountValue) {
@@ -97,7 +103,7 @@ function isHistoryRecordInAccountScope(record, selectedAccountValue) {
     return true;
   }
 
-  return isGameAccountSelectionMatch(record, selectedAccountValue)
+  return isGameAccountSelectionMatch(withExplicitServerScope(record), selectedAccountValue)
     || getHistoryAccountSelectionValue(record) === selectedAccountValue;
 }
 
@@ -215,9 +221,11 @@ function serializeInternalJsonHistoryRecord(record) {
     pity: record?.pity,
     isNew: normalizeIsNew(record),
     isFree: normalizeIsFree(record),
+    isInfoBook: record?.isInfoBook === true || record?.is_info_book === true,
     gameUid: getHistoryGameUid(record),
     nickName: record?.nickName || record?.nick_name,
     serverId: record?.serverId || record?.server_id,
+    serverScope: record?.serverScope || record?.server_scope,
     region: record?.region || record?.serverRegion
   });
 }
@@ -254,7 +262,8 @@ function buildAccountLookup(history) {
       channelName: record?.channel_name || record?.channelName || storedMetadata.channelName,
       hgUid: record?.hg_uid || record?.hgUid || storedMetadata.hgUid,
       channelMasterId: record?.channel_master_id || record?.channelMasterId || storedMetadata.channelMasterId,
-      serverId: record?.server_id || record?.serverId || storedMetadata.serverId,
+      serverId: withExplicitServerScope(record)?.serverId || record?.server_id || storedMetadata.serverId,
+      serverScope: record?.serverScope || record?.server_scope || storedMetadata.serverScope,
       region: record?.region || record?.serverRegion || storedMetadata.region,
       isOfficial: record?.is_official ?? record?.isOfficial ?? storedMetadata.isOfficial
     });
@@ -268,6 +277,7 @@ function buildAccountLookup(history) {
       hgUid: metadata?.hgUid || null,
       channelMasterId: metadata?.channelMasterId || null,
       serverId: metadata?.serverId || null,
+      serverScope: record?.serverScope || record?.server_scope || metadata?.serverScope || null,
       region: metadata?.region || null,
       isOfficial: metadata?.isOfficial ?? null,
       serverTag: buildGameAccountServerTag(metadata) || null
@@ -572,11 +582,12 @@ export function buildExportPayload({
   currentGameUid,
   currentUserId,
   options,
-  characterCatalog = []
+  characterCatalog = [],
+  workbenchEntries = []
 }) {
   const resolvedOptions = normalizeExportOptions(options, { currentGameUid });
   const poolLookup = buildPoolLookup(pools);
-  const accountLookup = buildAccountLookup(history);
+  const accountLookup = buildAccountLookup([...(history || []), ...workbenchEntries.map(row => ({ ...row, ...row.scope }))]);
   const allowedPoolIds = resolvePoolFilterIds(resolvedOptions, pools, currentPoolId);
   const targetGameUid = resolveTargetGameUid(resolvedOptions, currentGameUid);
   const startTime = buildDateBoundary(resolvedOptions.dateFrom, false);
@@ -614,8 +625,18 @@ export function buildExportPayload({
     characterCatalog
   );
 
-  const referencedPoolIds = new Set(filteredHistory.map(getHistoryPoolId).filter(Boolean));
-  const referencedAccountKeys = new Set(filteredHistory.map(getHistoryAccountSelectionValue).filter(Boolean));
+  const supplements = workbenchEntries.filter(row => !row.deleted_at && !row.deletedAt && (!currentUserId || !row.user_id || row.user_id === currentUserId))
+    .map(serializeWorkbenchEntry).filter(entry => {
+      if (allowedPoolIds && !allowedPoolIds.has(entry.poolId)) return false;
+      if (targetGameUid && !isHistoryRecordInAccountScope(entry, targetGameUid)) return false;
+      const from = Date.parse(entry.values.rangeStart || entry.values.timestamp);
+      const to = entry.values.rangeEnd ? Date.parse(entry.values.rangeEnd) - 1 : from;
+      // A range cannot be clipped without inventing counts for the selected dates.
+      return (!startTime || from >= startTime) && (!endTime || to <= endTime);
+    });
+  const referencedRecords = [...filteredHistory, ...supplements];
+  const referencedPoolIds = new Set(referencedRecords.map(getHistoryPoolId).filter(Boolean));
+  const referencedAccountKeys = new Set(referencedRecords.map(getHistoryAccountSelectionValue).filter(Boolean));
   const pityMap = buildPitySequence(filteredHistory);
   const summary = buildSummary(filteredHistory, poolLookup, accountLookup);
 
@@ -647,6 +668,7 @@ export function buildExportPayload({
     pools: exportedPools,
     accounts: exportedAccounts,
     history: filteredHistory,
+    ...(supplements.length ? { supplements: { schemaVersion: WORKBENCH_TRANSFER_VERSION, workbenchEntries: supplements } } : {}),
     accountKeys: exportedAccountKeys,
     pityMap
   };
@@ -663,7 +685,8 @@ export function buildExportJsonContent(payload) {
     summary: payload.summary,
     pools: payload.pools.map(serializeInternalJsonPool),
     accounts: payload.accounts,
-    history: payload.history.map(serializeInternalJsonHistoryRecord)
+    history: payload.history.map(serializeInternalJsonHistoryRecord),
+    ...(payload.supplements ? { supplements: payload.supplements } : {})
   }, null, 2);
 }
 
