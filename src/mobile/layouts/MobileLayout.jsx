@@ -32,6 +32,7 @@ const MobileTicketView = lazy(() => import('../views/MobileTicketView'));
 const MobileAnnouncementsView = lazy(() => import('../views/MobileAnnouncementsView'));
 const MobileMechanicsView = lazy(() => import('../views/MobileMechanicsView'));
 const MobileRoadmapView = lazy(() => import('../views/MobileRoadmapView'));
+const DataWorkbenchPage = lazy(() => import('../../features/data-workbench/DataWorkbenchPage.jsx'));
 
 function MobileRouteFallback({ label }) {
   return (
@@ -87,6 +88,7 @@ function MobileLayout({ onOAuthSessionSynced, onRetryPersonalData }) {
       <main className="flex-1 relative overflow-hidden flex flex-col">
         <Suspense fallback={<MobileRouteFallback label={t('common.loading')} />}>
           <Routes>
+            <Route path="data-workbench" element={<DataWorkbenchPage />} />
             <Route index element={previewHome ? <HomeLandingDemo mobile /> : <MobileHomePageView />} />
             <Route path="announcements" element={<MobileAnnouncementsView />} />
             <Route path="mechanics" element={<MobileMechanicsView />} />

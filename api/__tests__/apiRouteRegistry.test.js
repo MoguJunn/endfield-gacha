@@ -60,6 +60,7 @@ const USER_OPERATION_PATHS = [
   '/api/account-email-action',
   '/api/account-email-verify',
   '/api/account-gacha-data',
+  '/api/data-workbench',
   '/api/account-last-seen',
   '/api/account-password-setup',
   '/api/account-profile',

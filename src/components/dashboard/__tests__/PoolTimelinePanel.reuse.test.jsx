@@ -1,8 +1,8 @@
-﻿import React from 'react';
+import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import PoolTimelinePanel from '../PoolTimelinePanel.jsx';
-import { I18nProvider } from '../../../i18n/index.js';
+import PoolTimelinePanel, { TimelineSectionCard } from '../PoolTimelinePanel.jsx';
+import { I18nProvider, getMessage } from '../../../i18n/index.js';
 
 afterEach(cleanup);
 
@@ -29,6 +29,14 @@ describe('timeline shared presentation', () => {
     expect(screen.getByText('40')).toBeInTheDocument();
     expect(screen.getByText('12')).toBeInTheDocument();
     expect(screen.getAllByText('40.0 抽')).toHaveLength(1);
+  });
+  it('renders supplied workbench metrics without leaking calculated main-page metrics', () => {
+    render(<TimelineSectionCard section={section} dense embedded t={(key, params) => getMessage(key, params, 'zh-CN')} locale="zh-CN"
+      metrics={[{ label: '已知数量', value: '3' }]} statusText="待保存" renderEntry={(entry) => <p>本地条目 {entry.id}</p>} />);
+    expect(screen.getByText('已知数量')).toBeInTheDocument();
+    expect(screen.getByText('本地条目 entry')).toBeInTheDocument();
+    expect(screen.queryByText('40.0 抽')).not.toBeInTheDocument();
+    expect(screen.queryByText('12')).not.toBeInTheDocument();
   });
 
   it('shows carried pity inside the milestone bar while preserving the total interval', async () => {

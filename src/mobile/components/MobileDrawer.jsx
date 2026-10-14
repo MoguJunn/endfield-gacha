@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Home, User, ListFilter, Globe, Gamepad2, MessageSquare, Settings, Info, Shield, LogOut, ChevronDown, X, LogIn } from 'lucide-react';
 import PlatformSwitcher from '../../components/common/PlatformSwitcher.jsx';
 import useAuthStore from '../../stores/useAuthStore';
 import usePoolStore from '../../stores/usePoolStore';
 import useHistoryStore from '../../stores/useHistoryStore';
 import { useI18n } from '../../i18n/index.js';
+import WorkbenchBetaBadge from '../../features/import/WorkbenchBetaBadge.jsx';
 import { buildUsernameHandle, getPreferredUsername } from '../../utils/usernameValidation.js';
 import {
   isGameAccountSelectionMatch,
@@ -35,6 +37,7 @@ function DrawerNavButton({ icon: Icon, label, active = false, tone = 'default', 
 }
 
 function MobileDrawer({ isOpen, onClose, activeTab, setActiveTab }) {
+  const navigate = useNavigate();
   const { user, signOut, userRole, openAuthModal } = useAuthStore();
   const currentGameUid = usePoolStore((state) => state.currentGameUid);
   const getGameAccountsFromHistory = useHistoryStore((state) => state.getGameAccountsFromHistory);
@@ -135,6 +138,10 @@ function MobileDrawer({ isOpen, onClose, activeTab, setActiveTab }) {
           <DrawerNavButton icon={Home} label={t('nav.home')} active={activeTab === 'home'} onClick={() => jumpTo('home')} />
           <DrawerNavButton icon={User} label={t('nav.overview')} active={activeTab === 'overview'} onClick={() => jumpTo('overview')} />
           <DrawerNavButton icon={ListFilter} label={t('nav.details')} active={activeTab === 'details'} onClick={() => jumpTo('details')} />
+          <DrawerNavButton icon={ListFilter} label={locale === 'en-US' ? 'Import & correct' : '导入与补录'} trailing={<WorkbenchBetaBadge />} active={activeTab === 'dataWorkbench'} onClick={() => {
+            navigate('/m/data-workbench?import=choose');
+            onClose();
+          }} />
           <DrawerNavButton icon={Globe} label={t('nav.stats')} active={activeTab === 'stats'} onClick={() => jumpTo('stats')} />
           <DrawerNavButton icon={Gamepad2} label={t('nav.simulator')} active={activeTab === 'simulator'} onClick={() => jumpTo('simulator')} />
 

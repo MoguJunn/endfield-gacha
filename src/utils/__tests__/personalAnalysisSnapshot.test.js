@@ -411,6 +411,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
     });
 
     expect(result.owner.summary).toEqual(expected);
+    expect(result.owner.summary).not.toHaveProperty('workbench');
     expect(result.owner.summary.total).toBe(2);
   });
 

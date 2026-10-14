@@ -143,7 +143,7 @@ export default function NotificationCenter({
   };
 
   return (
-    <div className="fixed bottom-20 right-4 z-[90] sm:bottom-6 sm:right-6">
+    <div className="notification-center fixed bottom-20 right-4 z-[90] sm:bottom-6 sm:right-6">
       {visible && (
         <div className="mb-3 w-[min(25rem,calc(100vw-2rem))] overflow-hidden border border-zinc-200 bg-white shadow-2xl dark:border-zinc-800 dark:bg-zinc-950">
           <div className="flex items-center justify-between gap-3 border-b border-zinc-200 bg-slate-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900">

@@ -1,4 +1,4 @@
-﻿import React, { useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { Eye, EyeOff, Layers, ShieldCheck } from 'lucide-react';
 import { buildDashboardTimelineSections, countDashboardTimelineNodes } from '../../utils/dashboardTimelineSections.js';
 import { isEnglishLocale, useI18n } from '../../i18n/index.js';
@@ -319,7 +319,7 @@ function StagePortrait({ entry, featured, compact = false, t }) {
   );
 }
 
-function StageBadge({ badge, compact = false, mobile = false }) {
+export function StageBadge({ badge, compact = false, mobile = false }) {
   const isSixStar = badge.rarity >= 6;
   return (
     <div
@@ -414,7 +414,7 @@ function WeaponBatchResults({ batch, locale, showFiveStarDrops = true }) {
   );
 }
 
-function TimelineStageCard({
+export function TimelineStageCard({
   entry,
   sectionId,
   sectionType,
@@ -423,18 +423,22 @@ function TimelineStageCard({
   mobile = false,
   showFiveStarDrops = true,
   dense = false,
+  barValue = entry.pulls,
+  barUnit,
+  barWidthPercent,
   showWeaponBatch = true,
+  children,
 }) {
   const { locale } = useI18n();
   const english = isEnglishLocale(locale);
   const compact = entry.stageKind === 'fiveStar';
   const visibleBadges = getVisibleDropBadges(entry, showFiveStarDrops);
   const resultSummary = getVisibleResultSummary(entry, showFiveStarDrops);
-  const stamp = getStampConfig(entry, sectionType, t, locale);
-  const widthPercent =
+  const stamp = entry.unknownInheritedPity ? null : getStampConfig(entry, sectionType, t, locale);
+  const widthPercent = barWidthPercent ?? (
     entry.stageKind === 'gift'
       ? 100
-      : Math.max(compact ? 10 : 12, Math.min(100, (entry.pulls / Math.max(entry.targetPulls || 1, 1)) * 100));
+      : Math.max(compact ? 10 : 12, Math.min(100, (entry.pulls / Math.max(entry.targetPulls || 1, 1)) * 100)));
   const portraitCompact = compact || dense;
   const summaryTextClass = getLengthAwareSummaryClass(resultSummary, dense, compact);
   const inheritedPulls = Number(entry.inheritedPulls) || 0;
@@ -497,9 +501,9 @@ function TimelineStageCard({
             <div
               className={`absolute inset-y-0 left-2 sm:left-3 flex items-center font-black font-mono tracking-tight ${entry.guaranteePulls ? 'my-0.5 rounded-sm bg-amber-100/95 px-1 text-amber-950' : mobile ? 'text-slate-900 dark:text-zinc-100' : 'text-zinc-900 dark:text-zinc-100'} ${dense ? 'text-base' : compact ? 'text-sm sm:text-base' : 'text-lg sm:text-xl'}`}
             >
-              {entry.pulls}
+              {entry.unknownInheritedPity ? (english ? 'Unknown' : '继承未知') : barValue}
               <span className={`ml-0.5 font-bold ${compact ? 'text-[10px] sm:text-xs' : 'text-xs sm:text-sm'}`}>
-                {t('dashboard.unit.pull')}
+                {barUnit ?? t('dashboard.unit.pull')}
               </span>
             </div>
           </div>
@@ -514,6 +518,10 @@ function TimelineStageCard({
           )}
         </div>
 
+        {entry.unknownInheritedPity && <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">
+          {english ? `This banner has ${entry.localPulls} stored pulls in this segment; the inherited interval cannot be verified.`
+            : `本段记录包含本池 ${entry.localPulls} 抽，继承间隔无法核实，不参与保底间隔统计。`}
+        </p>}
         {inheritedPulls > 0 && (
           <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-bold sm:text-xs">
             <span className="inline-flex items-center gap-1 text-indigo-800 dark:text-indigo-300">
@@ -538,6 +546,7 @@ function TimelineStageCard({
             ))}
           </div>
         )}
+        {children}
       </div>
     </div>
   );
@@ -591,7 +600,7 @@ function TimelineMultiDropGroup({
   );
 }
 
-function TimelineSectionCard({
+export function TimelineSectionCard({
   section,
   isOverview,
   embedded,
@@ -600,9 +609,15 @@ function TimelineSectionCard({
   mobile = false,
   showFiveStarDrops = true,
   dense = false,
+  metrics = null,
+  statusText,
+  showMetadata = true,
+  renderEntry,
+  footer,
 }) {
   const tone = getTimelineTone(section.type);
-  const pityValue = section.hidePityState ? t('dashboard.timeline.multiAccount') : `${section.currentPity}`;
+  const pityValue = section.hidePityState ? t('dashboard.timeline.multiAccount')
+    : section.currentPity === null ? (locale === 'en-US' ? 'Unknown' : '未知') : `${section.currentPity}`;
   const titleClass = getLengthAwareTitleClass(section.title, dense, embedded);
   const chipClass = dense ? 'px-1.5 py-0.5 text-[9px] tracking-[0.08em]' : 'px-2 py-0.5 text-[11px] tracking-[0.18em]';
   const renderGroups = buildTimelineRenderGroups(section.entries);
@@ -649,18 +664,19 @@ function TimelineSectionCard({
               )}
             </div>
 
-            <div
+            {showMetadata && <div
               className={`mt-2 flex flex-wrap items-center gap-2 font-mono ${dense ? 'text-[10px]' : 'text-[11px]'} ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-zinc-500 dark:text-zinc-400'}`}
             >
               <span>{section.period}</span>
               <span className={mobile ? 'text-zinc-300 dark:text-zinc-700' : 'text-zinc-300 dark:text-zinc-700'}>
                 |
               </span>
-              <span className={tone.accent}>{getStatusText(section.status, t)}</span>
-            </div>
+              <span className={tone.accent}>{statusText ?? getStatusText(section.status, t)}</span>
+            </div>}
           </div>
 
           <div className={dense ? 'grid grid-cols-4 gap-2' : 'grid grid-cols-2 gap-3 md:grid-cols-4'}>
+            {metrics ? metrics.map((metric) => <MetricItem key={metric.label} {...metric} mobile={mobile} dense={dense} />) : <>
             <MetricItem
               label={t('dashboard.timeline.metric.total')}
               value={t('dashboard.unit.pulls', { count: section.totalPulls })}
@@ -688,6 +704,7 @@ function TimelineSectionCard({
               mobile={mobile}
               dense={dense}
             />
+            </>}
           </div>
         </div>
       </div>
@@ -702,7 +719,7 @@ function TimelineSectionCard({
         ) : (
           <div className="space-y-0">
             {renderGroups.map((group) =>
-              group.type === 'multi' ? (
+              renderEntry ? <React.Fragment key={group.key}>{group.type === 'multi' ? group.entries.map(renderEntry) : renderEntry(group.entry)}</React.Fragment> : group.type === 'multi' ? (
                 <TimelineMultiDropGroup
                   key={group.key}
                   group={group}
@@ -731,6 +748,7 @@ function TimelineSectionCard({
             )}
           </div>
         )}
+        {footer}
       </div>
     </div>
   );

@@ -69,6 +69,9 @@ export function buildCharacterStats({
     } else {
       pityValue = item?.rarity === 6 ? sixStarPityCounter : fiveStarPityCounter;
     }
+    if (!isFree && item.statisticsContinuity?.interrupted) {
+      pityValue = item.rarity === 6 ? item.statisticsContinuity.sixStarPity : item.statisticsContinuity.fiveStarPity;
+    }
 
     const existing = characters.get(name);
     if (existing) {

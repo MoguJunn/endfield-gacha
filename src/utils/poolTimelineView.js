@@ -1,4 +1,4 @@
-﻿import { characterCache } from './characterUtils.js';
+import { characterCache } from './characterUtils.js';
 import { isFreeHistoryPull, isGiftHistoryPull, isInfoBookHistoryPull } from './historyInfoBook.js';
 import { getPoolTimingMeta, normalizePoolGroupType } from './poolSelectorDisplay.js';
 import { compareHistoryTimelineAsc, getHistoryTimelineTimestampMs } from './historyTimelineSort.js';
@@ -355,6 +355,7 @@ function buildOrderedTimelineGroups(history = []) {
 }
 
 function getInheritedLimitedPityForItem(item, crossPoolPityMap = null) {
+  if (item.statisticsContinuity?.interrupted) return item.statisticsContinuity.sixStarPity;
   if (!(crossPoolPityMap instanceof Map)) {
     return null;
   }
@@ -413,6 +414,7 @@ function calculateTimelineMetrics(history = [], { poolType = 'standard', crossPo
       if (isGiftHistoryPull(item) || isFreeHistoryPull(item)) {
         continue;
       }
+      if (item.statisticsContinuity?.interrupted) return item.statisticsContinuity.currentPity6;
       if (Number(item?.rarity) >= 6) {
         break;
       }
@@ -427,6 +429,7 @@ function calculateTimelineMetrics(history = [], { poolType = 'standard', crossPo
       if (isGiftHistoryPull(item) || isFreeHistoryPull(item)) {
         continue;
       }
+      if (item.statisticsContinuity?.interrupted) return item.statisticsContinuity.currentPity5;
       if (Number(item?.rarity) >= 5) {
         break;
       }
@@ -434,12 +437,13 @@ function calculateTimelineMetrics(history = [], { poolType = 'standard', crossPo
     }
     return pity;
   })();
-  const sixStarIntervals = isLimitedPool
+  const hasInterruptedHistory = validPulls.some(item => item.statisticsContinuity?.interrupted);
+  const sixStarIntervals = isLimitedPool || hasInterruptedHistory
     ? sixStars
         .map((item) => getInheritedLimitedPityForItem(item, crossPoolPityMap))
         .filter((value) => Number.isFinite(value) && value > 0)
     : [];
-  const upSixStarIntervals = isLimitedPool
+  const upSixStarIntervals = isLimitedPool || hasInterruptedHistory
     ? upSixStars
         .map((item) => getInheritedLimitedPityForItem(item, crossPoolPityMap))
         .filter((value) => Number.isFinite(value) && value > 0)
@@ -452,14 +456,14 @@ function calculateTimelineMetrics(history = [], { poolType = 'standard', crossPo
     upSixStarCount: upSixStars.length,
     winRate: winRateSixStars.length > 0 ? (winRateUpSixStars.length / winRateSixStars.length) * 100 : 0,
     avgSixStarPulls:
-      sixStars.length > 0
+      hasInterruptedHistory ? (sixStarIntervals.length ? sixStarIntervals.reduce((sum, value) => sum + value, 0) / sixStarIntervals.length : Number.NaN) : sixStars.length > 0
         ? isLimitedPool && sixStarIntervals.length === sixStars.length
           ? sixStarIntervals.reduce((sum, value) => sum + value, 0) / sixStarIntervals.length
           : validPulls.length / sixStars.length
         : Number.NaN,
     avgFiveStarPulls: fiveStars.length > 0 ? validPulls.length / fiveStars.length : Number.NaN,
     avgUpPulls:
-      upSixStars.length > 0
+      hasInterruptedHistory ? (upSixStarIntervals.length ? upSixStarIntervals.reduce((sum, value) => sum + value, 0) / upSixStarIntervals.length : Number.NaN) : upSixStars.length > 0
         ? isLimitedPool && upSixStarIntervals.length === upSixStars.length
           ? upSixStarIntervals.reduce((sum, value) => sum + value, 0) / upSixStarIntervals.length
           : validPulls.length / upSixStars.length
@@ -692,7 +696,7 @@ function buildCurrentStageEntry(
 ) {
   const english = isEnglishLocale(locale);
   const targetLabel = english ? '6★ milestone' : '6★ 节点';
-  const displayPulls = Number.isFinite(currentPityValue) ? currentPityValue : pendingPaidCount;
+  const displayPulls = currentPityValue === null ? null : Number.isFinite(currentPityValue) ? currentPityValue : pendingPaidCount;
   const supportBadges = createDropBadges(
     supportItems.filter((item) => Number(item?.rarity) === 5),
     locale,
@@ -706,6 +710,7 @@ function buildCurrentStageEntry(
     dateLabel: english ? 'Now' : '至今',
     stageLabel: english ? 'Current Progress' : '当前推进',
     pulls: displayPulls,
+    ...(currentPityValue === null ? { unknownInheritedPity: true, localPulls: pendingPaidCount } : {}),
     targetPulls: Number.isFinite(currentTargetPullsOverride)
       ? currentTargetPullsOverride
       : getStageTargetPulls(pool, 'current'),
@@ -808,7 +813,8 @@ function buildStageEntries({
     const mergedSupportItems = mergeBadgeItems(pendingSupportItems, summary.fiveStars);
     const inheritedPulls =
       normalizedType === 'limited' ? getInheritedLimitedPityForItem(summary.primarySixStar, crossPoolPityMap) : null;
-    const pulls = inheritedPulls ?? pendingPaidCount;
+    const unknownInheritedPity = summary.primarySixStar?.statisticsContinuity?.sixStarKnown === false;
+    const pulls = unknownInheritedPity ? null : inheritedPulls ?? pendingPaidCount;
     const isGuaranteed = guaranteePulls && (
       isGuaranteedHistoryPull(summary.primarySixStar) ||
       guaranteedRecordKeys.has(getHistoryRecordKey(summary.primarySixStar))
@@ -819,6 +825,7 @@ function buildStageEntries({
       dateLabel: formatDateLabel(summary.timestamp),
       stageLabel: milestone.stageLabel,
       pulls,
+      ...(unknownInheritedPity ? { unknownInheritedPity: true } : {}),
       localPulls: pendingPaidCount,
       inheritedPulls: !hasPaidSixStar ? Math.max(0, pulls - pendingPaidCount) : 0,
       guaranteePulls: isGuaranteed ? guaranteePulls : null,
@@ -900,7 +907,7 @@ function buildTimelineSection({
   const entries = buildStageEntries({
     history,
     pool,
-    currentPityOverride,
+    currentPityOverride: currentPityOverride === undefined ? metrics.currentPity : currentPityOverride,
     currentTargetPullsOverride,
     crossPoolPityMap,
     guaranteePulls,
@@ -926,8 +933,8 @@ function buildTimelineSection({
     period: formatPeriod(pool, locale),
     status: timing,
     totalPulls: metrics.totalPulls,
-    currentPity: disablePityState ? null : (currentPityOverride ?? metrics.currentPity),
-    currentPity5: disablePityState ? null : (currentPity5Override ?? metrics.currentPity5),
+    currentPity: disablePityState ? null : (currentPityOverride === undefined ? metrics.currentPity : currentPityOverride),
+    currentPity5: disablePityState ? null : (currentPity5Override === undefined ? metrics.currentPity5 : currentPity5Override),
     sixStarCount: metrics.sixStarCount,
     fiveStarCount: metrics.fiveStarCount,
     upSixStarCount: metrics.upSixStarCount,

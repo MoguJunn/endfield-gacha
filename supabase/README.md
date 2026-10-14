@@ -1,6 +1,6 @@
 # 数据库 Schema 与迁移指南
 
-新环境入口是 `baseline/000_complete_schema.sql`。当前基线包含 195 个迁移，覆盖 `archive/001_init_tables.sql` 至 `active/2026101101_complete_pool_roster_reads.sql`；精确范围以文件头和生成校验为准。
+新环境入口是 `baseline/000_complete_schema.sql`。当前基线包含 202 个迁移，覆盖 `archive/001_init_tables.sql` 至 `active/2026101403_bound_statistics_pity_interval_work.sql`；精确范围以文件头和生成校验为准。
 
 ## 目录职责
 
@@ -68,6 +68,8 @@ npm run test:simulator-v2:sql
 `site_config.public_cache_epoch` 是公共缓存版本源。用户历史、个人分析、恢复和后台数据不得进入公共缓存。管理员写入通过同源 API，不需旧管理 Edge Functions。
 
 `2026101101_complete_pool_roster_reads.sql` 提供仅服务端可调用的单值 JSON 阵容读取，避免超过 1,000 条关系后被 REST 截断；不改变全库 API 上限或已有配置。现有环境已应用，API 升级与客户端失败合同见 [阵容完整读取](../docs/POOL_ROSTER_READS.md)，隔离 SQL 验证为 `npm run test:pool-rosters:sql`。
+
+2026-10-14 现有环境已应用 `2026100911`／`0912`／`0913` 工作台原子保存、`2026101400` 统计整池排除、`1401` 增量版本及 `1402`／`1403` 删除恢复与保底汇总性能修复。版本仅从启用后记录，旧手动池回填持久排除；原始历史记录保留。不要重跑这些创建迁移。统计计算及个人 schema 5 Worker 已衔接，网站版本切换与全量快照进度见 [生产迁移记录](../docs/PRODUCTION_WORKBENCH_MIGRATIONS_20261014.md)。
 
 ## 数据审计与修复
 

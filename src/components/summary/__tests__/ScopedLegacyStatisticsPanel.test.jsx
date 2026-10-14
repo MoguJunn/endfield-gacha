@@ -69,4 +69,15 @@ describe('scoped legacy statistics', () => {
     expect(screen.queryByRole('region', { name: 'Six-star interval distribution' })).toBeNull();
     expect(screen.getByText('Show resource details')).toBeTruthy();
   });
+
+  it('explains interrupted history while retaining the normal banner result counts', () => {
+    render(<ScopedLegacyStatisticsPanel legacy={{ ...legacy, regularTotal: 10, sixStarCount: 1,
+      avgSixStarInterval: null, intervalDistribution: [], meta: { ...legacy.meta, intervalCount: 0,
+        unknownInheritedIntervalCount: 1, unknownCopyHistoryCount: 10 } }} locale="zh-CN" t={zh => zh} />);
+    expect(screen.getByTestId('legacy-regularTotal')).toHaveTextContent('10');
+    expect(screen.getByTestId('legacy-sixStarCount')).toHaveTextContent('1');
+    expect(screen.getByTestId('legacy-avgSixStarInterval')).toHaveTextContent('—');
+    expect(screen.getByRole('note')).toHaveTextContent('当前池的正常记录仍计入抽数和星级数量');
+    expect(screen.getByRole('note')).toHaveTextContent('资源明细仅包含可核实部分');
+  });
 });
