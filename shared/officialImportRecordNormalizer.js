@@ -4,6 +4,7 @@ const ISSUE_SEVERITIES = new Set(['blocking', 'review', 'info']);
 const ACTIONABLE_IDENTITY_ISSUE_CODES = new Set(['MISSING_ITEM_ID_AND_NAME', 'MISSING_ITEM_ID', 'MISSING_ITEM_NAME']);
 const NON_PULL_RECORD_KINDS = new Set(['gift_intel_book']);
 const WEAPON_GIFT_EVENT_NAME_PATTERN = /^(?:武库赠礼|军列赠礼)(?:\s*[-－—–:：]\s*.+)?$/u;
+const SUPPLEMENTAL_WEAPON_BOX_NAME_PATTERN = /^补充武库箱(?:\s*·\s*.+)?$/u;
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null && String(value).trim() !== '');
@@ -28,7 +29,11 @@ export function getOfficialImportEventName(record = {}) {
 
 export function isOfficialImportNonPullRecord(record = {}) {
   return NON_PULL_RECORD_KINDS.has(getOfficialImportRecordKind(record))
-    || WEAPON_GIFT_EVENT_NAME_PATTERN.test(getOfficialImportEventName(record));
+    || WEAPON_GIFT_EVENT_NAME_PATTERN.test(getOfficialImportEventName(record))
+    // 补充武库箱是额外奖励；官方可能仅返回物品名而没有赠礼事件标记。
+    // 只匹配明确的箱子名称，不因武器 ID 或品质缺失就过滤未知物品。
+    || [record.nameText, record.name_text, record.weaponName, record.itemName, record.item_name, record.name]
+      .some((name) => SUPPLEMENTAL_WEAPON_BOX_NAME_PATTERN.test(normalizeText(name)));
 }
 
 export function filterOfficialImportPullRecords(records = []) {

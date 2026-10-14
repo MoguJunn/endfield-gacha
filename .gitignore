@@ -92,10 +92,24 @@ backend/lib/*
 
 # 本地私有后端重构产物：不属于主站主线，也不参与主站 CI。
 # backend/lib/* 默认继续忽略；后续拆分出的私有模块不要再加入白名单。
+# 旧兼容文件已在历史中跟踪，忽略规则不会隐藏它们的修改；公开提交须单独排除。
 backend/lib/dailyStats.js
 backend/lib/performanceMetrics.js
 backend/lib/performanceMonitor.js
 backend/lib/supabaseConnectionRetry.js
+
+# 私有实现的维护记录、部署工具、验证脚本和新增服务端迁移只保留在本地。
+docs/BACKEND_IMPORT_RELIABILITY.md
+docs/BACKEND_MAINTENANCE.md
+scripts/package-private-backend.mjs
+scripts/verify-private-backend.mjs
+scripts/verify-private-backend-package.mjs
+scripts/verify-backend-import-jobs.mjs
+scripts/verify-statistics-load-bounds.mjs
+supabase/migrations/2026101404_official_import_integrity_and_statistics_scope.sql
+supabase/migrations/2026101405_durable_backend_import_jobs.sql
+supabase/migrations/2026101406_bound_public_statistics_refresh.sql
+supabase/migrations/2026101407_indexed_statistics_history_pages.sql
 
 # 上述本地重构模块的配套测试同样只保留在本地。
 api/__tests__/dailyStats.test.js
@@ -104,6 +118,10 @@ api/__tests__/performanceMonitor.test.js
 api/__tests__/queuePerformanceMetrics.test.js
 api/__tests__/supabaseConnectionRetry.test.js
 api/__tests__/privateRecordsFallback.test.js
+api/__tests__/backendQueues.test.js
+api/__tests__/backendHttpIntegration.test.js
+api/__tests__/durableImportJobs.test.js
+api/__tests__/fullImportRecovery.test.js
 dev-proxy.js
 api/hg-proxy.js
 
