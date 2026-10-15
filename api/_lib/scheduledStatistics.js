@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { STATISTICS_SNAPSHOT_VERSION, statisticsRefreshMeta } from '../../shared/statisticsRefreshPolicy.js';
 import { getSupabaseAdminClient } from './authAdmin.js';
 import { resolveAuthenticatedRequestUser } from './siteAuth.js';
+import { projectStatisticsPoolLabels } from '../../shared/statisticsPoolLabels.js';
 
 // Explicit local preview only. Production always reads the persistent DB snapshot.
 async function localSnapshots() {
@@ -9,7 +10,7 @@ async function localSnapshots() {
   return file ? JSON.parse(await readFile(file, 'utf8')) : null;
 }
 
-export async function readScheduledStatistic(db, scope) {
+export async function readScheduledStatistic(db, scope, { pools = null } = {}) {
   const local = scope.startsWith('owner:') ? null : await localSnapshots();
   let snapshot;
   if (local) snapshot = local.snapshots[scope];
@@ -21,7 +22,15 @@ export async function readScheduledStatistic(db, scope) {
   if (!snapshot || snapshot.schema_version !== STATISTICS_SNAPSHOT_VERSION) {
     return { payload: null, meta: { availability: 'building', updatedAt: null, nextRefreshAt: null } };
   }
-  return { payload: snapshot.payload, meta: { ...statisticsRefreshMeta(snapshot),
+  if (scope.startsWith('owner:') && snapshot.payload?.pools?.length) {
+    // IDs come from this authenticated owner's snapshot. Only labels are read;
+    // a page visit never loads history or recomputes the saved analysis.
+    const { data, error } = await db.from('pools').select('pool_id,name,name_en')
+      .in('pool_id', snapshot.payload.pools.map((pool) => pool.id));
+    if (error || !Array.isArray(data)) throw new Error('Personal pool labels unavailable');
+    pools = data;
+  }
+  return { payload: pools ? projectStatisticsPoolLabels(snapshot.payload, pools) : snapshot.payload, meta: { ...statisticsRefreshMeta(snapshot),
     pendingChanges: Boolean(snapshot.pending_changes), source: local ? 'local-snapshot' : 'scheduled-snapshot' } };
 }
 

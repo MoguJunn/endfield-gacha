@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-10-14T02:28:02.343Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/2026101403_bound_statistics_pity_interval_work.sql
+--   4. 生成时间: 2026-10-15T04:07:31.920Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/2026101411_public_statistics_worker_contract.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -38970,4 +38970,424 @@ FROM resets r WHERE r.rarity>=5;
 NOTIFY pgrst, 'reload schema';
 COMMIT;
 -- <<< END MIGRATION: active/2026101403_bound_statistics_pity_interval_work.sql
+
+-- >>> BEGIN MIGRATION: active/2026101408_fix_pool_catalog_safe_updates.sql
+-- Explicit predicates keep catalog invalidation compatible with safeupdate.
+-- Every owner/scope must still be invalidated: catalog ordering can affect
+-- inherited resources even when the changed pool contains no stored history.
+BEGIN;
+CREATE OR REPLACE FUNCTION public.invalidate_personal_analysis_after_pool_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' AND (
+    OLD.pool_id, OLD.name, OLD.name_en, OLD.type, OLD.locked, OLD.user_id,
+    OLD.up_character, OLD.is_limited_weapon, OLD.featured_characters,
+    OLD.description, OLD.banner_url, OLD.start_time, OLD.end_time,
+    OLD.extra_subtype, OLD.extra_rule_profile, OLD.extra_series_key, OLD.extra_series_phase
+  ) IS NOT DISTINCT FROM (
+    NEW.pool_id, NEW.name, NEW.name_en, NEW.type, NEW.locked, NEW.user_id,
+    NEW.up_character, NEW.is_limited_weapon, NEW.featured_characters,
+    NEW.description, NEW.banner_url, NEW.start_time, NEW.end_time,
+    NEW.extra_subtype, NEW.extra_rule_profile, NEW.extra_series_key, NEW.extra_series_phase
+  ) THEN
+    RETURN NULL;
+  END IF;
+  UPDATE public.personal_analysis_owner_state
+  SET history_revision=history_revision+1,
+      dirty_since=COALESCE(dirty_since,statement_timestamp()),last_error=NULL
+  WHERE user_id IS NOT NULL;
+  UPDATE public.personal_analysis_scope_state
+  SET history_revision=history_revision+1,
+      dirty_since=COALESCE(dirty_since,statement_timestamp()),last_error=NULL
+  WHERE user_id IS NOT NULL;
+  RETURN NULL;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.invalidate_personal_analysis_after_pool_change()
+  FROM PUBLIC,anon,authenticated;
+
+-- Saving a name must not delete/reinsert the identical roster. Every roster
+-- row change otherwise updates its parent pool and repeats catalog recounts.
+DO $$
+DECLARE definition TEXT; original TEXT; replacement TEXT;
+BEGIN
+  definition:=replace(pg_get_functiondef('public.admin_save_pool_catalog(text,jsonb,jsonb,jsonb,jsonb,uuid)'::regprocedure),chr(13),'');
+  original:=$old$  DELETE FROM public.pool_characters WHERE pool_id = p_pool_id;
+  INSERT INTO public.pool_characters (pool_id, character_id, is_up)
+  SELECT p_pool_id, r->>'character_id', COALESCE((r->>'is_up')::BOOLEAN, FALSE)
+  FROM jsonb_array_elements(p_pool_character_rows) r;$old$;
+  replacement:=$new$  IF EXISTS (
+    SELECT character_id,is_up FROM public.pool_characters WHERE pool_id=p_pool_id
+    EXCEPT SELECT r->>'character_id',COALESCE((r->>'is_up')::BOOLEAN,FALSE)
+      FROM jsonb_array_elements(p_pool_character_rows) r
+  ) OR EXISTS (
+    SELECT r->>'character_id',COALESCE((r->>'is_up')::BOOLEAN,FALSE)
+      FROM jsonb_array_elements(p_pool_character_rows) r
+    EXCEPT SELECT character_id,is_up FROM public.pool_characters WHERE pool_id=p_pool_id
+  ) THEN
+    DELETE FROM public.pool_characters WHERE pool_id = p_pool_id;
+    INSERT INTO public.pool_characters (pool_id, character_id, is_up)
+    SELECT p_pool_id, r->>'character_id', COALESCE((r->>'is_up')::BOOLEAN, FALSE)
+    FROM jsonb_array_elements(p_pool_character_rows) r;
+  END IF;$new$;
+  IF position(original IN definition)=0 THEN RAISE EXCEPTION 'pool_catalog_roster_save_definition_changed';END IF;
+  EXECUTE replace(definition,original,replacement);
+END $$;
+COMMIT;
+-- <<< END MIGRATION: active/2026101408_fix_pool_catalog_safe_updates.sql
+
+-- >>> BEGIN MIGRATION: active/2026101409_scope_pool_catalog_invalidation.sql
+-- Display metadata is read from the catalog, not an analysis input. Catalog
+-- writes invalidate only referenced accounts and their cross-pool dependencies.
+BEGIN;
+CREATE FUNCTION public.statistics_pool_group(p_pool JSONB) RETURNS TEXT
+LANGUAGE sql IMMUTABLE SET search_path=pg_catalog,public AS $$
+  SELECT CASE
+    WHEN p_pool->>'type' IN ('limited','limited_character') THEN 'group:limited'
+    WHEN p_pool->>'type' IN ('weapon','limited_weapon') THEN
+      CASE WHEN (p_pool->>'is_limited_weapon')::BOOLEAN IS DISTINCT FROM FALSE
+        THEN 'group:weapon_limited' ELSE 'group:weapon_standard' END
+    WHEN p_pool->>'type'='extra' AND p_pool->>'extra_subtype'='reconstruction'
+      AND p_pool->>'extra_rule_profile'='reconstruction_weapon_v1' THEN 'group:extra:reconstruction_claim'
+    WHEN p_pool->>'type'='extra' AND p_pool->>'extra_subtype' IN ('reconstruction','reconstruction_claim')
+      THEN 'group:extra:'||(p_pool->>'extra_subtype') END;
+$$;
+
+CREATE FUNCTION public.invalidate_pool_statistics_dependencies(
+  p_pool_ids TEXT[], p_recount_ids TEXT[] DEFAULT '{}', p_group_keys TEXT[] DEFAULT '{}'
+) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE accounts JSONB; dependent_ids TEXT[];
+BEGIN
+  SELECT COALESCE(jsonb_agg(to_jsonb(a)),'[]'::JSONB) INTO accounts FROM (
+    SELECT DISTINCT h.user_id,btrim(h.game_uid::TEXT) AS game_uid,h.server_scope
+    FROM public.history h WHERE h.pool_id=ANY(p_pool_ids)
+  ) a;
+  SELECT ARRAY(SELECT DISTINCT pool_id FROM (
+    SELECT unnest(p_pool_ids) AS pool_id
+    UNION
+    SELECT d.pool_id FROM jsonb_to_recordset(accounts) a(user_id UUID,game_uid TEXT,server_scope TEXT)
+    CROSS JOIN LATERAL public.statistics_account_pool_dependencies(a.user_id,a.game_uid,a.server_scope) d
+    WHERE NULLIF(a.game_uid,'') IS NOT NULL
+  ) dependencies WHERE NULLIF(pool_id,'') IS NOT NULL) INTO dependent_ids;
+
+  -- Retain the history trigger's owner -> scope lock order, and include private
+  -- manual/legacy accounts even when their rows are excluded from public data.
+  UPDATE public.personal_analysis_owner_state s
+  SET history_revision=s.history_revision+1,
+      dirty_since=COALESCE(s.dirty_since,statement_timestamp()),last_error=NULL
+  WHERE s.user_id IN (SELECT a.user_id FROM jsonb_to_recordset(accounts) a(user_id UUID));
+  UPDATE public.personal_analysis_scope_state s
+  SET history_revision=s.history_revision+1,
+      dirty_since=COALESCE(s.dirty_since,statement_timestamp()),last_error=NULL
+  WHERE EXISTS (SELECT 1 FROM jsonb_to_recordset(accounts) a(user_id UUID,game_uid TEXT,server_scope TEXT)
+    WHERE s.user_id=a.user_id
+      AND s.scope_game_uid=public.normalize_personal_analysis_game_uid(a.user_id,a.game_uid)
+      AND s.server_scope=COALESCE(NULLIF(btrim(a.server_scope),''),'legacy'));
+
+  -- Counts change only when identity/visibility changes; UP/roster edits never
+  -- recount history. New IDs start with their existing eligible rows.
+  INSERT INTO public.statistics_jobs(scope_key,total_pulls)
+    SELECT 'pool:'||p.pool_id,(SELECT count(*) FROM public.statistics_history h
+      WHERE h.pool_id=p.pool_id AND h.special_type IS DISTINCT FROM 'gift'
+        AND h.rarity IN (4,5,6) AND NULLIF(btrim(h.game_uid::TEXT),'') IS NOT NULL
+        AND h.timestamp>to_timestamp(0))
+    FROM public.get_app_visible_pools() p WHERE p.pool_id=ANY(p_recount_ids)
+    ON CONFLICT(scope_key) DO UPDATE SET total_pulls=EXCLUDED.total_pulls;
+  INSERT INTO public.statistics_jobs(scope_key)
+    SELECT 'pool:'||p.pool_id FROM public.get_app_visible_pools() p WHERE p.pool_id=ANY(dependent_ids)
+    ON CONFLICT(scope_key) DO NOTHING;
+  UPDATE public.statistics_jobs SET revision=revision+1
+    WHERE scope_key=ANY(ARRAY(SELECT 'pool:'||id FROM unnest(dependent_ids) id));
+  INSERT INTO public.statistics_jobs(scope_key,total_pulls)
+    SELECT g.scope_key,COALESCE(sum(j.total_pulls),0)::BIGINT
+    FROM public.statistics_group_keys() g(scope_key)
+    LEFT JOIN public.statistics_group_members() m ON m.scope_key=g.scope_key
+    LEFT JOIN public.statistics_jobs j ON j.scope_key='pool:'||m.pool_id
+    WHERE g.scope_key=ANY(p_group_keys) OR EXISTS (
+      SELECT 1 FROM public.statistics_group_members() affected
+      WHERE affected.scope_key=g.scope_key AND affected.pool_id=ANY(dependent_ids))
+    GROUP BY g.scope_key
+    ON CONFLICT(scope_key) DO UPDATE SET revision=statistics_jobs.revision+1,total_pulls=EXCLUDED.total_pulls;
+  INSERT INTO public.statistics_jobs(scope_key)
+    SELECT DISTINCT 'owner:'||a.user_id FROM jsonb_to_recordset(accounts) a(user_id UUID)
+    WHERE a.user_id IS NOT NULL ORDER BY 1
+    ON CONFLICT(scope_key) DO UPDATE SET revision=statistics_jobs.revision+1;
+  UPDATE public.statistics_jobs SET revision=revision+1 WHERE scope_key IN
+    ('global_summary','character_ranking','character_catalog','public_analytics');
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.invalidate_personal_analysis_after_pool_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE before_row JSONB; after_row JSONB; ids TEXT[]; recount TEXT[] := '{}'; boundary JSONB;
+BEGIN
+  before_row:=CASE WHEN TG_OP='INSERT' THEN NULL ELSE to_jsonb(OLD) END;
+  after_row:=CASE WHEN TG_OP='DELETE' THEN NULL ELSE to_jsonb(NEW) END;
+  IF TG_OP = 'UPDATE' AND (
+    OLD.pool_id, OLD.type, OLD.locked, OLD.user_id,
+    OLD.up_character, OLD.is_limited_weapon, OLD.featured_characters,
+    OLD.start_time, OLD.end_time, OLD.created_at, OLD.roster_status,
+    OLD.extra_subtype, OLD.extra_rule_profile, OLD.extra_series_key, OLD.extra_series_phase
+  ) IS NOT DISTINCT FROM (
+    NEW.pool_id, NEW.type, NEW.locked, NEW.user_id,
+    NEW.up_character, NEW.is_limited_weapon, NEW.featured_characters,
+    NEW.start_time, NEW.end_time, NEW.created_at, NEW.roster_status,
+    NEW.extra_subtype, NEW.extra_rule_profile, NEW.extra_series_key, NEW.extra_series_phase
+  ) THEN
+    RETURN NULL;
+  END IF;
+  ids:=ARRAY_REMOVE(ARRAY[before_row->>'pool_id',after_row->>'pool_id'],NULL);
+  IF TG_OP<>'UPDATE' OR (OLD.pool_id,OLD.locked,OLD.user_id) IS DISTINCT FROM
+      (NEW.pool_id,NEW.locked,NEW.user_id) THEN recount:=ids; END IF;
+  IF TG_OP<>'UPDATE' OR (OLD.pool_id,OLD.type,OLD.start_time,OLD.created_at,OLD.locked,OLD.user_id)
+      IS DISTINCT FROM (NEW.pool_id,NEW.type,NEW.start_time,NEW.created_at,NEW.locked,NEW.user_id) THEN
+    -- An empty new period can redirect an info book. Include neighbors at both
+    -- old and new positions, not every owner merely because the catalog changed.
+    FOR boundary IN SELECT value FROM jsonb_array_elements(jsonb_build_array(before_row,after_row))
+      WHERE value->>'type' IN ('limited','limited_character') LOOP
+      ids:=ids||ARRAY(SELECT p.pool_id FROM public.pools p
+        WHERE p.type IN ('limited','limited_character') AND NOT p.pool_id=ANY(ids)
+          AND COALESCE(p.start_time,p.created_at,to_timestamp(0)) IN (
+            (SELECT max(COALESCE(q.start_time,q.created_at,to_timestamp(0))) FROM public.pools q
+              WHERE q.type IN ('limited','limited_character') AND q.pool_id<>ALL(ARRAY_REMOVE(
+                ARRAY[before_row->>'pool_id',after_row->>'pool_id'],NULL))
+              AND COALESCE(q.start_time,q.created_at,to_timestamp(0))<=
+                COALESCE((boundary->>'start_time')::TIMESTAMPTZ,(boundary->>'created_at')::TIMESTAMPTZ,to_timestamp(0))),
+            (SELECT min(COALESCE(q.start_time,q.created_at,to_timestamp(0))) FROM public.pools q
+              WHERE q.type IN ('limited','limited_character') AND q.pool_id<>ALL(ARRAY_REMOVE(
+                ARRAY[before_row->>'pool_id',after_row->>'pool_id'],NULL))
+              AND COALESCE(q.start_time,q.created_at,to_timestamp(0))>=
+                COALESCE((boundary->>'start_time')::TIMESTAMPTZ,(boundary->>'created_at')::TIMESTAMPTZ,to_timestamp(0)))));
+    END LOOP;
+  END IF;
+  -- Reconstruction periods share a series pity chain. An empty/new phase or
+  -- series reassignment can change it without any history in the edited pool.
+  FOR boundary IN SELECT value FROM jsonb_array_elements(jsonb_build_array(before_row,after_row))
+    WHERE value->>'type'='extra' AND value->>'extra_rule_profile'='reconstruction_character_v1'
+      AND NULLIF(btrim(value->>'extra_series_key'),'') IS NOT NULL LOOP
+    ids:=ids||ARRAY(SELECT p.pool_id FROM public.pools p WHERE p.type='extra'
+      AND p.extra_rule_profile=boundary->>'extra_rule_profile'
+      AND p.extra_series_key=boundary->>'extra_series_key' AND NOT p.pool_id=ANY(ids));
+  END LOOP;
+  PERFORM public.invalidate_pool_statistics_dependencies(ids,recount,
+    ARRAY_REMOVE(ARRAY[public.statistics_pool_group(before_row),public.statistics_pool_group(after_row)],NULL));
+  RETURN NULL;
+END;
+$$;
+-- The row trigger above replaces the unconditional statement-level recount.
+DROP TRIGGER statistics_pool_catalog ON public.pools;
+
+CREATE OR REPLACE FUNCTION public.invalidate_changed_pool_roster() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE id TEXT; status TEXT;
+BEGIN
+  IF TG_OP='UPDATE' AND (OLD.pool_id,OLD.character_id,OLD.is_up) IS NOT DISTINCT FROM
+      (NEW.pool_id,NEW.character_id,NEW.is_up) THEN RETURN NULL; END IF;
+  FOR id IN SELECT DISTINCT value FROM unnest(ARRAY_REMOVE(ARRAY[
+    CASE WHEN TG_OP='INSERT' THEN NULL ELSE OLD.pool_id END,
+    CASE WHEN TG_OP='DELETE' THEN NULL ELSE NEW.pool_id END],NULL)) value LOOP
+    status:=CASE WHEN EXISTS(SELECT 1 FROM public.pool_characters WHERE pool_id=id)
+      THEN 'partial' ELSE 'missing' END;
+    UPDATE public.pools SET roster_status=status WHERE pool_id=id AND roster_status IS DISTINCT FROM status;
+  END LOOP;
+  RETURN NULL;
+END;
+$$;
+
+CREATE FUNCTION public.invalidate_statistics_roster_changes() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE ids TEXT[];
+BEGIN
+  IF TG_OP='UPDATE' THEN
+    SELECT ARRAY(SELECT DISTINCT pool_id FROM (
+      (SELECT pool_id,character_id,is_up FROM old_roster EXCEPT SELECT pool_id,character_id,is_up FROM new_roster)
+      UNION (SELECT pool_id,character_id,is_up FROM new_roster EXCEPT SELECT pool_id,character_id,is_up FROM old_roster)
+    ) changed) INTO ids;
+  ELSIF TG_OP='DELETE' THEN SELECT ARRAY(SELECT DISTINCT pool_id FROM old_roster) INTO ids;
+  ELSE SELECT ARRAY(SELECT DISTINCT pool_id FROM new_roster) INTO ids; END IF;
+  IF cardinality(ids)>0 THEN PERFORM public.invalidate_pool_statistics_dependencies(ids); END IF;
+  RETURN NULL;
+END;
+$$;
+DROP TRIGGER statistics_pool_roster ON public.pool_characters;
+CREATE TRIGGER statistics_pool_roster_insert AFTER INSERT ON public.pool_characters
+  REFERENCING NEW TABLE AS new_roster FOR EACH STATEMENT EXECUTE FUNCTION public.invalidate_statistics_roster_changes();
+CREATE TRIGGER statistics_pool_roster_update AFTER UPDATE ON public.pool_characters
+  REFERENCING OLD TABLE AS old_roster NEW TABLE AS new_roster FOR EACH STATEMENT EXECUTE FUNCTION public.invalidate_statistics_roster_changes();
+CREATE TRIGGER statistics_pool_roster_delete AFTER DELETE ON public.pool_characters
+  REFERENCING OLD TABLE AS old_roster FOR EACH STATEMENT EXECUTE FUNCTION public.invalidate_statistics_roster_changes();
+REVOKE ALL ON FUNCTION public.statistics_pool_group(JSONB),
+  public.invalidate_pool_statistics_dependencies(TEXT[],TEXT[],TEXT[]),
+  public.invalidate_statistics_roster_changes(),public.invalidate_changed_pool_roster(),
+  public.invalidate_personal_analysis_after_pool_change()
+  FROM PUBLIC,anon,authenticated;
+NOTIFY pgrst,'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026101409_scope_pool_catalog_invalidation.sql
+
+-- >>> BEGIN MIGRATION: active/2026101410_fix_pool_roster_identifier_ambiguity.sql
+-- pools.id exists in production. Never reuse it as an unqualified PL/pgSQL
+-- variable: catalog saves with a changed roster otherwise fail with 42702.
+BEGIN;
+CREATE OR REPLACE FUNCTION public.invalidate_changed_pool_roster() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE v_pool_id TEXT; v_roster_status TEXT;
+BEGIN
+  IF TG_OP='UPDATE' AND (OLD.pool_id,OLD.character_id,OLD.is_up) IS NOT DISTINCT FROM
+      (NEW.pool_id,NEW.character_id,NEW.is_up) THEN RETURN NULL; END IF;
+  FOR v_pool_id IN SELECT DISTINCT changed.pool_id FROM unnest(ARRAY_REMOVE(ARRAY[
+    CASE WHEN TG_OP='INSERT' THEN NULL ELSE OLD.pool_id END,
+    CASE WHEN TG_OP='DELETE' THEN NULL ELSE NEW.pool_id END],NULL)) AS changed(pool_id) LOOP
+    v_roster_status:=CASE WHEN EXISTS(
+      SELECT 1 FROM public.pool_characters AS pc WHERE pc.pool_id=v_pool_id
+    ) THEN 'partial' ELSE 'missing' END;
+    UPDATE public.pools AS p SET roster_status=v_roster_status
+    WHERE p.pool_id=v_pool_id AND p.roster_status IS DISTINCT FROM v_roster_status;
+  END LOOP;
+  RETURN NULL;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.invalidate_changed_pool_roster() FROM PUBLIC,anon,authenticated;
+NOTIFY pgrst,'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026101410_fix_pool_roster_identifier_ambiguity.sql
+
+-- >>> BEGIN MIGRATION: active/2026101411_public_statistics_worker_contract.sql
+-- Publish the statistics-only RPC contract required by the public worker and
+-- pool catalog triggers. No private import executor or credentials are needed.
+-- CREATE OR REPLACE also supports installations with the earlier ops rollout.
+BEGIN;
+CREATE OR REPLACE FUNCTION public.statistics_account_pool_dependencies(
+  p_user_id UUID, p_game_uid TEXT, p_server_scope TEXT,
+  p_legacy_game BOOLEAN DEFAULT false, p_legacy_server BOOLEAN DEFAULT false
+) RETURNS TABLE(pool_id TEXT)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+BEGIN
+  IF p_user_id IS NULL THEN
+    RETURN QUERY SELECT DISTINCT h.pool_id FROM public.statistics_history h
+      WHERE h.user_id IS NULL
+        AND (CASE WHEN p_legacy_game THEN COALESCE(NULLIF(btrim(h.game_uid::text),''),'legacy')
+          ELSE btrim(h.game_uid::text) END)=p_game_uid
+        AND (CASE WHEN p_legacy_server THEN COALESCE(h.server_scope,'legacy')
+          ELSE h.server_scope END) IS NOT DISTINCT FROM p_server_scope;
+  ELSE
+    RETURN QUERY SELECT DISTINCT h.pool_id FROM public.statistics_history h
+      WHERE h.user_id=p_user_id
+        AND (CASE WHEN p_legacy_game THEN COALESCE(NULLIF(btrim(h.game_uid::text),''),'legacy')
+          ELSE btrim(h.game_uid::text) END)=p_game_uid
+        AND (CASE WHEN p_legacy_server THEN COALESCE(h.server_scope,'legacy')
+          ELSE h.server_scope END) IS NOT DISTINCT FROM p_server_scope;
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.read_statistics_history_page(
+  p_pool_ids TEXT[],p_after BIGINT,p_upper BIGINT,p_limit INTEGER DEFAULT 1000
+) RETURNS JSONB
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,public
+SET max_parallel_workers_per_gather=0 AS $$
+DECLARE result JSONB;
+BEGIN
+  IF p_pool_ids IS NULL OR p_after IS NULL OR p_after<0 OR p_upper IS NULL OR p_upper<p_after
+    OR p_limit IS NULL OR p_limit<1 OR p_limit>1000 THEN
+    RAISE EXCEPTION USING ERRCODE='22023',MESSAGE='invalid_statistics_page_parameters';
+  END IF;
+  SELECT coalesce(jsonb_agg(page ORDER BY page.id),'[]'::jsonb) INTO result FROM (
+    SELECT h.id,h.record_id,h.user_id,h.game_uid,h.server_scope,h.server_id,h.region,
+      h.pool_id,h.pool_version,h.character_id,h.character_name,h.rarity,h.timestamp,h.seq_id,
+      h.is_new,h.is_free,h.is_info_book,h.special_type
+    FROM public.history h
+    WHERE h.id>p_after AND h.id<=p_upper AND h.pool_id=ANY(p_pool_ids)
+      AND NOT h.statistics_excluded AND NOT EXISTS (
+        SELECT 1 FROM public.account_statistics_exclusions e WHERE e.user_id=h.user_id
+          AND e.game_uid=COALESCE(NULLIF(btrim(h.game_uid),''),'legacy')
+          AND e.server_scope=COALESCE(h.server_scope,'legacy') AND e.pool_id=h.pool_id
+      )
+    ORDER BY h.id LIMIT p_limit
+  ) page;
+  RETURN result;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.read_statistics_job_revisions() RETURNS JSONB
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+  SELECT coalesce(jsonb_object_agg(scope_key,revision::text),'{}'::jsonb)
+    FROM public.statistics_jobs WHERE scope_key LIKE 'pool:%' OR scope_key LIKE 'group:%';
+$$;
+
+ALTER TABLE public.statistics_jobs DROP CONSTRAINT statistics_jobs_refresh_minutes_check;
+ALTER TABLE public.statistics_jobs ADD CONSTRAINT statistics_jobs_refresh_minutes_check
+  CHECK (refresh_minutes IN (5,15,30,60));
+
+CREATE OR REPLACE FUNCTION public.claim_statistics_job(p_lease UUID) RETURNS JSONB
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE v_minutes INTEGER; v_rows10 BIGINT; v_rows60 BIGINT; v_users BIGINT; v_job public.statistics_jobs;
+BEGIN
+  SELECT coalesce(sum(changed_rows) FILTER (WHERE minute_at>=now()-interval '10 minutes'),0),
+    coalesce(sum(changed_rows),0),count(DISTINCT contributor_id) FILTER (WHERE minute_at>=now()-interval '10 minutes')
+    INTO v_rows10,v_rows60,v_users FROM public.statistics_activity WHERE minute_at>=now()-interval '60 minutes';
+  v_minutes:=CASE WHEN v_users>=5 OR v_rows10>=1000 THEN 15 WHEN v_rows60>0 THEN 30 ELSE 60 END;
+  DELETE FROM public.statistics_activity WHERE minute_at<now()-interval '65 minutes';
+  UPDATE public.statistics_jobs SET
+    refresh_minutes=CASE WHEN scope_key LIKE 'owner:%' AND v_minutes=15 THEN 5 ELSE v_minutes END,
+    next_refresh_at=coalesce(computed_at,now())+make_interval(mins=>
+      CASE WHEN scope_key LIKE 'owner:%' AND v_minutes=15 THEN 5 ELSE v_minutes END)
+    WHERE refresh_minutes IS DISTINCT FROM
+      CASE WHEN scope_key LIKE 'owner:%' AND v_minutes=15 THEN 5 ELSE v_minutes END
+      AND computed_at IS NOT NULL;
+  DELETE FROM public.statistics_jobs j WHERE
+    (scope_key LIKE 'pool:%' AND NOT EXISTS(SELECT 1 FROM public.get_app_visible_pools() p WHERE 'pool:'||p.pool_id=j.scope_key))
+    OR (scope_key LIKE 'group:%' AND NOT EXISTS(SELECT 1 FROM public.statistics_group_keys() g(scope_key) WHERE g.scope_key=j.scope_key))
+    OR (scope_key LIKE 'owner:%' AND NOT EXISTS(SELECT 1 FROM public.profiles p WHERE 'owner:'||p.id=j.scope_key));
+  DELETE FROM public.statistics_snapshots s WHERE NOT EXISTS(SELECT 1 FROM public.statistics_jobs j WHERE j.scope_key=s.scope_key);
+  UPDATE public.statistics_jobs SET next_refresh_at=now()+make_interval(mins=>refresh_minutes)
+    WHERE revision=published_revision AND scope_key<>'global_summary' AND next_refresh_at<=now();
+  SELECT * INTO v_job FROM public.statistics_jobs j
+    WHERE (revision<>published_revision OR scope_key='global_summary')
+      AND (computed_at IS NULL OR next_refresh_at<=now())
+      AND (lease_until IS NULL OR lease_until<now()) AND (retry_at IS NULL OR retry_at<=now())
+    ORDER BY next_refresh_at,CASE WHEN scope_key LIKE 'owner:%' THEN 2
+      WHEN scope_key LIKE 'pool:%' OR scope_key LIKE 'group:%' THEN 1 ELSE 0 END,scope_key
+    FOR UPDATE SKIP LOCKED LIMIT 1;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  IF v_job.scope_key LIKE 'owner:%' AND v_minutes=15 THEN v_minutes:=5; END IF;
+  UPDATE public.statistics_jobs SET lease_id=p_lease,lease_until=now()+interval '5 minutes',refresh_minutes=v_minutes
+    WHERE scope_key=v_job.scope_key;
+  RETURN jsonb_build_object('scopeKey',v_job.scope_key,'revision',v_job.revision,'refreshMinutes',v_minutes);
+END $$;
+
+DO $$
+DECLARE definition TEXT; signature TEXT;
+BEGIN
+  FOREACH signature IN ARRAY ARRAY[
+    'public.publish_statistics_snapshot(text,bigint,uuid,jsonb,text)',
+    'public.compute_and_publish_legacy_statistics(text,bigint,uuid,text)'
+  ] LOOP
+    definition:=replace(pg_get_functiondef(signature::regprocedure),chr(13),'');
+    IF position('retry_at=now()+make_interval(mins=>greatest(5,refresh_minutes))' IN definition)>0 THEN
+      CONTINUE;
+    END IF;
+    IF position('retry_at=now()+interval ''1 minute''' IN definition)=0 THEN
+      RAISE EXCEPTION 'statistics_conflict_retry_definition_changed: %',signature;
+    END IF;
+    EXECUTE replace(definition,'retry_at=now()+interval ''1 minute''',
+      'retry_at=now()+make_interval(mins=>greatest(5,refresh_minutes))');
+  END LOOP;
+END $$;
+
+REVOKE ALL ON FUNCTION public.statistics_account_pool_dependencies(UUID,TEXT,TEXT,BOOLEAN,BOOLEAN),
+  public.read_statistics_history_page(TEXT[],BIGINT,BIGINT,INTEGER),
+  public.read_statistics_job_revisions(),public.claim_statistics_job(UUID) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.statistics_account_pool_dependencies(UUID,TEXT,TEXT,BOOLEAN,BOOLEAN),
+  public.read_statistics_history_page(TEXT[],BIGINT,BIGINT,INTEGER),
+  public.read_statistics_job_revisions(),public.claim_statistics_job(UUID) TO service_role;
+
+UPDATE public.statistics_jobs SET refresh_minutes=15,
+  next_refresh_at=CASE WHEN computed_at IS NULL THEN next_refresh_at
+    ELSE greatest(next_refresh_at,computed_at+interval '15 minutes') END
+  WHERE scope_key NOT LIKE 'owner:%' AND refresh_minutes=5;
+NOTIFY pgrst,'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026101411_public_statistics_worker_contract.sql
 

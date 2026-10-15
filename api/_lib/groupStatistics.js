@@ -10,7 +10,7 @@ export async function handleGroupStatistics(req, res, db) {
     const { data: visible, error } = await db.rpc('get_app_visible_pools');
     if (error || !Array.isArray(visible)) throw new Error('Public catalog unavailable');
     const members = getStatisticsGroupPools(visible, groupKey);
-    const { payload, meta } = await readScheduledStatistic(db, `group:${groupKey}`);
+    const { payload, meta } = await readScheduledStatistic(db, `group:${groupKey}`, { pools: members });
     if (!payload || payload.memberSignature !== statisticsMemberSignature(members)) {
       return res.status(202).json({ success: true, cached: true, data: { groupKey, observations: null,
         meta: { availability: 'building', updatedAt: null, nextRefreshAt: meta.nextRefreshAt } } });

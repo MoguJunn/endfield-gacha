@@ -1,15 +1,21 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import { readStatisticsScopeAggregate } from '../_lib/statisticsScopeAggregate.js';
+import { readStatisticsPreviewDataset, readStatisticsScopeAggregate } from '../_lib/statisticsScopeAggregate.js';
 import { statisticsHistory } from '../../shared/statisticsEligibility.js';
 
 const pools = [{ pool_id: 'p', type: 'limited', up_character: 'A' }, { pool_id: 's', type: 'standard' }];
 const directory = [{ id: 'a', name: 'A', rarity: 6, type: 'character', is_limited: true }];
 const row = (id, pool = 'p', extra = {}) => ({ id, record_id: String(id), user_id: 'owner', game_uid: 'uid', server_scope: 'cn',
   pool_id: pool, character_id: 'a', character_name: 'untrusted user label', rarity: 6, timestamp: new Date(1700000000000 + id * 1000).toISOString(), ...extra });
-function client(history, { shortPage = false, gaps = [] } = {}) {
+function client(history, { shortPage = false, pageCap = 1000, gaps = [] } = {}) {
   return {
-    rpc: vi.fn(() => ({ abortSignal: async () => ({ data: pools }) })),
+    rpc: vi.fn((name, params) => ({ abortSignal: async () => ({
+      data: name === 'read_statistics_history_page'
+        ? shortPage ? [] : statisticsHistory(history).filter((row) => params.p_pool_ids.includes(row.pool_id)
+          && row.id > params.p_after && row.id <= params.p_upper).sort((a, b) => a.id - b.id)
+          .slice(0, Math.min(params.p_limit, pageCap))
+        : pools,
+    }) })),
     from: vi.fn((table) => {
       const state = { filters: [], start: 0, end: Infinity, ascending: true, head: false };
       const query = {
@@ -26,7 +32,8 @@ function client(history, { shortPage = false, gaps = [] } = {}) {
           if (table === 'statistics_history_gaps') return { data: gaps.slice(state.start, state.end + 1) };
           expect(table).toBe('statistics_history');
           const selected = statisticsHistory(history).filter((row) => state.filters.every((filter) => filter(row))).sort((a, b) => state.ascending ? a.id - b.id : b.id - a.id);
-          return state.head ? { count: selected.length } : { data: shortPage && state.filters.length ? [] : selected.slice(state.start, state.end + 1) };
+          return state.head ? { count: selected.length } : { data: shortPage && state.filters.length ? []
+            : selected.slice(state.start, Math.min(state.end + 1, state.start + pageCap)) };
         },
       };
       return query;
@@ -50,6 +57,17 @@ describe('scope worker context', () => {
   });
   it('rejects incomplete pagination instead of publishing a partial aggregate', async () => {
     await expect(readStatisticsScopeAggregate(client([row(1)], { shortPage: true }), 'group:limited')).rejects.toThrow('context changed');
+  });
+  it('reads a smaller server page cap completely and reuses an equivalent dataset without further database reads', async () => {
+    const db = client([row(1, 's'), row(2), row(3), row(4, 's')], { pageCap: 1 });
+    const expected = await readStatisticsScopeAggregate(db, 'pool:p');
+    const dataset = await readStatisticsPreviewDataset(db);
+    const reads = db.from.mock.calls.length;
+    const actual = await readStatisticsScopeAggregate(db, 'pool:p', { dataset });
+    expect(dataset.history).toHaveLength(4);
+    expect(actual.observations).toEqual(expected.observations);
+    expect(actual.legacy).toEqual(expected.legacy);
+    expect(db.from).toHaveBeenCalledTimes(reads);
   });
   it('excludes manual samples from observations and inherited account context', async () => {
     const db = client([row(1, 's', { statistics_excluded: true }), row(2, 'p'),

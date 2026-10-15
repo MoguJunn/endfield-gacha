@@ -21,6 +21,7 @@ import { getPoolIdCandidate, isReservedPoolTypeId } from '../../../shared/poolId
 import { loadPersonalAnalysisModel, PERSONAL_ANALYSIS_SCHEMA_VERSION } from '../../_lib/personalAnalysisWorker.js';
 import { serverLogger } from '../../_lib/serverLogger.js';
 import { validateWorkbenchPoolOperations } from '../../../shared/workbenchPoolAvailability.js';
+import { projectPersonalAnalysisPoolLabels } from '../../../shared/statisticsPoolLabels.js';
 
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 500;
@@ -657,13 +658,19 @@ async function loadProjectedPersonalAnalysisAccountSnapshot(dbClient, userId, sc
   }
   if (!data) return null;
 
+  let payload = projectTransientScopePayload(
+    buildProjectedAccountPayload(data, safeView ? viewKey : '', locale), viewKey, locale
+  );
+  if (payload.poolManifest.length) {
+    const { data: pools, error: labelError } = await dbClient.from('pools')
+      .select('pool_id,name,name_en,description,banner_url')
+      .in('pool_id', payload.poolManifest.map((pool) => pool.pool_id || pool.id));
+    if (labelError || !Array.isArray(pools)) throw labelError || new Error('Personal pool labels unavailable');
+    payload = projectPersonalAnalysisPoolLabels(payload, pools);
+  }
   return normalizePersonalAnalysisSnapshot({
     ...data,
-    payload: projectTransientScopePayload(
-      buildProjectedAccountPayload(data, safeView ? viewKey : '', locale),
-      viewKey,
-      locale
-    ),
+    payload,
   });
 }
 

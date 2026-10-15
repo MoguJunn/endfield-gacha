@@ -45,6 +45,7 @@
     "test:simulator-v2:ui": "node scripts/verify-simulator-v2-playwright.mjs",
     "test:simulator-v2:sql": "node scripts/verify-simulator-inheritance-v2-sql.mjs",
     "test:pool-rosters:sql": "node scripts/verify-complete-pool-rosters.mjs",
+    "test:pool-catalog:sql": "node scripts/verify-pool-catalog-save.mjs",
     "test:simulator-share": "node scripts/verify-simulator-share.mjs",
     "test:simulator-share:ui": "node scripts/verify-simulator-share-playwright.mjs",
     "test:contributor-demo:ui": "node scripts/verify-contributor-demo-playwright.mjs",

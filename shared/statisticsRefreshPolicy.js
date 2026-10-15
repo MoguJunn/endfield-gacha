@@ -1,8 +1,8 @@
 export const STATISTICS_SNAPSHOT_VERSION = 'public-statistics-v6';
 
 // Activity measures uploads/edits now, never the in-game pull timestamp.
-export function statisticsRefreshMinutes({ contributors10m = 0, changedRows10m = 0, changedRows60m = 0 } = {}) {
-  if (contributors10m >= 5 || changedRows10m >= 1000) return 5;
+export function statisticsRefreshMinutes({ contributors10m = 0, changedRows10m = 0, changedRows60m = 0, personal = false } = {}) {
+  if (contributors10m >= 5 || changedRows10m >= 1000) return personal ? 5 : 15;
   return changedRows60m > 0 ? 30 : 60;
 }
 

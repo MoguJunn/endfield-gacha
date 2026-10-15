@@ -25,6 +25,52 @@ describe('scheduled statistics', () => {
     expect(db.from).not.toHaveBeenCalled();
     expect(db.rpc).toHaveBeenCalledWith('read_statistics_snapshot', { p_scope: 'group:limited' });
   });
+  it('shows renamed group members from the current catalog without changing saved statistics', async () => {
+    const members = [{ pool_id: 'p', name: '新名称', name_en: 'New name', type: 'limited', up_character: 'A' }];
+    const payload = { observations: { total: 10, members: [{ id: 'p', name: '旧名称', nameEn: 'Old name', total: 10 }] },
+      memberSignature: statisticsMemberSignature(members) };
+    const db = { from: vi.fn(), rpc: vi.fn(async (name) => ({ data: name === 'get_app_visible_pools' ? members
+      : { schema_version: STATISTICS_SNAPSHOT_VERSION, payload, computed_at: '2026-01-01' } })) };
+    const response = res();
+    await handleGroupStatistics({ query: { groupKey: 'limited' } }, response, db);
+    expect(response.json.mock.calls[0][0].data.observations).toEqual({ total: 10,
+      members: [{ id: 'p', name: '新名称', nameEn: 'New name', total: 10 }] });
+    expect(db.from).not.toHaveBeenCalled();
+    expect(db.rpc).toHaveBeenCalledTimes(2);
+    expect(payload.observations.members[0].name).toBe('旧名称');
+  });
+  it('updates personal pool and acquisition labels by ID while preserving character names and metrics', async () => {
+    const row = { id: 'char', name: '角色名称', total: 6, firstAcquiredPoolId: 'p', firstAcquiredPoolName: '旧名称',
+      lastAcquiredPoolId: 'p', lastAcquiredPoolName: '旧名称',
+      acquisitionPulls: [{ poolId: 'p', poolName: '旧名称', pulls: 70, kind: 'normal' }] };
+    const catalog = { rows: [row], summary: { ownedCharacters: 1 },
+      ledger: { characterRows: [row], charactersByKey: { char: row }, quota: { total: 12 } } };
+    const payload = { pools: [{ id: 'p', name: '旧名称', name_en: 'Old name', type: 'limited' }],
+      scopes: { '': { p: { total: 70 } } }, catalogs: { '': { 'zh-CN': catalog, 'en-US': catalog } },
+      groupScopes: { '': { limited: { observations: { total: 70, members: [{ id: 'p', name: '旧名称', total: 70 }] } } } } };
+    const filter = vi.fn(async () => ({ data: [{ pool_id: 'p', name: '新名称', name_en: 'New name' }] }));
+    const select = vi.fn(() => ({ in: filter }));
+    const db = { from: vi.fn(() => ({ select })), rpc: vi.fn(async () => ({ data: {
+      schema_version: STATISTICS_SNAPSHOT_VERSION, payload, computed_at: '2026-01-01',
+    } })) };
+    auth.admin.mockReturnValue(db);
+    auth.resolve.mockResolvedValue({ ok: true, user: { id: 'owner' } });
+    const response = res();
+    await handlePersonalStatistics({}, response);
+    const result = response.json.mock.calls[0][0];
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(result.data.pools[0]).toMatchObject({ name: '新名称', name_en: 'New name', type: 'limited' });
+    expect(result.data.catalogs['']['zh-CN'].rows[0]).toMatchObject({ name: '角色名称', total: 6,
+      firstAcquiredPoolName: '新名称', lastAcquiredPoolName: '新名称', acquisitionPulls: [{ poolId: 'p', poolName: '新名称', pulls: 70, kind: 'normal' }] });
+    expect(result.data.catalogs['']['en-US'].ledger.charactersByKey.char.firstAcquiredPoolName).toBe('New name');
+    expect(result.data.groupScopes[''].limited.observations.members[0].name).toBe('新名称');
+    expect(result.data.scopes).toEqual(payload.scopes);
+    expect(result.data.catalogs['']['zh-CN'].ledger.quota).toEqual({ total: 12 });
+    expect(db.from).toHaveBeenCalledExactlyOnceWith('pools');
+    expect(select).toHaveBeenCalledWith('pool_id,name,name_en');
+    expect(filter).toHaveBeenCalledWith('pool_id', ['p']);
+    expect(row.firstAcquiredPoolName).toBe('旧名称');
+  });
   it('rejects arbitrary groups and withholds snapshots after member visibility or target changes', async () => {
     const db = { rpc: vi.fn() };
     const bad = res();
@@ -51,11 +97,39 @@ describe('scheduled statistics', () => {
     expect(db.rpc).toHaveBeenCalledWith('fail_statistics_job', expect.objectContaining({ p_scope: 'group:weapon_standard' }));
     expect(db.rpc.mock.calls.filter(([name]) => name === 'compute_and_publish_legacy_statistics')).toHaveLength(0);
   });
-  it('selects 5, 30 and 60 minutes based on recent upload activity', () => {
+  it('selects public 15, 30 and 60 minutes while preserving active personal 5 minutes', () => {
     expect(statisticsRefreshMinutes()).toBe(60);
     expect(statisticsRefreshMinutes({ changedRows60m: 1 })).toBe(30);
-    expect(statisticsRefreshMinutes({ changedRows10m: 1000 })).toBe(5);
-    expect(statisticsRefreshMinutes({ contributors10m: 5 })).toBe(5);
+    expect(statisticsRefreshMinutes({ changedRows10m: 1000 })).toBe(15);
+    expect(statisticsRefreshMinutes({ contributors10m: 5 })).toBe(15);
+    expect(statisticsRefreshMinutes({ contributors10m: 5, personal: true })).toBe(5);
+  });
+
+  it('reuses one history read across public jobs only at their captured revisions', async () => {
+    const jobs = [{ scopeKey: 'pool:p', revision: 3 }, { scopeKey: 'group:limited', revision: 8 },
+      { scopeKey: 'pool:changed', revision: 5 }, null];
+    const db = { rpc: vi.fn((name, params) => {
+      const result = { data: name === 'claim_statistics_job' ? jobs.shift()
+        : name === 'read_statistics_job_revisions' ? { 'pool:p': '3', 'group:limited': '8', 'pool:changed': '4' }
+          : name === 'publish_statistics_snapshot' && params.p_payload === null ? false : true };
+      return Object.assign(Promise.resolve(result), { abortSignal: async () => result });
+    }) };
+    const dataset = { history: [] };
+    const datasetLoader = vi.fn(async () => {
+      expect(db.rpc).toHaveBeenCalledWith('read_statistics_job_revisions', {});
+      return dataset;
+    });
+    const scopeAggregate = vi.fn(async () => ({ observations: { total: 1 } }));
+    const result = await runStatisticsWorker(db, { datasetLoader, scopeAggregate });
+    expect(result.map((row) => row.status)).toEqual(['published', 'published', 'changed-during-calculation']);
+    expect(datasetLoader).toHaveBeenCalledTimes(1);
+    expect(scopeAggregate).toHaveBeenNthCalledWith(1, db, 'pool:p', expect.objectContaining({ dataset }));
+    expect(scopeAggregate).toHaveBeenNthCalledWith(2, db, 'group:limited', expect.objectContaining({ dataset }));
+    expect(scopeAggregate).toHaveBeenCalledTimes(2);
+    expect(db.rpc).toHaveBeenCalledWith('publish_statistics_snapshot', expect.objectContaining({
+      p_scope: 'pool:changed', p_revision: '4', p_payload: null,
+    }));
+    expect(db.rpc.mock.calls.some(([name]) => name === 'fail_statistics_job')).toBe(false);
   });
   it('reads snapshots only and does not compute missing snapshots on page visits', async () => {
     const db = { rpc: vi.fn().mockResolvedValue({ data: null }), from: vi.fn() };
@@ -91,11 +165,11 @@ describe('scheduled statistics', () => {
     const jobs = [{ scopeKey: 'pool:p', revision: 3 }, { scopeKey: 'global_summary', revision: 8 }, null];
     const db = { rpc: vi.fn(async (name) => ({ data: name === 'claim_statistics_job' ? jobs.shift() : true })) };
     const aggregate = vi.fn().mockResolvedValue({ observations: { total: 2 } });
-    const result = await runStatisticsWorker(db, { aggregate });
+    const result = await runStatisticsWorker(db, { aggregate, snapshotVersion: 'public-statistics-v4' });
     expect(result.map((row) => row.status)).toEqual(['published', 'published']);
     expect(aggregate).toHaveBeenCalledTimes(1);
-    expect(db.rpc).toHaveBeenCalledWith('publish_statistics_snapshot', expect.objectContaining({ p_scope: 'pool:p', p_revision: 3, p_schema: STATISTICS_SNAPSHOT_VERSION }));
-    expect(db.rpc).toHaveBeenCalledWith('compute_and_publish_legacy_statistics', expect.objectContaining({ p_scope: 'global_summary', p_revision: 8 }));
+    expect(db.rpc).toHaveBeenCalledWith('publish_statistics_snapshot', expect.objectContaining({ p_scope: 'pool:p', p_revision: 3, p_schema: 'public-statistics-v4' }));
+    expect(db.rpc).toHaveBeenCalledWith('compute_and_publish_legacy_statistics', expect.objectContaining({ p_scope: 'global_summary', p_revision: 8, p_schema: 'public-statistics-v4' }));
   });
   it('keeps a failed computation out of the published results and schedules a retry', async () => {
     const db = { rpc: vi.fn(async (name) => ({ data: name === 'claim_statistics_job' ? { scopeKey: 'pool:p', revision: 2 } : true })) };
