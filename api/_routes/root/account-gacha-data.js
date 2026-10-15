@@ -582,8 +582,14 @@ async function loadPersonalAnalysisSnapshot(dbClient, userId, scopeKind, scopeKe
   return normalizePersonalAnalysisSnapshot(data);
 }
 
+function buildAccountOverview(stats) {
+  if (stats?.total == null || stats?.totalSixStar == null) return null;
+  return { total: stats.total, sixStar: stats.totalSixStar, totalKnown: stats.personalData?.totalKnown !== false };
+}
+
 function buildProjectedAccountPayload(data, viewKey, locale) {
   const fallbackPayload = data?.payload && typeof data.payload === 'object' ? data.payload : {};
+  const overviewStats = fallbackPayload.dashboard?.views?.__group_all?.excludeFree?.stats;
   const view =
     data?.view && typeof data.view === 'object' ? data.view : fallbackPayload.dashboard?.views?.[viewKey] || null;
   const timeline = Array.isArray(data?.timeline)
@@ -591,6 +597,11 @@ function buildProjectedAccountPayload(data, viewKey, locale) {
     : fallbackPayload.dashboard?.timelineViews?.[locale]?.[viewKey] || null;
   return {
     account: data?.account && typeof data.account === 'object' ? data.account : fallbackPayload.account || null,
+    overview: buildAccountOverview({
+      total: data?.overview_total ?? overviewStats?.total,
+      totalSixStar: data?.overview_six_star ?? overviewStats?.totalSixStar,
+      personalData: { totalKnown: data?.overview_total_known ?? overviewStats?.personalData?.totalKnown },
+    }),
     poolManifest: Array.isArray(data?.pool_manifest)
       ? data.pool_manifest
       : Array.isArray(fallbackPayload.poolManifest)
@@ -628,6 +639,9 @@ async function loadProjectedPersonalAnalysisAccountSnapshot(dbClient, userId, sc
     'analysis_schema_version',
     'computed_at',
     'account:payload->account',
+    'overview_total:payload->dashboard->views->__group_all->excludeFree->stats->total',
+    'overview_six_star:payload->dashboard->views->__group_all->excludeFree->stats->totalSixStar',
+    'overview_total_known:payload->dashboard->views->__group_all->excludeFree->stats->personalData->totalKnown',
     'pool_manifest:payload->poolManifest',
     'selector:payload->selector',
     ...(safeView
@@ -676,7 +690,9 @@ async function loadProjectedPersonalAnalysisAccountSnapshot(dbClient, userId, sc
 
 function projectTransientScopePayload(payload, viewKey, locale) {
   if (!payload) return null;
-  const { simulatorInheritance: _simulatorInheritance, ...analysisPayload } = payload;
+  const { simulatorInheritance: _simulatorInheritance, ...scopePayload } = payload;
+  const analysisPayload = { ...scopePayload, overview: scopePayload.overview ??
+    buildAccountOverview(scopePayload.dashboard?.views?.__group_all?.excludeFree?.stats) };
   if (!viewKey) return analysisPayload;
   const view = analysisPayload.dashboard?.views?.[viewKey] || null;
   const timeline =

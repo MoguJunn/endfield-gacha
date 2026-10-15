@@ -133,13 +133,15 @@ export default function MobileOverviewView() {
   });
   const isAnalysisScopeCurrent = analysisScope?.account?.accountKey === effectiveGameUid;
   const scopeOverviewStats = analysisScope?.dashboard?.views?.__group_all?.excludeFree?.stats || null;
+  const scopeOverview = analysisScope?.overview || (scopeOverviewStats ? {
+    total: scopeOverviewStats.total,
+    sixStar: scopeOverviewStats.totalSixStar,
+    totalKnown: scopeOverviewStats.personalData?.totalKnown !== false,
+  } : null);
   const currentStats =
-    hasAnalysisSnapshot && isAnalysisScopeCurrent && scopeOverviewStats
-      ? {
-          ...scopeOverviewStats,
-          sixStar: scopeOverviewStats.totalSixStar,
-        }
-      : hasAnalysisSnapshot
+    hasAnalysisSnapshot && isAnalysisScopeCurrent && scopeOverview
+      ? scopeOverview
+      : hasAnalysisSnapshot || analysisAvailability === 'building'
         ? null
         : legacyCurrentStats;
   const currentAccount = useMemo(
@@ -193,7 +195,10 @@ export default function MobileOverviewView() {
   ]);
   const currentAccountLastImportAt = getAccountLastImportTimestamp(currentAccount);
   const accountTone = getFreshnessTone(currentAccountLastImportAt || currentAccount?.latestRecordAt);
-  const totalSixStars = Number(currentStats?.counts?.['6'] || 0) + Number(currentStats?.counts?.['6_std'] || 0);
+  const totalSixStars = currentStats == null ? '—' : currentStats.sixStar ??
+    (Number(currentStats.counts?.['6'] || 0) + Number(currentStats.counts?.['6_std'] || 0));
+  const totalPulls = currentStats?.total == null ? '—' :
+    `${currentStats.totalKnown === false || currentStats.personalData?.totalKnown === false ? '≥ ' : ''}${currentStats.total}`;
 
   if (!user) {
     return (
@@ -267,7 +272,7 @@ export default function MobileOverviewView() {
               {t('summary.metric.totalPulls')}
             </div>
             <div className="mt-1 font-mono text-3xl font-black text-slate-900 dark:text-white">
-              {currentStats?.total || 0}
+              {totalPulls}
             </div>
           </div>
         </div>

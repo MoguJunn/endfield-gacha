@@ -10,6 +10,7 @@ import { getTooltipStyle, useSummaryViewState, useThemeDetection } from '../../h
 import { useI18n } from '../../i18n/index.js';
 import { useHorizontalWheelScroll } from '../../hooks/useHorizontalWheelScroll.js';
 import PoolStatisticsWorkspace from '../../components/summary/PoolStatisticsWorkspace.jsx';
+import WorkbenchMetricsPanel from '../../components/summary/WorkbenchMetricsPanel.jsx';
 
 function StatCard({ icon: Icon, label, value, hint, tone = 'text-slate-900 dark:text-white' }) {
   return (

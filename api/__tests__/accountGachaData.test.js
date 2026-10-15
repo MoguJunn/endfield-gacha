@@ -498,6 +498,8 @@ describe('/api/account-gacha-data', () => {
       views: {
         'pool-current': { total: 12 },
         'pool-other': { total: 34 },
+        __group_all: { excludeFree: { stats: { total: 1200, totalSixStar: 24,
+          personalData: { totalKnown: false } } } },
       },
       timelineViews: {
         'zh-CN': {
@@ -530,14 +532,38 @@ describe('/api/account-gacha-data', () => {
       timelineViews: { 'en-US': { 'pool-current': [{ id: 'current-en' }] } },
     });
     expect(res.body.scope).not.toHaveProperty('simulatorInheritance');
+    expect(res.body.scope.overview).toEqual({ total: 1200, sixStar: 24, totalKnown: false });
     const projectedRead = adminClient.__state.selectCalls.find(
       (call) =>
         call.table === 'personal_analysis_snapshots' &&
         call.selection.includes('view:payload->dashboard->views->pool-current')
     );
     expect(projectedRead?.selection).toContain('timeline:payload->dashboard->timelineViews->en-US->pool-current');
+    expect(projectedRead?.selection).toContain('overview_total:payload->dashboard->views->__group_all->excludeFree->stats->total');
+    expect(projectedRead?.selection).toContain('overview_six_star:payload->dashboard->views->__group_all->excludeFree->stats->totalSixStar');
+    expect(projectedRead?.selection).toContain('overview_total_known:payload->dashboard->views->__group_all->excludeFree->stats->personalData->totalKnown');
     expect(projectedRead?.selection).not.toContain('simulator_inheritance:payload->simulatorInheritance');
     expect(JSON.stringify(res.body.scope)).not.toContain('pool-other');
+  });
+
+  it('keeps zero totals from the projected account overview without reading raw history', async () => {
+    const adminClient = createAdminClient();
+    const snapshot = adminClient.__state.accountSnapshots['game-1::server:2'];
+    const { account, poolManifest, selector, recentSixStars } = snapshot.payload;
+    delete snapshot.payload;
+    Object.assign(snapshot, { account, pool_manifest: poolManifest, selector, recent_six_stars: recentSixStars,
+      overview_total: 0, overview_six_star: 0, overview_total_known: null,
+      view: { excludeFree: { stats: { total: 0 } } }, timeline: [] });
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2&viewKey=pool-current',
+    }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.scope.overview).toEqual({ total: 0, sixStar: 0, totalKnown: true });
+    expect(adminClient.__state.selectCalls.some(call => call.table === 'history')).toBe(false);
   });
 
   it('projects current pool display fields and timeline titles without rebuilding a ready analysis', async () => {
