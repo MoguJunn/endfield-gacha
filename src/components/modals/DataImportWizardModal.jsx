@@ -13,6 +13,7 @@ function ImportSourceCard({
   links = [],
   onImportFile,
   actionLabel,
+  disabled = false,
   accent = 'yellow'
 }) {
   const inputRef = useRef(null);
@@ -65,19 +66,22 @@ function ImportSourceCard({
 
       <button
         type="button"
+        disabled={disabled}
         onClick={() => inputRef.current?.click()}
-        className={`mt-4 flex w-full items-center justify-center gap-2 border px-4 py-2.5 text-xs font-black uppercase tracking-wider transition-colors ${accentClasses}`}
+        className={`mt-4 flex w-full items-center justify-center gap-2 border px-4 py-2.5 text-xs font-black uppercase tracking-wider transition-colors ${disabled
+          ? 'cursor-not-allowed border-zinc-200 text-zinc-400 dark:border-zinc-700 dark:text-zinc-500'
+          : accentClasses}`}
       >
         <Upload size={14} />
         {actionLabel}
       </button>
-      <input
+      {!disabled && <input
         ref={inputRef}
         type="file"
         className="hidden"
         accept={accept}
         onChange={onImportFile}
-      />
+      />}
     </div>
   );
 }
@@ -170,6 +174,15 @@ export default function DataImportWizardModal({
             onImportFile={onImportFile}
             actionLabel={t('import.fileWizard.chooseFile')}
             accent="violet"
+          />
+          <ImportSourceCard
+            icon={Table2}
+            title={t('import.fileWizard.highStarSummary.title')}
+            badge="XLSX"
+            description={t('import.fileWizard.highStarSummary.desc')}
+            note={t('import.fileWizard.highStarSummary.note')}
+            actionLabel={t('import.fileWizard.highStarSummary.pending')}
+            disabled
           />
         </div>
 
