@@ -882,6 +882,10 @@ function MobileDashboardView() {
         <MobilePoolRailSelector />
       </div>
       <AccountServerLabelNotice ownerId={user.id} mobile />
+      {stats.personalData?.hasSupplements && <p role="note" className="mx-4 mt-3 border border-amber-400/40 p-3 text-xs text-amber-700 dark:text-amber-300">
+        {isEnglish ? 'Manual edits and saved supplements are included here and excluded from community statistics.' : '本页已纳入手动修改和补录资料，这些资料不参与全服统计。'}
+        {stats.personalData.totalKnown === false && (isEnglish ? ' ≥ marks a known minimum; missing counts and pity remain unknown.' : ' ≥ 表示已知数量下限；缺失的抽数和垫抽保持未知。')}
+      </p>}
 
       <div className="mobile-ux-card relative mb-4 mx-4 mt-4 overflow-hidden border-pink-500/30">
         <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-gradient-to-b from-pink-500 to-orange-500"></div>
@@ -916,7 +920,7 @@ function MobileDashboardView() {
                                 ? t('dashboard.pool.type.weapon')
                                 : t('dashboard.pool.type.standard')}
                     </MobileStatusBadge>
-                    <span className="tabular-nums">{formatNumber(stats.total)} {pullUnitLabel}</span>
+                    <span className="tabular-nums">{stats.personalData?.totalKnown === false ? '≥ ' : ''}{formatNumber(stats.total)} {pullUnitLabel}</span>
                   </div>
                 </div>
               </div>
@@ -1073,7 +1077,7 @@ function MobileDashboardView() {
       <div className="mobile-ux-card mx-4 mb-4 flex items-center gap-3 border-l-4 border-amber-500 px-3 py-3 text-amber-600 dark:border-ef-yellow dark:text-ef-yellow">
           <Database size={14} />
           <span className="text-xs font-bold tracking-widest">{t('dashboard.resources.totalInvested')}</span>
-          <span className="ml-auto text-2xl font-black font-mono">{stats.total}</span>
+          <span className="ml-auto text-2xl font-black font-mono">{stats.personalData?.totalKnown === false ? '≥ ' : ''}{stats.total}</span>
           <span className="text-xs text-slate-500 dark:text-zinc-500">{t('dashboard.unit.pull')}</span>
           <div className="mobile-ux-card-chip ml-1 flex h-8 w-8 items-center justify-center text-slate-500 dark:text-zinc-500"><Layers size={16}/></div>
           <button
@@ -1101,7 +1105,7 @@ function MobileDashboardView() {
       </div>
 
       {/* 保底进度（聚合模式下隐藏） */}
-      {!isGroupMode && !hasMergedAccountView && (
+      {!isGroupMode && !hasMergedAccountView && stats.personalData?.totalKnown !== false && (
       <div className="mx-4 mb-4 grid grid-cols-2 gap-2">
         {/* 6星保底 */}
         {(() => {

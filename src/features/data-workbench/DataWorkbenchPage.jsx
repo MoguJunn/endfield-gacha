@@ -190,8 +190,8 @@ function DataWorkbenchContent({ onOpenFileImport, questionnaireReadDelayMs = 150
         </small>}
       </section>
       <p className="wb-notice" role="note" aria-label={tt('统计范围说明', 'Statistics eligibility')}>
-        {tt('某一卡池发生手动添加或修改后，该游戏账号在该区服的整池记录均不参与全服及个人统计。跨池修改会同时排除原池和目标池；删除、重新导入或撤回不会恢复统计资格。记录仍可核对。',
-          'After a manual addition or edit, all records for that game account, server and banner are excluded from community and personal statistics. Moving a record excludes both banners. Deleting, reimporting or reverting does not restore eligibility; records remain available for review.')}
+        {tt('手动修改和已保存的补录会展示在你的个人分析中；资料缺失的数量、出率和保底保留为未知。发生手动添加或修改的账号、区服、卡池整池不参与全服统计。跨池修改排除原池和目标池；删除、重新导入或撤回不会恢复全服统计资格。',
+          'Manual edits and saved supplements appear in your personal analysis. Missing counts, rates and pity remain unknown. The affected game account, server and banner are excluded from community statistics. Moving a record excludes both banners; deleting, reimporting or reverting does not restore community eligibility.')}
       </p>
       {!user ? (
         <section className="wb-surface p-6">

@@ -345,6 +345,8 @@ const DashboardView = ({ showToast }) => {
     [t]
   );
   const pullUnitLabel = isEnglish ? 'PULLS' : t('dashboard.unit.pull');
+  const unknownTotalLabel = isEnglish ? 'Total pulls unknown' : '总抽数未知';
+  const formatKnownTotal = (value) => `${value.personalData?.totalKnown === false ? '≥ ' : ''}${formatNumber(value.total)}`;
   const characterPoolLabel = isEnglish ? 'Character Banner' : '角色池';
   const weaponPoolLabel = isEnglish ? 'Weapon Banner' : '武器池';
   const standardSixLabel = isEnglish ? 'Standard 6★' : '常驻6★';
@@ -1320,6 +1322,15 @@ const DashboardView = ({ showToast }) => {
 
   return (
     <div className="space-y-6">
+      {stats.personalData?.hasSupplements && (
+        <p role="note" className="border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+          {isEnglish ? 'Your manual edits and saved supplements are included in this analysis. They are excluded from community statistics.'
+            : '本页已纳入你的手动修改和补录资料；这些资料不参与全服统计。'}
+          {stats.personalData.totalKnown === false && (isEnglish
+            ? ' Some low-star records are missing: ≥ marks the known minimum. Rates and pity that cannot be verified remain unknown.'
+            : ' 部分低星记录缺失，≥ 表示已知数量下限；无法核实的出率和垫抽保持未知。')}
+        </p>
+      )}
       {shouldMountShareCard && (
         <div
           aria-hidden="true"
@@ -1365,7 +1376,7 @@ const DashboardView = ({ showToast }) => {
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 <OverviewBanner
                   title={t('dashboard.overview.characterTotal')}
-                  value={formatNumber(splitOverviewStats.character.total)}
+                  value={formatKnownTotal(splitOverviewStats.character)}
                   accentClass="rainbow-text"
                   unitLabel={pullUnitLabel}
                 >
@@ -1386,7 +1397,7 @@ const DashboardView = ({ showToast }) => {
                 </OverviewBanner>
                 <OverviewBanner
                   title={t('dashboard.overview.weaponTotal')}
-                  value={formatNumber(splitOverviewStats.weapon.total)}
+                  value={formatKnownTotal(splitOverviewStats.weapon)}
                   accentClass="text-amber-600 dark:text-amber-400"
                   unitLabel={pullUnitLabel}
                 >
@@ -1433,7 +1444,7 @@ const DashboardView = ({ showToast }) => {
                     <StatBox
                       title={t('dashboard.overview.fiveStarTotal')}
                       value={splitOverviewStats.character.counts[5]}
-                      subValue={t('dashboard.overview.ratio', {
+                      subValue={splitOverviewStats.character.personalData?.totalKnown === false ? unknownTotalLabel : t('dashboard.overview.ratio', {
                         percent: formatPercentValue(
                           splitOverviewStats.character.total > 0
                             ? (splitOverviewStats.character.counts[5] / splitOverviewStats.character.total) * 100
@@ -1446,7 +1457,7 @@ const DashboardView = ({ showToast }) => {
                     <StatBox
                       title={t('dashboard.overview.fourStarTotal')}
                       value={splitOverviewStats.character.counts[4]}
-                      subValue={t('dashboard.overview.ratio', {
+                      subValue={splitOverviewStats.character.personalData?.totalKnown === false ? unknownTotalLabel : t('dashboard.overview.ratio', {
                         percent: formatPercentValue(
                           splitOverviewStats.character.total > 0
                             ? (splitOverviewStats.character.counts[4] / splitOverviewStats.character.total) * 100
@@ -1505,7 +1516,7 @@ const DashboardView = ({ showToast }) => {
                     <StatBox
                       title={t('dashboard.overview.fiveStarTotal')}
                       value={splitOverviewStats.weapon.counts[5]}
-                      subValue={t('dashboard.overview.ratio', {
+                      subValue={splitOverviewStats.weapon.personalData?.totalKnown === false ? unknownTotalLabel : t('dashboard.overview.ratio', {
                         percent: formatPercentValue(
                           splitOverviewStats.weapon.total > 0
                             ? (splitOverviewStats.weapon.counts[5] / splitOverviewStats.weapon.total) * 100
@@ -1518,7 +1529,7 @@ const DashboardView = ({ showToast }) => {
                     <StatBox
                       title={t('dashboard.overview.fourStarTotal')}
                       value={splitOverviewStats.weapon.counts[4]}
-                      subValue={t('dashboard.overview.ratio', {
+                      subValue={splitOverviewStats.weapon.personalData?.totalKnown === false ? unknownTotalLabel : t('dashboard.overview.ratio', {
                         percent: formatPercentValue(
                           splitOverviewStats.weapon.total > 0
                             ? (splitOverviewStats.weapon.counts[4] / splitOverviewStats.weapon.total) * 100
@@ -1606,7 +1617,7 @@ const DashboardView = ({ showToast }) => {
                       {totalPullBannerTitle}
                     </h3>
                     <div className="flex items-baseline gap-2 font-mono text-3xl font-black text-slate-800 dark:text-zinc-100">
-                      {formatNumber(stats.total)}
+                      {formatKnownTotal(stats)}
                       <span className="text-base font-medium text-slate-400 dark:text-zinc-600">{pullUnitLabel}</span>
                     </div>
                   </div>
@@ -1630,6 +1641,7 @@ const DashboardView = ({ showToast }) => {
                       title={primarySixStarLabel}
                       value={stats.counts[6]}
                       subValue={(() => {
+                        if (stats.personalData?.totalKnown === false) return unknownTotalLabel;
                         if (isAllPoolsOverview) {
                           return stats.totalSixStar > 0
                             ? t('dashboard.overview.allSixRate', {
@@ -1676,7 +1688,7 @@ const DashboardView = ({ showToast }) => {
                   <StatBox
                     title={t('dashboard.overview.fiveStarTotal')}
                     value={stats.counts[5]}
-                    subValue={t('dashboard.overview.ratio', {
+                    subValue={stats.personalData?.totalKnown === false ? unknownTotalLabel : t('dashboard.overview.ratio', {
                       percent: formatPercentValue(stats.total > 0 ? (stats.counts[5] / stats.total) * 100 : 0),
                     })}
                     colorClass="text-amber-600 dark:text-amber-400"
@@ -1685,7 +1697,7 @@ const DashboardView = ({ showToast }) => {
                   <StatBox
                     title={t('dashboard.overview.fourStarTotal')}
                     value={stats.counts[4]}
-                    subValue={t('dashboard.overview.ratio', {
+                    subValue={stats.personalData?.totalKnown === false ? unknownTotalLabel : t('dashboard.overview.ratio', {
                       percent: formatPercentValue(stats.total > 0 ? (stats.counts[4] / stats.total) * 100 : 0),
                     })}
                     colorClass="text-purple-600 dark:text-purple-400"

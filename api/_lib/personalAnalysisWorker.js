@@ -232,25 +232,27 @@ export async function loadPersonalAnalysisModel(adminClient, userId, config = {}
     maxHistoryPages: parseInteger(config.maxHistoryPages, 100, { min: 1, max: 500 }),
     historyPageConcurrency: parseInteger(config.historyPageConcurrency, 2, { min: 1, max: 4 }),
   };
-  const [rawHistory, workbench, statisticsExclusions] = await Promise.all([
+  const [rawHistory, workbench] = await Promise.all([
     loadHistory(adminClient, userId, normalizedModelConfig),
     loadWorkbenchEntriesForAnalytics(adminClient, userId),
-    callRpc(adminClient, 'read_account_statistics_exclusions', { p_user_id: userId }),
   ]);
-  if (!Array.isArray(statisticsExclusions)) throw new Error('Account statistics exclusions unavailable');
   const [poolAliasMap, characterAliasMap] = await Promise.all([
-    resolvePoolAliasMap(adminClient, [...rawHistory.map((row) => row?.pool_id), ...workbench.entries.map(row => row.pool_id), ...statisticsExclusions.map(row => row.pool_id)]),
-    resolveCharacterAliasMap(adminClient, [...rawHistory.map((row) => row?.character_id), ...workbench.entries.map(row => row.values?.entityId)]),
+    resolvePoolAliasMap(adminClient, [...rawHistory.map((row) => row?.pool_id), ...workbench.entries.map(row => row.pool_id)]),
+    resolveCharacterAliasMap(adminClient, [...rawHistory.map((row) => row?.character_id), ...workbench.entries.flatMap(row =>
+      [row.values?.entityId, ...(row.values?.acquisitions || []).map(acquisition => acquisition.entityId)])]),
   ]);
   const history = formatAccountGachaHistoryRows(rawHistory, {
     poolAliasMap,
     characterAliasMap,
   });
-  const workbenchEntries = workbench.entries.map(row => ({ ...row, pool_id: resolveAliasValue(poolAliasMap, row.pool_id), values: { ...row.values, ...(row.values?.entityId ? { entityId: resolveAliasValue(characterAliasMap, row.values.entityId) } : {}) } }));
+  const workbenchEntries = workbench.entries.map(row => ({ ...row, pool_id: resolveAliasValue(poolAliasMap, row.pool_id), values: {
+    ...row.values, ...(row.values?.entityId ? { entityId: resolveAliasValue(characterAliasMap, row.values.entityId) } : {}),
+    ...(Array.isArray(row.values?.acquisitions) ? { acquisitions: row.values.acquisitions.map(acquisition => ({ ...acquisition,
+      entityId: resolveAliasValue(characterAliasMap, acquisition.entityId) })) } : {}),
+  } }));
   const [pools, characters] = await Promise.all([loadPools(adminClient, userId), loadCharacters(adminClient)]);
 
-  return buildPersonalAnalysisSnapshots({ history, pools, characters, userId, workbenchEntries,
-    statisticsExclusions: statisticsExclusions.map(row => ({ ...row, pool_id: resolveAliasValue(poolAliasMap, row.pool_id) })) });
+  return buildPersonalAnalysisSnapshots({ history, pools, characters, userId, workbenchEntries });
 }
 
 function normalizeClaimedJobs(claimed) {

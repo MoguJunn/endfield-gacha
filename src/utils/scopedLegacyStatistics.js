@@ -336,8 +336,8 @@ function addExclusionCount(exclusionCountsByAccount, account, reason, rawPoolId,
  *
  * 生命周期仅限本次计算：返回对象不持有原始/规范化历史记录，也不做跨任务缓存。
  */
-export function prepareScopedLegacyStatistics({ history = [], pools = [], characters = [], exclusions = [] } = {}) {
-  history = prepareStatisticsContinuity({ history, pools, exclusions }).history;
+export function prepareScopedLegacyStatistics({ history = [], pools = [], characters = [], exclusions = [], audience = 'public' } = {}) {
+  history = prepareStatisticsContinuity({ history, pools, exclusions, audience }).history;
   const poolLookup = buildPoolLookup(pools);
   const catalogIndex = buildCatalogIndex(characters);
   const resolvePool = createPoolResolver();

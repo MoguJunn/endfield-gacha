@@ -29,15 +29,16 @@ describe('manual data statistics exclusion', () => {
     expect(buildPoolStats({ normalizedCurrentPoolHistory: original, currentPool: pool,
       accountHistory: [...original, ...excluded] })).toEqual(singlePool([]));
   });
-  it('keeps manual data available for record review while published personal metrics use only eligible history', () => {
-    const base = buildPersonalAnalysisSnapshots({ history: original.map(row => ({ ...row, statistics_pool_excluded: true })), pools: [pool], userId: 'owner' });
+  it('includes manual edits in private analysis while public calculations still exclude the scope', () => {
     const result = buildPersonalAnalysisSnapshots({ history: [...original, ...excluded], pools: [pool], userId: 'owner',
       workbenchEntries: [{ id: 'ledger', user_id: 'owner', game_uid: 'uid', server_scope: '1', pool_id: 'standard',
         kind: 'pool-ledger', values: { totalPulls: 9999, sixStarCount: 999 } }] });
     expect(result.owner.accounts[0].recordCount).toBe(original.length + excluded.length);
-    expect(result.owner.summary).toEqual(base.owner.summary);
-    expect(result.scopes[0].payload.selector).toEqual(base.scopes[0].payload.selector);
-    expect(result.scopes[0].payload.dashboard).toEqual(base.scopes[0].payload.dashboard);
+    expect(result.owner.summary.total).toBe(original.length + excluded.length);
+    expect(result.owner.summary.sixStar).toBe(4);
+    expect(result.scopes[0].payload.selector.totalPulls).toBe(6);
+    expect(result.scopes[0].payload.dashboard.views.standard.excludeFree.stats.totalSixStar).toBe(4);
+    expect(statisticsHistory([...original, ...excluded])).toEqual([]);
     expect(result.owner.summary).not.toHaveProperty('workbench');
   });
   it('a supplement or permanent marker excludes untouched rows even after the manual record is gone', () => {
@@ -45,8 +46,8 @@ describe('manual data statistics exclusion', () => {
     expect(statisticsHistory(original, { entries: [scope] })).toEqual([]);
     expect(statisticsHistory(original, { exclusions: [scope] })).toEqual([]);
     const model = buildPersonalAnalysisSnapshots({ history: original, pools: [pool], userId: 'owner', statisticsExclusions: [scope] });
-    expect(model.owner.summary.total).toBe(0);
-    expect(model.scopes[0].payload.selector.totalPulls).toBe(0);
+    expect(model.owner.summary.total).toBe(2);
+    expect(model.scopes[0].payload.selector.totalPulls).toBe(2);
     expect(model.owner.accounts[0].recordCount).toBe(2);
   });
 });

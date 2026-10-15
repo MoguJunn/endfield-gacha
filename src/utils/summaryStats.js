@@ -140,9 +140,9 @@ function getRuleScopeKey(pool, capabilities, scopeType) {
  * @param {Array} [options.characters=[]] 角色元数据
  * @returns {Object} 统计数据
  */
-export function buildSummaryStats({ history, pools, user, characters = [] }) {
+export function buildSummaryStats({ history, pools, user, characters = [], audience = 'public' }) {
   const myPools = pools && user ? pools : [];
-  const myHistory = history && user ? prepareStatisticsContinuity({ history: history.filter((h) => h.user_id === user.id), pools: myPools }).history : [];
+  const myHistory = history && user ? prepareStatisticsContinuity({ history: history.filter((h) => h.user_id === user.id), pools: myPools, audience }).history : [];
   const annotatedMyHistory = annotateInfoBookPulls(myHistory, myPools);
 
   const poolMap = new Map();

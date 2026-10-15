@@ -53,6 +53,9 @@ jobs:
       - name: Pool catalog save and scoped invalidation SQL behavior
         run: npm run test:pool-catalog:sql
 
+      - name: Manual personal analysis and community isolation SQL behavior
+        run: node scripts/verify-manual-personal-analysis.mjs
+
       - name: Official rerun period and promotion SQL behavior
         run: node scripts/verify-supabase-baseline-smoke.mjs --history-pool-version
 

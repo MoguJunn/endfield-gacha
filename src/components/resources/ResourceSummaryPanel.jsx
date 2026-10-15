@@ -208,6 +208,10 @@ const ResourceSummaryPanel = ({
       <div className={mobile ? 'mb-3 pl-1' : 'mb-4'}>
         <span className={`${mobile ? 'text-sm tracking-wide' : 'text-lg tracking-widest'} font-bold uppercase text-slate-800 dark:text-white`}>{title}</span>
       </div>
+      {resources.personalData?.totalKnown === false && <p role="note" className="mb-3 text-xs text-amber-700 dark:text-amber-300">
+        {locale === 'en-US' ? 'Converted from known results only. Missing history means the full resource totals are unknown.'
+          : '以下仅按已知结果换算；由于记录不完整，实际资源总量仍未知。'}
+      </p>}
 
       <div className={`grid ${mobile ? 'gap-2' : 'gap-3'}`} style={{ gridTemplateColumns: getGridTemplateColumns() }}>
         {items.map(renderItem)}

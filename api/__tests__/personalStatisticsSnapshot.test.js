@@ -2,18 +2,18 @@
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('../../shared/idAliasService.js', async (original) => ({ ...await original(), resolvePoolAliasMap: async () => new Map(), resolveCharacterAliasMap: async () => new Map() }));
 import { buildPersonalStatisticsSnapshot } from '../_lib/personalStatisticsSnapshot.js';
-import { statisticsHistory } from '../../shared/statisticsEligibility.js';
 
 function client(rows, gaps = []) {
   const db = { from: vi.fn((table) => {
     const state = { head: false, owner: null, start: 0, end: 999 };
     const query = { select: (_fields, options) => { state.head = options?.head; return query; },
       eq: (key, value) => { if (key === 'user_id') state.owner = value; return query; },
-      in: () => query, order: () => query, range: (start, end) => { state.start = start; state.end = end; return query; },
+      in: () => query, is: () => query, order: () => query, range: (start, end) => { state.start = start; state.end = end; return query; },
+      then: (resolve, reject) => Promise.resolve({ data: [] }).then(resolve, reject),
       abortSignal: async () => {
-        if (table === 'statistics_history') {
+        if (table === 'history') {
           expect(state.owner).toBe('owner');
-          const owned = statisticsHistory(rows).filter((row) => row.user_id === state.owner);
+          const owned = rows.filter((row) => row.user_id === state.owner);
           return state.head ? { count: owned.length } : { data: owned.slice(state.start, state.end + 1) };
         }
         if (table === 'statistics_history_gaps') {
@@ -60,13 +60,15 @@ describe('personal scheduled snapshots', () => {
     expect(result.scopes['']).toEqual({});
     expect(result.catalogs).toEqual({});
   });
-  it('manual edits and additions cannot change any personal observation, resource or catalog metric', async () => {
+  it('includes manual edits and additions in private observations, resources and catalogs', async () => {
     const original = [row(1), row(2, 'cn', { edit_version: 6, statistics_excluded: false })];
-    const expected = await buildPersonalStatisticsSnapshot(client(original), 'owner');
     const db = client([...original, row(3, 'cn', { game_uid: 'blocked', statistics_excluded: true }),
       row(4, 'intl', { record_id: 'manual_4' }), row(5, 'cn', { game_uid: 'blocked' })]);
-    expect(await buildPersonalStatisticsSnapshot(db, 'owner')).toEqual(expected);
-    expect(db.from).not.toHaveBeenCalledWith('history');
-    expect(db.from).not.toHaveBeenCalledWith('account_data_workbench_entries');
+    const result = await buildPersonalStatisticsSnapshot(db, 'owner');
+    expect(result.scopes[''].p.total).toBe(5);
+    expect(result.summary.total).toBe(5);
+    expect(result.legacyScopes[''].p.regularTotal).toBe(5);
+    expect(db.from).toHaveBeenCalledWith('history');
+    expect(db.from).not.toHaveBeenCalledWith('statistics_history');
   });
 });

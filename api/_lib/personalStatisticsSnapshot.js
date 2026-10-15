@@ -11,33 +11,41 @@ import { buildLimitedCrossPoolPityMap, buildTimelineAcquisitionIndex } from '../
 import { buildGroupPoolObservations } from '../../src/utils/groupPoolObservations.js';
 import { prepareScopedLegacyStatistics } from '../../src/utils/scopedLegacyStatistics.js';
 import { STATISTICS_GROUPS, getStatisticsGroupPools, normalizeStatisticsPool } from '../../shared/statisticsScopes.js';
-import { prepareStatisticsContinuity } from '../../src/utils/statisticsContinuity.js';
-import { readStatisticsHistoryGaps } from './statisticsHistoryGaps.js';
+import { personalAnalysisCoverage, preparePersonalAnalysisData } from '../../src/utils/personalAnalysisData.js';
+import { loadWorkbenchEntriesForAnalytics } from './dataWorkbenchAnalytics.js';
 
 export async function buildPersonalStatisticsSnapshot(db, userId, { signal } = {}) {
   const rows = [];
-  const { count, error: countError } = await db.from('statistics_history').select('id', { head: true, count: 'exact' }).eq('user_id', userId).abortSignal(signal);
+  const { count, error: countError } = await db.from('history').select('id', { head: true, count: 'exact' }).eq('user_id', userId).abortSignal(signal);
   if (countError || !Number.isInteger(count)) throw new Error('Cannot read complete personal statistics history');
   for (let start = 0; start < count; start += 1000) {
     const end = Math.min(start + 999, count - 1);
-    const { data, error } = await db.from('statistics_history').select('*').eq('user_id', userId).order('id').range(start, end).abortSignal(signal);
+    const { data, error } = await db.from('history').select('*').eq('user_id', userId).order('id').range(start, end).abortSignal(signal);
     if (error || data?.length !== end - start + 1) throw new Error('Personal history changed during calculation');
     rows.push(...data);
   }
-  const exclusions = await readStatisticsHistoryGaps(db, { userId, signal });
+  const workbench = await loadWorkbenchEntriesForAnalytics(db, userId);
   const [poolAliasMap, characterAliasMap] = await Promise.all([
-    resolvePoolAliasMap(db, [...rows.map((row) => row.pool_id), ...exclusions.map(row => row.pool_id)]), resolveCharacterAliasMap(db, rows.map((row) => row.character_id)),
+    resolvePoolAliasMap(db, [...rows.map((row) => row.pool_id), ...workbench.entries.map(row => row.pool_id)]),
+    resolveCharacterAliasMap(db, [...rows.map((row) => row.character_id), ...workbench.entries.flatMap(row =>
+      [row.values?.entityId, ...(row.values?.acquisitions || []).map(acquisition => acquisition.entityId)])]),
   ]);
   let history = formatAccountGachaHistoryRows(rows, { poolAliasMap, characterAliasMap });
   rows.length = 0;
-  const ids = [...new Set([...history.map((row) => row.poolId), ...exclusions.map(row => poolAliasMap.get(row.pool_id) || row.pool_id)])];
+  const entries = workbench.entries.map(row => ({ ...row, pool_id: poolAliasMap.get(row.pool_id) || row.pool_id, values: {
+    ...row.values, ...(row.values?.entityId ? { entityId: characterAliasMap.get(row.values.entityId) || row.values.entityId } : {}),
+    ...(Array.isArray(row.values?.acquisitions) ? { acquisitions: row.values.acquisitions.map(acquisition => ({ ...acquisition,
+      entityId: characterAliasMap.get(acquisition.entityId) || acquisition.entityId })) } : {}),
+  } }));
+  const ids = [...new Set([...history.map((row) => row.poolId), ...entries.map(row => row.pool_id)])];
   const { data: visiblePools, error: visibleError } = await db.rpc('get_app_visible_pools').abortSignal(signal);
   const { data: poolRows, error: poolError } = ids.length ? await db.from('pools').select('*').in('pool_id', ids).abortSignal(signal) : { data: [] };
   const { data: characters, error: characterError } = await db.from('characters').select('*').abortSignal(signal);
   if (poolError || characterError || visibleError || !Array.isArray(visiblePools)) throw new Error('Personal catalog unavailable');
   const pools = [...new Map([...visiblePools, ...poolRows].map(normalizeStatisticsPool).map((pool) => [pool.id, pool])).values()];
-  history = prepareStatisticsContinuity({ history, pools, exclusions: exclusions.map(row => ({ ...row,
-    pool_id: poolAliasMap.get(row.pool_id) || row.pool_id })) }).history;
+  const originalHistory = history;
+  const personal = preparePersonalAnalysisData({ history, entries, pools, characters });
+  history = personal.history;
   const accounts = getStoredObservationAccounts(history);
   const { data: ranking, error: rankingError } = await db.rpc('get_user_ranking_stats', { p_user_id: userId }).abortSignal(signal);
   if (rankingError) throw new Error('Personal ranking calculation failed');
@@ -53,7 +61,7 @@ export async function buildPersonalStatisticsSnapshot(db, userId, { signal } = {
     const read = prepareStoredPoolObservations({ history, directory: characters, entityType });
     for (const key of accountKeys) for (const pool of typePools) scopes[key][pool.id] = read(pool.id, key || null);
   }
-  const legacy = prepareScopedLegacyStatistics({ history, pools, characters });
+  const legacy = prepareScopedLegacyStatistics({ history, pools, characters, audience: 'personal' });
   for (const key of accountKeys) {
     legacyScopes[key] = Object.fromEntries(pools.map((pool) => [pool.id, legacy.build({ memberPoolIds: [pool.id], accountKey: key || null })]));
     groupScopes[key] = Object.fromEntries(STATISTICS_GROUPS.map((group) => {
@@ -61,6 +69,20 @@ export async function buildPersonalStatisticsSnapshot(db, userId, { signal } = {
       return [group.key, { observations: buildGroupPoolObservations({ history: key ? accountHistories.get(key) || [] : history, pools, groupKey: group.key, directory: characters, accountKey: key || null }),
         legacy: legacy.build({ memberPoolIds: members.map((pool) => pool.id), accountKey: key || null }) }];
     }));
+  }
+  for (const key of accountKeys) {
+    const ownedEntries = personal.entries.filter(entry => !key || storedAccountKey(entry) === key);
+    const ownedHistory = originalHistory.filter(row => !key || storedAccountKey(row) === key);
+    const decorate = (observations, members) => {
+      const ids = new Set(members.map(pool => pool.id));
+      const selectedEntries = ownedEntries.filter(entry => ids.has(entry.poolId));
+      const coverage = personalAnalysisCoverage({ history: ownedHistory.filter(row => ids.has(row.poolId)),
+        entries: selectedEntries, pools: members, characters, includeFree: true });
+      if (coverage.hasSupplements) observations.personalData = { hasSupplements: true, totalKnown: coverage.totalKnown,
+        hasCompleteOrder: selectedEntries.every(entry => entry.kind === 'detail') };
+    };
+    for (const pool of pools) if (scopes[key][pool.id]) decorate(scopes[key][pool.id], [pool]);
+    for (const group of STATISTICS_GROUPS) decorate(groupScopes[key][group.key].observations, getStatisticsGroupPools(pools, group.key));
   }
   const poolById = new Map(pools.map((pool) => [pool.id, pool]));
   const historyByAccount = Map.groupBy(history, getHistoryRecordAccountKey);
@@ -79,5 +101,5 @@ export async function buildPersonalStatisticsSnapshot(db, userId, { signal } = {
     up_character: pool.up_character, start_time: pool.start_time, end_time: pool.end_time, isLimitedWeapon: pool.isLimitedWeapon,
     extra_subtype: pool.extra_subtype, extra_rule_profile: pool.extra_rule_profile, extra_series_key: pool.extra_series_key,
     extra_series_phase: pool.extra_series_phase, featured_characters: pool.featured_characters })), scopes, groupScopes, legacyScopes,
-    ranking, catalogs, summary: buildSummaryStats({ history, pools, characters, user: { id: userId } }) };
+    ranking, catalogs, summary: buildSummaryStats({ history, pools, characters, user: { id: userId }, audience: 'personal' }) };
 }

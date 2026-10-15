@@ -148,7 +148,15 @@ export function computeWorkbenchMetrics({ entries = [], history = [], resourceHi
     const existing = empty();
     covered.forEach(point => sum(existing, point.counts));
     const snapshot = { ...v };
-    const freshAcquisitions = (v.acquisitions || []).filter(row => row.drawMethod === v.drawMethod && !covered.some(point => row.entityId && entityId(point) === String(row.entityId) && row.timestamp && point.timestampMs === ms(row.timestamp)));
+    const matchedPoints = new Set();
+    const freshAcquisitions = (v.acquisitions || []).filter(row => {
+      if (row.drawMethod !== v.drawMethod) return false;
+      const match = covered.find(point => !matchedPoints.has(point) && row.entityId && entityId(point) === String(row.entityId)
+        && row.timestamp && point.timestampMs === ms(row.timestamp));
+      if (!match) return true;
+      matchedPoints.add(match);
+      return false;
+    });
     for (const [rarity, key] of [[5, 'fiveStarCount'], [6, 'sixStarCount']]) {
       if (!has(snapshot[key]) && freshAcquisitions.some(row => Number(row.rarity) === rarity)) snapshot[key] = existing[key] + freshAcquisitions.filter(row => Number(row.rarity) === rarity).length;
     }

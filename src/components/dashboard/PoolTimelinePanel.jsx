@@ -679,7 +679,7 @@ export function TimelineSectionCard({
             {metrics ? metrics.map((metric) => <MetricItem key={metric.label} {...metric} mobile={mobile} dense={dense} />) : <>
             <MetricItem
               label={t('dashboard.timeline.metric.total')}
-              value={t('dashboard.unit.pulls', { count: section.totalPulls })}
+              value={`${section.personalData?.totalKnown === false ? '≥ ' : ''}${t('dashboard.unit.pulls', { count: section.totalPulls })}`}
               mobile={mobile}
               dense={dense}
             />

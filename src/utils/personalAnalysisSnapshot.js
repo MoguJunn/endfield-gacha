@@ -32,7 +32,7 @@ import { getOverviewPoolBucket } from './dashboardOverviewPoolFilters.js';
 import { buildSimulatorInheritanceProjection } from '../features/simulator/inheritanceProjection.js';
 import { packInheritanceProjection } from '../../shared/simulator/historyCodec.js';
 import { getRecordPoolVersion } from '../../shared/poolVersion.js';
-import { prepareStatisticsContinuity } from './statisticsContinuity.js';
+import { applyPersonalAnalysisCoverage, personalAnalysisCoverage, preparePersonalAnalysisData } from './personalAnalysisData.js';
 
 const LEGACY_ACCOUNT_KEY = 'legacy';
 const GROUP_TYPES = ['all', 'extra', 'limited', 'standard', 'weapon_limited', 'weapon_standard', 'beginner'];
@@ -609,6 +609,7 @@ function buildStatsVariant({
     selectedPools,
     resolveCharacter,
     includeFreePullsInStats,
+    audience: 'personal',
   });
   const limitedPoolIds = currentPool.isGroupMode
     ? new Set(
@@ -700,7 +701,7 @@ function sanitizeTimelineSections(sections = []) {
   }));
 }
 
-function buildDashboard(history, pools, poolManifest, resolveCharacter) {
+function buildDashboard(history, pools, poolManifest, resolveCharacter, { originalHistory = history, entries = [], characters = [] } = {}) {
   const poolLookup = buildPoolLookup(poolManifest);
   const annotatedHistory = annotateInfoBookPulls(history, buildInfoBookPoolList(pools, poolManifest))
     .slice()
@@ -757,6 +758,34 @@ function buildDashboard(history, pools, poolManifest, resolveCharacter) {
     });
   });
 
+  const withCoverage = (viewId, selectedPools) => {
+    const ids = new Set(selectedPools.map(getPoolId));
+    const source = originalHistory.filter(row => ids.has(getHistoryPoolId(row)));
+    const selectedEntries = entries.filter(row => ids.has(getHistoryPoolId(row)));
+    for (const [key, includeFree] of [['excludeFree', false], ['includeFree', true]]) {
+      const view = views[viewId][key];
+      const coverage = personalAnalysisCoverage({ history: source, entries: selectedEntries, pools: selectedPools, characters, includeFree });
+      views[viewId][key] = applyPersonalAnalysisCoverage(view, coverage);
+      if (view.splitOverviewStats) {
+        const split = {};
+        for (const type of ['character', 'weapon']) {
+          const typePools = selectedPools.filter(pool => resolvePoolCapabilities(pool).entityType === type);
+          const typeIds = new Set(typePools.map(getPoolId));
+          split[type] = applyPersonalAnalysisCoverage({ stats: view.splitOverviewStats[type] }, personalAnalysisCoverage({
+            history: source.filter(row => typeIds.has(getHistoryPoolId(row))),
+            entries: selectedEntries.filter(row => typeIds.has(getHistoryPoolId(row))), pools: typePools, characters, includeFree,
+          })).stats;
+        }
+        views[viewId][key].splitOverviewStats = split;
+      }
+    }
+  };
+  poolManifest.forEach(pool => withCoverage(getPoolId(pool), [pool]));
+  groupScopes.forEach(({ type, subtype }) => {
+    const selected = getPoolsForGroupType(poolManifest, type, subtype);
+    withCoverage(buildGroupPool(type, subtype, selected).id, selected);
+  });
+
   const timelineViews = Object.fromEntries(
     ['zh-CN', 'en-US'].map((locale) => {
       const localizedViews = {};
@@ -804,6 +833,18 @@ function buildDashboard(history, pools, poolManifest, resolveCharacter) {
     })
   );
 
+  for (const localizedViews of Object.values(timelineViews)) {
+    for (const sections of Object.values(localizedViews)) {
+      for (const section of sections) {
+        const stats = views[section.id]?.excludeFree?.stats;
+        if (!stats?.personalData?.hasSupplements) continue;
+        section.personalData = stats.personalData;
+        section.totalPulls = stats.total;
+        section.currentPity = stats.currentPity;
+        section.currentPity5 = stats.currentPity5;
+      }
+    }
+  }
   return { views, timelineViews };
 }
 
@@ -848,15 +889,14 @@ function buildRecentSixStars(history, poolManifest, resolveCharacter) {
 /**
  * 从已加载的数据构建可直接持久化的个人分析快照，不执行任何外部读取。
  */
-export function buildPersonalAnalysisSnapshots({ history = [], pools = [], characters = [], userId, workbenchEntries = [], statisticsExclusions = [] } = {}) {
+export function buildPersonalAnalysisSnapshots({ history = [], pools = [], characters = [], userId, workbenchEntries = [] } = {}) {
   const historyArray = asArray(history);
   const poolsArray = asArray(pools);
   const charactersArray = asArray(characters);
   const ownedHistory = historyArray.filter((record) => record?.user_id === userId);
   const ownedEntries = asArray(workbenchEntries).filter(entry => entry.user_id === userId && !entry.deleted_at && !entry.deletedAt);
-  const eligibleOwnedHistory = prepareStatisticsContinuity({ history: ownedHistory, pools: poolsArray,
-    entries: ownedEntries, exclusions: statisticsExclusions }).history;
-  const eligibleAccounts = Map.groupBy(eligibleOwnedHistory, getRecordAccountKey);
+  const personal = preparePersonalAnalysisData({ history: ownedHistory, entries: ownedEntries, pools: poolsArray, characters: charactersArray });
+  const personalAccounts = Map.groupBy(personal.history, getRecordAccountKey);
   const accountGroups = buildAccountGroups(ownedHistory);
   ownedEntries.forEach(entry => {
     const key = getRecordAccountKey(entry);
@@ -871,17 +911,26 @@ export function buildPersonalAnalysisSnapshots({ history = [], pools = [], chara
     accounts,
     defaultAccountKey: accounts[0]?.accountKey || null,
     summary: buildSummaryStats({
-      history: eligibleOwnedHistory,
+      history: personal.history,
       pools: poolsArray,
       user: { id: userId },
       characters: charactersArray,
+      audience: 'personal',
     }),
   };
   const scopes = accountGroups.map((accountGroup) => {
     const account = toPublicAccount(accountGroup);
-    const entries = ownedEntries.filter(entry => getRecordAccountKey(entry) === account.accountKey);
+    const entries = personal.entries.filter(entry => getRecordAccountKey(entry) === account.accountKey);
     const poolManifest = buildPoolManifest([...accountGroup.records, ...entries.map(entry => ({ poolId: entry.poolId ?? entry.pool_id }))], poolsArray, userId);
-    const eligibleHistory = eligibleAccounts.get(account.accountKey) || [];
+    const personalHistory = personalAccounts.get(account.accountKey) || [];
+    const selector = buildSelector(personalHistory);
+    poolManifest.forEach(pool => {
+      const id = getPoolId(pool);
+      const coverage = personalAnalysisCoverage({ history: accountGroup.records.filter(row => getHistoryPoolId(row) === id),
+        entries: entries.filter(entry => getHistoryPoolId(entry) === id), pools: [pool], characters: charactersArray, includeFree: true });
+      if (coverage.hasSupplements) selector.poolPullCounts[id] = coverage.metrics.combined.totalPulls;
+    });
+    selector.totalPulls = Object.values(selector.poolPullCounts).reduce((sum, count) => sum + count, 0);
     return {
       scopeKey: account.accountKey,
       sourceGameUid: account.gameUid,
@@ -889,8 +938,9 @@ export function buildPersonalAnalysisSnapshots({ history = [], pools = [], chara
       payload: {
         account,
         poolManifest,
-        selector: buildSelector(eligibleHistory),
-        dashboard: buildDashboard(eligibleHistory, poolsArray, poolManifest, resolveCharacter),
+        selector,
+        dashboard: buildDashboard(personalHistory, poolsArray, poolManifest, resolveCharacter,
+          { originalHistory: accountGroup.records, entries, characters: charactersArray }),
         simulatorInheritance: packInheritanceProjection(
           buildSimulatorInheritanceProjection({
             history: accountGroup.records,
@@ -899,11 +949,20 @@ export function buildPersonalAnalysisSnapshots({ history = [], pools = [], chara
             accountKey: account.accountKey,
           })
         ),
-        recentSixStars: buildRecentSixStars(accountGroup.records, poolManifest, resolveCharacter),
+        recentSixStars: buildRecentSixStars(personalHistory, poolManifest, resolveCharacter),
       },
     };
   });
 
+  const allViews = scopes.map(scope => scope.payload.dashboard.views[`${POOL_GROUP_PREFIX}all`].excludeFree.stats);
+  if (allViews.some(stats => stats.personalData?.hasSupplements)) {
+    owner.summary.total = allViews.reduce((sum, stats) => sum + stats.total, 0);
+    owner.summary.sixStar = allViews.reduce((sum, stats) => sum + stats.totalSixStar, 0);
+    owner.summary.fiveStar = allViews.reduce((sum, stats) => sum + stats.counts[5], 0);
+    owner.summary.counts = Object.fromEntries([6, '6_std', 5, 4].map(key => [key,
+      allViews.reduce((sum, stats) => sum + stats.counts[key], 0)]));
+    owner.summary.personalData = { hasSupplements: true, totalKnown: allViews.every(stats => stats.personalData?.totalKnown !== false) };
+  }
   return { owner, scopes };
 }
 

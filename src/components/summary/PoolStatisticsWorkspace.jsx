@@ -133,8 +133,10 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
   const guest = source === 'local' && !user;
   return <div className="experience-ui hl-theme ex-integrated" data-theme={isDark ? 'dark' : 'light'} data-variant={mobile ? 'mobile' : 'desktop'} data-source={source}>
     <p className="ex-sidebar-hint" role="note" aria-label={t('统计范围说明', 'Statistics eligibility')}>
-      {t('某一卡池被手动添加或修改过，该游戏账号在该区服的整池记录均不参与统计，包括概率、保底、排名、图鉴和资源计算。其他账号和区服不受影响；删除、重新导入或撤回不会恢复统计资格。',
-        'A manual addition or edit excludes the entire banner for that game account and server from rates, pity, rankings, catalogs and resource statistics. Other accounts and servers are unaffected. Deleting, reimporting or reverting does not restore eligibility.')}
+      {source === 'local' ? t('我的数据包含手动修改和已保存的补录；缺少完整明细时，只展示已知结果，无法核实的间隔与出率保持未知。',
+        'My data includes manual edits and saved supplements. Incomplete history shows known results; unverifiable intervals and rates remain unknown.')
+        : t('手动添加或修改会使该游戏账号、区服、卡池整池退出全服统计；其他账号和区服不受影响。删除、重新导入或撤回不会恢复全服统计资格。个人分析仍保留这些资料。',
+          'Manual changes exclude the affected game account, server and banner from community statistics. Other accounts and servers are unaffected. Deleting, reimporting or reverting does not restore community eligibility. Personal analysis retains this data.')}
     </p>
     <div className="ex-main ex-workspace-grid">
       <aside className="ex-sidebar" aria-label={t('统计筛选', 'Statistics filters')}>
@@ -185,8 +187,13 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
               {Object.entries(stats.meta.exclusions).filter(([, count]) => count > 0).map(([reason, count]) => <p key={reason}>{({ missingIdentity: t('账号或记录标识缺失', 'Missing account or record identity'), invalidTime: t('时间无效', 'Invalid time'), invalidRarity: t('星级无效', 'Invalid rarity'), duplicate: t('重复记录', 'Duplicate records') })[reason]}：{count}</p>)}
             </details>}
             </details>
-            {legacy && <ScopedLegacyStatisticsPanel section="metrics" legacy={legacy} weapon={weapon} locale={locale} t={t} mobile={mobile} />}
-            <PoolObservationCharts key={`${scopeKey}:${selectedAccountKey}`} stats={stats} pool={group ? null : pool} english={isEnglish} weapon={weapon} t={t} />
+            {stats.personalData?.hasCompleteOrder === false ? <p role="note" className="ex-coverage-note">
+              {t('已包含补录中的已知结果。缺少完整抽取顺序，首次花费、出率与间隔图表暂不推算；可在个人卡池分析查看高星数量和时间线。',
+                'Known supplemental results are included. Missing pull order prevents reliable first costs, rates and intervals. Personal banner analysis shows the known acquisition counts and timeline.')}
+            </p> : <>
+              {legacy && <ScopedLegacyStatisticsPanel section="metrics" legacy={legacy} weapon={weapon} locale={locale} t={t} mobile={mobile} />}
+              <PoolObservationCharts key={`${scopeKey}:${selectedAccountKey}`} stats={stats} pool={group ? null : pool} english={isEnglish} weapon={weapon} t={t} />
+            </>}
             {legacy && <ScopedLegacyStatisticsPanel section="resources" legacy={legacy} weapon={weapon} locale={locale} t={t} mobile={mobile} />}
             <section className="ex-scope-members" aria-label={t('范围与成员期数', 'Scope and member periods')}>
               <h2>{t('范围与成员期数', 'Scope and member periods')} · {members.length}</h2>

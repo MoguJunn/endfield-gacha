@@ -29,6 +29,7 @@ export function usePoolStats({
         currentPoolId,
         selectedPools,
         includeFreePullsInStats,
+        audience: 'personal',
       }),
     [
       accountHistory,

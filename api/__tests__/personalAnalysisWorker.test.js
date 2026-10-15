@@ -203,12 +203,13 @@ describe('personal analysis worker', () => {
       workbenchEntries: [{ id: 'supplement', user_id: USER_ID, entry_id: 'entry', draft_id: 'draft', game_uid: 'game-1', server_scope: '1', pool_id: 'raw-pool', kind: 'pool-summary', time_precision: 'range', values: { drawMethod: 'normal', rangeStart: '2026-08-01T00:00:00Z', rangeEnd: '2026-09-01T00:00:00Z', totalPulls: 180, sixStarCount: 3 } }],
     });
     const model = await loadPersonalAnalysisModel(client, USER_ID);
-    expect(model.owner.summary.total).toBe(0);
+    expect(model.owner.summary.total).toBe(180);
+    expect(model.owner.summary.sixStar).toBe(3);
     expect(model.owner.summary).not.toHaveProperty('workbench');
     expect(model.scopes[0].payload).not.toHaveProperty('workbench');
     expect(model.scopes[0].payload.poolManifest[0].id).toBe('pool-1');
   });
-  it('reads the permanent scope marker after manual rows were removed, including pool aliases', async () => {
+  it('keeps private history available despite permanent community exclusion markers', async () => {
     const { client, rpc } = createAdminClient({
       history: [createHistoryRow(), createHistoryRow({ id: 2, record_id: 'record-2', seq_id: '2' })],
       pools: [createPoolRow()],
@@ -216,10 +217,10 @@ describe('personal analysis worker', () => {
       statisticsExclusions: [{ user_id: USER_ID, game_uid: 'game-1', server_scope: 'scope-1', pool_id: 'raw-pool' }],
     });
     const model = await loadPersonalAnalysisModel(client, USER_ID);
-    expect(model.owner.summary.total).toBe(0);
+    expect(model.owner.summary.total).toBe(2);
     expect(model.owner.accounts[0].recordCount).toBe(2);
-    expect(model.scopes[0].payload.selector.totalPulls).toBe(0);
-    expect(rpc).toHaveBeenCalledWith('read_account_statistics_exclusions', { p_user_id: USER_ID });
+    expect(model.scopes[0].payload.selector.totalPulls).toBe(2);
+    expect(rpc).not.toHaveBeenCalledWith('read_account_statistics_exclusions', expect.anything());
   });
   it('is disabled by default and clamps environment configuration', async () => {
     const adminClient = { rpc: vi.fn(), from: vi.fn() };

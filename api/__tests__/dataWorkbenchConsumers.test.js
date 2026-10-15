@@ -41,11 +41,13 @@ describe('workbench analytics consumers', () => {
     expect(result.coverage.unknownFourStar).toBe(3);
   });
 
-  it('keeps supplement-only accounts available for editing without contributing any statistics', () => {
+  it('includes supplement-only accounts in personal analysis without fabricating detailed outcomes', () => {
     const model = buildPersonalAnalysisSnapshots({ userId: 'owner', history: [], pools, characters: entities, workbenchEntries: [summary] });
     expect(model.owner.accounts).toHaveLength(1);
     expect(model.scopes).toHaveLength(1);
-    expect(model.owner.summary.total).toBe(0);
+    expect(model.owner.summary.total).toBe(180);
+    expect(model.owner.summary.sixStar).toBe(3);
+    expect(model.scopes[0].payload.selector.poolPullCounts.special_test).toBe(180);
     expect(model.owner.summary).not.toHaveProperty('workbench');
     expect(model.scopes[0].payload).not.toHaveProperty('workbench');
     expect(model.scopes[0].payload.poolManifest).toHaveLength(1);

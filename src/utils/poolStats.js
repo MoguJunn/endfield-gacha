@@ -135,20 +135,23 @@ export function buildPoolStats({
   selectedPools = [],
   includeFreePullsInStats = false,
   resolveCharacter = resolveCharacterRecordByName,
+  audience = 'public',
 }) {
   const rowKey = row => `${statisticsScopeKey(row)}:${getHistoryRecordKey(row)}`;
   const sourceHistory = accountHistory || [...new Map([...allLimitedHistory, ...(normalizedCurrentPoolHistory || [])].map(row => [rowKey(row), row])).values()];
-  const continuity = prepareStatisticsContinuity({ history: sourceHistory, pools: poolCatalog.length ? poolCatalog : [...selectedPools, currentPool] }).history;
+  const continuity = prepareStatisticsContinuity({ history: sourceHistory, pools: poolCatalog.length ? poolCatalog : [...selectedPools, currentPool], audience }).history;
   const byId = new Map(continuity.map(row => [rowKey(row), row.statisticsContinuity]));
   const annotate = rows => rows.map(row => byId.get(rowKey(row)) ? { ...row, statisticsContinuity: byId.get(rowKey(row)) } : row);
   normalizedCurrentPoolHistory = annotate(normalizedCurrentPoolHistory || []);
   allLimitedHistory = annotate(allLimitedHistory);
   if (Array.isArray(accountHistory)) accountHistory = annotate(accountHistory);
-  const exclusions = [...allLimitedHistory, ...(accountHistory || []), ...(normalizedCurrentPoolHistory || [])]
-    .filter(row => !isStatisticsHistoryRecord(row));
-  normalizedCurrentPoolHistory = statisticsHistory(normalizedCurrentPoolHistory, { exclusions });
-  allLimitedHistory = statisticsHistory(allLimitedHistory, { exclusions });
-  if (Array.isArray(accountHistory)) accountHistory = statisticsHistory(accountHistory, { exclusions });
+  if (audience !== 'personal') {
+    const exclusions = [...allLimitedHistory, ...(accountHistory || []), ...(normalizedCurrentPoolHistory || [])]
+      .filter(row => !isStatisticsHistoryRecord(row));
+    normalizedCurrentPoolHistory = statisticsHistory(normalizedCurrentPoolHistory, { exclusions });
+    allLimitedHistory = statisticsHistory(allLimitedHistory, { exclusions });
+    if (Array.isArray(accountHistory)) accountHistory = statisticsHistory(accountHistory, { exclusions });
+  }
   const currentPoolCapabilities = resolvePoolCapabilities(currentPool);
   const isLimitedPool = currentPoolCapabilities.basePoolType === 'limited';
   const isWeaponPool = currentPoolCapabilities.basePoolType === 'weapon';

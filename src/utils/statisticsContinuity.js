@@ -17,8 +17,8 @@ function pityScope(pool) {
 
 /** Missing scopes supply only temporal boundaries, never outcomes or pull counts.
  * Missing timestamps conservatively keep the dependent state unknown. */
-export function prepareStatisticsContinuity({ history = [], pools = [], exclusions = [], entries = [] } = {}) {
-  const eligible = statisticsHistory(history, { exclusions, entries });
+export function prepareStatisticsContinuity({ history = [], pools = [], exclusions = [], entries = [], audience = 'public', gaps: personalGaps = [] } = {}) {
+  const eligible = audience === 'personal' ? history : statisticsHistory(history, { exclusions, entries });
   const included = new Set(eligible);
   const poolsById = new Map(pools.filter(Boolean).flatMap(pool => [pool.id, pool.pool_id].filter(value => value != null)
     .map(value => [String(value), pool])));
@@ -28,8 +28,8 @@ export function prepareStatisticsContinuity({ history = [], pools = [], exclusio
     return [id, c.targetScope === 'series' || c.rewardScope === 'series' ? getPoolSeriesStateKey(pool) : null];
   }));
   const characterPoolIds = new Set([...poolsById].filter(([, pool]) => resolvePoolCapabilities(pool).entityType !== 'weapon').map(([id]) => id));
-  const missing = new Map(exclusions.map(row => [statisticsScopeKey(row), { ...row }]));
-  for (const row of [...history.filter(row => !included.has(row)), ...entries]) {
+  const missing = new Map((audience === 'personal' ? personalGaps : exclusions).map(row => [statisticsScopeKey(row), { ...row }]));
+  for (const row of [...history.filter(row => !included.has(row)), ...(audience === 'personal' ? [] : entries)]) {
     const key = statisticsScopeKey(row);
     const gap = missing.get(key) || { ...row, history_start_at: null, history_end_at: null };
     const start = time(row.timestamp ?? row.values?.rangeStart);
