@@ -38,6 +38,8 @@ export function formatAccountGachaHistoryRows(
     is_info_book: row.is_info_book,
     editVersion: Number(row.edit_version || 1),
     edit_version: Number(row.edit_version || 1),
+    statisticsExcluded: row.statistics_excluded,
+    statistics_excluded: row.statistics_excluded,
     gameUid: row.game_uid,
     game_uid: row.game_uid,
     nickName: row.nick_name,

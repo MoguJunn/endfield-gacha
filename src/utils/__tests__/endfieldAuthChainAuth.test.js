@@ -145,4 +145,26 @@ describe('endfieldAuthChain auth headers', () => {
       expect.any(Object)
     );
   });
+
+  it('stops polling a cancelled persistent task immediately', async () => {
+    fetchWithTimeout.mockResolvedValueOnce(jsonResponse({ success: true,
+      data: { status: 'cancelled', error: '导入任务已取消。' } }));
+    await expect(importAllRecordsFullyOnBackend('official-token',0,'user-1',null,'cn'))
+      .rejects.toMatchObject({ step:'import-full', message:'导入任务已取消。' });
+    expect(fetchWithTimeout).toHaveBeenCalledOnce();
+  });
+
+  it('continues a persistent task beyond the old five minute browser limit', async () => {
+    vi.useFakeTimers();
+    try {
+      const initialTime=Date.now();
+      fetchWithTimeout.mockResolvedValueOnce(jsonResponse({success:true,data:{status:'pending',progress:0}}))
+        .mockResolvedValueOnce(jsonResponse({success:true,data:{status:'completed',result:{savedRecords:1}}}));
+      const result=importAllRecordsFullyOnBackend('official-token',0,'user-1',(update)=>{
+        if(update.status==='pending' && update.progress===0) vi.setSystemTime(initialTime+6*60*1000);
+      },'cn');
+      await vi.advanceTimersByTimeAsync(2001);
+      await expect(result).resolves.toEqual({savedRecords:1});
+    } finally { vi.useRealTimers(); }
+  });
 });

@@ -22,6 +22,7 @@ import {
   Monitor,
   Moon,
   PanelsTopLeft,
+  PenLine,
   Settings,
   Shield,
   Sun,
@@ -37,6 +38,7 @@ import { buildUsernameHandle } from '../../utils/usernameValidation.js';
 import { STORAGE_KEYS, markAsViewed } from '../../utils/storageUtils.js';
 import LocaleSwitcher from '../common/LocaleSwitcher.jsx';
 import PlatformSwitcher from '../common/PlatformSwitcher.jsx';
+import WorkbenchBetaBadge from '../../features/import/WorkbenchBetaBadge.jsx';
 import './homeLandingDemo.css';
 import '../app/desktopPageLayout.css';
 
@@ -87,6 +89,13 @@ export default function HomeLandingHeader({
           mobile ? tt('卡池分析', 'Banner analysis') : tt('个人卡池分析', 'Personal banner analysis'),
           mobile ? tt('保底进度与寻访明细', 'Pity and pull history') : tt('个人概览、保底进度与寻访明细', 'Your overview, pity and pull history'),
           page('dashboard', 'details'),
+        ],
+        [
+          PenLine,
+          tt('导入／修改', 'Import / edit'),
+          tt('手动补录、截图识别与记录校对', 'Manual entry, screenshot recognition and record correction'),
+          page('data-workbench'),
+          'beta',
         ],
         [
           Layers,
@@ -211,6 +220,7 @@ export default function HomeLandingHeader({
                 <span className="hl-menu-item-copy">
                   <span className="hl-menu-item-title">
                     <strong>{label}</strong>
+                    {kind === 'beta' && <WorkbenchBetaBadge />}
                     {opensDialog ? (
                       <span className="hl-dialog-tag">
                         <PanelsTopLeft size={11} aria-hidden="true" />

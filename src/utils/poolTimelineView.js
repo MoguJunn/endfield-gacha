@@ -3,6 +3,7 @@ import { isFreeHistoryPull, isGiftHistoryPull, isInfoBookHistoryPull } from './h
 import { getPoolTimingMeta, normalizePoolGroupType } from './poolSelectorDisplay.js';
 import { compareHistoryTimelineAsc, getHistoryTimelineTimestampMs } from './historyTimelineSort.js';
 import { resolvePoolCapabilities } from './poolCapabilities.js';
+import { buildOneTimeTargetGuaranteeState } from './poolScopedHistory.js';
 import { getAppLocale, isEnglishLocale } from '../i18n/index.js';
 import {
   localizeEntityName,
@@ -79,7 +80,9 @@ function isGuaranteedHistoryPull(item) {
     item?.specialType === 'guaranteed' ||
     item?.special_type === 'guaranteed' ||
     item?.isSpark === true ||
-    item?.isGuaranteed === true
+    item?.is_spark === true ||
+    item?.isGuaranteed === true ||
+    item?.is_guaranteed === true
   );
 }
 
@@ -352,6 +355,7 @@ function buildOrderedTimelineGroups(history = []) {
 }
 
 function getInheritedLimitedPityForItem(item, crossPoolPityMap = null) {
+  if (item.statisticsContinuity?.interrupted) return item.statisticsContinuity.sixStarPity;
   if (!(crossPoolPityMap instanceof Map)) {
     return null;
   }
@@ -364,6 +368,34 @@ function getInheritedLimitedPityForItem(item, crossPoolPityMap = null) {
   const pityInfo = crossPoolPityMap.get(recordKey);
   const pityValue = Number(pityInfo?.sixStarPity);
   return Number.isFinite(pityValue) && pityValue > 0 ? pityValue : null;
+}
+
+function buildWeaponBatchMap(history, locale) {
+  const batches = new Map();
+  [...history].sort(sortHistoryAsc).forEach((item) => {
+    if (isGiftHistoryPull(item) || isFreeHistoryPull(item)) return;
+    const key = getHistoryBatchKey(item);
+    if (!key) return;
+    if (!batches.has(key)) batches.set(key, []);
+    batches.get(key).push(item);
+  });
+
+  const byRecord = new Map();
+  batches.forEach((items, key) => {
+    const batch = {
+      key,
+      size: items.length,
+      isCompleteTenPull: items.length === 10,
+      sixStarCount: items.filter((item) => Number(item.rarity) >= 6).length,
+      fiveStarCount: items.filter((item) => Number(item.rarity) === 5).length,
+      slots: items.map((item) => ({ label: getItemName(item, locale), rarity: Number(item.rarity) || 0 })),
+    };
+    items.forEach((item) => {
+      const recordKey = getHistoryRecordKey(item);
+      if (recordKey) byRecord.set(recordKey, batch);
+    });
+  });
+  return byRecord;
 }
 
 function calculateTimelineMetrics(history = [], { poolType = 'standard', crossPoolPityMap = null } = {}) {
@@ -382,6 +414,7 @@ function calculateTimelineMetrics(history = [], { poolType = 'standard', crossPo
       if (isGiftHistoryPull(item) || isFreeHistoryPull(item)) {
         continue;
       }
+      if (item.statisticsContinuity?.interrupted) return item.statisticsContinuity.currentPity6;
       if (Number(item?.rarity) >= 6) {
         break;
       }
@@ -396,6 +429,7 @@ function calculateTimelineMetrics(history = [], { poolType = 'standard', crossPo
       if (isGiftHistoryPull(item) || isFreeHistoryPull(item)) {
         continue;
       }
+      if (item.statisticsContinuity?.interrupted) return item.statisticsContinuity.currentPity5;
       if (Number(item?.rarity) >= 5) {
         break;
       }
@@ -403,12 +437,13 @@ function calculateTimelineMetrics(history = [], { poolType = 'standard', crossPo
     }
     return pity;
   })();
-  const sixStarIntervals = isLimitedPool
+  const hasInterruptedHistory = validPulls.some(item => item.statisticsContinuity?.interrupted);
+  const sixStarIntervals = isLimitedPool || hasInterruptedHistory
     ? sixStars
         .map((item) => getInheritedLimitedPityForItem(item, crossPoolPityMap))
         .filter((value) => Number.isFinite(value) && value > 0)
     : [];
-  const upSixStarIntervals = isLimitedPool
+  const upSixStarIntervals = isLimitedPool || hasInterruptedHistory
     ? upSixStars
         .map((item) => getInheritedLimitedPityForItem(item, crossPoolPityMap))
         .filter((value) => Number.isFinite(value) && value > 0)
@@ -421,14 +456,14 @@ function calculateTimelineMetrics(history = [], { poolType = 'standard', crossPo
     upSixStarCount: upSixStars.length,
     winRate: winRateSixStars.length > 0 ? (winRateUpSixStars.length / winRateSixStars.length) * 100 : 0,
     avgSixStarPulls:
-      sixStars.length > 0
+      hasInterruptedHistory ? (sixStarIntervals.length ? sixStarIntervals.reduce((sum, value) => sum + value, 0) / sixStarIntervals.length : Number.NaN) : sixStars.length > 0
         ? isLimitedPool && sixStarIntervals.length === sixStars.length
           ? sixStarIntervals.reduce((sum, value) => sum + value, 0) / sixStarIntervals.length
           : validPulls.length / sixStars.length
         : Number.NaN,
     avgFiveStarPulls: fiveStars.length > 0 ? validPulls.length / fiveStars.length : Number.NaN,
     avgUpPulls:
-      upSixStars.length > 0
+      hasInterruptedHistory ? (upSixStarIntervals.length ? upSixStarIntervals.reduce((sum, value) => sum + value, 0) / upSixStarIntervals.length : Number.NaN) : upSixStars.length > 0
         ? isLimitedPool && upSixStarIntervals.length === upSixStars.length
           ? upSixStarIntervals.reduce((sum, value) => sum + value, 0) / upSixStarIntervals.length
           : validPulls.length / upSixStars.length
@@ -661,7 +696,7 @@ function buildCurrentStageEntry(
 ) {
   const english = isEnglishLocale(locale);
   const targetLabel = english ? '6★ milestone' : '6★ 节点';
-  const displayPulls = Number.isFinite(currentPityValue) ? currentPityValue : pendingPaidCount;
+  const displayPulls = currentPityValue === null ? null : Number.isFinite(currentPityValue) ? currentPityValue : pendingPaidCount;
   const supportBadges = createDropBadges(
     supportItems.filter((item) => Number(item?.rarity) === 5),
     locale,
@@ -675,6 +710,7 @@ function buildCurrentStageEntry(
     dateLabel: english ? 'Now' : '至今',
     stageLabel: english ? 'Current Progress' : '当前推进',
     pulls: displayPulls,
+    ...(currentPityValue === null ? { unknownInheritedPity: true, localPulls: pendingPaidCount } : {}),
     targetPulls: Number.isFinite(currentTargetPullsOverride)
       ? currentTargetPullsOverride
       : getStageTargetPulls(pool, 'current'),
@@ -715,19 +751,23 @@ function buildStageEntries({
   currentPityOverride,
   currentTargetPullsOverride,
   crossPoolPityMap,
+  guaranteePulls = null,
+  guaranteedRecordKeys = new Set(),
   showCurrentStage = true,
   locale = getAppLocale(),
   resolveCharacter = resolveTimelineCharacterFromCache,
 }) {
   const ascendingGroups = buildOrderedTimelineGroups(history);
+  const normalizedType = resolvePoolCapabilities(pool).basePoolType;
+  const weaponBatches = normalizedType === 'weapon' ? buildWeaponBatchMap(history, locale) : new Map();
   const stages = [];
   let pendingPaidCount = 0;
   let pendingSupportItems = [];
+  let hasPaidSixStar = false;
 
   ascendingGroups.forEach((group) => {
     const summary = summarizeGroup(group, locale, resolveCharacter);
     pendingPaidCount += summary.paidCount;
-    const normalizedType = resolvePoolCapabilities(pool).basePoolType;
 
     if (summary.hasGift) {
       const milestone = buildMilestoneSummary(summary, normalizedType, locale, resolveCharacter);
@@ -773,12 +813,23 @@ function buildStageEntries({
     const mergedSupportItems = mergeBadgeItems(pendingSupportItems, summary.fiveStars);
     const inheritedPulls =
       normalizedType === 'limited' ? getInheritedLimitedPityForItem(summary.primarySixStar, crossPoolPityMap) : null;
+    const unknownInheritedPity = summary.primarySixStar?.statisticsContinuity?.sixStarKnown === false;
+    const pulls = unknownInheritedPity ? null : inheritedPulls ?? pendingPaidCount;
+    const isGuaranteed = guaranteePulls && (
+      isGuaranteedHistoryPull(summary.primarySixStar) ||
+      guaranteedRecordKeys.has(getHistoryRecordKey(summary.primarySixStar))
+    );
     stages.push({
       id: `${pool?.id || 'pool'}-stage-${stages.length + 1}`,
       stageKind: milestone.stageKind,
       dateLabel: formatDateLabel(summary.timestamp),
       stageLabel: milestone.stageLabel,
-      pulls: inheritedPulls ?? pendingPaidCount,
+      pulls,
+      ...(unknownInheritedPity ? { unknownInheritedPity: true } : {}),
+      localPulls: pendingPaidCount,
+      inheritedPulls: !hasPaidSixStar ? Math.max(0, pulls - pendingPaidCount) : 0,
+      guaranteePulls: isGuaranteed ? guaranteePulls : null,
+      weaponBatch: weaponBatches.get(getHistoryRecordKey(summary.primarySixStar)) || null,
       targetPulls: getStageTargetPulls(pool, milestone.stageKind, summary.groupSize),
       resultSummary: milestone.resultSummary,
       resultSummaryWithoutFiveStar: milestone.resultSummaryWithoutFiveStar || milestone.resultSummary,
@@ -801,13 +852,13 @@ function buildStageEntries({
     });
     pendingPaidCount = 0;
     pendingSupportItems = [];
+    hasPaidSixStar = true;
   });
 
   const shouldAlwaysShowCurrentStage = resolvePoolCapabilities(pool).basePoolType === 'weapon';
 
   if (showCurrentStage && (pendingPaidCount > 0 || stages.length === 0 || shouldAlwaysShowCurrentStage)) {
-    stages.push(
-      buildCurrentStageEntry(
+    const currentStage = buildCurrentStageEntry(
         pool,
         pendingPaidCount,
         currentPityOverride,
@@ -815,8 +866,12 @@ function buildStageEntries({
         currentTargetPullsOverride,
         locale,
         resolveCharacter
-      )
-    );
+      );
+    const lastPaidRecord = [...history].sort(sortHistoryAsc)
+      .filter((item) => !isGiftHistoryPull(item) && !isFreeHistoryPull(item)).at(-1);
+    const lastBatch = weaponBatches.get(getHistoryRecordKey(lastPaidRecord));
+    if (lastBatch?.sixStarCount === 0) currentStage.weaponBatch = lastBatch;
+    stages.push(currentStage);
   }
 
   return stages.reverse();
@@ -833,7 +888,14 @@ function buildTimelineSection({
   locale = getAppLocale(),
   resolveCharacter = resolveTimelineCharacterFromCache,
 }) {
-  const normalizedType = resolvePoolCapabilities(pool).basePoolType;
+  const capabilities = resolvePoolCapabilities(pool);
+  const normalizedType = capabilities.basePoolType;
+  const guaranteePulls = capabilities.entityType === 'character' && capabilities.rules.guaranteedLimitedPity === 120
+    ? 120
+    : null;
+  const guaranteedRecordKeys = guaranteePulls && !disablePityState
+    ? buildOneTimeTargetGuaranteeState({ history, pool }).guaranteedRecordKeys
+    : new Set();
   const metrics = calculateTimelineMetrics(history, {
     poolType: normalizedType,
     crossPoolPityMap,
@@ -845,9 +907,11 @@ function buildTimelineSection({
   const entries = buildStageEntries({
     history,
     pool,
-    currentPityOverride,
+    currentPityOverride: currentPityOverride === undefined ? metrics.currentPity : currentPityOverride,
     currentTargetPullsOverride,
     crossPoolPityMap,
+    guaranteePulls,
+    guaranteedRecordKeys,
     showCurrentStage,
     locale,
     resolveCharacter,
@@ -869,8 +933,8 @@ function buildTimelineSection({
     period: formatPeriod(pool, locale),
     status: timing,
     totalPulls: metrics.totalPulls,
-    currentPity: disablePityState ? null : (currentPityOverride ?? metrics.currentPity),
-    currentPity5: disablePityState ? null : (currentPity5Override ?? metrics.currentPity5),
+    currentPity: disablePityState ? null : (currentPityOverride === undefined ? metrics.currentPity : currentPityOverride),
+    currentPity5: disablePityState ? null : (currentPity5Override === undefined ? metrics.currentPity5 : currentPity5Override),
     sixStarCount: metrics.sixStarCount,
     fiveStarCount: metrics.fiveStarCount,
     upSixStarCount: metrics.upSixStarCount,

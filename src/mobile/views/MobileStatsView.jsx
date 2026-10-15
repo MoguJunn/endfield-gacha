@@ -296,6 +296,7 @@ function MobileStatsView({ lockedDataSource = null, scheduledSummary, scheduledC
               </div>
             </div>
 
+            {!loading && <WorkbenchMetricsPanel metrics={currentStats?.workbench} />}
             {loading ? (
               <div className="py-20 text-center font-mono text-sm text-slate-500 dark:text-zinc-500">{t('common.loading')}</div>
             ) : poolTypeFilter === 'all' ? (

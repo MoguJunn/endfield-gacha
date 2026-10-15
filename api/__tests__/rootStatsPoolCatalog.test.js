@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   resolveSupabaseServerKey: vi.fn(() => 'service-role-key'),
   serverLogger: { error: vi.fn() },
   poolRosterError: null,
+  rosterStatus: 'complete',
 }));
 
 vi.mock('@supabase/supabase-js', () => ({
@@ -68,6 +69,7 @@ describe('/api/stats pool_catalog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.poolRosterError = null;
+    mocks.rosterStatus = 'complete';
     mocks.createClient.mockReturnValue({ from: mocks.from, rpc: vi.fn() });
     mocks.from.mockImplementation((table) => {
       if (table === 'site_config') {
@@ -101,6 +103,7 @@ describe('/api/stats pool_catalog', () => {
                 start_time: '2026-01-22T03:00:00+00:00',
                 end_time: '2026-02-07T03:55:00+00:00',
                 featured_characters: null,
+                roster_status: mocks.rosterStatus,
               },
             ],
             error: null,
@@ -177,6 +180,7 @@ describe('/api/stats pool_catalog', () => {
             start_time: '2026-01-22T03:00:00+00:00',
             end_time: '2026-02-07T03:55:00+00:00',
             six_star_roster_complete: true,
+            roster_status: 'complete',
             six_star_entities: [
               { id: 'chr_0016_laevat', name: '莱万汀', type: 'character', is_up: true },
               { id: 'chr_0013_aglina', name: '洁尔佩塔', type: 'character', is_up: false },
@@ -195,6 +199,14 @@ describe('/api/stats pool_catalog', () => {
     expect(res.body.data.pools[0]).not.toHaveProperty('user_id');
     expect(res.body.data.pools[0]).not.toHaveProperty('creator_username');
     expect(res.body.data.pools[0]).not.toHaveProperty('creator_role');
+  });
+
+  it('does not promote an existing partial roster to complete in the public catalog', async () => {
+    mocks.rosterStatus = 'partial';
+    const res = await callPoolCatalog('pool-roster-unconfirmed-test');
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.pools[0]).toMatchObject({ roster_status: 'partial', six_star_roster_complete: false });
+    expect(res.body.data.pools[0].six_star_entities).toHaveLength(2);
   });
 
   it('keeps the pool catalog available when the optional roster query fails', async () => {

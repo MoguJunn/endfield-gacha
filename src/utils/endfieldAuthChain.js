@@ -678,7 +678,7 @@ export async function rejectFullImportReviewOnBackend({ taskId, accessKey }, sou
   return result.data;
 }
 
-async function pollFullImportUntilComplete(taskId, onProgress, maxWaitTime = 300000, source = 'cn') {
+async function pollFullImportUntilComplete(taskId, onProgress, maxWaitTime = 30 * 60 * 1000, source = 'cn') {
   const startTime = Date.now();
   const pollInterval = 2000;
   let authRefreshRetried = false;
@@ -700,8 +700,8 @@ async function pollFullImportUntilComplete(taskId, onProgress, maxWaitTime = 300
         return task.result;
       }
 
-      if (task.status === 'failed') {
-        throw new AuthChainError(task.error || 'Import failed', 'import-full', task);
+      if (task.status === 'failed' || task.status === 'cancelled') {
+        throw new AuthChainError(task.error || task.message || '导入失败', 'import-full', task);
       }
 
       // eslint-disable-next-line no-await-in-loop -- polling cadence is intentionally sequential
@@ -788,7 +788,7 @@ export async function importAllRecordsFullyOnBackend(initialToken, accountIndex,
     throw new AuthChainError(result.error || 'Full import failed', 'import-full', result);
   }
 
-  return pollFullImportUntilComplete(result.taskId, onProgress, 300000, source);
+  return pollFullImportUntilComplete(result.taskId, onProgress, 30 * 60 * 1000, source);
 }
 
 /**

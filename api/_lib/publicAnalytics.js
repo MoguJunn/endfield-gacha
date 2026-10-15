@@ -415,7 +415,7 @@ function applyPublicHistoryBaseFilters(query) {
 
 async function countHistory(adminClient, applyFilters) {
   let query = adminClient
-    .from('history')
+    .from('statistics_history')
     .select('id', { count: 'exact', head: true });
 
   query = applyPublicHistoryBaseFilters(query);
@@ -431,7 +431,7 @@ async function countHistory(adminClient, applyFilters) {
 
 async function fetchBoundaryTimestamp(adminClient, applyFilters, ascending) {
   let query = adminClient
-    .from('history')
+    .from('statistics_history')
     .select('timestamp')
     .order('timestamp', { ascending, nullsFirst: false })
     .limit(1);
@@ -568,6 +568,7 @@ export async function fetchPublicAnalytics(adminClient) {
     source: 'cached_rpc',
     summary: normalizeSummaryCounter(globalSummary || {}),
     byPoolType: buildTypeSummary(globalSummary || {}),
+    workbench: globalSummary?.workbench || null,
     items: flattenRankingItems(characterRanking || {}),
     rankings: characterRanking || {},
     trends: {},
@@ -579,6 +580,7 @@ export async function buildPublicGlobalStats(adminClient) {
   const analytics = {
     summary: normalizeSummaryCounter(globalSummary || {}),
     byPoolType: buildTypeSummary(globalSummary || {}),
+    workbench: globalSummary?.workbench || null,
     rowCount: toNumber(globalSummary?.totalPullsWithFree ?? globalSummary?.totalPulls, 0),
     capped: false,
     source: 'cached_rpc',

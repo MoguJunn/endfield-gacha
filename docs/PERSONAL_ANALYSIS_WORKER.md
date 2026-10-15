@@ -8,6 +8,8 @@
 
 ## 当前快照合同
 
+2026-10-14 生产数据库已执行工作台、统计隔离和增量撤回迁移，个人状态升为 schema 5；目前由同机 `endfield-personal-analysis-upgrade.timer` 运行新算法。原 pg_cron 派发入口暂时只返回 `reason=server_timer`，不再调用旧 schema 3 固定部署。Vault 中原 URL 和密钥保留。恢复远程派发前必须发布 schema 5 Worker、恢复原派发函数并验证真实发布，再停止同机 timer；具体备份、串行锁和执行证据见 [生产迁移记录](PRODUCTION_WORKBENCH_MIGRATIONS_20261014.md)。下文 v4.6.4 schema 3 为原发布合同，不能据此覆盖当前状态。
+
 v4.6.4 使用个人分析 schema 3；模拟器继承合同为 2，完整历史编码为 1，本地会话版本为 2。Worker 使用完整可见卡池目录及当前用户个人池生成投影，零抽目标池也参与共享水位和情报书目标装配。
 
 `mode=analysis` 保留个人总览与选中视图，不附带完整继承历史；`mode=simulator-inheritance&accountKey=…` 是独立鉴权读取，只有 owner/account 来源、版本和修订匹配才返回 `ready`。构建中响应不覆盖本地存档，GET 不扫描原始历史。完整历史与本地资源、存储规则见 [模拟器合同](SIMULATOR_ENGINE.md)。

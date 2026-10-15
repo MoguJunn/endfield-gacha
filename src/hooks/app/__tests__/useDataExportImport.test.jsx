@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useDataExportImport } from '../useDataExportImport.js';
 import { loadAllAccountGachaHistoryForAccounts } from '../../../services/accountGachaDataService.js';
+import { loadWorkbenchEntriesForExport, importWorkbenchEntries } from '../../../services/workbenchTransferService.js';
 import {
   useAuthStore,
   useHistoryStore,
@@ -19,6 +20,10 @@ import {
 
 vi.mock('../../../services/accountGachaDataService.js', () => ({
   loadAllAccountGachaHistoryForAccounts: vi.fn(),
+}));
+vi.mock('../../../services/workbenchTransferService.js', () => ({
+  loadWorkbenchEntriesForExport: vi.fn().mockResolvedValue([]),
+  importWorkbenchEntries: vi.fn().mockResolvedValue({ saved: 1, skipped: 0 }),
 }));
 
 vi.mock('../../../utils/dataExport.js', () => ({
@@ -159,6 +164,52 @@ describe('useDataExportImport export', () => {
     expect(setSyncing.mock.calls).toEqual([[true], [false]]);
     expect(setHistory).not.toHaveBeenCalled();
     expect(useHistoryStore.getState().history).toBe(partialHistory);
+    expect(loadWorkbenchEntriesForExport).toHaveBeenCalled();
+  });
+
+  it.each(['history', 'workbenchEntries'])('keeps the preview and writes nothing when %s contains an unopened pool', async field => {
+    const setHistory = vi.fn(); const setPools = vi.fn();
+    useAuthStore.setState({ user: { id: 'user-1' }, setSyncing: vi.fn() });
+    useHistoryStore.setState({ history: [], setHistory });
+    usePoolStore.setState({ pools: [{ id: 'pool-1', name: '尚未开放卡池', start_time: '2099-01-01' }], setPools });
+    const showToast = vi.fn(); const cloudSync = createCloudSync();
+    const { result } = renderHook(() => useDataExportImport({ showToast, cloudSync }));
+    const pending = { willSyncToCloud: true, data: { pools: [{ id: 'pool-1', start_time: '2020-01-01' }], history: [], workbenchEntries: [],
+      [field]: [{ id: 'future-record', poolId: 'pool-1', gameUid: 'game-1' }] } };
+    act(() => result.current.setPendingImport(pending));
+    await act(async () => result.current.confirmImport());
+    expect(result.current.pendingImport).toEqual(pending);
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('尚未开放'), 'warning');
+    expect(setHistory).not.toHaveBeenCalled(); expect(setPools).not.toHaveBeenCalled();
+    expect(cloudSync.saveHistoryToCloud).not.toHaveBeenCalled(); expect(importWorkbenchEntries).not.toHaveBeenCalled();
+  });
+
+  it('persists supplement-only reimports and refreshes personal analysis', async () => {
+    useAuthStore.setState({ user: { id: 'user-1' }, setSyncing: vi.fn() });
+    useHistoryStore.setState({ history: [], setHistory: vi.fn() });
+    const cloudSync = createCloudSync();
+    cloudSync.refreshPersonalData.mockResolvedValue({ ok: true });
+    const { result } = renderHook(() => useDataExportImport({ showToast: vi.fn(), cloudSync }));
+    const supplements = [{ entryId: 'supplement', gameUid: 'game-1', serverScope: '1' }];
+    act(() => result.current.setPendingImport({ willSyncToCloud: true, data: { pools: [], history: [], workbenchEntries: supplements } }));
+    await act(async () => { await result.current.confirmImport(); });
+    expect(importWorkbenchEntries).toHaveBeenCalledWith(supplements);
+    expect(cloudSync.saveHistoryToCloud).not.toHaveBeenCalled();
+    expect(cloudSync.refreshPersonalData).toHaveBeenCalled();
+    expect(result.current.pendingImport).toBeNull();
+  });
+
+  it('retains the import preview if supplement validation fails', async () => {
+    useAuthStore.setState({ user: { id: 'user-1' }, setSyncing: vi.fn() });
+    useHistoryStore.setState({ history: [], setHistory: vi.fn() });
+    importWorkbenchEntries.mockRejectedValueOnce(new Error('覆盖范围冲突'));
+    const showToast = vi.fn();
+    const { result } = renderHook(() => useDataExportImport({ showToast, cloudSync: createCloudSync() }));
+    const pending = { willSyncToCloud: true, data: { pools: [], history: [], workbenchEntries: [{ entryId: 'supplement' }] } };
+    act(() => result.current.setPendingImport(pending));
+    await act(async () => { await result.current.confirmImport(); });
+    expect(result.current.pendingImport).toEqual(pending);
+    expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'warning', message: expect.stringContaining('补录预览已保留') }));
   });
 
   it('falls back to current history when a logged-in legacy session has no analysis snapshot', async () => {

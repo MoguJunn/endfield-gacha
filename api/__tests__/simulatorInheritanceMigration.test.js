@@ -9,7 +9,6 @@ const migration = '2026100901_simulator_inheritance_v2.sql';
 describe('simulator inheritance v2 snapshot migration', () => {
   it('queues schema v3 rebuilds without replacing snapshots, source identities, ACLs or leases', () => {
     const sql = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations', migration), 'utf8');
-    expect(PERSONAL_ANALYSIS_SCHEMA_VERSION).toBe(3);
     expect(sql.match(/analysis_schema_version SET DEFAULT 3/g)).toHaveLength(2);
     expect(sql).toContain('enforce_personal_analysis_schema_v3');
     expect(sql).toContain('FROM PUBLIC, anon, authenticated');
@@ -24,5 +23,12 @@ describe('simulator inheritance v2 snapshot migration', () => {
     const sql = fs.readFileSync(path.join(process.cwd(), 'supabase/baseline/000_complete_schema.sql'), 'utf8');
     expect(sql).toContain('-- >>> BEGIN MIGRATION: active/194_add_history_pool_version.sql');
     expect(sql).toContain(`-- >>> BEGIN MIGRATION: active/${migration}`);
+  });
+
+  it('matches the active worker schema to the later trusted-statistics migration', () => {
+    const sql = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations/2026101400_exclude_manual_statistics.sql'), 'utf8');
+    expect(PERSONAL_ANALYSIS_SCHEMA_VERSION).toBe(5);
+    expect(sql.match(/analysis_schema_version SET DEFAULT 5/g)).toHaveLength(2);
+    expect(sql).toContain('enforce_personal_analysis_schema_v5');
   });
 });

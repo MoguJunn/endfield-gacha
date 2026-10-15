@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-10-10T16:24:51.364Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/2026101101_complete_pool_roster_reads.sql
+--   4. 生成时间: 2026-10-15T04:07:31.920Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/2026101411_public_statistics_worker_contract.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -37274,6 +37274,790 @@ COMMIT;
 NOTIFY pgrst, 'reload schema';
 -- <<< END MIGRATION: active/2026100901_simulator_inheritance_v2.sql
 
+-- >>> BEGIN MIGRATION: active/2026100911_create_account_data_workbench.sql
+-- 2026100911: 用户确认的补录独立保存；不生成官方 seq，也不写入 history。
+-- 仅保存本地迁移文件。必须通过正常迁移发布流程另行应用。
+BEGIN;
+
+CREATE TABLE public.account_data_workbench_entries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  game_uid TEXT NOT NULL CHECK (length(btrim(game_uid)) BETWEEN 1 AND 160),
+  server_scope TEXT NOT NULL CHECK (length(btrim(server_scope)) BETWEEN 1 AND 160),
+  pool_id TEXT,
+  entry_id UUID NOT NULL,
+  draft_id UUID NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('detail', 'six-star-interval', 'pool-summary', 'batch-summary', 'potential-evidence')),
+  source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'file', 'xhh')),
+  "values" JSONB NOT NULL CHECK (jsonb_typeof("values") = 'object'),
+  time_precision TEXT NOT NULL CHECK (time_precision IN ('second', 'day', 'range', 'unknown')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at TIMESTAMPTZ,
+  UNIQUE (user_id, draft_id, entry_id),
+  CHECK (kind = 'potential-evidence' OR (pool_id IS NOT NULL AND length(btrim(pool_id)) > 0)),
+  CHECK (NOT ("values" ?| ARRAY['seq', 'seqId', 'seq_id', 'record_id', 'user_id', 'history_id']))
+);
+CREATE INDEX account_data_workbench_scope_idx
+  ON public.account_data_workbench_entries (user_id, game_uid, server_scope, id);
+
+CREATE TABLE public.account_data_workbench_commits (
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  commit_id UUID NOT NULL,
+  draft_id UUID NOT NULL,
+  payload_hash TEXT NOT NULL CHECK (payload_hash ~ '^[0-9a-f]{64}$'),
+  result JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, commit_id)
+);
+
+CREATE TABLE public.account_data_workbench_audit (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  entry_id UUID NOT NULL REFERENCES public.account_data_workbench_entries(id) ON DELETE CASCADE,
+  actor_user_id UUID NOT NULL,
+  operation TEXT NOT NULL CHECK (operation IN ('create', 'update', 'delete')),
+  old_values JSONB,
+  new_values JSONB NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  commit_id UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX account_data_workbench_audit_owner_idx
+  ON public.account_data_workbench_audit (user_id, entry_id, created_at);
+
+ALTER TABLE public.account_data_workbench_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.account_data_workbench_commits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.account_data_workbench_audit ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.account_data_workbench_entries, public.account_data_workbench_commits,
+  public.account_data_workbench_audit FROM PUBLIC, anon, authenticated, service_role;
+GRANT SELECT ON public.account_data_workbench_entries, public.account_data_workbench_commits,
+  public.account_data_workbench_audit TO authenticated, service_role;
+CREATE POLICY account_data_workbench_entries_owner ON public.account_data_workbench_entries
+  FOR SELECT TO authenticated USING (auth.uid() = user_id AND public.is_request_auth_session_allowed());
+CREATE POLICY account_data_workbench_commits_owner ON public.account_data_workbench_commits
+  FOR SELECT TO authenticated USING (auth.uid() = user_id AND public.is_request_auth_session_allowed());
+CREATE POLICY account_data_workbench_audit_owner ON public.account_data_workbench_audit
+  FOR SELECT TO authenticated USING (auth.uid() = user_id AND public.is_request_auth_session_allowed());
+
+-- 返回同一数据库快照中的完整 scope。超过上限明确拒绝，不能截断后声称校验通过。
+CREATE FUNCTION public.read_account_data_workbench_context(
+  p_user_id UUID, p_game_uid TEXT, p_server_scope TEXT
+) RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, public AS $$
+DECLARE
+  v_history JSONB;
+  v_entries JSONB;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'service_role_required';
+  END IF;
+  IF p_user_id IS NULL OR NULLIF(btrim(p_game_uid), '') IS NULL OR NULLIF(btrim(p_server_scope), '') IS NULL THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'workbench_scope_required';
+  END IF;
+  -- 每行都补齐去重与抽取方式所需字段：汇总/间隔按 drawMethod 比较，
+  -- 明细按 seq/record 身份去重，且不会暴露给浏览器（仅 service_role 可读）。
+  SELECT COALESCE(jsonb_agg(to_jsonb(item) ORDER BY item.id), '[]'::JSONB) INTO v_history
+  FROM (
+    SELECT
+      history_row.id,
+      history_row.pool_id,
+      history_row.character_id,
+      history_row.rarity,
+      history_row.timestamp,
+      history_row.seq_id,
+      history_row.record_id,
+      COALESCE(NULLIF(btrim(history_row.game_uid), ''), 'legacy') AS game_uid,
+      history_row.server_scope,
+      history_row.user_id,
+      history_row.is_free,
+      history_row.is_info_book,
+      history_row.special_type,
+      history_row.updated_at
+    FROM public.history AS history_row
+    WHERE history_row.user_id = p_user_id
+      AND COALESCE(NULLIF(btrim(history_row.game_uid), ''), 'legacy') = p_game_uid
+      AND history_row.server_scope = p_server_scope
+    ORDER BY history_row.id LIMIT 50001
+  ) item;
+  SELECT COALESCE(jsonb_agg(to_jsonb(item) ORDER BY item.id), '[]'::JSONB) INTO v_entries
+  FROM (
+    SELECT * FROM public.account_data_workbench_entries
+    WHERE user_id = p_user_id AND game_uid = p_game_uid AND server_scope = p_server_scope
+    ORDER BY id LIMIT 50001
+  ) item;
+  IF jsonb_array_length(v_history) > 50000 OR jsonb_array_length(v_entries) > 50000 THEN
+    RAISE EXCEPTION USING ERRCODE = '54000', MESSAGE = 'workbench_scope_too_large';
+  END IF;
+  RETURN jsonb_build_object('history', v_history, 'entries', v_entries,
+    'contextToken', md5(jsonb_build_array(v_history, v_entries)::TEXT));
+END;
+$$;
+
+CREATE FUNCTION public.commit_account_data_workbench(
+  p_user_id UUID, p_commit_id UUID, p_draft_id UUID, p_game_uid TEXT, p_server_scope TEXT,
+  p_payload_hash TEXT, p_context_token TEXT, p_entries JSONB
+) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public AS $$
+DECLARE
+  v_prior public.account_data_workbench_commits%ROWTYPE;
+  v_entry public.account_data_workbench_entries%ROWTYPE;
+  v_item JSONB;
+  v_ids JSONB := '[]'::JSONB;
+  v_result JSONB;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'service_role_required';
+  END IF;
+  IF p_user_id IS NULL OR p_commit_id IS NULL OR p_draft_id IS NULL
+    OR p_payload_hash IS NULL OR p_payload_hash !~ '^[0-9a-f]{64}$'
+    OR jsonb_typeof(p_entries) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'workbench_invalid_submission';
+  END IF;
+  IF jsonb_array_length(p_entries) NOT BETWEEN 1 AND 100 THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'workbench_invalid_batch';
+  END IF;
+  -- 所有相同 owner/commitId 的重试先串行化，再判断 payload；未成功的事务不留下提交记录。
+  PERFORM pg_advisory_xact_lock(hashtextextended('workbench-commit:' || p_user_id::TEXT || ':' || p_commit_id::TEXT, 0));
+  SELECT * INTO v_prior FROM public.account_data_workbench_commits
+    WHERE user_id = p_user_id AND commit_id = p_commit_id;
+  IF FOUND THEN
+    IF v_prior.payload_hash IS DISTINCT FROM p_payload_hash THEN
+      RAISE EXCEPTION USING ERRCODE = '23505', MESSAGE = 'workbench_idempotency_conflict';
+    END IF;
+    RETURN v_prior.result;
+  END IF;
+  -- 官方导入不使用工作台作用域锁；共享表锁封住校验后、提交前的 history 写入窗口。
+  -- 所有工作台写入均先锁 history 再锁作用域，避免锁顺序倒置。
+  LOCK TABLE public.history IN SHARE MODE;
+  PERFORM pg_advisory_xact_lock(hashtextextended('workbench-scope:' || p_user_id::TEXT || ':' || p_game_uid || ':' || p_server_scope, 0));
+  IF (public.read_account_data_workbench_context(p_user_id, p_game_uid, p_server_scope)->>'contextToken') IS DISTINCT FROM p_context_token THEN
+    RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_context_changed';
+  END IF;
+  FOR v_item IN SELECT value FROM jsonb_array_elements(p_entries) LOOP
+    IF EXISTS (SELECT 1 FROM public.account_data_workbench_entries
+      WHERE user_id = p_user_id AND draft_id = p_draft_id AND entry_id = (v_item->>'entryId')::UUID) THEN
+      RAISE EXCEPTION USING ERRCODE = '23505', MESSAGE = 'workbench_entry_already_committed';
+    END IF;
+    INSERT INTO public.account_data_workbench_entries (
+      user_id, game_uid, server_scope, pool_id, entry_id, draft_id, kind, source, "values", time_precision
+    ) VALUES (
+      p_user_id, p_game_uid, p_server_scope, NULLIF(v_item->>'poolId', ''), (v_item->>'entryId')::UUID,
+      p_draft_id, v_item->>'kind', COALESCE(v_item->>'source', 'manual'), v_item->'values', v_item->>'timePrecision'
+    ) ON CONFLICT (user_id, draft_id, entry_id) DO NOTHING
+      RETURNING * INTO v_entry;
+    -- 同一条目被另一作用域并发提交时，由唯一键决定胜者，整个失败批次回滚。
+    IF NOT FOUND THEN
+      RAISE EXCEPTION USING ERRCODE = '23505', MESSAGE = 'workbench_entry_already_committed';
+    END IF;
+    INSERT INTO public.account_data_workbench_audit (user_id, entry_id, actor_user_id, operation, new_values, commit_id)
+      VALUES (p_user_id, v_entry.id, p_user_id, 'create', to_jsonb(v_entry), p_commit_id);
+    v_ids := v_ids || jsonb_build_array(v_entry.id);
+  END LOOP;
+  v_result := jsonb_build_object('commitId', p_commit_id, 'saved', jsonb_array_length(v_ids), 'entryIds', v_ids);
+  INSERT INTO public.account_data_workbench_commits(user_id, commit_id, draft_id, payload_hash, result)
+    VALUES (p_user_id, p_commit_id, p_draft_id, p_payload_hash, v_result);
+  RETURN v_result;
+END;
+$$;
+
+CREATE FUNCTION public.mutate_account_data_workbench_entry(
+  p_user_id UUID, p_id UUID, p_expected_revision INTEGER, p_action TEXT,
+  p_entry JSONB, p_context_token TEXT, p_reason TEXT
+) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public AS $$
+DECLARE
+  v_old public.account_data_workbench_entries%ROWTYPE;
+  v_new public.account_data_workbench_entries%ROWTYPE;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'service_role_required';
+  END IF;
+  IF p_action IS NULL OR p_action NOT IN ('update', 'delete') OR p_expected_revision IS NULL OR p_expected_revision < 1 THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'workbench_invalid_mutation';
+  END IF;
+  -- 先确定 scope，再以与 commit 相同的锁顺序串行化；锁内重新读取并检查 revision。
+  SELECT * INTO v_old FROM public.account_data_workbench_entries
+    WHERE id = p_id AND user_id = p_user_id AND deleted_at IS NULL;
+  IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'workbench_entry_not_found'; END IF;
+  LOCK TABLE public.history IN SHARE MODE;
+  PERFORM pg_advisory_xact_lock(hashtextextended('workbench-scope:' || p_user_id::TEXT || ':' || v_old.game_uid || ':' || v_old.server_scope, 0));
+  SELECT * INTO v_old FROM public.account_data_workbench_entries
+    WHERE id = p_id AND user_id = p_user_id AND deleted_at IS NULL FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'workbench_entry_not_found'; END IF;
+  IF v_old.revision <> p_expected_revision THEN
+    RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_revision_conflict';
+  END IF;
+  IF p_action = 'update' THEN
+    IF jsonb_typeof(p_entry) IS DISTINCT FROM 'object' THEN
+      RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'workbench_invalid_entry';
+    END IF;
+    IF (public.read_account_data_workbench_context(p_user_id, v_old.game_uid, v_old.server_scope)->>'contextToken') IS DISTINCT FROM p_context_token THEN
+      RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_context_changed';
+    END IF;
+    UPDATE public.account_data_workbench_entries SET
+      kind = p_entry->>'kind', pool_id = NULLIF(p_entry->>'poolId', ''), "values" = p_entry->'values',
+      time_precision = p_entry->>'timePrecision', revision = revision + 1, updated_at = now()
+      WHERE id = p_id AND user_id = p_user_id AND revision = p_expected_revision
+      RETURNING * INTO v_new;
+  ELSE
+    IF NULLIF(btrim(p_reason), '') IS NULL OR length(p_reason) > 500 THEN
+      RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'workbench_delete_reason_required';
+    END IF;
+    UPDATE public.account_data_workbench_entries SET deleted_at = now(), updated_at = now(), revision = revision + 1
+      WHERE id = p_id AND user_id = p_user_id AND revision = p_expected_revision
+      RETURNING * INTO v_new;
+  END IF;
+  IF v_new.id IS NULL THEN RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_revision_conflict'; END IF;
+  INSERT INTO public.account_data_workbench_audit(user_id, entry_id, actor_user_id, operation, old_values, new_values, reason)
+    VALUES (p_user_id, p_id, p_user_id, p_action, to_jsonb(v_old), to_jsonb(v_new), COALESCE(p_reason, ''));
+  RETURN to_jsonb(v_new);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.read_account_data_workbench_context(UUID, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.commit_account_data_workbench(UUID, UUID, UUID, TEXT, TEXT, TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.mutate_account_data_workbench_entry(UUID, UUID, INTEGER, TEXT, JSONB, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.read_account_data_workbench_context(UUID, TEXT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.commit_account_data_workbench(UUID, UUID, UUID, TEXT, TEXT, TEXT, TEXT, JSONB) TO service_role;
+GRANT EXECUTE ON FUNCTION public.mutate_account_data_workbench_entry(UUID, UUID, INTEGER, TEXT, JSONB, TEXT, TEXT) TO service_role;
+
+-- Supplement changes do not touch history, so its existing queue triggers cannot
+-- invalidate these snapshots. Mark revisions in the same transaction as the write.
+CREATE FUNCTION public.invalidate_workbench_personal_analysis()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public AS $$
+DECLARE
+  v_row public.account_data_workbench_entries%ROWTYPE;
+BEGIN
+  IF TG_OP = 'DELETE' THEN v_row := OLD; ELSE v_row := NEW; END IF;
+  -- Profile deletion cascades must not recreate a queue row for a removed owner.
+  IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = v_row.user_id) THEN RETURN NULL; END IF;
+  INSERT INTO public.personal_analysis_owner_state (
+    user_id, history_revision, snapshot_revision, dirty_since, analysis_schema_version, last_error
+  ) VALUES (v_row.user_id, 1, -1, statement_timestamp(), 2, NULL)
+  ON CONFLICT (user_id) DO UPDATE SET
+    history_revision = public.personal_analysis_owner_state.history_revision + 1,
+    dirty_since = COALESCE(public.personal_analysis_owner_state.dirty_since, EXCLUDED.dirty_since),
+    last_error = NULL;
+  INSERT INTO public.personal_analysis_scope_state (
+    user_id, scope_game_uid, server_scope, history_revision, snapshot_revision,
+    dirty_since, analysis_schema_version, last_error
+  ) VALUES (
+    v_row.user_id, public.normalize_personal_analysis_game_uid(v_row.user_id, v_row.game_uid),
+    v_row.server_scope, 1, -1, statement_timestamp(), 2, NULL
+  ) ON CONFLICT (user_id, scope_game_uid, server_scope) DO UPDATE SET
+    history_revision = public.personal_analysis_scope_state.history_revision + 1,
+    dirty_since = COALESCE(public.personal_analysis_scope_state.dirty_since, EXCLUDED.dirty_since),
+    last_error = NULL;
+  RETURN NULL;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.invalidate_workbench_personal_analysis() FROM PUBLIC, anon, authenticated;
+CREATE TRIGGER invalidate_workbench_personal_analysis
+AFTER INSERT OR UPDATE OR DELETE ON public.account_data_workbench_entries
+FOR EACH ROW EXECUTE FUNCTION public.invalidate_workbench_personal_analysis();
+
+COMMIT;
+-- <<< END MIGRATION: active/2026100911_create_account_data_workbench.sql
+
+-- >>> BEGIN MIGRATION: active/2026100912_admin_pool_catalog_roster_and_recalculation.sql
+-- 2026100912: explicit roster completeness and preview-guarded global recalculation.
+-- No history/entity roster is rewritten by applying this migration.
+BEGIN;
+
+ALTER TABLE public.pools ADD COLUMN roster_status TEXT NOT NULL DEFAULT 'missing'
+  CHECK (roster_status IN ('missing', 'partial', 'complete'));
+UPDATE public.pools p SET roster_status = 'partial'
+WHERE EXISTS (SELECT 1 FROM public.pool_characters pc WHERE pc.pool_id = p.pool_id);
+COMMENT ON COLUMN public.pools.roster_status IS
+  '名单核对状态：missing 缺失、partial 不完整、complete 超管明确确认完整；非空不代表完整。';
+GRANT SELECT (roster_status) ON public.pools TO anon, authenticated;
+
+CREATE FUNCTION public.guard_pool_roster_confirmation() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NEW.roster_status = 'complete' AND NOT public.is_super_admin() THEN
+    RAISE EXCEPTION 'only super_admin can confirm a complete pool roster';
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.roster_status = 'complete' AND
+    ROW(NEW.type, NEW.up_character, NEW.featured_characters, NEW.start_time, NEW.end_time,
+      NEW.extra_subtype, NEW.extra_rule_profile, NEW.extra_series_key, NEW.extra_series_phase)
+    IS DISTINCT FROM
+    ROW(OLD.type, OLD.up_character, OLD.featured_characters, OLD.start_time, OLD.end_time,
+      OLD.extra_subtype, OLD.extra_rule_profile, OLD.extra_series_key, OLD.extra_series_phase) THEN
+    NEW.roster_status := 'partial';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER guard_pool_roster_confirmation
+BEFORE INSERT OR UPDATE ON public.pools FOR EACH ROW
+EXECUTE FUNCTION public.guard_pool_roster_confirmation();
+
+CREATE FUNCTION public.invalidate_changed_pool_roster() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_pool_id TEXT;
+BEGIN
+  IF TG_OP = 'UPDATE' AND OLD.pool_id IS DISTINCT FROM NEW.pool_id THEN
+    UPDATE public.pools SET roster_status = CASE WHEN EXISTS (
+      SELECT 1 FROM public.pool_characters WHERE pool_id = OLD.pool_id
+    ) THEN 'partial' ELSE 'missing' END WHERE pool_id = OLD.pool_id;
+  END IF;
+  v_pool_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.pool_id ELSE NEW.pool_id END;
+  UPDATE public.pools SET roster_status = CASE WHEN EXISTS (
+    SELECT 1 FROM public.pool_characters WHERE pool_id = v_pool_id
+  ) THEN 'partial' ELSE 'missing' END WHERE pool_id = v_pool_id;
+  RETURN NULL;
+END;
+$$;
+CREATE TRIGGER invalidate_changed_pool_roster
+AFTER INSERT OR UPDATE OR DELETE ON public.pool_characters FOR EACH ROW
+EXECUTE FUNCTION public.invalidate_changed_pool_roster();
+
+CREATE FUNCTION public.admin_pool_catalog_bump_cache(p_scope TEXT DEFAULT 'pools') RETURNS VOID
+LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  INSERT INTO public.site_config (key, value, label, category, updated_at)
+  VALUES ('public_cache_epoch', jsonb_build_object(
+    'version', gen_random_uuid()::TEXT, 'scope', p_scope,
+    'reason', 'admin:pool:catalog', 'updatedAt', clock_timestamp()
+  )::TEXT, '公共缓存版本', 'system', NOW())
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at;
+$$;
+REVOKE ALL ON FUNCTION public.admin_pool_catalog_bump_cache(TEXT) FROM PUBLIC, anon, authenticated;
+
+CREATE FUNCTION public.admin_save_pool_catalog(
+  p_pool_id TEXT, p_insert_payload JSONB, p_update_payload JSONB,
+  p_alias_rows JSONB, p_pool_character_rows JSONB, p_actor_user_id UUID
+) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_status TEXT;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION 'service_role required';
+  END IF;
+  -- The existing alias RPC can reassign aliases. Catalog edits must not silently
+  -- move a canonical/self alias away from another pool, including concurrent saves.
+  LOCK TABLE public.pool_id_aliases IN SHARE ROW EXCLUSIVE MODE;
+  IF EXISTS (
+    SELECT 1 FROM jsonb_array_elements(p_alias_rows) r
+    JOIN public.pool_id_aliases a ON a.source = BTRIM(r->>'source')
+      AND a.alias_id = BTRIM(r->>'alias_id')
+    WHERE a.pool_id <> p_pool_id
+  ) THEN RAISE EXCEPTION 'pool_alias_conflict'; END IF;
+  -- Existing RPC preserves special-pool metadata, owner and alias behavior.
+  PERFORM public.admin_upsert_pool_with_aliases(
+    p_pool_id, p_insert_payload, p_update_payload, p_alias_rows, '[]'::JSONB, p_actor_user_id
+  );
+  DELETE FROM public.pool_characters WHERE pool_id = p_pool_id;
+  INSERT INTO public.pool_characters (pool_id, character_id, is_up)
+  SELECT p_pool_id, r->>'character_id', COALESCE((r->>'is_up')::BOOLEAN, FALSE)
+  FROM jsonb_array_elements(p_pool_character_rows) r;
+  v_status := COALESCE(p_update_payload->>'roster_status', p_insert_payload->>'roster_status',
+    CASE WHEN jsonb_array_length(p_pool_character_rows) > 0 THEN 'partial' ELSE 'missing' END);
+  IF (v_status = 'missing') IS DISTINCT FROM (jsonb_array_length(p_pool_character_rows) = 0) THEN
+    RAISE EXCEPTION 'pool_roster_status_mismatch';
+  END IF;
+  IF v_status = 'complete' AND NOT EXISTS (
+    SELECT 1 FROM public.pool_characters pc JOIN public.characters c ON c.id = pc.character_id
+    WHERE pc.pool_id = p_pool_id AND c.rarity = 6
+  ) THEN RAISE EXCEPTION 'complete roster requires six-star entities'; END IF;
+  UPDATE public.pools SET roster_status = v_status, updated_at = NOW() WHERE pool_id = p_pool_id;
+  -- This succeeds or rolls back together with the catalog and roster save.
+  PERFORM public.admin_pool_catalog_bump_cache();
+END;
+$$;
+REVOKE ALL ON FUNCTION public.admin_save_pool_catalog(TEXT, JSONB, JSONB, JSONB, JSONB, UUID)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_save_pool_catalog(TEXT, JSONB, JSONB, JSONB, JSONB, UUID) TO service_role;
+
+-- Preserve the existing visibility/ranking rules and public field allowlist.
+DROP FUNCTION public.get_app_visible_pools();
+CREATE FUNCTION public.get_app_visible_pools()
+RETURNS TABLE (
+  pool_id TEXT, name TEXT, name_en TEXT, type TEXT, extra_subtype TEXT,
+  extra_rule_profile TEXT, extra_series_key TEXT, extra_series_phase INTEGER,
+  locked BOOLEAN, is_limited_weapon BOOLEAN, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ,
+  up_character TEXT, description TEXT, banner_url TEXT, start_time TIMESTAMPTZ,
+  end_time TIMESTAMPTZ, featured_characters TEXT[], roster_status TEXT
+) LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  WITH visible AS (
+    SELECT p.*, ROW_NUMBER() OVER (PARTITION BY p.pool_id ORDER BY
+      (CASE WHEN NULLIF(BTRIM(COALESCE(p.up_character, '')), '') IS NOT NULL THEN 4 ELSE 0 END +
+       CASE WHEN p.start_time IS NOT NULL THEN 2 ELSE 0 END +
+       CASE WHEN p.end_time IS NOT NULL THEN 2 ELSE 0 END +
+       CASE WHEN COALESCE(array_length(p.featured_characters, 1), 0) > 0 THEN 1 ELSE 0 END +
+       CASE WHEN NULLIF(BTRIM(COALESCE(p.banner_url, '')), '') IS NOT NULL THEN 1 ELSE 0 END +
+       CASE WHEN NULLIF(BTRIM(COALESCE(p.description, '')), '') IS NOT NULL THEN 1 ELSE 0 END +
+       CASE WHEN NULLIF(BTRIM(COALESCE(p.name_en, '')), '') IS NOT NULL THEN 1 ELSE 0 END +
+       CASE WHEN p.locked THEN 1 ELSE 0 END) DESC,
+      CASE WHEN p.user_id = auth.uid() THEN 1 ELSE 0 END DESC,
+      COALESCE(p.start_time, p.updated_at, p.created_at, to_timestamp(0)) DESC,
+      COALESCE(p.updated_at, p.created_at, to_timestamp(0)) DESC
+    ) AS row_rank
+    FROM public.pools p WHERE p.pool_id IN ('standard', 'beginner')
+      OR split_part(p.pool_id, '_', 1) IN ('special', 'weponbox', 'weaponbox')
+      OR p.user_id IS NULL OR p.user_id = auth.uid() OR p.locked = TRUE
+      OR EXISTS (SELECT 1 FROM public.profiles owner_profile
+        WHERE owner_profile.id = p.user_id AND owner_profile.role IN ('admin', 'super_admin'))
+  ) SELECT pool_id, name, name_en, type, extra_subtype, extra_rule_profile,
+    extra_series_key, extra_series_phase, locked, is_limited_weapon, created_at, updated_at,
+    up_character, description, banner_url, start_time, end_time, featured_characters, roster_status
+  FROM visible WHERE row_rank = 1
+  ORDER BY COALESCE(start_time, created_at, updated_at, to_timestamp(0)) DESC, pool_id ASC;
+$$;
+GRANT EXECUTE ON FUNCTION public.get_app_visible_pools() TO anon, authenticated, service_role;
+
+-- A single JSON snapshot bypasses REST row limits. Only the trusted API sees
+-- record identities; the browser receives counts, affected pool IDs and a token.
+CREATE FUNCTION public.admin_pool_recalculation_snapshot() RETURNS JSONB
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_snapshot JSONB;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service_role required'; END IF;
+  SELECT jsonb_build_object(
+    'pools', COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.pool_id) FROM (
+      SELECT p.pool_id, p.type, COALESCE(c.name, p.up_character) AS up_character,
+        c.id AS up_character_id, to_jsonb(c.aliases) AS up_character_aliases,
+        p.extra_subtype, p.extra_rule_profile, p.extra_series_key, p.extra_series_phase
+      FROM public.pools p LEFT JOIN LATERAL (
+        SELECT c.id, c.name, c.aliases FROM public.characters c
+        WHERE (c.id = p.up_character OR c.name = p.up_character) AND c.rarity = 6
+          AND c.type = CASE WHEN p.type = 'weapon' OR p.extra_rule_profile = 'reconstruction_weapon_v1'
+            THEN 'weapon' ELSE 'character' END
+        ORDER BY (c.id = p.up_character) DESC, c.id LIMIT 1
+      ) c ON TRUE
+    ) p), '[]'::JSONB),
+    'records', COALESCE((SELECT jsonb_agg(to_jsonb(h) ORDER BY h.user_id, h.id, h.record_id) FROM (
+      SELECT id::TEXT, user_id, game_uid, server_id, record_id, pool_id,
+        rarity, character_id, character_name, item_name, is_standard FROM public.history WHERE rarity = 6
+    ) h), '[]'::JSONB)
+  ) INTO v_snapshot;
+  RETURN v_snapshot || jsonb_build_object('previewToken', md5(v_snapshot::TEXT));
+END;
+$$;
+REVOKE ALL ON FUNCTION public.admin_pool_recalculation_snapshot() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_pool_recalculation_snapshot() TO service_role;
+
+CREATE FUNCTION public.admin_apply_pool_recalculation(p_preview_token TEXT, p_updates JSONB)
+RETURNS INTEGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+SET lock_timeout = '5s' SET statement_timeout = '50s' AS $$
+DECLARE v_snapshot JSONB; v_changed INTEGER;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service_role required'; END IF;
+  IF p_preview_token IS NULL OR jsonb_typeof(p_updates) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION 'recalculate_preview_required';
+  END IF;
+  -- Prevent inserts, deletes or catalog edits between token comparison and UPDATE.
+  -- Locks exist only during this transaction, never while awaiting confirmation.
+  LOCK TABLE public.pools IN SHARE MODE;
+  LOCK TABLE public.characters IN SHARE MODE;
+  LOCK TABLE public.history IN SHARE ROW EXCLUSIVE MODE;
+  v_snapshot := public.admin_pool_recalculation_snapshot();
+  IF v_snapshot->>'previewToken' IS DISTINCT FROM p_preview_token THEN
+    RAISE EXCEPTION 'recalculate_preview_stale';
+  END IF;
+  UPDATE public.history h SET is_standard = (u->>'is_standard')::BOOLEAN
+  FROM jsonb_array_elements(p_updates) u
+  WHERE h.id = (u->>'id')::BIGINT AND h.user_id = (u->>'user_id')::UUID
+    AND h.record_id = u->>'record_id' AND h.pool_id = u->>'pool_id'
+    AND h.game_uid IS NOT DISTINCT FROM (u->>'game_uid')
+    AND h.server_id IS NOT DISTINCT FROM (u->>'server_id')
+    AND h.rarity = 6 AND jsonb_typeof(u->'is_standard') = 'boolean'
+    AND h.is_standard IS DISTINCT FROM (u->>'is_standard')::BOOLEAN;
+  GET DIAGNOSTICS v_changed = ROW_COUNT;
+  IF v_changed <> jsonb_array_length(p_updates) THEN
+    RAISE EXCEPTION 'recalculate_scope_mismatch';
+  END IF;
+  IF v_changed > 0 THEN PERFORM public.admin_pool_catalog_bump_cache('stats'); END IF;
+  RETURN v_changed;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.admin_apply_pool_recalculation(TEXT, JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_apply_pool_recalculation(TEXT, JSONB) TO service_role;
+COMMIT;
+-- <<< END MIGRATION: active/2026100912_admin_pool_catalog_roster_and_recalculation.sql
+
+-- >>> BEGIN MIGRATION: active/2026100913_atomic_workbench_workspace.sql
+-- Verified pool workspace: one validation credential, one all-or-nothing transaction.
+BEGIN;
+
+ALTER TABLE public.account_data_workbench_entries DROP CONSTRAINT account_data_workbench_entries_kind_check;
+ALTER TABLE public.account_data_workbench_entries ADD CONSTRAINT account_data_workbench_entries_kind_check
+  CHECK (kind IN ('detail', 'six-star-interval', 'pool-summary', 'batch-summary', 'potential-evidence', 'pool-ledger'));
+ALTER TABLE public.account_data_workbench_entries ADD COLUMN derivation TEXT
+  CHECK (derivation IN ('declared', 'inferred'));
+ALTER TABLE public.account_data_workbench_commits ADD COLUMN validation_token UUID;
+
+CREATE TABLE public.account_data_workbench_validations (
+  token UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  draft_id UUID NOT NULL,
+  commit_id UUID NOT NULL,
+  draft_revision BIGINT NOT NULL CHECK (draft_revision >= 1),
+  game_uid TEXT NOT NULL,
+  server_scope TEXT NOT NULL,
+  payload_hash TEXT NOT NULL CHECK (payload_hash ~ '^[0-9a-f]{64}$'),
+  request JSONB NOT NULL,
+  operations JSONB NOT NULL,
+  context_token TEXT NOT NULL,
+  catalog_token TEXT NOT NULL,
+  rules_version TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '15 minutes'),
+  consumed_at TIMESTAMPTZ
+);
+CREATE INDEX account_data_workbench_validations_expiry_idx ON public.account_data_workbench_validations(expires_at);
+ALTER TABLE public.account_data_workbench_validations ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.account_data_workbench_validations FROM PUBLIC, anon, authenticated, service_role;
+-- Credentials and their trusted operations are accessible exclusively through the RPCs below.
+
+CREATE OR REPLACE FUNCTION public.read_account_data_workbench_context(
+  p_user_id UUID, p_game_uid TEXT, p_server_scope TEXT
+) RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = pg_catalog, public AS $$
+DECLARE v_history JSONB; v_entries JSONB;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'service_role_required';
+  END IF;
+  IF p_user_id IS NULL OR NULLIF(btrim(p_game_uid), '') IS NULL OR NULLIF(btrim(p_server_scope), '') IS NULL THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'workbench_scope_required';
+  END IF;
+  SELECT COALESCE(jsonb_agg(to_jsonb(item) ORDER BY item.id), '[]'::JSONB) INTO v_history FROM (
+    SELECT h.id, h.pool_id, h.character_id, h.character_name, h.item_name, h.rarity,
+      h.timestamp, h.seq_id, h.record_id,
+      COALESCE(NULLIF(btrim(h.game_uid), ''), 'legacy') AS game_uid,
+      h.server_scope, h.server_id, h.user_id, h.is_free, h.is_info_book, h.is_standard,
+      h.special_type, h.edit_version, h.pity, h.batch_id, h.updated_at
+    FROM public.history h WHERE h.user_id = p_user_id
+      AND COALESCE(NULLIF(btrim(h.game_uid), ''), 'legacy') = p_game_uid
+      AND h.server_scope = p_server_scope ORDER BY h.id LIMIT 50001
+  ) item;
+  SELECT COALESCE(jsonb_agg(to_jsonb(item) ORDER BY item.id), '[]'::JSONB) INTO v_entries FROM (
+    SELECT * FROM public.account_data_workbench_entries WHERE user_id = p_user_id
+      AND game_uid = p_game_uid AND server_scope = p_server_scope ORDER BY id LIMIT 50001
+  ) item;
+  IF jsonb_array_length(v_history) > 50000 OR jsonb_array_length(v_entries) > 50000 THEN
+    RAISE EXCEPTION USING ERRCODE = '54000', MESSAGE = 'workbench_scope_too_large';
+  END IF;
+  RETURN jsonb_build_object('history', v_history, 'entries', v_entries,
+    'contextToken', md5(jsonb_build_array(v_history, v_entries)::TEXT));
+END;
+$$;
+
+-- One MVCC snapshot supplies every field the API uses for membership/numeric/rule checks.
+CREATE FUNCTION public.read_account_data_workbench_catalog() RETURNS JSONB
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+DECLARE v_catalog JSONB;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'service_role_required';
+  END IF;
+  SELECT jsonb_build_object(
+    'pools', COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.pool_id) FROM public.get_app_visible_pools() p), '[]'::JSONB),
+    'entities', COALESCE((SELECT jsonb_agg(to_jsonb(c) ORDER BY c.id) FROM (
+      SELECT id, name, type, rarity, is_limited, release_date, pool_config FROM public.characters ORDER BY id LIMIT 50001
+    ) c), '[]'::JSONB),
+    'roster', COALESCE((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.pool_id, r.character_id) FROM (
+      SELECT pool_id, character_id, is_up FROM public.pool_characters ORDER BY pool_id, character_id LIMIT 50001
+    ) r), '[]'::JSONB)
+  ) INTO v_catalog;
+  IF jsonb_array_length(v_catalog->'entities') > 50000 OR jsonb_array_length(v_catalog->'roster') > 50000
+    OR jsonb_array_length(v_catalog->'pools') > 50000 THEN
+    RAISE EXCEPTION USING ERRCODE = '54000', MESSAGE = 'workbench_catalog_too_large';
+  END IF;
+  RETURN v_catalog || jsonb_build_object('catalogToken', md5(v_catalog::TEXT));
+END;
+$$;
+
+CREATE FUNCTION public.validate_account_data_workbench_workspace(
+  p_user_id UUID, p_payload_hash TEXT, p_request JSONB, p_operations JSONB,
+  p_context_token TEXT, p_catalog_token TEXT, p_rules_version TEXT
+) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+SET lock_timeout = '5s' SET statement_timeout = '50s' AS $$
+DECLARE v_token public.account_data_workbench_validations%ROWTYPE; v_count INTEGER;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'service_role_required';
+  END IF;
+  IF p_user_id IS NULL OR p_payload_hash IS NULL OR p_payload_hash !~ '^[0-9a-f]{64}$'
+    OR p_request->>'mode' IS DISTINCT FROM 'pool-workspace'
+    OR jsonb_typeof(p_request->'entries') IS DISTINCT FROM 'array'
+    OR jsonb_typeof(p_request->'historyChanges') IS DISTINCT FROM 'array'
+    OR jsonb_typeof(p_request->'supplementChanges') IS DISTINCT FROM 'array'
+    OR jsonb_typeof(p_operations->'entries') IS DISTINCT FROM 'array'
+    OR jsonb_typeof(p_operations->'historyChanges') IS DISTINCT FROM 'array'
+    OR jsonb_typeof(p_operations->'supplementChanges') IS DISTINCT FROM 'array'
+    OR (p_request->>'draftRevision')::BIGINT < 1
+    OR NULLIF(p_request->'scope'->>'gameUid', '') IS NULL
+    OR NULLIF(p_request->'scope'->>'serverScope', '') IS NULL
+    OR p_operations->'scope' IS DISTINCT FROM p_request->'scope'
+    OR p_operations->>'draftId' IS DISTINCT FROM p_request->>'draftId'
+    OR p_operations->>'commitId' IS DISTINCT FROM p_request->>'commitId'
+    OR p_operations->>'draftRevision' IS DISTINCT FROM p_request->>'draftRevision' THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'workbench_invalid_submission';
+  END IF;
+  v_count := jsonb_array_length(p_request->'entries') + jsonb_array_length(p_request->'historyChanges') + jsonb_array_length(p_request->'supplementChanges');
+  IF v_count NOT BETWEEN 1 AND 100
+    OR jsonb_array_length(p_request->'entries') <> jsonb_array_length(p_operations->'entries')
+    OR jsonb_array_length(p_request->'historyChanges') <> jsonb_array_length(p_operations->'historyChanges')
+    OR jsonb_array_length(p_request->'supplementChanges') <> jsonb_array_length(p_operations->'supplementChanges') THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'workbench_invalid_batch';
+  END IF;
+  IF p_rules_version IS DISTINCT FROM 'pool-workspace-1' THEN
+    RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_rules_changed';
+  END IF;
+  -- Lock order matches commit; nobody can mutate the validated context/catalog mid-comparison.
+  LOCK TABLE public.profiles, public.pools, public.characters, public.pool_characters IN SHARE MODE;
+  LOCK TABLE public.history IN SHARE MODE;
+  PERFORM pg_advisory_xact_lock(hashtextextended('workbench-scope:' || p_user_id::TEXT || ':' || (p_request->'scope'->>'gameUid') || ':' || (p_request->'scope'->>'serverScope'), 0));
+  IF (public.read_account_data_workbench_context(p_user_id, p_request->'scope'->>'gameUid', p_request->'scope'->>'serverScope')->>'contextToken') IS DISTINCT FROM p_context_token THEN
+    RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_context_changed';
+  END IF;
+  IF (public.read_account_data_workbench_catalog()->>'catalogToken') IS DISTINCT FROM p_catalog_token THEN
+    RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_catalog_changed';
+  END IF;
+  INSERT INTO public.account_data_workbench_validations(user_id, draft_id, commit_id, draft_revision,
+    game_uid, server_scope, payload_hash, request, operations, context_token, catalog_token, rules_version)
+  VALUES(p_user_id, (p_request->>'draftId')::UUID, (p_request->>'commitId')::UUID,
+    (p_request->>'draftRevision')::BIGINT, p_request->'scope'->>'gameUid', p_request->'scope'->>'serverScope',
+    p_payload_hash, p_request, p_operations, p_context_token, p_catalog_token, p_rules_version) RETURNING * INTO v_token;
+  RETURN jsonb_build_object('validationToken', v_token.token, 'draftRevision', v_token.draft_revision, 'expiresAt', v_token.expires_at);
+END;
+$$;
+
+CREATE FUNCTION public.commit_account_data_workbench_workspace(
+  p_user_id UUID, p_validation_token UUID, p_payload_hash TEXT, p_request JSONB, p_rules_version TEXT
+) RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+SET lock_timeout = '5s' SET statement_timeout = '50s' AS $$
+DECLARE
+  v_token public.account_data_workbench_validations%ROWTYPE;
+  v_prior public.account_data_workbench_commits%ROWTYPE;
+  v_old public.account_data_workbench_entries%ROWTYPE;
+  v_new public.account_data_workbench_entries%ROWTYPE;
+  v_item JSONB; v_mutation JSONB; v_result JSONB; v_entry JSONB;
+  v_ids JSONB := '[]'::JSONB;
+  v_history_updated INTEGER := 0; v_supplements_updated INTEGER := 0; v_supplements_deleted INTEGER := 0;
+  v_commit_id UUID;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'service_role_required';
+  END IF;
+  IF p_user_id IS NULL OR p_validation_token IS NULL OR p_payload_hash IS NULL OR p_request IS NULL THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'workbench_validation_required';
+  END IF;
+  v_commit_id := (p_request->>'commitId')::UUID;
+  PERFORM pg_advisory_xact_lock(hashtextextended('workbench-commit:' || p_user_id::TEXT || ':' || v_commit_id::TEXT, 0));
+  SELECT * INTO v_prior FROM public.account_data_workbench_commits WHERE user_id = p_user_id AND commit_id = v_commit_id;
+  IF FOUND THEN
+    IF v_prior.payload_hash IS DISTINCT FROM p_payload_hash THEN
+      RAISE EXCEPTION USING ERRCODE = '23505', MESSAGE = 'workbench_idempotency_conflict';
+    END IF;
+    IF v_prior.validation_token IS DISTINCT FROM p_validation_token THEN
+      RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_validation_mismatch';
+    END IF;
+    SELECT * INTO v_token FROM public.account_data_workbench_validations WHERE token = p_validation_token AND user_id = p_user_id;
+    IF NOT FOUND OR v_token.request IS DISTINCT FROM p_request THEN
+      RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_validation_mismatch';
+    END IF;
+    RETURN v_prior.result; -- Successful exact retries remain valid even after the credential expires.
+  END IF;
+  SELECT * INTO v_token FROM public.account_data_workbench_validations WHERE token = p_validation_token AND user_id = p_user_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_validation_required'; END IF;
+  IF v_token.payload_hash IS DISTINCT FROM p_payload_hash OR v_token.request IS DISTINCT FROM p_request
+    OR v_token.commit_id IS DISTINCT FROM v_commit_id
+    OR v_token.draft_id IS DISTINCT FROM (p_request->>'draftId')::UUID
+    OR v_token.draft_revision IS DISTINCT FROM (p_request->>'draftRevision')::BIGINT THEN
+    RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_validation_mismatch';
+  END IF;
+  IF v_token.rules_version IS DISTINCT FROM p_rules_version OR p_rules_version IS DISTINCT FROM 'pool-workspace-1' THEN
+    RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_rules_changed';
+  END IF;
+  IF v_token.expires_at <= clock_timestamp() OR v_token.consumed_at IS NOT NULL THEN
+    RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_validation_expired';
+  END IF;
+  LOCK TABLE public.profiles, public.pools, public.characters, public.pool_characters IN SHARE MODE;
+  -- SHARE ROW EXCLUSIVE serializes workbench history writers and blocks official import;
+  -- SHARE would allow two transactions to deadlock when both subsequently UPDATE history.
+  LOCK TABLE public.history IN SHARE ROW EXCLUSIVE MODE;
+  PERFORM pg_advisory_xact_lock(hashtextextended('workbench-scope:' || p_user_id::TEXT || ':' || v_token.game_uid || ':' || v_token.server_scope, 0));
+  IF (public.read_account_data_workbench_context(p_user_id, v_token.game_uid, v_token.server_scope)->>'contextToken') IS DISTINCT FROM v_token.context_token THEN
+    RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_context_changed';
+  END IF;
+  IF (public.read_account_data_workbench_catalog()->>'catalogToken') IS DISTINCT FROM v_token.catalog_token THEN
+    RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_catalog_changed';
+  END IF;
+  FOR v_item IN SELECT value FROM jsonb_array_elements(v_token.operations->'historyChanges') LOOP
+    IF v_item->>'gameUid' IS DISTINCT FROM v_token.game_uid OR v_item->>'serverScope' IS DISTINCT FROM v_token.server_scope THEN
+      RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'workbench_scope_mismatch';
+    END IF;
+    v_mutation := public.update_history_record_controlled(p_user_id, v_item->>'recordId', v_token.game_uid,
+      v_token.server_scope, v_item->>'currentPoolId', v_item->>'seqId', (v_item->>'expectedEditVersion')::BIGINT,
+      v_item->'changes', v_item->>'reason');
+    v_history_updated := v_history_updated + (v_mutation->>'updated')::INTEGER;
+  END LOOP;
+  FOR v_item IN SELECT value FROM jsonb_array_elements(v_token.operations->'supplementChanges') LOOP
+    SELECT * INTO v_old FROM public.account_data_workbench_entries
+      WHERE id = (v_item->>'id')::UUID AND user_id = p_user_id
+        AND game_uid = v_token.game_uid AND server_scope = v_token.server_scope AND deleted_at IS NULL FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'workbench_entry_not_found'; END IF;
+    IF v_old.revision IS DISTINCT FROM (v_item->>'expectedRevision')::INTEGER THEN
+      RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_revision_conflict';
+    END IF;
+    IF v_item->>'action' = 'update' THEN
+      v_entry := v_item->'entry';
+      IF (v_entry->>'entryId')::UUID IS DISTINCT FROM v_old.entry_id THEN
+        RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'workbench_entry_identity_changed';
+      END IF;
+      UPDATE public.account_data_workbench_entries SET kind = v_entry->>'kind', pool_id = v_entry->>'poolId',
+        "values" = v_entry->'values', time_precision = v_entry->>'timePrecision',
+        revision = revision + 1, updated_at = now() WHERE id = v_old.id AND revision = v_old.revision RETURNING * INTO v_new;
+      v_supplements_updated := v_supplements_updated + 1;
+    ELSIF v_item->>'action' = 'delete' THEN
+      IF NULLIF(btrim(v_item->>'reason'), '') IS NULL OR length(v_item->>'reason') > 500 THEN
+        RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'workbench_delete_reason_required';
+      END IF;
+      UPDATE public.account_data_workbench_entries SET deleted_at = now(), updated_at = now(), revision = revision + 1
+        WHERE id = v_old.id AND revision = v_old.revision RETURNING * INTO v_new;
+      v_supplements_deleted := v_supplements_deleted + 1;
+    ELSE RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'workbench_invalid_mutation'; END IF;
+    IF v_new.id IS NULL THEN RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'workbench_revision_conflict'; END IF;
+    INSERT INTO public.account_data_workbench_audit(user_id, entry_id, actor_user_id, operation, old_values, new_values, reason, commit_id)
+      VALUES(p_user_id, v_old.id, p_user_id, v_item->>'action', to_jsonb(v_old), to_jsonb(v_new), COALESCE(v_item->>'reason', ''), v_commit_id);
+  END LOOP;
+  FOR v_item IN SELECT value FROM jsonb_array_elements(v_token.operations->'entries') LOOP
+    INSERT INTO public.account_data_workbench_entries(user_id, game_uid, server_scope, pool_id, entry_id, draft_id,
+      kind, source, derivation, "values", time_precision)
+    VALUES(p_user_id, v_token.game_uid, v_token.server_scope, v_item->>'poolId', (v_item->>'entryId')::UUID,
+      v_token.draft_id, v_item->>'kind', COALESCE(v_item->>'source', 'manual'), v_item->>'derivation', v_item->'values', v_item->>'timePrecision')
+    RETURNING * INTO v_new;
+    INSERT INTO public.account_data_workbench_audit(user_id, entry_id, actor_user_id, operation, new_values, commit_id)
+      VALUES(p_user_id, v_new.id, p_user_id, 'create', to_jsonb(v_new), v_commit_id);
+    v_ids := v_ids || jsonb_build_array(v_new.id);
+  END LOOP;
+  v_result := jsonb_build_object('commitId', v_commit_id, 'draftRevision', v_token.draft_revision,
+    'saved', jsonb_array_length(v_ids), 'entryIds', v_ids, 'historyUpdated', v_history_updated,
+    'supplementsUpdated', v_supplements_updated, 'supplementsDeleted', v_supplements_deleted,
+    'operationCount', jsonb_array_length(v_token.operations->'entries') + jsonb_array_length(v_token.operations->'historyChanges') + jsonb_array_length(v_token.operations->'supplementChanges'));
+  INSERT INTO public.account_data_workbench_commits(user_id, commit_id, draft_id, payload_hash, validation_token, result)
+    VALUES(p_user_id, v_commit_id, v_token.draft_id, p_payload_hash, p_validation_token, v_result);
+  UPDATE public.account_data_workbench_validations SET consumed_at = clock_timestamp() WHERE token = p_validation_token;
+  RETURN v_result;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.read_account_data_workbench_catalog() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.validate_account_data_workbench_workspace(UUID, TEXT, JSONB, JSONB, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.commit_account_data_workbench_workspace(UUID, UUID, TEXT, JSONB, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.read_account_data_workbench_catalog() TO service_role;
+GRANT EXECUTE ON FUNCTION public.validate_account_data_workbench_workspace(UUID, TEXT, JSONB, JSONB, TEXT, TEXT, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.commit_account_data_workbench_workspace(UUID, UUID, TEXT, JSONB, TEXT) TO service_role;
+COMMIT;
+-- <<< END MIGRATION: active/2026100913_atomic_workbench_workspace.sql
+
 -- >>> BEGIN MIGRATION: active/2026101101_complete_pool_roster_reads.sql
 -- Return one JSON value so PostgREST's row limit cannot truncate a roster.
 -- NULL selects all pools for the authenticated admin API; an empty array
@@ -37318,4 +38102,1292 @@ GRANT EXECUTE ON FUNCTION public.read_pool_roster_catalog(TEXT[]) TO service_rol
 COMMIT;
 NOTIFY pgrst, 'reload schema';
 -- <<< END MIGRATION: active/2026101101_complete_pool_roster_reads.sql
+
+-- >>> BEGIN MIGRATION: active/2026101400_exclude_manual_statistics.sql
+-- Pending rollout: scope exclusions persist after deletes, imports and reverts.
+BEGIN;
+ALTER TABLE public.history ADD COLUMN statistics_excluded BOOLEAN NOT NULL DEFAULT false;
+COMMENT ON COLUMN public.history.statistics_excluded IS
+  'Row evidence of a manual edit; the owner/account/server/pool exclusion persists independently of this row.';
+
+-- edit_version is incremented only by the controlled user editor in the existing schema.
+UPDATE public.history SET statistics_excluded = true
+  WHERE edit_version > 1 OR left(record_id, 7) = 'manual_';
+
+CREATE TABLE public.account_statistics_exclusions (
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  game_uid TEXT NOT NULL,
+  server_scope TEXT NOT NULL,
+  pool_id TEXT NOT NULL,
+  first_modified_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+  history_start_at TIMESTAMPTZ,
+  history_end_at TIMESTAMPTZ,
+  history_time_unknown BOOLEAN NOT NULL DEFAULT false,
+  PRIMARY KEY(user_id, game_uid, server_scope, pool_id)
+);
+ALTER TABLE public.account_statistics_exclusions ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.account_statistics_exclusions FROM PUBLIC, anon, authenticated, service_role;
+CREATE INDEX account_statistics_history_scope_idx ON public.history
+  (user_id, (COALESCE(NULLIF(btrim(game_uid), ''), 'legacy')), server_scope, pool_id)
+  WHERE NOT statistics_excluded;
+
+INSERT INTO public.account_statistics_exclusions(user_id, game_uid, server_scope, pool_id)
+  SELECT user_id, COALESCE(NULLIF(btrim(game_uid), ''), 'legacy'), COALESCE(server_scope, 'legacy'), pool_id
+  FROM public.history WHERE statistics_excluded AND pool_id IS NOT NULL
+  UNION SELECT user_id, game_uid, server_scope, pool_id
+  FROM public.account_data_workbench_entries WHERE pool_id IS NOT NULL
+  ON CONFLICT DO NOTHING;
+-- Recover the original pool of old moves when the audit has an unambiguous account locator.
+INSERT INTO public.account_statistics_exclusions(user_id, game_uid, server_scope, pool_id)
+  SELECT DISTINCT h.user_id, COALESCE(NULLIF(btrim(h.game_uid), ''), 'legacy'), COALESCE(h.server_scope, 'legacy'), a.old_values->>'pool_id'
+  FROM public.history_change_log a JOIN public.history h ON h.user_id = a.user_id AND h.record_id = a.record_id
+  WHERE a.old_values->>'pool_id' IS NOT NULL AND h.statistics_excluded
+    AND (SELECT count(*) FROM public.history x WHERE x.user_id = a.user_id AND x.record_id = a.record_id) = 1
+  ON CONFLICT DO NOTHING;
+
+UPDATE public.account_statistics_exclusions e SET
+  history_start_at = b.first_at, history_end_at = b.last_at, history_time_unknown = b.unknown_time
+FROM (SELECT e.user_id,e.game_uid,e.server_scope,e.pool_id,min(h.timestamp) AS first_at,max(h.timestamp) AS last_at,
+  COALESCE(bool_or(h.id IS NOT NULL AND h.timestamp IS NULL),false) AS unknown_time
+  FROM public.account_statistics_exclusions e LEFT JOIN public.history h ON h.user_id=e.user_id
+    AND COALESCE(NULLIF(btrim(h.game_uid),''),'legacy')=e.game_uid AND h.server_scope=e.server_scope AND h.pool_id=e.pool_id
+  GROUP BY e.user_id,e.game_uid,e.server_scope,e.pool_id) b
+WHERE (e.user_id,e.game_uid,e.server_scope,e.pool_id)=(b.user_id,b.game_uid,b.server_scope,b.pool_id);
+CREATE VIEW public.statistics_history_gaps WITH (security_barrier=true) AS
+  SELECT user_id,game_uid,server_scope,pool_id,history_start_at,history_end_at,history_time_unknown
+  FROM public.account_statistics_exclusions;
+REVOKE ALL ON public.statistics_history_gaps FROM PUBLIC,anon,authenticated;
+GRANT SELECT ON public.statistics_history_gaps TO service_role;
+
+CREATE VIEW public.statistics_history WITH (security_barrier = true) AS
+  SELECT h.* FROM public.history h WHERE NOT h.statistics_excluded AND NOT EXISTS (
+    SELECT 1 FROM public.account_statistics_exclusions e WHERE e.user_id = h.user_id
+      AND e.game_uid = COALESCE(NULLIF(btrim(h.game_uid), ''), 'legacy')
+      AND e.server_scope = COALESCE(h.server_scope, 'legacy') AND e.pool_id = h.pool_id
+  );
+REVOKE ALL ON public.statistics_history FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.statistics_history TO service_role;
+
+CREATE FUNCTION public.statistics_pity_scope(p public.pools) RETURNS TEXT
+LANGUAGE sql IMMUTABLE SET search_path=pg_catalog,public AS $$
+  SELECT CASE WHEN p.type IN ('limited','limited_character') THEN 'shared'
+    WHEN p.type='extra' AND p.extra_rule_profile='reconstruction_character_v1'
+      AND NULLIF(btrim(p.extra_series_key),'') IS NOT NULL
+      THEN 'series:'||p.extra_rule_profile||':'||p.extra_series_key
+    ELSE 'pool:'||p.pool_id END;
+$$;
+REVOKE ALL ON FUNCTION public.statistics_pity_scope(public.pools) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.statistics_pity_scope(public.pools) TO service_role;
+
+-- The old overview/cache RPCs use the same trusted-reset rule as the JS worker.
+-- A view has no persisted copy of the history or excluded results.
+CREATE VIEW public.statistics_pity_intervals WITH (security_barrier=true) AS
+WITH numbered AS MATERIALIZED (
+  SELECT h.id,h.user_id,COALESCE(NULLIF(btrim(h.game_uid),''),'legacy') AS game_uid,h.server_scope,
+    h.pool_id,h.rarity,h.timestamp,public.statistics_pity_scope(p) AS pity_scope,
+    row_number() OVER (PARTITION BY h.user_id,h.game_uid,h.server_scope,public.statistics_pity_scope(p)
+      ORDER BY h.timestamp,CASE WHEN h.seq_id ~ '^[0-9]+$' THEN h.seq_id::numeric END,h.id) AS rn
+  FROM public.statistics_history h JOIN public.pools p ON p.pool_id=h.pool_id
+  WHERE h.special_type IS DISTINCT FROM 'gift' AND h.is_free IS NOT TRUE
+    AND h.rarity IN (4,5,6) AND h.timestamp>to_timestamp(0) AND nullif(btrim(h.game_uid),'') IS NOT NULL
+), resets AS MATERIALIZED (
+  SELECT *,max(rn) FILTER(WHERE rarity=6) OVER w AS previous_six,
+    max(rn) FILTER(WHERE rarity>=5) OVER w AS previous_five
+  FROM numbered WINDOW w AS (PARTITION BY user_id,game_uid,server_scope,pity_scope
+    ORDER BY rn ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)
+), gaps AS MATERIALIZED (
+  SELECT e.*,public.statistics_pity_scope(p) AS pity_scope,
+    COALESCE(LEAST(e.history_start_at,p.start_time),'-infinity'::timestamptz) AS starts,
+    CASE WHEN e.history_time_unknown THEN 'infinity'::timestamptz
+      ELSE COALESCE(GREATEST(e.history_end_at,p.end_time),'infinity'::timestamptz) END AS ends
+  FROM public.account_statistics_exclusions e LEFT JOIN public.pools p ON p.pool_id=e.pool_id
+)
+SELECT r.id,r.user_id,r.pool_id,
+  CASE WHEN r.rarity=6 AND NOT EXISTS(SELECT 1 FROM gaps g WHERE g.user_id=r.user_id
+    AND g.game_uid=r.game_uid AND g.server_scope=r.server_scope AND (g.pity_scope=r.pity_scope OR g.pity_scope IS NULL)
+    AND g.starts<=r.timestamp AND (s.timestamp IS NULL OR g.ends>=s.timestamp))
+    THEN r.rn-COALESCE(r.previous_six,0) END AS six_star_pity,
+  CASE WHEN r.rarity>=5 AND NOT EXISTS(SELECT 1 FROM gaps g WHERE g.user_id=r.user_id
+    AND g.game_uid=r.game_uid AND g.server_scope=r.server_scope AND (g.pity_scope=r.pity_scope OR g.pity_scope IS NULL)
+    AND g.starts<=r.timestamp AND (f.timestamp IS NULL OR g.ends>=f.timestamp))
+    THEN r.rn-COALESCE(r.previous_five,0) END AS five_star_pity
+FROM resets r LEFT JOIN numbered s ON s.user_id=r.user_id AND s.game_uid=r.game_uid AND s.server_scope=r.server_scope
+  AND s.pity_scope=r.pity_scope AND s.rn=r.previous_six
+LEFT JOIN numbered f ON f.user_id=r.user_id AND f.game_uid=r.game_uid AND f.server_scope=r.server_scope
+  AND f.pity_scope=r.pity_scope AND f.rn=r.previous_five
+WHERE r.rarity>=5;
+REVOKE ALL ON public.statistics_pity_intervals FROM PUBLIC,anon,authenticated;
+GRANT SELECT ON public.statistics_pity_intervals TO service_role;
+
+-- Ownership totals cannot establish copy order across a missing character pool.
+CREATE VIEW public.statistics_copy_history WITH (security_barrier=true) AS
+SELECT h.* FROM public.statistics_history h JOIN public.pools p ON p.pool_id=h.pool_id
+WHERE p.type IN ('weapon','limited_weapon') OR p.extra_rule_profile='reconstruction_weapon_v1' OR NOT EXISTS (
+  SELECT 1 FROM public.account_statistics_exclusions e LEFT JOIN public.pools ep ON ep.pool_id=e.pool_id
+  WHERE e.user_id=h.user_id AND e.game_uid=COALESCE(NULLIF(btrim(h.game_uid),''),'legacy') AND e.server_scope=h.server_scope
+    AND (ep.pool_id IS NULL OR ep.type NOT IN ('weapon','limited_weapon')
+      AND ep.extra_rule_profile IS DISTINCT FROM 'reconstruction_weapon_v1')
+);
+REVOKE ALL ON public.statistics_copy_history FROM PUBLIC,anon,authenticated;
+GRANT SELECT ON public.statistics_copy_history TO service_role;
+
+CREATE FUNCTION public.account_pool_statistics_excluded(p_user_id UUID, p_uid TEXT, p_server TEXT, p_pool TEXT)
+RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+  SELECT EXISTS(SELECT 1 FROM public.account_statistics_exclusions e WHERE e.user_id=p_user_id
+    AND e.game_uid=COALESCE(NULLIF(btrim(p_uid),''),'legacy')
+    AND e.server_scope=COALESCE(p_server,'legacy') AND e.pool_id=p_pool);
+$$;
+REVOKE ALL ON FUNCTION public.account_pool_statistics_excluded(UUID,TEXT,TEXT,TEXT) FROM PUBLIC, anon, authenticated;
+
+CREATE FUNCTION public.read_account_statistics_exclusions(p_user_id UUID) RETURNS JSONB
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION 'service_role_required'; END IF;
+  RETURN COALESCE((SELECT jsonb_agg(to_jsonb(e)) FROM public.account_statistics_exclusions e WHERE e.user_id = p_user_id), '[]'::JSONB);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.read_account_statistics_exclusions(UUID) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.read_account_statistics_exclusions(UUID) TO service_role;
+
+-- Called before changing history: the new scope removes its entire old
+-- contribution once; subsequent excluded writes cannot add it back.
+CREATE FUNCTION public.mark_account_statistics_scope(p_user_id UUID, p_uid TEXT, p_server TEXT, p_pool TEXT)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+DECLARE v_uid TEXT := COALESCE(NULLIF(btrim(p_uid), ''), 'legacy'); v_server TEXT := COALESCE(p_server, 'legacy');
+BEGIN
+  IF p_pool IS NULL OR NOT EXISTS(SELECT 1 FROM public.profiles WHERE id = p_user_id) THEN RETURN; END IF;
+  IF EXISTS(SELECT 1 FROM public.account_statistics_exclusions WHERE user_id=p_user_id
+    AND game_uid=v_uid AND server_scope=v_server AND pool_id=p_pool) THEN RETURN; END IF;
+  INSERT INTO public.account_statistics_exclusions(user_id, game_uid, server_scope, pool_id,
+    history_start_at,history_end_at,history_time_unknown)
+    SELECT p_user_id,v_uid,v_server,p_pool,min(timestamp),max(timestamp),COALESCE(bool_or(timestamp IS NULL),false)
+    FROM public.history WHERE user_id=p_user_id AND COALESCE(NULLIF(btrim(game_uid),''),'legacy')=v_uid
+      AND server_scope=v_server AND pool_id=p_pool ON CONFLICT DO NOTHING;
+END;
+$$;
+
+CREATE FUNCTION public.capture_manual_statistics_scope() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+DECLARE v_manual BOOLEAN := TG_TABLE_NAME <> 'history';
+BEGIN
+  IF TG_TABLE_NAME = 'history' THEN
+    IF TG_OP <> 'INSERT' THEN v_manual := OLD.statistics_excluded; END IF;
+    IF TG_OP <> 'DELETE' THEN v_manual := v_manual OR NEW.statistics_excluded OR left(NEW.record_id, 7) = 'manual_'; END IF;
+  END IF;
+  IF v_manual THEN
+    IF TG_OP <> 'INSERT' THEN PERFORM public.mark_account_statistics_scope(OLD.user_id, OLD.game_uid, OLD.server_scope, OLD.pool_id); END IF;
+    IF TG_OP <> 'DELETE' THEN
+      IF TG_TABLE_NAME = 'history' THEN
+        -- server_scope is generated on production history; its new value is
+        -- not available until AFTER a BEFORE trigger has returned.
+        PERFORM public.mark_account_statistics_scope(NEW.user_id, NEW.game_uid,
+          COALESCE(NEW.server_scope, NULLIF(btrim(NEW.server_id),''), 'legacy'), NEW.pool_id);
+      ELSE
+        PERFORM public.mark_account_statistics_scope(NEW.user_id, NEW.game_uid, NEW.server_scope, NEW.pool_id);
+      END IF;
+    END IF;
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+CREATE TRIGGER capture_manual_statistics_scope BEFORE INSERT OR UPDATE OR DELETE ON public.history
+  FOR EACH ROW EXECUTE FUNCTION public.capture_manual_statistics_scope();
+CREATE TRIGGER capture_manual_statistics_scope BEFORE INSERT OR UPDATE OR DELETE ON public.account_data_workbench_entries
+  FOR EACH ROW EXECUTE FUNCTION public.capture_manual_statistics_scope();
+REVOKE ALL ON FUNCTION public.mark_account_statistics_scope(UUID,TEXT,TEXT,TEXT), public.capture_manual_statistics_scope()
+  FROM PUBLIC, anon, authenticated;
+
+CREATE FUNCTION public.mark_manual_history_insert() RETURNS TRIGGER
+LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN
+  IF left(NEW.record_id, 7) = 'manual_' THEN NEW.statistics_excluded := true; END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER mark_manual_history_insert BEFORE INSERT ON public.history
+  FOR EACH ROW EXECUTE FUNCTION public.mark_manual_history_insert();
+REVOKE ALL ON FUNCTION public.mark_manual_history_insert() FROM PUBLIC, anon, authenticated;
+
+-- Store only temporal boundaries, never excluded outcomes or pull counts.
+-- Deleting the manual row cannot remove evidence of a missing history interval.
+CREATE FUNCTION public.track_statistics_gap_bounds() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE v_rows TEXT;
+BEGIN
+  v_rows := CASE WHEN TG_OP='INSERT' THEN 'SELECT * FROM new_rows'
+    WHEN TG_OP='DELETE' THEN 'SELECT * FROM old_rows'
+    ELSE 'SELECT * FROM new_rows UNION ALL SELECT * FROM old_rows' END;
+  EXECUTE 'WITH bounds AS (SELECT user_id,COALESCE(NULLIF(btrim(game_uid),''''),''legacy'') AS game_uid,
+    COALESCE(server_scope,''legacy'') AS server_scope,pool_id,min(timestamp) AS first_at,max(timestamp) AS last_at,
+    bool_or(timestamp IS NULL) AS unknown_time FROM ('||v_rows||') r GROUP BY 1,2,3,4)
+    UPDATE public.account_statistics_exclusions e SET history_start_at=LEAST(e.history_start_at,b.first_at),
+      history_end_at=GREATEST(e.history_end_at,b.last_at),history_time_unknown=e.history_time_unknown OR b.unknown_time
+    FROM bounds b WHERE (e.user_id,e.game_uid,e.server_scope,e.pool_id)=(b.user_id,b.game_uid,b.server_scope,b.pool_id)
+      AND (e.history_start_at IS NULL OR b.first_at<e.history_start_at OR e.history_end_at IS NULL
+        OR b.last_at>e.history_end_at OR b.unknown_time AND NOT e.history_time_unknown)';
+  RETURN NULL;
+END;
+$$;
+CREATE TRIGGER statistics_gap_bounds_insert AFTER INSERT ON public.history REFERENCING NEW TABLE AS new_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION public.track_statistics_gap_bounds();
+CREATE TRIGGER statistics_gap_bounds_update AFTER UPDATE ON public.history REFERENCING NEW TABLE AS new_rows OLD TABLE AS old_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION public.track_statistics_gap_bounds();
+CREATE TRIGGER statistics_gap_bounds_delete AFTER DELETE ON public.history REFERENCING OLD TABLE AS old_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION public.track_statistics_gap_bounds();
+REVOKE ALL ON FUNCTION public.track_statistics_gap_bounds() FROM PUBLIC,anon,authenticated;
+
+-- The eligibility flag is owned by the server, never supplied as a user-editable field.
+DO $$ DECLARE v_definition TEXT; BEGIN
+  SELECT pg_get_functiondef('public.update_history_record_controlled(uuid,text,text,text,text,text,bigint,jsonb,text)'::regprocedure)
+    INTO v_definition;
+  IF position('edit_version = p_expected_version + 1' IN v_definition) = 0 THEN
+    RAISE EXCEPTION 'controlled_history_definition_changed';
+  END IF;
+  EXECUTE replace(v_definition, 'edit_version = p_expected_version + 1',
+    'statistics_excluded = true, edit_version = p_expected_version + 1');
+  SELECT pg_get_functiondef('public.read_account_data_workbench_context(uuid,text,text)'::regprocedure)
+    INTO v_definition;
+  IF position('h.updated_at' IN v_definition) = 0 THEN RAISE EXCEPTION 'workbench_context_definition_changed'; END IF;
+  EXECUTE replace(v_definition, 'h.updated_at', 'h.updated_at, (h.statistics_excluded OR EXISTS(
+    SELECT 1 FROM public.account_statistics_exclusions e WHERE e.user_id=h.user_id
+      AND e.game_uid=COALESCE(NULLIF(btrim(h.game_uid),''''),''legacy'')
+      AND e.server_scope=COALESCE(h.server_scope,''legacy'') AND e.pool_id=h.pool_id)) AS statistics_excluded');
+END $$;
+
+-- All existing SQL statistics use the same filtered view, including legacy
+-- rates, resources, ranks, contributor counts, catalogs and public trends.
+-- Only statistical readers are rewritten; import/edit/revert keep the real table.
+DO $$ DECLARE v_function RECORD; v_definition TEXT; BEGIN
+  FOR v_function IN SELECT p.oid, p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = ANY(ARRAY[
+      'get_global_stats', 'get_global_stats_cached', 'get_contributor_activity_stats',
+      'get_character_ranking_stats', 'get_character_ranking_stats_cached',
+      'get_user_ranking_stats', 'get_user_ranking_stats_cached',
+      'get_character_catalog_stats', 'get_character_catalog_stats_cached',
+      'get_pool_type_quota_stats', 'refresh_public_pool_analytics_cache',
+      'refresh_public_pool_trend_cache', 'invalidate_statistics_catalog', 'track_statistics_history'
+    ]) LOOP
+    v_definition := pg_get_functiondef(v_function.oid);
+    v_definition := regexp_replace(v_definition, '(\mFROM|\mJOIN)(\s+)(public\.)?history\M',
+      '\1\2public.statistics_history', 'gi');
+    IF v_function.proname IN ('get_character_catalog_stats','get_pool_type_quota_stats') THEN
+      v_definition := replace(v_definition,'public.statistics_history','public.statistics_copy_history');
+    END IF;
+    IF v_function.proname IN ('get_global_stats','refresh_public_pool_analytics_cache') THEN
+      IF position('six_star_pity AS MATERIALIZED' IN v_definition)=0 THEN
+        RAISE EXCEPTION 'legacy_pity_definition_changed: %',v_function.proname;
+      END IF;
+      v_definition := replace(v_definition,'WITH history_base AS MATERIALIZED',
+        'WITH trusted_pity AS MATERIALIZED (SELECT * FROM public.statistics_pity_intervals), history_base AS MATERIALIZED');
+      v_definition := replace(v_definition,'FROM public.statistics_history AS h',
+        'FROM public.statistics_history AS h LEFT JOIN trusted_pity ti ON ti.id=h.id AND ti.user_id=h.user_id');
+      v_definition := replace(v_definition,'h.record_id,',
+        'h.record_id, ti.six_star_pity AS statistics_six_star_pity, ti.five_star_pity AS statistics_five_star_pity,');
+      IF v_function.proname='get_global_stats' THEN
+        v_definition := replace(v_definition,'hb.record_id,','hb.record_id, hb.statistics_six_star_pity, hb.statistics_five_star_pity,');
+        v_definition := regexp_replace(v_definition,'(\n\s*)record_id,','\1record_id, statistics_six_star_pity, statistics_five_star_pity,','g');
+        v_definition := replace(v_definition,'pool_id, user_id, rarity,',
+          'pool_id, user_id, statistics_six_star_pity, statistics_five_star_pity, rarity,');
+      END IF;
+      v_definition := regexp_replace(v_definition,
+        'LEAST\(\s*rn - COALESCE\(LAG\(rn\) OVER \(PARTITION BY pool_id, user_id ORDER BY rn\), 0\),\s*80\s*\) AS pity',
+        'statistics_six_star_pity AS pity','g');
+      v_definition := regexp_replace(v_definition,
+        'LEAST\(\s*rn - COALESCE\(LAG\(rn\) OVER \(PARTITION BY pool_id, user_id ORDER BY rn\), 0\),\s*10\s*\) AS pity',
+        'statistics_five_star_pity AS pity','g');
+      IF position('statistics_six_star_pity AS pity' IN v_definition)=0
+        OR position('LEFT JOIN trusted_pity' IN v_definition)=0 THEN RAISE EXCEPTION 'legacy_pity_expression_changed'; END IF;
+      v_definition := regexp_replace(v_definition,'(FROM six_star_pity\s*)(\),\s*\w*distribution)',
+        '\1 WHERE pity IS NOT NULL \2','g');
+      IF v_function.proname='get_global_stats' THEN
+        v_definition := replace(v_definition,'COALESCE(gap.avg_pity, 0)','gap.avg_pity');
+        v_definition := regexp_replace(v_definition,'COALESCE\((tps_\w+\.avg_pity), 0\)','\1','g');
+        v_definition := replace(v_definition,'''avgPity'', gap.avg_pity,',
+          '''statisticsContinuity'', json_build_object(''unknownInheritedIntervalCount'',
+            (SELECT count(*) FROM trusted_pity WHERE six_star_pity IS NULL AND id IN
+              (SELECT id FROM public.statistics_history WHERE rarity=6))), ''avgPity'', gap.avg_pity,');
+      END IF;
+    END IF;
+    -- Scope invalidation has already removed its old contribution before the
+    -- manual row change; neither side of that change may contribute again.
+    v_definition := replace(v_definition, 'FROM new_rows', 'FROM new_rows r WHERE NOT statistics_excluded
+      AND NOT public.account_pool_statistics_excluded(r.user_id,r.game_uid,r.server_scope,r.pool_id)');
+    v_definition := replace(v_definition, 'FROM old_rows', 'FROM old_rows r WHERE NOT statistics_excluded
+      AND NOT public.account_pool_statistics_excluded(r.user_id,r.game_uid,r.server_scope,r.pool_id)');
+    IF v_function.proname = 'track_statistics_history' THEN
+      -- An already-excluded edit or addition cannot dirty statistical samples
+      -- or accelerate the worker cadence. Exclusion invalidation subtracts
+      -- the entire prior scope contribution separately.
+      v_definition := replace(v_definition, 'v_activity_source text;', 'v_activity_source text; v_has_eligible boolean;');
+      IF position('v_has_eligible boolean' IN v_definition) = 0 THEN RAISE EXCEPTION 'statistics_tracker_definition_changed'; END IF;
+      v_definition := regexp_replace(v_definition, '(END IF;)(\s*)(-- Ownership|EXECUTE)',
+        '\1\2EXECUTE ''SELECT EXISTS(SELECT 1 FROM (''||v_sql||'') changes)'' INTO v_has_eligible;' || chr(10)
+          || '  IF NOT v_has_eligible THEN RETURN NULL; END IF;' || chr(10) || '  \3');
+      IF position('INTO v_has_eligible;' IN v_definition) = 0 THEN RAISE EXCEPTION 'statistics_tracker_body_changed'; END IF;
+    END IF;
+    EXECUTE v_definition;
+  END LOOP;
+END $$;
+
+CREATE FUNCTION public.invalidate_account_statistics_exclusions() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+BEGIN
+  IF to_regclass('public.statistics_jobs') IS NULL OR NOT EXISTS(SELECT 1 FROM inserted_exclusions) THEN RETURN NULL; END IF;
+  -- This runs BEFORE the corresponding manual history change. Scan only the
+  -- newly excluded account scopes, subtracting their old contribution once.
+  WITH accounts AS (SELECT DISTINCT user_id, game_uid, server_scope FROM inserted_exclusions),
+  affected AS (
+    SELECT pool_id FROM inserted_exclusions
+    UNION SELECT h.pool_id FROM public.statistics_history h JOIN accounts a ON h.user_id=a.user_id
+      AND COALESCE(NULLIF(btrim(h.game_uid),''),'legacy')=a.game_uid AND COALESCE(h.server_scope,'legacy')=a.server_scope
+  ), deltas AS (
+    SELECT e.pool_id, -count(h.id) FILTER (WHERE h.special_type IS DISTINCT FROM 'gift' AND h.rarity IN (4,5,6)
+      AND nullif(btrim(h.game_uid),'') IS NOT NULL AND h.timestamp>to_timestamp(0)) AS delta
+    FROM inserted_exclusions e LEFT JOIN public.history h ON h.user_id=e.user_id
+      AND COALESCE(NULLIF(btrim(h.game_uid),''),'legacy')=e.game_uid
+      AND COALESCE(h.server_scope,'legacy')=e.server_scope AND h.pool_id=e.pool_id AND NOT h.statistics_excluded
+    GROUP BY e.pool_id
+  ), scope_deltas AS (
+    SELECT 'pool:'||a.pool_id AS scope_key, COALESCE(d.delta,0) AS delta FROM affected a LEFT JOIN deltas d USING(pool_id)
+    UNION ALL SELECT m.scope_key, sum(COALESCE(d.delta,0)) FROM public.statistics_group_members() m
+      JOIN affected a USING(pool_id) LEFT JOIN deltas d USING(pool_id) GROUP BY m.scope_key
+  )
+  INSERT INTO public.statistics_jobs(scope_key,total_pulls)
+    SELECT scope_key,delta FROM scope_deltas WHERE scope_key IS NOT NULL ORDER BY scope_key
+    ON CONFLICT(scope_key) DO UPDATE SET revision=statistics_jobs.revision+1,
+      total_pulls=GREATEST(0,statistics_jobs.total_pulls+EXCLUDED.total_pulls);
+  INSERT INTO public.statistics_jobs(scope_key)
+    SELECT DISTINCT 'owner:'||user_id FROM inserted_exclusions ORDER BY 1
+    ON CONFLICT(scope_key) DO UPDATE SET revision=statistics_jobs.revision+1;
+  UPDATE public.statistics_jobs SET revision=revision+1 WHERE scope_key IN
+    ('global_summary','character_ranking','character_catalog','public_analytics');
+  RETURN NULL;
+END;
+$$;
+CREATE TRIGGER invalidate_account_statistics_exclusions AFTER INSERT ON public.account_statistics_exclusions
+  REFERENCING NEW TABLE AS inserted_exclusions FOR EACH STATEMENT
+  EXECUTE FUNCTION public.invalidate_account_statistics_exclusions();
+REVOKE ALL ON FUNCTION public.invalidate_account_statistics_exclusions() FROM PUBLIC, anon, authenticated;
+
+CREATE FUNCTION public.invalidate_statistics_gap_updates() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+BEGIN
+  IF to_regclass('public.statistics_jobs') IS NULL THEN RETURN NULL; END IF;
+  WITH changed AS (
+    SELECT n.* FROM new_gaps n JOIN old_gaps o USING(user_id,game_uid,server_scope,pool_id)
+    WHERE (n.history_start_at,n.history_end_at,n.history_time_unknown)
+      IS DISTINCT FROM (o.history_start_at,o.history_end_at,o.history_time_unknown)
+  ), affected AS (
+    SELECT pool_id FROM changed UNION SELECT h.pool_id FROM public.statistics_history h JOIN changed c
+      ON h.user_id=c.user_id AND COALESCE(NULLIF(btrim(h.game_uid),''),'legacy')=c.game_uid AND h.server_scope=c.server_scope
+  ), scopes AS (
+    SELECT 'pool:'||pool_id AS scope_key FROM affected UNION SELECT m.scope_key
+      FROM public.statistics_group_members() m JOIN affected a USING(pool_id)
+    UNION SELECT 'owner:'||user_id FROM changed
+    UNION SELECT scope_key FROM public.statistics_jobs WHERE scope_key IN
+      ('global_summary','character_ranking','character_catalog','public_analytics') AND EXISTS(SELECT 1 FROM changed)
+  )
+  INSERT INTO public.statistics_jobs(scope_key) SELECT scope_key FROM scopes ORDER BY scope_key
+    ON CONFLICT(scope_key) DO UPDATE SET revision=statistics_jobs.revision+1;
+  RETURN NULL;
+END;
+$$;
+CREATE TRIGGER invalidate_statistics_gap_updates AFTER UPDATE ON public.account_statistics_exclusions
+  REFERENCING NEW TABLE AS new_gaps OLD TABLE AS old_gaps FOR EACH STATEMENT
+  EXECUTE FUNCTION public.invalidate_statistics_gap_updates();
+REVOKE ALL ON FUNCTION public.invalidate_statistics_gap_updates() FROM PUBLIC,anon,authenticated;
+
+-- Only stored counts need an initial pass; payloads are recomputed by the
+-- existing scheduled worker. The schema version prevents serving old samples.
+DO $$ BEGIN
+  IF to_regclass('public.statistics_jobs') IS NOT NULL THEN
+    INSERT INTO public.statistics_jobs(scope_key, total_pulls)
+      SELECT 'pool:' || p.pool_id, count(h.id) FILTER (WHERE h.special_type IS DISTINCT FROM 'gift'
+        AND h.rarity IN (4,5,6) AND nullif(btrim(h.game_uid::text),'') IS NOT NULL AND h.timestamp > to_timestamp(0))
+      FROM public.get_app_visible_pools() p LEFT JOIN public.statistics_history h ON h.pool_id = p.pool_id
+      GROUP BY p.pool_id
+      ON CONFLICT(scope_key) DO UPDATE SET total_pulls = EXCLUDED.total_pulls;
+    IF to_regprocedure('public.statistics_group_members()') IS NOT NULL THEN
+      INSERT INTO public.statistics_jobs(scope_key, total_pulls)
+        SELECT g.scope_key, count(h.id) FILTER (WHERE h.special_type IS DISTINCT FROM 'gift'
+          AND h.rarity IN (4,5,6) AND nullif(btrim(h.game_uid::text),'') IS NOT NULL AND h.timestamp > to_timestamp(0))
+        FROM public.statistics_group_keys() g(scope_key)
+        LEFT JOIN public.statistics_group_members() m ON m.scope_key = g.scope_key
+        LEFT JOIN public.statistics_history h ON h.pool_id = m.pool_id GROUP BY g.scope_key
+        ON CONFLICT(scope_key) DO UPDATE SET total_pulls = EXCLUDED.total_pulls;
+    END IF;
+    UPDATE public.statistics_jobs SET revision = revision + 1, computed_at = NULL,
+      next_refresh_at = now(), retry_at = NULL WHERE true;
+  END IF;
+  IF to_regclass('public.personal_analysis_owner_state') IS NOT NULL THEN
+    UPDATE public.personal_analysis_owner_state SET history_revision = history_revision + 1,
+      analysis_schema_version = GREATEST(analysis_schema_version, 5),
+      dirty_since = COALESCE(dirty_since, now()), last_error = NULL, next_attempt_at = NULL;
+    UPDATE public.personal_analysis_scope_state SET history_revision = history_revision + 1,
+      analysis_schema_version = GREATEST(analysis_schema_version, 5),
+      dirty_since = COALESCE(dirty_since, now()), last_error = NULL, next_attempt_at = NULL;
+  END IF;
+END $$;
+ALTER TABLE public.personal_analysis_owner_state ALTER COLUMN analysis_schema_version SET DEFAULT 5;
+ALTER TABLE public.personal_analysis_scope_state ALTER COLUMN analysis_schema_version SET DEFAULT 5;
+CREATE FUNCTION public.enforce_personal_analysis_schema_v5() RETURNS TRIGGER
+LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN NEW.analysis_schema_version := GREATEST(COALESCE(NEW.analysis_schema_version, 5), 5); RETURN NEW; END;
+$$;
+CREATE TRIGGER enforce_personal_analysis_owner_schema_v5 BEFORE INSERT ON public.personal_analysis_owner_state
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_personal_analysis_schema_v5();
+CREATE TRIGGER enforce_personal_analysis_scope_schema_v5 BEFORE INSERT ON public.personal_analysis_scope_state
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_personal_analysis_schema_v5();
+REVOKE ALL ON FUNCTION public.enforce_personal_analysis_schema_v5() FROM PUBLIC, anon, authenticated;
+DELETE FROM public.stats_cache WHERE cache_key LIKE 'global_stats%' OR cache_key LIKE 'character_ranking%'
+  OR cache_key LIKE 'character_catalog%' OR cache_key LIKE 'user_ranking%';
+DO $$ BEGIN
+  IF to_regclass('public.public_pool_analytics_cache') IS NOT NULL THEN DELETE FROM public.public_pool_analytics_cache WHERE true; END IF;
+  IF to_regclass('public.public_pool_trend_cache') IS NOT NULL THEN DELETE FROM public.public_pool_trend_cache WHERE true; END IF;
+END $$;
+NOTIFY pgrst, 'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026101400_exclude_manual_statistics.sql
+
+-- >>> BEGIN MIGRATION: active/2026101401_incremental_account_data_revisions.sql
+-- One current dataset; five reversible transactions within 180 days, stored as JSON field deltas.
+BEGIN;
+
+CREATE TABLE public.account_data_revisions (
+  id BIGSERIAL PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  transaction_id BIGINT NOT NULL,
+  parent_id BIGINT,
+  kind TEXT NOT NULL DEFAULT 'change' CHECK (kind IN ('change', 'revert')),
+  target_id BIGINT,
+  request_id UUID,
+  preview_token TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+  operation_count INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(user_id, transaction_id),
+  UNIQUE(user_id, request_id)
+);
+CREATE INDEX account_data_revisions_owner_idx ON public.account_data_revisions(user_id, id DESC);
+CREATE INDEX account_data_revisions_expiry_idx ON public.account_data_revisions(created_at);
+CREATE INDEX IF NOT EXISTS account_revision_history_row_idx ON public.history(user_id, id);
+CREATE TABLE public.account_data_revision_deltas (
+  revision_id BIGINT NOT NULL REFERENCES public.account_data_revisions(id) ON DELETE CASCADE,
+  ordinal BIGSERIAL NOT NULL,
+  entity TEXT NOT NULL CHECK (entity IN ('history', 'supplement')),
+  row_key TEXT NOT NULL,
+  game_uid TEXT NOT NULL,
+  server_scope TEXT NOT NULL,
+  operation TEXT NOT NULL CHECK (operation IN ('insert', 'update', 'delete')),
+  row_version BIGINT NOT NULL,
+  delta JSONB NOT NULL,
+  PRIMARY KEY(revision_id, ordinal)
+);
+ALTER TABLE public.account_data_revisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.account_data_revision_deltas ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.account_data_revisions, public.account_data_revision_deltas FROM PUBLIC, anon, authenticated, service_role;
+
+-- Remove only derived/version fields. Their values are regenerated after a revert.
+CREATE FUNCTION public.account_revision_content(p_entity TEXT, p_row JSONB) RETURNS JSONB
+LANGUAGE sql IMMUTABLE SET search_path = pg_catalog, public AS $$
+  SELECT CASE WHEN p_entity = 'history' THEN p_row - ARRAY['edit_version','updated_at','pity','batch_id']
+    ELSE p_row - ARRAY['revision','updated_at'] END;
+$$;
+
+-- Compare object fields and array elements; a single acquisition edit does not copy the whole ledger.
+CREATE FUNCTION public.account_revision_diff(p_before JSONB, p_after JSONB, p_path TEXT[] DEFAULT ARRAY[]::TEXT[])
+RETURNS JSONB LANGUAGE plpgsql IMMUTABLE SET search_path = pg_catalog, public AS $$
+DECLARE v_key TEXT; v_index INTEGER; v_length INTEGER; v_result JSONB := '[]';
+BEGIN
+  IF p_before IS NOT DISTINCT FROM p_after THEN RETURN v_result; END IF;
+  IF jsonb_typeof(p_before) = 'object' AND jsonb_typeof(p_after) = 'object' THEN
+    FOR v_key IN SELECT key FROM jsonb_object_keys(p_before || p_after) key ORDER BY key LOOP
+      v_result := v_result || public.account_revision_diff(p_before->v_key, p_after->v_key, p_path || v_key);
+    END LOOP;
+    RETURN v_result;
+  END IF;
+  IF jsonb_typeof(p_before) = 'array' AND jsonb_typeof(p_after) = 'array' THEN
+    v_length := GREATEST(jsonb_array_length(p_before), jsonb_array_length(p_after));
+    IF v_length = 0 THEN RETURN v_result; END IF;
+    -- Undo appended values from the tail, undo removed values in ascending order.
+    FOR v_index IN SELECT n FROM generate_series(0, v_length - 1) n
+      ORDER BY CASE WHEN jsonb_array_length(p_after) > jsonb_array_length(p_before) THEN -n ELSE n END LOOP
+      v_result := v_result || public.account_revision_diff(p_before->v_index, p_after->v_index, p_path || v_index::TEXT);
+    END LOOP;
+    RETURN v_result;
+  END IF;
+  RETURN jsonb_build_array(jsonb_build_object('path', to_jsonb(p_path),
+    'beforeExists', p_before IS NOT NULL, 'before', p_before,
+    'afterExists', p_after IS NOT NULL, 'after', p_after));
+END;
+$$;
+
+CREATE FUNCTION public.account_revision_inverse(p_row JSONB, p_delta JSONB) RETURNS JSONB
+LANGUAGE plpgsql IMMUTABLE SET search_path = pg_catalog, public AS $$
+DECLARE v_patch JSONB; v_path TEXT[]; v_exists BOOLEAN; v_expected JSONB;
+BEGIN
+  FOR v_patch IN SELECT value FROM jsonb_array_elements(p_delta) LOOP
+    SELECT COALESCE(array_agg(value), ARRAY[]::TEXT[]) INTO v_path FROM jsonb_array_elements_text(v_patch->'path');
+    v_exists := (v_patch->>'afterExists')::BOOLEAN;
+    v_expected := v_patch->'after';
+    IF (p_row #> v_path) IS NOT DISTINCT FROM NULL AND v_exists
+      OR (p_row #> v_path) IS DISTINCT FROM NULL AND NOT v_exists
+      OR v_exists AND (p_row #> v_path) IS DISTINCT FROM v_expected THEN
+      RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'account_revision_conflict';
+    END IF;
+    IF cardinality(v_path) = 0 THEN
+      p_row := CASE WHEN (v_patch->>'beforeExists')::BOOLEAN THEN v_patch->'before' ELSE NULL END;
+    ELSIF (v_patch->>'beforeExists')::BOOLEAN THEN
+      p_row := jsonb_set(p_row, v_path, v_patch->'before', true);
+    ELSE
+      p_row := p_row #- v_path;
+    END IF;
+  END LOOP;
+  RETURN p_row;
+END;
+$$;
+
+CREATE FUNCTION public.capture_account_data_revision() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+DECLARE v_before JSONB; v_after JSONB; v_row JSONB; v_entity TEXT; v_delta JSONB;
+  v_owner UUID; v_id BIGINT; v_parent BIGINT; v_created BOOLEAN := false;
+BEGIN
+  v_entity := CASE WHEN TG_TABLE_NAME = 'history' THEN 'history' ELSE 'supplement' END;
+  v_before := CASE WHEN TG_OP <> 'INSERT' THEN public.account_revision_content(v_entity, to_jsonb(OLD)) END;
+  v_after := CASE WHEN TG_OP <> 'DELETE' THEN public.account_revision_content(v_entity, to_jsonb(NEW)) END;
+  v_delta := public.account_revision_diff(v_before, v_after);
+  IF v_delta = '[]'::JSONB THEN RETURN NULL; END IF;
+  v_row := COALESCE(v_after, v_before); v_owner := (v_row->>'user_id')::UUID;
+  -- Cascade removal of an owner must never recreate a revision for that deleted owner.
+  IF NOT EXISTS(SELECT 1 FROM public.profiles WHERE id = v_owner) THEN RETURN NULL; END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('account-revisions:' || v_owner::TEXT, 0));
+  SELECT id INTO v_id FROM public.account_data_revisions WHERE user_id = v_owner AND transaction_id = txid_current();
+  IF NOT FOUND THEN
+    SELECT id INTO v_parent FROM public.account_data_revisions WHERE user_id = v_owner ORDER BY id DESC LIMIT 1;
+    INSERT INTO public.account_data_revisions(user_id, transaction_id, parent_id, kind, target_id, request_id, preview_token)
+      VALUES(v_owner, txid_current(), v_parent,
+        CASE WHEN NULLIF(current_setting('app.account_revert_target', true), '') IS NULL THEN 'change' ELSE 'revert' END,
+        NULLIF(current_setting('app.account_revert_target', true), '')::BIGINT,
+        NULLIF(current_setting('app.account_revert_request', true), '')::UUID,
+        NULLIF(current_setting('app.account_revert_token', true), '')) RETURNING id INTO v_id;
+    v_created := true;
+  END IF;
+  INSERT INTO public.account_data_revision_deltas(revision_id, entity, row_key, game_uid, server_scope, operation, row_version, delta)
+    VALUES(v_id, v_entity, v_row->>'id',
+      COALESCE(NULLIF(btrim(v_row->>'game_uid'), ''), 'legacy'), COALESCE(v_row->>'server_scope', 'legacy'), lower(TG_OP),
+      GREATEST(COALESCE((to_jsonb(OLD)->>'edit_version')::BIGINT, (to_jsonb(OLD)->>'revision')::BIGINT, 1),
+        COALESCE((to_jsonb(NEW)->>'edit_version')::BIGINT, (to_jsonb(NEW)->>'revision')::BIGINT, 1)), v_delta);
+  UPDATE public.account_data_revisions SET operation_count = operation_count + 1 WHERE id = v_id;
+  IF v_created THEN
+    -- Indexed owner scan; at most five transactions retain payloads. Old metadata is also bounded.
+    DELETE FROM public.account_data_revision_deltas d USING public.account_data_revisions r
+      WHERE d.revision_id = r.id AND r.user_id = v_owner AND
+      (r.created_at < clock_timestamp() - interval '180 days' OR r.id NOT IN
+        (SELECT id FROM public.account_data_revisions WHERE user_id = v_owner ORDER BY id DESC LIMIT 5));
+    DELETE FROM public.account_data_revisions WHERE user_id = v_owner AND created_at < clock_timestamp() - interval '180 days';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+CREATE TRIGGER zz_capture_history_revision AFTER INSERT OR UPDATE OR DELETE ON public.history
+  FOR EACH ROW EXECUTE FUNCTION public.capture_account_data_revision();
+CREATE TRIGGER zz_capture_supplement_revision AFTER INSERT OR UPDATE OR DELETE ON public.account_data_workbench_entries
+  FOR EACH ROW EXECUTE FUNCTION public.capture_account_data_revision();
+
+-- The new journal already records these writes. Keep legacy audit reads without writing a second payload copy.
+CREATE FUNCTION public.skip_duplicate_account_audit() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+BEGIN
+  IF EXISTS(SELECT 1 FROM public.account_data_revisions WHERE user_id = NEW.user_id AND transaction_id = txid_current()) THEN RETURN NULL; END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER skip_duplicate_workbench_audit BEFORE INSERT ON public.account_data_workbench_audit
+  FOR EACH ROW EXECUTE FUNCTION public.skip_duplicate_account_audit();
+CREATE TRIGGER skip_duplicate_history_audit BEFORE INSERT ON public.history_change_log
+  FOR EACH ROW EXECUTE FUNCTION public.skip_duplicate_account_audit();
+
+CREATE FUNCTION public.list_account_data_revisions(p_user_id UUID) RETURNS JSONB
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+DECLARE v_items JSONB; v_head TEXT;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'service_role_required'; END IF;
+  SELECT r.id::TEXT INTO v_head FROM public.account_data_revisions r WHERE r.user_id = p_user_id ORDER BY r.id DESC LIMIT 1;
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('id', r.id::TEXT, 'parentId', r.parent_id::TEXT, 'kind', r.kind,
+    'createdAt', r.created_at, 'expiresAt', r.created_at + interval '180 days', 'operationCount', r.operation_count,
+    'revertible', r.created_at >= clock_timestamp() - interval '180 days' AND EXISTS
+      (SELECT 1 FROM public.account_data_revision_deltas WHERE revision_id = r.id),
+    'scopes', COALESCE((SELECT jsonb_agg(s) FROM (SELECT DISTINCT game_uid AS "gameUid", server_scope AS "serverScope"
+      FROM public.account_data_revision_deltas WHERE revision_id = r.id) s), '[]'::JSONB)) ORDER BY r.id DESC), '[]'::JSONB)
+    INTO v_items FROM (SELECT * FROM public.account_data_revisions WHERE user_id = p_user_id ORDER BY id DESC LIMIT 5) r;
+  RETURN jsonb_build_object('headId', v_head, 'versions', v_items, 'limit', 5, 'retentionDays', 180);
+END;
+$$;
+
+-- A transient plan holds only touched rows; it is never persisted in the database or returned to the browser.
+CREATE FUNCTION public.plan_account_data_revert(p_user_id UUID, p_target_id BIGINT) RETURNS JSONB
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+DECLARE v_target public.account_data_revisions%ROWTYPE; v_head BIGINT; v_ids BIGINT[]; v_item RECORD;
+  v_rows JSONB := '{}'; v_initial JSONB := '{}'; v_versions JSONB := '{}'; v_key TEXT; v_row JSONB; v_current JSONB;
+  v_scope JSONB; v_summaries JSONB := '[]'; v_result JSONB;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'service_role_required'; END IF;
+  SELECT * INTO v_target FROM public.account_data_revisions WHERE id = p_target_id AND user_id = p_user_id;
+  IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'account_revision_not_found'; END IF;
+  SELECT array_agg(id ORDER BY id DESC), max(id) INTO v_ids, v_head FROM
+    (SELECT id FROM public.account_data_revisions WHERE user_id = p_user_id ORDER BY id DESC LIMIT 5) latest;
+  IF NOT p_target_id = ANY(v_ids) OR v_target.created_at < clock_timestamp() - interval '180 days'
+    OR EXISTS(SELECT 1 FROM public.account_data_revisions r WHERE user_id = p_user_id AND id >= p_target_id
+      AND NOT EXISTS(SELECT 1 FROM public.account_data_revision_deltas d WHERE d.revision_id = r.id)) THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'account_revision_expired';
+  END IF;
+  FOR v_item IN SELECT d.* FROM public.account_data_revision_deltas d JOIN public.account_data_revisions r ON r.id = d.revision_id
+    WHERE r.user_id = p_user_id AND r.id >= p_target_id ORDER BY r.id DESC, d.ordinal DESC LOOP
+    v_key := v_item.entity || ':' || v_item.row_key;
+    IF NOT v_initial ? v_key THEN
+      IF v_item.entity = 'history' THEN SELECT public.account_revision_content('history', to_jsonb(h)) INTO v_current
+        FROM public.history h WHERE h.user_id = p_user_id AND h.id = v_item.row_key::BIGINT;
+      ELSE SELECT public.account_revision_content('supplement', to_jsonb(e)) INTO v_current
+        FROM public.account_data_workbench_entries e WHERE e.user_id = p_user_id AND e.id = v_item.row_key::UUID;
+      END IF;
+      v_initial := v_initial || jsonb_build_object(v_key, v_current);
+      v_rows := v_rows || jsonb_build_object(v_key, v_current);
+    END IF;
+    v_versions := v_versions || jsonb_build_object(v_key, GREATEST(COALESCE((v_versions->>v_key)::BIGINT, 0), v_item.row_version));
+    v_row := NULLIF(v_rows->v_key, 'null'::JSONB);
+    v_row := public.account_revision_inverse(v_row, v_item.delta);
+    v_rows := v_rows || jsonb_build_object(v_key, v_row);
+  END LOOP;
+  FOR v_key, v_row IN SELECT key, value FROM jsonb_each(v_rows) LOOP
+    v_current := NULLIF(v_initial->v_key, 'null'::JSONB); v_row := NULLIF(v_row, 'null'::JSONB);
+    IF v_current IS NOT DISTINCT FROM v_row THEN CONTINUE; END IF;
+    v_scope := COALESCE(v_current, v_row);
+    v_summaries := v_summaries || jsonb_build_array(jsonb_build_object('entity', split_part(v_key, ':', 1),
+      'operation', CASE WHEN v_row IS NULL THEN 'delete' WHEN v_current IS NULL THEN 'restore' ELSE 'update' END,
+      'gameUid', v_scope->>'game_uid', 'serverScope', v_scope->>'server_scope',
+      'poolId', v_scope->>'pool_id', 'restoredPoolId', v_row->>'pool_id'));
+  END LOOP;
+  v_result := jsonb_build_object('headId', v_head::TEXT, 'targetId', p_target_id::TEXT,
+    'revisionCount', (SELECT count(*) FROM public.account_data_revisions WHERE user_id = p_user_id AND id >= p_target_id),
+    'changes', v_summaries, 'rows', v_rows, 'initial', v_initial, 'rowVersions', v_versions);
+  RETURN v_result || jsonb_build_object('token', md5(v_result::TEXT));
+END;
+$$;
+
+CREATE FUNCTION public.preview_account_data_revert(p_user_id UUID, p_target_id BIGINT) RETURNS JSONB
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+BEGIN RETURN public.plan_account_data_revert(p_user_id, p_target_id) - ARRAY['rows', 'initial', 'rowVersions']; END;
+$$;
+
+CREATE FUNCTION public.revert_account_data_revision(p_user_id UUID, p_target_id BIGINT, p_token TEXT, p_request_id UUID) RETURNS JSONB
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
+SET lock_timeout = '5s' SET statement_timeout = '50s' AS $$
+DECLARE v_plan JSONB; v_prior public.account_data_revisions%ROWTYPE; v_key TEXT; v_row JSONB; v_current JSONB;
+  v_history public.history%ROWTYPE; v_entry public.account_data_workbench_entries%ROWTYPE;
+  v_new_id BIGINT; v_scope RECORD; v_count INTEGER := 0; v_columns TEXT;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'service_role_required'; END IF;
+  IF p_request_id IS NULL OR p_token IS NULL OR p_token !~ '^[0-9a-f]{32}$' THEN
+    RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'account_revision_preview_required'; END IF;
+  -- Same table order as controlled workspace writes; retry and context checks share the write transaction.
+  LOCK TABLE public.history IN SHARE ROW EXCLUSIVE MODE;
+  LOCK TABLE public.account_data_workbench_entries IN SHARE ROW EXCLUSIVE MODE;
+  PERFORM pg_advisory_xact_lock(hashtextextended('account-revisions:' || p_user_id::TEXT, 0));
+  SELECT * INTO v_prior FROM public.account_data_revisions WHERE user_id = p_user_id AND request_id = p_request_id;
+  IF FOUND THEN
+    IF v_prior.target_id IS DISTINCT FROM p_target_id OR v_prior.preview_token IS DISTINCT FROM p_token THEN
+      RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'account_revision_request_conflict'; END IF;
+    RETURN jsonb_build_object('revisionId', v_prior.id::TEXT, 'targetId', p_target_id::TEXT, 'changed', v_prior.operation_count, 'replayed', true);
+  END IF;
+  v_plan := public.plan_account_data_revert(p_user_id, p_target_id);
+  IF v_plan->>'token' IS DISTINCT FROM p_token THEN RAISE EXCEPTION USING ERRCODE = '40001', MESSAGE = 'account_revision_context_changed'; END IF;
+  IF jsonb_array_length(v_plan->'changes') = 0 THEN RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'account_revision_no_changes'; END IF;
+  PERFORM set_config('app.account_revert_target', p_target_id::TEXT, true);
+  PERFORM set_config('app.account_revert_request', p_request_id::TEXT, true);
+  PERFORM set_config('app.account_revert_token', p_token, true);
+  FOR v_key, v_row IN SELECT key, value FROM jsonb_each(v_plan->'rows') LOOP
+    v_current := NULLIF(v_plan->'initial'->v_key, 'null'::JSONB); v_row := NULLIF(v_row, 'null'::JSONB);
+    IF v_current IS NOT DISTINCT FROM v_row THEN CONTINUE; END IF;
+    IF split_part(v_key, ':', 1) = 'history' THEN
+      IF v_row IS NULL THEN DELETE FROM public.history WHERE user_id = p_user_id AND id = (v_current->>'id')::BIGINT;
+      ELSE
+        v_history := jsonb_populate_record(NULL::public.history, v_row);
+        IF v_current IS NULL THEN
+          v_history.edit_version := (v_plan->'rowVersions'->>v_key)::BIGINT + 1; v_history.updated_at := clock_timestamp(); v_history.pity := 0;
+          INSERT INTO public.history SELECT v_history.*;
+        ELSE
+          SELECT string_agg(quote_ident(attname), ',' ORDER BY attnum) INTO v_columns FROM pg_attribute
+            WHERE attrelid = 'public.history'::regclass AND attnum > 0 AND NOT attisdropped AND attgenerated = ''
+              AND attname NOT IN ('id', 'user_id', 'record_id', 'edit_version', 'updated_at', 'pity', 'batch_id');
+          EXECUTE format('UPDATE public.history SET (%s) = (SELECT %s FROM jsonb_populate_record(NULL::public.history,$1)),
+            edit_version = edit_version + 1, updated_at = clock_timestamp() WHERE user_id = $2 AND id = $3', v_columns, v_columns)
+            USING v_row, p_user_id, (v_row->>'id')::BIGINT;
+        END IF;
+      END IF;
+    ELSE
+      IF v_row IS NULL THEN DELETE FROM public.account_data_workbench_entries WHERE user_id = p_user_id AND id = (v_current->>'id')::UUID;
+      ELSE
+        v_entry := jsonb_populate_record(NULL::public.account_data_workbench_entries, v_row);
+        IF v_current IS NULL THEN
+          v_entry.revision := (v_plan->'rowVersions'->>v_key)::INTEGER + 1; v_entry.updated_at := clock_timestamp();
+          INSERT INTO public.account_data_workbench_entries SELECT v_entry.*;
+        ELSE
+          UPDATE public.account_data_workbench_entries SET pool_id = v_entry.pool_id, kind = v_entry.kind,
+            source = v_entry.source, derivation = v_entry.derivation, "values" = v_entry."values",
+            time_precision = v_entry.time_precision, deleted_at = v_entry.deleted_at,
+            revision = revision + 1, updated_at = clock_timestamp()
+          WHERE user_id = p_user_id AND id = v_entry.id;
+        END IF;
+      END IF;
+    END IF;
+    v_count := v_count + 1;
+  END LOOP;
+  -- Recompute only the affected pools, once each; do not journal derived pity updates.
+  FOR v_scope IN SELECT DISTINCT row->>'game_uid' AS game_uid, row->>'server_scope' AS server_scope, row->>'pool_id' AS pool_id
+    FROM (SELECT value AS row FROM jsonb_each(v_plan->'initial') UNION ALL SELECT value FROM jsonb_each(v_plan->'rows')) touched
+    WHERE jsonb_typeof(row) = 'object' AND row ? 'record_id' LOOP
+    PERFORM public.recompute_history_scope(p_user_id, v_scope.game_uid, v_scope.server_scope, v_scope.pool_id);
+  END LOOP;
+  SELECT id INTO v_new_id FROM public.account_data_revisions WHERE user_id = p_user_id AND transaction_id = txid_current();
+  PERFORM set_config('app.account_revert_target', '', true); PERFORM set_config('app.account_revert_request', '', true);
+  PERFORM set_config('app.account_revert_token', '', true);
+  RETURN jsonb_build_object('revisionId', v_new_id::TEXT, 'targetId', p_target_id::TEXT, 'changed', v_count, 'replayed', false);
+END;
+$$;
+
+-- Expired validations lose full request copies, while hashes and compact receipts keep retries idempotent.
+ALTER TABLE public.account_data_workbench_validations ADD COLUMN request_digest TEXT;
+UPDATE public.account_data_workbench_validations SET request_digest = md5(request::TEXT);
+CREATE FUNCTION public.compact_workbench_validation() RETURNS TRIGGER
+LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN NEW.request_digest := md5(NEW.request::TEXT); END IF;
+  IF NEW.consumed_at IS NOT NULL THEN NEW.request := '{}'::JSONB; NEW.operations := '{}'::JSONB; END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER compact_workbench_validation BEFORE INSERT OR UPDATE ON public.account_data_workbench_validations
+  FOR EACH ROW EXECUTE FUNCTION public.compact_workbench_validation();
+UPDATE public.account_data_workbench_validations SET request = '{}', operations = '{}' WHERE consumed_at IS NOT NULL;
+DO $$ DECLARE v_function TEXT; BEGIN
+  SELECT pg_get_functiondef('public.commit_account_data_workbench_workspace(uuid,uuid,text,jsonb,text)'::regprocedure) INTO v_function;
+  IF position('v_token.request IS DISTINCT FROM p_request' IN v_function) = 0 THEN
+    RAISE EXCEPTION 'workbench_commit_definition_changed: review the request digest migration before applying';
+  END IF;
+  v_function := replace(v_function, 'v_token.request IS DISTINCT FROM p_request',
+    'v_token.request_digest IS DISTINCT FROM md5(p_request::TEXT)');
+  EXECUTE v_function;
+END $$;
+
+CREATE FUNCTION public.prune_account_data_revisions() RETURNS INTEGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+DECLARE v_count INTEGER;
+BEGIN
+  DELETE FROM public.account_data_revisions WHERE created_at < clock_timestamp() - interval '180 days';
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  DELETE FROM public.account_data_workbench_validations WHERE consumed_at IS NULL AND expires_at < clock_timestamp();
+  RETURN v_count;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.account_revision_content(TEXT,JSONB), public.account_revision_diff(JSONB,JSONB,TEXT[]),
+  public.account_revision_inverse(JSONB,JSONB), public.capture_account_data_revision(), public.skip_duplicate_account_audit(),
+  public.plan_account_data_revert(UUID,BIGINT), public.list_account_data_revisions(UUID), public.preview_account_data_revert(UUID,BIGINT),
+  public.revert_account_data_revision(UUID,BIGINT,TEXT,UUID), public.prune_account_data_revisions(), public.compact_workbench_validation()
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.list_account_data_revisions(UUID), public.preview_account_data_revert(UUID,BIGINT),
+  public.revert_account_data_revision(UUID,BIGINT,TEXT,UUID), public.prune_account_data_revisions() TO service_role;
+
+DO $$ BEGIN
+  IF EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    PERFORM cron.schedule('prune-account-data-revisions', '17 3 * * *', 'SELECT public.prune_account_data_revisions()');
+  END IF;
+END $$;
+COMMIT;
+-- <<< END MIGRATION: active/2026101401_incremental_account_data_revisions.sql
+
+-- >>> BEGIN MIGRATION: active/2026101402_restore_revisions_generated_history.sql
+-- Restore deleted history without assigning database-generated columns.
+BEGIN;
+DO $$
+DECLARE v_definition TEXT;
+BEGIN
+  SELECT pg_get_functiondef('public.revert_account_data_revision(uuid,bigint,text,uuid)'::regprocedure)
+    INTO v_definition;
+  IF position('INSERT INTO public.history SELECT v_history.*;' IN v_definition)=0 THEN
+    RAISE EXCEPTION 'revision_restore_definition_changed';
+  END IF;
+  v_definition := replace(v_definition,'INSERT INTO public.history SELECT v_history.*;',
+    'SELECT string_agg(quote_ident(attname), '','' ORDER BY attnum) INTO v_columns FROM pg_attribute
+      WHERE attrelid = ''public.history''::regclass AND attnum > 0 AND NOT attisdropped AND attgenerated = '''';
+    EXECUTE format(''INSERT INTO public.history(%s) SELECT %s FROM jsonb_populate_record(NULL::public.history,$1)'',
+      v_columns,v_columns) USING to_jsonb(v_history);');
+  EXECUTE v_definition;
+END;
+$$;
+NOTIFY pgrst, 'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026101402_restore_revisions_generated_history.sql
+
+-- >>> BEGIN MIGRATION: active/2026101403_bound_statistics_pity_interval_work.sql
+-- Avoid matching every pair of records in a large account's pity scope.
+-- Previous reset positions and timestamps are obtained in one window pass.
+BEGIN;
+CREATE OR REPLACE VIEW public.statistics_pity_intervals WITH (security_barrier=true) AS
+WITH catalog AS MATERIALIZED (
+  SELECT p.pool_id,p.start_time,p.end_time,public.statistics_pity_scope(p) AS pity_scope FROM public.pools p
+), numbered AS MATERIALIZED (
+  SELECT h.id,h.user_id,COALESCE(NULLIF(btrim(h.game_uid),''),'legacy') AS game_uid,h.server_scope,
+    h.pool_id,h.rarity,h.timestamp,p.pity_scope,
+    row_number() OVER (PARTITION BY h.user_id,h.game_uid,h.server_scope,p.pity_scope
+      ORDER BY h.timestamp,CASE WHEN h.seq_id ~ '^[0-9]+$' THEN h.seq_id::numeric END,h.id) AS rn
+  FROM public.statistics_history h JOIN catalog p ON p.pool_id=h.pool_id
+  WHERE h.special_type IS DISTINCT FROM 'gift' AND h.is_free IS NOT TRUE
+    AND h.rarity IN (4,5,6) AND h.timestamp>to_timestamp(0) AND nullif(btrim(h.game_uid),'') IS NOT NULL
+), resets AS MATERIALIZED (
+  SELECT *,max(rn) FILTER(WHERE rarity=6) OVER w AS previous_six,
+    max(rn) FILTER(WHERE rarity>=5) OVER w AS previous_five,
+    max(timestamp) FILTER(WHERE rarity=6) OVER w AS previous_six_at,
+    max(timestamp) FILTER(WHERE rarity>=5) OVER w AS previous_five_at
+  FROM numbered WINDOW w AS (PARTITION BY user_id,game_uid,server_scope,pity_scope
+    ORDER BY rn ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)
+), gaps AS MATERIALIZED (
+  SELECT e.*,p.pity_scope,
+    COALESCE(LEAST(e.history_start_at,p.start_time),'-infinity'::timestamptz) AS starts,
+    CASE WHEN e.history_time_unknown THEN 'infinity'::timestamptz
+      ELSE COALESCE(GREATEST(e.history_end_at,p.end_time),'infinity'::timestamptz) END AS ends
+  FROM public.account_statistics_exclusions e LEFT JOIN catalog p ON p.pool_id=e.pool_id
+)
+SELECT r.id,r.user_id,r.pool_id,
+  CASE WHEN r.rarity=6 AND NOT EXISTS(SELECT 1 FROM gaps g WHERE g.user_id=r.user_id
+    AND g.game_uid=r.game_uid AND g.server_scope=r.server_scope AND (g.pity_scope=r.pity_scope OR g.pity_scope IS NULL)
+    AND g.starts<=r.timestamp AND (r.previous_six_at IS NULL OR g.ends>=r.previous_six_at))
+    THEN r.rn-COALESCE(r.previous_six,0) END AS six_star_pity,
+  CASE WHEN r.rarity>=5 AND NOT EXISTS(SELECT 1 FROM gaps g WHERE g.user_id=r.user_id
+    AND g.game_uid=r.game_uid AND g.server_scope=r.server_scope AND (g.pity_scope=r.pity_scope OR g.pity_scope IS NULL)
+    AND g.starts<=r.timestamp AND (r.previous_five_at IS NULL OR g.ends>=r.previous_five_at))
+    THEN r.rn-COALESCE(r.previous_five,0) END AS five_star_pity
+FROM resets r WHERE r.rarity>=5;
+NOTIFY pgrst, 'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026101403_bound_statistics_pity_interval_work.sql
+
+-- >>> BEGIN MIGRATION: active/2026101408_fix_pool_catalog_safe_updates.sql
+-- Explicit predicates keep catalog invalidation compatible with safeupdate.
+-- Every owner/scope must still be invalidated: catalog ordering can affect
+-- inherited resources even when the changed pool contains no stored history.
+BEGIN;
+CREATE OR REPLACE FUNCTION public.invalidate_personal_analysis_after_pool_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' AND (
+    OLD.pool_id, OLD.name, OLD.name_en, OLD.type, OLD.locked, OLD.user_id,
+    OLD.up_character, OLD.is_limited_weapon, OLD.featured_characters,
+    OLD.description, OLD.banner_url, OLD.start_time, OLD.end_time,
+    OLD.extra_subtype, OLD.extra_rule_profile, OLD.extra_series_key, OLD.extra_series_phase
+  ) IS NOT DISTINCT FROM (
+    NEW.pool_id, NEW.name, NEW.name_en, NEW.type, NEW.locked, NEW.user_id,
+    NEW.up_character, NEW.is_limited_weapon, NEW.featured_characters,
+    NEW.description, NEW.banner_url, NEW.start_time, NEW.end_time,
+    NEW.extra_subtype, NEW.extra_rule_profile, NEW.extra_series_key, NEW.extra_series_phase
+  ) THEN
+    RETURN NULL;
+  END IF;
+  UPDATE public.personal_analysis_owner_state
+  SET history_revision=history_revision+1,
+      dirty_since=COALESCE(dirty_since,statement_timestamp()),last_error=NULL
+  WHERE user_id IS NOT NULL;
+  UPDATE public.personal_analysis_scope_state
+  SET history_revision=history_revision+1,
+      dirty_since=COALESCE(dirty_since,statement_timestamp()),last_error=NULL
+  WHERE user_id IS NOT NULL;
+  RETURN NULL;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.invalidate_personal_analysis_after_pool_change()
+  FROM PUBLIC,anon,authenticated;
+
+-- Saving a name must not delete/reinsert the identical roster. Every roster
+-- row change otherwise updates its parent pool and repeats catalog recounts.
+DO $$
+DECLARE definition TEXT; original TEXT; replacement TEXT;
+BEGIN
+  definition:=replace(pg_get_functiondef('public.admin_save_pool_catalog(text,jsonb,jsonb,jsonb,jsonb,uuid)'::regprocedure),chr(13),'');
+  original:=$old$  DELETE FROM public.pool_characters WHERE pool_id = p_pool_id;
+  INSERT INTO public.pool_characters (pool_id, character_id, is_up)
+  SELECT p_pool_id, r->>'character_id', COALESCE((r->>'is_up')::BOOLEAN, FALSE)
+  FROM jsonb_array_elements(p_pool_character_rows) r;$old$;
+  replacement:=$new$  IF EXISTS (
+    SELECT character_id,is_up FROM public.pool_characters WHERE pool_id=p_pool_id
+    EXCEPT SELECT r->>'character_id',COALESCE((r->>'is_up')::BOOLEAN,FALSE)
+      FROM jsonb_array_elements(p_pool_character_rows) r
+  ) OR EXISTS (
+    SELECT r->>'character_id',COALESCE((r->>'is_up')::BOOLEAN,FALSE)
+      FROM jsonb_array_elements(p_pool_character_rows) r
+    EXCEPT SELECT character_id,is_up FROM public.pool_characters WHERE pool_id=p_pool_id
+  ) THEN
+    DELETE FROM public.pool_characters WHERE pool_id = p_pool_id;
+    INSERT INTO public.pool_characters (pool_id, character_id, is_up)
+    SELECT p_pool_id, r->>'character_id', COALESCE((r->>'is_up')::BOOLEAN, FALSE)
+    FROM jsonb_array_elements(p_pool_character_rows) r;
+  END IF;$new$;
+  IF position(original IN definition)=0 THEN RAISE EXCEPTION 'pool_catalog_roster_save_definition_changed';END IF;
+  EXECUTE replace(definition,original,replacement);
+END $$;
+COMMIT;
+-- <<< END MIGRATION: active/2026101408_fix_pool_catalog_safe_updates.sql
+
+-- >>> BEGIN MIGRATION: active/2026101409_scope_pool_catalog_invalidation.sql
+-- Display metadata is read from the catalog, not an analysis input. Catalog
+-- writes invalidate only referenced accounts and their cross-pool dependencies.
+BEGIN;
+CREATE FUNCTION public.statistics_pool_group(p_pool JSONB) RETURNS TEXT
+LANGUAGE sql IMMUTABLE SET search_path=pg_catalog,public AS $$
+  SELECT CASE
+    WHEN p_pool->>'type' IN ('limited','limited_character') THEN 'group:limited'
+    WHEN p_pool->>'type' IN ('weapon','limited_weapon') THEN
+      CASE WHEN (p_pool->>'is_limited_weapon')::BOOLEAN IS DISTINCT FROM FALSE
+        THEN 'group:weapon_limited' ELSE 'group:weapon_standard' END
+    WHEN p_pool->>'type'='extra' AND p_pool->>'extra_subtype'='reconstruction'
+      AND p_pool->>'extra_rule_profile'='reconstruction_weapon_v1' THEN 'group:extra:reconstruction_claim'
+    WHEN p_pool->>'type'='extra' AND p_pool->>'extra_subtype' IN ('reconstruction','reconstruction_claim')
+      THEN 'group:extra:'||(p_pool->>'extra_subtype') END;
+$$;
+
+CREATE FUNCTION public.invalidate_pool_statistics_dependencies(
+  p_pool_ids TEXT[], p_recount_ids TEXT[] DEFAULT '{}', p_group_keys TEXT[] DEFAULT '{}'
+) RETURNS VOID
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE accounts JSONB; dependent_ids TEXT[];
+BEGIN
+  SELECT COALESCE(jsonb_agg(to_jsonb(a)),'[]'::JSONB) INTO accounts FROM (
+    SELECT DISTINCT h.user_id,btrim(h.game_uid::TEXT) AS game_uid,h.server_scope
+    FROM public.history h WHERE h.pool_id=ANY(p_pool_ids)
+  ) a;
+  SELECT ARRAY(SELECT DISTINCT pool_id FROM (
+    SELECT unnest(p_pool_ids) AS pool_id
+    UNION
+    SELECT d.pool_id FROM jsonb_to_recordset(accounts) a(user_id UUID,game_uid TEXT,server_scope TEXT)
+    CROSS JOIN LATERAL public.statistics_account_pool_dependencies(a.user_id,a.game_uid,a.server_scope) d
+    WHERE NULLIF(a.game_uid,'') IS NOT NULL
+  ) dependencies WHERE NULLIF(pool_id,'') IS NOT NULL) INTO dependent_ids;
+
+  -- Retain the history trigger's owner -> scope lock order, and include private
+  -- manual/legacy accounts even when their rows are excluded from public data.
+  UPDATE public.personal_analysis_owner_state s
+  SET history_revision=s.history_revision+1,
+      dirty_since=COALESCE(s.dirty_since,statement_timestamp()),last_error=NULL
+  WHERE s.user_id IN (SELECT a.user_id FROM jsonb_to_recordset(accounts) a(user_id UUID));
+  UPDATE public.personal_analysis_scope_state s
+  SET history_revision=s.history_revision+1,
+      dirty_since=COALESCE(s.dirty_since,statement_timestamp()),last_error=NULL
+  WHERE EXISTS (SELECT 1 FROM jsonb_to_recordset(accounts) a(user_id UUID,game_uid TEXT,server_scope TEXT)
+    WHERE s.user_id=a.user_id
+      AND s.scope_game_uid=public.normalize_personal_analysis_game_uid(a.user_id,a.game_uid)
+      AND s.server_scope=COALESCE(NULLIF(btrim(a.server_scope),''),'legacy'));
+
+  -- Counts change only when identity/visibility changes; UP/roster edits never
+  -- recount history. New IDs start with their existing eligible rows.
+  INSERT INTO public.statistics_jobs(scope_key,total_pulls)
+    SELECT 'pool:'||p.pool_id,(SELECT count(*) FROM public.statistics_history h
+      WHERE h.pool_id=p.pool_id AND h.special_type IS DISTINCT FROM 'gift'
+        AND h.rarity IN (4,5,6) AND NULLIF(btrim(h.game_uid::TEXT),'') IS NOT NULL
+        AND h.timestamp>to_timestamp(0))
+    FROM public.get_app_visible_pools() p WHERE p.pool_id=ANY(p_recount_ids)
+    ON CONFLICT(scope_key) DO UPDATE SET total_pulls=EXCLUDED.total_pulls;
+  INSERT INTO public.statistics_jobs(scope_key)
+    SELECT 'pool:'||p.pool_id FROM public.get_app_visible_pools() p WHERE p.pool_id=ANY(dependent_ids)
+    ON CONFLICT(scope_key) DO NOTHING;
+  UPDATE public.statistics_jobs SET revision=revision+1
+    WHERE scope_key=ANY(ARRAY(SELECT 'pool:'||id FROM unnest(dependent_ids) id));
+  INSERT INTO public.statistics_jobs(scope_key,total_pulls)
+    SELECT g.scope_key,COALESCE(sum(j.total_pulls),0)::BIGINT
+    FROM public.statistics_group_keys() g(scope_key)
+    LEFT JOIN public.statistics_group_members() m ON m.scope_key=g.scope_key
+    LEFT JOIN public.statistics_jobs j ON j.scope_key='pool:'||m.pool_id
+    WHERE g.scope_key=ANY(p_group_keys) OR EXISTS (
+      SELECT 1 FROM public.statistics_group_members() affected
+      WHERE affected.scope_key=g.scope_key AND affected.pool_id=ANY(dependent_ids))
+    GROUP BY g.scope_key
+    ON CONFLICT(scope_key) DO UPDATE SET revision=statistics_jobs.revision+1,total_pulls=EXCLUDED.total_pulls;
+  INSERT INTO public.statistics_jobs(scope_key)
+    SELECT DISTINCT 'owner:'||a.user_id FROM jsonb_to_recordset(accounts) a(user_id UUID)
+    WHERE a.user_id IS NOT NULL ORDER BY 1
+    ON CONFLICT(scope_key) DO UPDATE SET revision=statistics_jobs.revision+1;
+  UPDATE public.statistics_jobs SET revision=revision+1 WHERE scope_key IN
+    ('global_summary','character_ranking','character_catalog','public_analytics');
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.invalidate_personal_analysis_after_pool_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE before_row JSONB; after_row JSONB; ids TEXT[]; recount TEXT[] := '{}'; boundary JSONB;
+BEGIN
+  before_row:=CASE WHEN TG_OP='INSERT' THEN NULL ELSE to_jsonb(OLD) END;
+  after_row:=CASE WHEN TG_OP='DELETE' THEN NULL ELSE to_jsonb(NEW) END;
+  IF TG_OP = 'UPDATE' AND (
+    OLD.pool_id, OLD.type, OLD.locked, OLD.user_id,
+    OLD.up_character, OLD.is_limited_weapon, OLD.featured_characters,
+    OLD.start_time, OLD.end_time, OLD.created_at, OLD.roster_status,
+    OLD.extra_subtype, OLD.extra_rule_profile, OLD.extra_series_key, OLD.extra_series_phase
+  ) IS NOT DISTINCT FROM (
+    NEW.pool_id, NEW.type, NEW.locked, NEW.user_id,
+    NEW.up_character, NEW.is_limited_weapon, NEW.featured_characters,
+    NEW.start_time, NEW.end_time, NEW.created_at, NEW.roster_status,
+    NEW.extra_subtype, NEW.extra_rule_profile, NEW.extra_series_key, NEW.extra_series_phase
+  ) THEN
+    RETURN NULL;
+  END IF;
+  ids:=ARRAY_REMOVE(ARRAY[before_row->>'pool_id',after_row->>'pool_id'],NULL);
+  IF TG_OP<>'UPDATE' OR (OLD.pool_id,OLD.locked,OLD.user_id) IS DISTINCT FROM
+      (NEW.pool_id,NEW.locked,NEW.user_id) THEN recount:=ids; END IF;
+  IF TG_OP<>'UPDATE' OR (OLD.pool_id,OLD.type,OLD.start_time,OLD.created_at,OLD.locked,OLD.user_id)
+      IS DISTINCT FROM (NEW.pool_id,NEW.type,NEW.start_time,NEW.created_at,NEW.locked,NEW.user_id) THEN
+    -- An empty new period can redirect an info book. Include neighbors at both
+    -- old and new positions, not every owner merely because the catalog changed.
+    FOR boundary IN SELECT value FROM jsonb_array_elements(jsonb_build_array(before_row,after_row))
+      WHERE value->>'type' IN ('limited','limited_character') LOOP
+      ids:=ids||ARRAY(SELECT p.pool_id FROM public.pools p
+        WHERE p.type IN ('limited','limited_character') AND NOT p.pool_id=ANY(ids)
+          AND COALESCE(p.start_time,p.created_at,to_timestamp(0)) IN (
+            (SELECT max(COALESCE(q.start_time,q.created_at,to_timestamp(0))) FROM public.pools q
+              WHERE q.type IN ('limited','limited_character') AND q.pool_id<>ALL(ARRAY_REMOVE(
+                ARRAY[before_row->>'pool_id',after_row->>'pool_id'],NULL))
+              AND COALESCE(q.start_time,q.created_at,to_timestamp(0))<=
+                COALESCE((boundary->>'start_time')::TIMESTAMPTZ,(boundary->>'created_at')::TIMESTAMPTZ,to_timestamp(0))),
+            (SELECT min(COALESCE(q.start_time,q.created_at,to_timestamp(0))) FROM public.pools q
+              WHERE q.type IN ('limited','limited_character') AND q.pool_id<>ALL(ARRAY_REMOVE(
+                ARRAY[before_row->>'pool_id',after_row->>'pool_id'],NULL))
+              AND COALESCE(q.start_time,q.created_at,to_timestamp(0))>=
+                COALESCE((boundary->>'start_time')::TIMESTAMPTZ,(boundary->>'created_at')::TIMESTAMPTZ,to_timestamp(0)))));
+    END LOOP;
+  END IF;
+  -- Reconstruction periods share a series pity chain. An empty/new phase or
+  -- series reassignment can change it without any history in the edited pool.
+  FOR boundary IN SELECT value FROM jsonb_array_elements(jsonb_build_array(before_row,after_row))
+    WHERE value->>'type'='extra' AND value->>'extra_rule_profile'='reconstruction_character_v1'
+      AND NULLIF(btrim(value->>'extra_series_key'),'') IS NOT NULL LOOP
+    ids:=ids||ARRAY(SELECT p.pool_id FROM public.pools p WHERE p.type='extra'
+      AND p.extra_rule_profile=boundary->>'extra_rule_profile'
+      AND p.extra_series_key=boundary->>'extra_series_key' AND NOT p.pool_id=ANY(ids));
+  END LOOP;
+  PERFORM public.invalidate_pool_statistics_dependencies(ids,recount,
+    ARRAY_REMOVE(ARRAY[public.statistics_pool_group(before_row),public.statistics_pool_group(after_row)],NULL));
+  RETURN NULL;
+END;
+$$;
+-- The row trigger above replaces the unconditional statement-level recount.
+DROP TRIGGER statistics_pool_catalog ON public.pools;
+
+CREATE OR REPLACE FUNCTION public.invalidate_changed_pool_roster() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE id TEXT; status TEXT;
+BEGIN
+  IF TG_OP='UPDATE' AND (OLD.pool_id,OLD.character_id,OLD.is_up) IS NOT DISTINCT FROM
+      (NEW.pool_id,NEW.character_id,NEW.is_up) THEN RETURN NULL; END IF;
+  FOR id IN SELECT DISTINCT value FROM unnest(ARRAY_REMOVE(ARRAY[
+    CASE WHEN TG_OP='INSERT' THEN NULL ELSE OLD.pool_id END,
+    CASE WHEN TG_OP='DELETE' THEN NULL ELSE NEW.pool_id END],NULL)) value LOOP
+    status:=CASE WHEN EXISTS(SELECT 1 FROM public.pool_characters WHERE pool_id=id)
+      THEN 'partial' ELSE 'missing' END;
+    UPDATE public.pools SET roster_status=status WHERE pool_id=id AND roster_status IS DISTINCT FROM status;
+  END LOOP;
+  RETURN NULL;
+END;
+$$;
+
+CREATE FUNCTION public.invalidate_statistics_roster_changes() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE ids TEXT[];
+BEGIN
+  IF TG_OP='UPDATE' THEN
+    SELECT ARRAY(SELECT DISTINCT pool_id FROM (
+      (SELECT pool_id,character_id,is_up FROM old_roster EXCEPT SELECT pool_id,character_id,is_up FROM new_roster)
+      UNION (SELECT pool_id,character_id,is_up FROM new_roster EXCEPT SELECT pool_id,character_id,is_up FROM old_roster)
+    ) changed) INTO ids;
+  ELSIF TG_OP='DELETE' THEN SELECT ARRAY(SELECT DISTINCT pool_id FROM old_roster) INTO ids;
+  ELSE SELECT ARRAY(SELECT DISTINCT pool_id FROM new_roster) INTO ids; END IF;
+  IF cardinality(ids)>0 THEN PERFORM public.invalidate_pool_statistics_dependencies(ids); END IF;
+  RETURN NULL;
+END;
+$$;
+DROP TRIGGER statistics_pool_roster ON public.pool_characters;
+CREATE TRIGGER statistics_pool_roster_insert AFTER INSERT ON public.pool_characters
+  REFERENCING NEW TABLE AS new_roster FOR EACH STATEMENT EXECUTE FUNCTION public.invalidate_statistics_roster_changes();
+CREATE TRIGGER statistics_pool_roster_update AFTER UPDATE ON public.pool_characters
+  REFERENCING OLD TABLE AS old_roster NEW TABLE AS new_roster FOR EACH STATEMENT EXECUTE FUNCTION public.invalidate_statistics_roster_changes();
+CREATE TRIGGER statistics_pool_roster_delete AFTER DELETE ON public.pool_characters
+  REFERENCING OLD TABLE AS old_roster FOR EACH STATEMENT EXECUTE FUNCTION public.invalidate_statistics_roster_changes();
+REVOKE ALL ON FUNCTION public.statistics_pool_group(JSONB),
+  public.invalidate_pool_statistics_dependencies(TEXT[],TEXT[],TEXT[]),
+  public.invalidate_statistics_roster_changes(),public.invalidate_changed_pool_roster(),
+  public.invalidate_personal_analysis_after_pool_change()
+  FROM PUBLIC,anon,authenticated;
+NOTIFY pgrst,'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026101409_scope_pool_catalog_invalidation.sql
+
+-- >>> BEGIN MIGRATION: active/2026101410_fix_pool_roster_identifier_ambiguity.sql
+-- pools.id exists in production. Never reuse it as an unqualified PL/pgSQL
+-- variable: catalog saves with a changed roster otherwise fail with 42702.
+BEGIN;
+CREATE OR REPLACE FUNCTION public.invalidate_changed_pool_roster() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE v_pool_id TEXT; v_roster_status TEXT;
+BEGIN
+  IF TG_OP='UPDATE' AND (OLD.pool_id,OLD.character_id,OLD.is_up) IS NOT DISTINCT FROM
+      (NEW.pool_id,NEW.character_id,NEW.is_up) THEN RETURN NULL; END IF;
+  FOR v_pool_id IN SELECT DISTINCT changed.pool_id FROM unnest(ARRAY_REMOVE(ARRAY[
+    CASE WHEN TG_OP='INSERT' THEN NULL ELSE OLD.pool_id END,
+    CASE WHEN TG_OP='DELETE' THEN NULL ELSE NEW.pool_id END],NULL)) AS changed(pool_id) LOOP
+    v_roster_status:=CASE WHEN EXISTS(
+      SELECT 1 FROM public.pool_characters AS pc WHERE pc.pool_id=v_pool_id
+    ) THEN 'partial' ELSE 'missing' END;
+    UPDATE public.pools AS p SET roster_status=v_roster_status
+    WHERE p.pool_id=v_pool_id AND p.roster_status IS DISTINCT FROM v_roster_status;
+  END LOOP;
+  RETURN NULL;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.invalidate_changed_pool_roster() FROM PUBLIC,anon,authenticated;
+NOTIFY pgrst,'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026101410_fix_pool_roster_identifier_ambiguity.sql
+
+-- >>> BEGIN MIGRATION: active/2026101411_public_statistics_worker_contract.sql
+-- Publish the statistics-only RPC contract required by the public worker and
+-- pool catalog triggers. No private import executor or credentials are needed.
+-- CREATE OR REPLACE also supports installations with the earlier ops rollout.
+BEGIN;
+CREATE OR REPLACE FUNCTION public.statistics_account_pool_dependencies(
+  p_user_id UUID, p_game_uid TEXT, p_server_scope TEXT,
+  p_legacy_game BOOLEAN DEFAULT false, p_legacy_server BOOLEAN DEFAULT false
+) RETURNS TABLE(pool_id TEXT)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+BEGIN
+  IF p_user_id IS NULL THEN
+    RETURN QUERY SELECT DISTINCT h.pool_id FROM public.statistics_history h
+      WHERE h.user_id IS NULL
+        AND (CASE WHEN p_legacy_game THEN COALESCE(NULLIF(btrim(h.game_uid::text),''),'legacy')
+          ELSE btrim(h.game_uid::text) END)=p_game_uid
+        AND (CASE WHEN p_legacy_server THEN COALESCE(h.server_scope,'legacy')
+          ELSE h.server_scope END) IS NOT DISTINCT FROM p_server_scope;
+  ELSE
+    RETURN QUERY SELECT DISTINCT h.pool_id FROM public.statistics_history h
+      WHERE h.user_id=p_user_id
+        AND (CASE WHEN p_legacy_game THEN COALESCE(NULLIF(btrim(h.game_uid::text),''),'legacy')
+          ELSE btrim(h.game_uid::text) END)=p_game_uid
+        AND (CASE WHEN p_legacy_server THEN COALESCE(h.server_scope,'legacy')
+          ELSE h.server_scope END) IS NOT DISTINCT FROM p_server_scope;
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.read_statistics_history_page(
+  p_pool_ids TEXT[],p_after BIGINT,p_upper BIGINT,p_limit INTEGER DEFAULT 1000
+) RETURNS JSONB
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=pg_catalog,public
+SET max_parallel_workers_per_gather=0 AS $$
+DECLARE result JSONB;
+BEGIN
+  IF p_pool_ids IS NULL OR p_after IS NULL OR p_after<0 OR p_upper IS NULL OR p_upper<p_after
+    OR p_limit IS NULL OR p_limit<1 OR p_limit>1000 THEN
+    RAISE EXCEPTION USING ERRCODE='22023',MESSAGE='invalid_statistics_page_parameters';
+  END IF;
+  SELECT coalesce(jsonb_agg(page ORDER BY page.id),'[]'::jsonb) INTO result FROM (
+    SELECT h.id,h.record_id,h.user_id,h.game_uid,h.server_scope,h.server_id,h.region,
+      h.pool_id,h.pool_version,h.character_id,h.character_name,h.rarity,h.timestamp,h.seq_id,
+      h.is_new,h.is_free,h.is_info_book,h.special_type
+    FROM public.history h
+    WHERE h.id>p_after AND h.id<=p_upper AND h.pool_id=ANY(p_pool_ids)
+      AND NOT h.statistics_excluded AND NOT EXISTS (
+        SELECT 1 FROM public.account_statistics_exclusions e WHERE e.user_id=h.user_id
+          AND e.game_uid=COALESCE(NULLIF(btrim(h.game_uid),''),'legacy')
+          AND e.server_scope=COALESCE(h.server_scope,'legacy') AND e.pool_id=h.pool_id
+      )
+    ORDER BY h.id LIMIT p_limit
+  ) page;
+  RETURN result;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.read_statistics_job_revisions() RETURNS JSONB
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+  SELECT coalesce(jsonb_object_agg(scope_key,revision::text),'{}'::jsonb)
+    FROM public.statistics_jobs WHERE scope_key LIKE 'pool:%' OR scope_key LIKE 'group:%';
+$$;
+
+ALTER TABLE public.statistics_jobs DROP CONSTRAINT statistics_jobs_refresh_minutes_check;
+ALTER TABLE public.statistics_jobs ADD CONSTRAINT statistics_jobs_refresh_minutes_check
+  CHECK (refresh_minutes IN (5,15,30,60));
+
+CREATE OR REPLACE FUNCTION public.claim_statistics_job(p_lease UUID) RETURNS JSONB
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
+DECLARE v_minutes INTEGER; v_rows10 BIGINT; v_rows60 BIGINT; v_users BIGINT; v_job public.statistics_jobs;
+BEGIN
+  SELECT coalesce(sum(changed_rows) FILTER (WHERE minute_at>=now()-interval '10 minutes'),0),
+    coalesce(sum(changed_rows),0),count(DISTINCT contributor_id) FILTER (WHERE minute_at>=now()-interval '10 minutes')
+    INTO v_rows10,v_rows60,v_users FROM public.statistics_activity WHERE minute_at>=now()-interval '60 minutes';
+  v_minutes:=CASE WHEN v_users>=5 OR v_rows10>=1000 THEN 15 WHEN v_rows60>0 THEN 30 ELSE 60 END;
+  DELETE FROM public.statistics_activity WHERE minute_at<now()-interval '65 minutes';
+  UPDATE public.statistics_jobs SET
+    refresh_minutes=CASE WHEN scope_key LIKE 'owner:%' AND v_minutes=15 THEN 5 ELSE v_minutes END,
+    next_refresh_at=coalesce(computed_at,now())+make_interval(mins=>
+      CASE WHEN scope_key LIKE 'owner:%' AND v_minutes=15 THEN 5 ELSE v_minutes END)
+    WHERE refresh_minutes IS DISTINCT FROM
+      CASE WHEN scope_key LIKE 'owner:%' AND v_minutes=15 THEN 5 ELSE v_minutes END
+      AND computed_at IS NOT NULL;
+  DELETE FROM public.statistics_jobs j WHERE
+    (scope_key LIKE 'pool:%' AND NOT EXISTS(SELECT 1 FROM public.get_app_visible_pools() p WHERE 'pool:'||p.pool_id=j.scope_key))
+    OR (scope_key LIKE 'group:%' AND NOT EXISTS(SELECT 1 FROM public.statistics_group_keys() g(scope_key) WHERE g.scope_key=j.scope_key))
+    OR (scope_key LIKE 'owner:%' AND NOT EXISTS(SELECT 1 FROM public.profiles p WHERE 'owner:'||p.id=j.scope_key));
+  DELETE FROM public.statistics_snapshots s WHERE NOT EXISTS(SELECT 1 FROM public.statistics_jobs j WHERE j.scope_key=s.scope_key);
+  UPDATE public.statistics_jobs SET next_refresh_at=now()+make_interval(mins=>refresh_minutes)
+    WHERE revision=published_revision AND scope_key<>'global_summary' AND next_refresh_at<=now();
+  SELECT * INTO v_job FROM public.statistics_jobs j
+    WHERE (revision<>published_revision OR scope_key='global_summary')
+      AND (computed_at IS NULL OR next_refresh_at<=now())
+      AND (lease_until IS NULL OR lease_until<now()) AND (retry_at IS NULL OR retry_at<=now())
+    ORDER BY next_refresh_at,CASE WHEN scope_key LIKE 'owner:%' THEN 2
+      WHEN scope_key LIKE 'pool:%' OR scope_key LIKE 'group:%' THEN 1 ELSE 0 END,scope_key
+    FOR UPDATE SKIP LOCKED LIMIT 1;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  IF v_job.scope_key LIKE 'owner:%' AND v_minutes=15 THEN v_minutes:=5; END IF;
+  UPDATE public.statistics_jobs SET lease_id=p_lease,lease_until=now()+interval '5 minutes',refresh_minutes=v_minutes
+    WHERE scope_key=v_job.scope_key;
+  RETURN jsonb_build_object('scopeKey',v_job.scope_key,'revision',v_job.revision,'refreshMinutes',v_minutes);
+END $$;
+
+DO $$
+DECLARE definition TEXT; signature TEXT;
+BEGIN
+  FOREACH signature IN ARRAY ARRAY[
+    'public.publish_statistics_snapshot(text,bigint,uuid,jsonb,text)',
+    'public.compute_and_publish_legacy_statistics(text,bigint,uuid,text)'
+  ] LOOP
+    definition:=replace(pg_get_functiondef(signature::regprocedure),chr(13),'');
+    IF position('retry_at=now()+make_interval(mins=>greatest(5,refresh_minutes))' IN definition)>0 THEN
+      CONTINUE;
+    END IF;
+    IF position('retry_at=now()+interval ''1 minute''' IN definition)=0 THEN
+      RAISE EXCEPTION 'statistics_conflict_retry_definition_changed: %',signature;
+    END IF;
+    EXECUTE replace(definition,'retry_at=now()+interval ''1 minute''',
+      'retry_at=now()+make_interval(mins=>greatest(5,refresh_minutes))');
+  END LOOP;
+END $$;
+
+REVOKE ALL ON FUNCTION public.statistics_account_pool_dependencies(UUID,TEXT,TEXT,BOOLEAN,BOOLEAN),
+  public.read_statistics_history_page(TEXT[],BIGINT,BIGINT,INTEGER),
+  public.read_statistics_job_revisions(),public.claim_statistics_job(UUID) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.statistics_account_pool_dependencies(UUID,TEXT,TEXT,BOOLEAN,BOOLEAN),
+  public.read_statistics_history_page(TEXT[],BIGINT,BIGINT,INTEGER),
+  public.read_statistics_job_revisions(),public.claim_statistics_job(UUID) TO service_role;
+
+UPDATE public.statistics_jobs SET refresh_minutes=15,
+  next_refresh_at=CASE WHEN computed_at IS NULL THEN next_refresh_at
+    ELSE greatest(next_refresh_at,computed_at+interval '15 minutes') END
+  WHERE scope_key NOT LIKE 'owner:%' AND refresh_minutes=5;
+NOTIFY pgrst,'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026101411_public_statistics_worker_contract.sql
 

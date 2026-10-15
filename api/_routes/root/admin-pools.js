@@ -4,7 +4,8 @@ import { requireSuperAdminUser } from '../../_lib/siteAuth.js';
 import { readCompletePoolRoster } from '../../_lib/poolRosterRead.js';
 import { buildManualCharacterId, buildManualPoolId } from '../../../src/utils/canonicalEntityUtils.js';
 import { resolvePoolCapabilities } from '../../../src/utils/poolCapabilities.js';
-import { isTargetSixStarHistoryRecord } from '../../../src/utils/poolScopedHistory.js';
+import { isReservedPoolTypeId } from '../../../shared/poolIdValidation.js';
+import { POOL_ROSTER_STATUSES, resolvePoolRosterStatus } from '../../../shared/poolRosterStatus.js';
 import {
   buildCharacterSelfAliasRows,
   buildPoolSelfAliasRows,
@@ -14,8 +15,6 @@ import {
   getCanonicalExtraPoolMetadata,
   getCanonicalExtraPoolSubtype,
 } from '../../../shared/extraPoolSubtype.js';
-
-const HISTORY_RECALCULATE_BATCH_SIZE = 50;
 
 function parseRequestBody(req) {
   if (!req.body) return {};
@@ -120,7 +119,7 @@ function normalizePoolCharacterRows(rows = [], characters = [], poolData = {}) {
     const character = byId.get(characterId);
     const isUp = poolType === 'extra'
       ? featuredIds.has(characterId) || featuredNames.has(normalizeName(character?.name))
-      : Boolean(row?.is_up) || (upCharacterName && normalizeName(character?.name) === upCharacterName);
+      : upCharacterName === characterId || (upCharacterName && normalizeName(character?.name) === upCharacterName);
 
     dedupedRows.set(characterId, {
       character_id: characterId,
@@ -129,6 +128,61 @@ function normalizePoolCharacterRows(rows = [], characters = [], poolData = {}) {
   });
 
   return Array.from(dedupedRows.values());
+}
+
+function validatePoolContract(poolData, rows, characters, body) {
+  const fail = (error, code) => ({ ok: false, error, code });
+  if (!normalizeName(poolData.name) || poolData.name.length > 120) {
+    return fail('卡池名称不能为空且不能超过 120 字', 'pool_name_invalid');
+  }
+  if (!['limited', 'weapon', 'standard', 'beginner', 'extra'].includes(poolData.type)) {
+    return fail('卡池类型无效', 'pool_type_invalid');
+  }
+  for (const field of ['start_time', 'end_time']) {
+    if (poolData[field] != null && poolData[field] !== '' && !Number.isFinite(Date.parse(poolData[field]))) {
+      return fail('卡池时间格式无效', 'pool_time_invalid');
+    }
+  }
+  if (poolData.start_time && poolData.end_time && Date.parse(poolData.start_time) >= Date.parse(poolData.end_time)) {
+    return fail('结束时间必须晚于开始时间', 'pool_time_range_invalid');
+  }
+  if (!POOL_ROSTER_STATUSES.includes(poolData.roster_status)) {
+    return fail('名单完整性状态无效', 'pool_roster_status_invalid');
+  }
+  if (poolData.roster_status === 'complete' && body.confirmRosterComplete !== true) {
+    return fail('请明确确认本期完整名单已核对', 'pool_roster_confirmation_required');
+  }
+  if (poolData.roster_status === 'missing' && rows.length > 0) {
+    return fail('已有名单请标记为不完整或确认完整', 'pool_roster_status_mismatch');
+  }
+  if (poolData.roster_status === 'partial' && rows.length === 0) {
+    return fail('尚未录入名单，请标记为名单缺失', 'pool_roster_status_mismatch');
+  }
+  const expectedType = poolData.type === 'weapon' || poolData.extra_rule_profile === 'reconstruction_weapon_v1'
+    ? 'weapon' : 'character';
+  const byId = new Map(characters.map((character) => [character.id, character]));
+  if (rows.some((row) => !byId.has(row.character_id) || byId.get(row.character_id).type !== expectedType)) {
+    return fail('名单包含未登记项目或对象类型与卡池不一致', 'pool_roster_entity_invalid');
+  }
+  if (poolData.roster_status === 'complete' && !rows.some((row) => Number(byId.get(row.character_id)?.rarity) === 6)) {
+    return fail('完整名单必须包含本期可获得的六星项目', 'pool_roster_complete_empty');
+  }
+  if (poolData.type !== 'extra') {
+    const up = normalizeName(poolData.up_character);
+    const upRows = rows.filter((row) => row.is_up);
+    if (poolData.featured_characters != null && (
+      !Array.isArray(poolData.featured_characters) || poolData.featured_characters.length > 0
+    )) {
+      return fail('普通卡池请使用单个 UP 项，不能配置附加寻访名单', 'pool_featured_not_allowed');
+    }
+    if (['standard', 'beginner'].includes(poolData.type) && up) {
+      return fail('常驻和新手卡池不能配置 UP 项', 'pool_up_not_allowed');
+    }
+    if (up && (upRows.length !== 1 || Number(byId.get(upRows[0].character_id)?.rarity) !== 6)) {
+      return fail('UP 项必须是名单中唯一匹配的已登记六星项目', 'pool_up_roster_invalid');
+    }
+  }
+  return validatePoolExtraContract(poolData, rows, characters);
 }
 
 function validatePoolExtraContract(poolData, poolCharacterRows, characters) {
@@ -343,7 +397,7 @@ async function upsertPoolWithAliases(adminClient, {
   aliasRows,
   poolCharacterRows = [],
 }) {
-  const { error } = await adminClient.rpc('admin_upsert_pool_with_aliases', {
+  const { error } = await adminClient.rpc('admin_save_pool_catalog', {
     p_pool_id: poolId,
     p_insert_payload: insertPayload,
     p_update_payload: updatePayload,
@@ -353,31 +407,10 @@ async function upsertPoolWithAliases(adminClient, {
   });
 
   if (!error) return;
-  if (error.code === 'PGRST202' || /admin_upsert_pool_with_aliases/i.test(error.message || '')) {
-    throw new Error('缺少数据库迁移 078，请先执行 078_harden_admin_entity_upsert_rpcs.sql');
+  if (error.code === 'PGRST202') {
+    throw new Error('缺少目录管理数据库迁移，请先执行 2026100912_admin_pool_catalog_roster_and_recalculation.sql');
   }
   throw error;
-}
-
-async function replacePoolCharacters(adminClient, poolId, rows = []) {
-  const { error: deleteError } = await adminClient
-    .from('pool_characters')
-    .delete()
-    .eq('pool_id', poolId);
-  if (deleteError) throw deleteError;
-  if (rows.length === 0) return;
-
-  const { error: insertError } = await adminClient
-    .from('pool_characters')
-    .upsert(
-      rows.map((row) => ({
-        pool_id: poolId,
-        character_id: row.character_id,
-        is_up: Boolean(row.is_up),
-      })),
-      { onConflict: 'pool_id,character_id' }
-    );
-  if (insertError) throw insertError;
 }
 
 async function handleGet(req, res, adminClient) {
@@ -458,21 +491,50 @@ async function handleCreateUpCharacter(res, adminClient, body) {
 async function handleSavePool(res, adminClient, authResult, body) {
   const poolData = normalizePoolExtraFields(body.poolData || body.pool_data || {});
   const editingPool = body.editingPool || body.editing_pool || null;
-  const characters = Array.isArray(body.characters) ? body.characters : [];
+  // Entity metadata is authoritative server data, never the browser's copy.
+  const characters = await loadCharacters(adminClient);
+  if (!Array.isArray(body.editingPoolCharacters)) {
+    return sendError(res, 400, '请提交已核对的卡池名单，可显式提交空名单', 'pool_roster_required');
+  }
   const editingPoolCharacters = Array.isArray(body.editingPoolCharacters)
     ? body.editingPoolCharacters
     : [];
+  if (editingPoolCharacters.some((row) => !normalizeName(row?.character_id))) {
+    return sendError(res, 400, '名单项目 ID 不能为空', 'pool_roster_entity_invalid');
+  }
+  poolData.name = normalizeName(poolData.name);
+  // Store a catalog name consistently, even when an administrator supplied its ID.
+  const resolveEntityName = (value) => {
+    const reference = normalizeName(value);
+    return characters.find((character) => character.id === reference)?.name || reference;
+  };
+  poolData.up_character = resolveEntityName(poolData.up_character) || null;
+  if (Array.isArray(poolData.featured_characters)) {
+    poolData.featured_characters = poolData.featured_characters.map(resolveEntityName);
+  }
+  poolData.roster_status = poolData.roster_status ?? resolvePoolRosterStatus(null, editingPoolCharacters);
   const poolCharacterRows = normalizePoolCharacterRows(editingPoolCharacters, characters, poolData);
-  const extraContract = validatePoolExtraContract(poolData, poolCharacterRows, characters);
+  const extraContract = validatePoolContract(poolData, poolCharacterRows, characters, body);
   if (!extraContract.ok) {
     return sendError(res, 400, extraContract.error, extraContract.code);
   }
 
-  if (editingPool) {
-    const targetPoolId = normalizeName(poolData.pool_id || editingPool.pool_id);
-    if (!targetPoolId) {
-      return sendError(res, 400, 'Pool ID is required', 'pool_id_required');
+  const targetPoolId = normalizeName(poolData.pool_id || editingPool?.pool_id) || (!editingPool && buildManualPoolId({
+    type: poolData.type, name: poolData.name, upCharacter: poolData.up_character,
+    startTime: poolData.start_time, endTime: poolData.end_time,
+  }));
+  if (!targetPoolId || !/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,199}$/u.test(targetPoolId) || isReservedPoolTypeId(targetPoolId)) {
+    return sendError(res, 400, '卡池 ID 无效或使用了类型保留字', 'pool_id_invalid');
     }
+  if (editingPool && normalizeName(editingPool.pool_id) !== targetPoolId) {
+    return sendError(res, 400, '已有卡池 ID 不可更改', 'pool_id_immutable');
+  }
+  const { data: existing, error: existingError } = await adminClient.from('pools').select('pool_id').eq('pool_id', targetPoolId);
+  if (existingError) throw existingError;
+  if (editingPool && !existing?.length) return sendError(res, 404, '卡池不存在', 'pool_not_found');
+  if (!editingPool && existing?.length) return sendError(res, 409, '卡池 ID 已存在', 'pool_id_exists');
+
+  if (editingPool) {
 
     await upsertPoolWithAliases(adminClient, {
       actorUserId: authResult.user.id,
@@ -490,7 +552,6 @@ async function handleSavePool(res, adminClient, authResult, body) {
       }),
       poolCharacterRows,
     });
-    await replacePoolCharacters(adminClient, targetPoolId, poolCharacterRows);
     return res.status(200).json({
       success: true,
       isNew: false,
@@ -499,13 +560,7 @@ async function handleSavePool(res, adminClient, authResult, body) {
     });
   }
 
-  const poolId = buildManualPoolId({
-    type: poolData.type,
-    name: poolData.name,
-    upCharacter: poolData.up_character,
-    startTime: poolData.start_time,
-    endTime: poolData.end_time,
-  });
+  const poolId = targetPoolId;
   const newPoolData = {
     ...poolData,
     user_id: authResult.user.id,
@@ -524,7 +579,6 @@ async function handleSavePool(res, adminClient, authResult, body) {
     }),
     poolCharacterRows,
   });
-  await replacePoolCharacters(adminClient, poolId, poolCharacterRows);
 
   return res.status(200).json({
     success: true,
@@ -534,50 +588,39 @@ async function handleSavePool(res, adminClient, authResult, body) {
   });
 }
 
-async function handleAddCharacterToPool(res, adminClient, body) {
+async function handleAddCharacterToPool(res, adminClient, authResult, body) {
   const poolId = normalizeName(body.poolId || body.pool_id);
   const characterId = normalizeName(body.characterId || body.character_id);
   if (!poolId || !characterId) {
     return sendError(res, 400, 'Pool ID and character ID are required', 'pool_character_required');
   }
 
-  const { error } = await adminClient
-    .from('pool_characters')
-    .upsert(
-      {
-        pool_id: poolId,
-        character_id: characterId,
-        is_up: Boolean(body.isUp || body.is_up),
-      },
-      { onConflict: 'pool_id,character_id' }
-    );
+  const { data, error } = await adminClient.from('pools').select('*').eq('pool_id', poolId);
   if (error) throw error;
-
-  return res.status(200).json({
-    success: true,
-    poolId,
-    characterId,
+  if (!data?.[0]) return sendError(res, 404, '卡池不存在', 'pool_not_found');
+  const rows = await loadPoolCharactersForEdit(adminClient, poolId);
+  return handleSavePool(res, adminClient, authResult, {
+    editingPool: data[0],
+    poolData: { ...data[0], roster_status: 'partial' },
+    editingPoolCharacters: [...rows.filter((row) => row.character_id !== characterId), { character_id: characterId }],
   });
 }
 
-async function handleRemoveCharacterFromPool(res, adminClient, body) {
+async function handleRemoveCharacterFromPool(res, adminClient, authResult, body) {
   const poolId = normalizeName(body.poolId || body.pool_id);
   const characterId = normalizeName(body.characterId || body.character_id);
   if (!poolId || !characterId) {
     return sendError(res, 400, 'Pool ID and character ID are required', 'pool_character_required');
   }
 
-  const { error } = await adminClient
-    .from('pool_characters')
-    .delete()
-    .eq('pool_id', poolId)
-    .eq('character_id', characterId);
+  const { data, error } = await adminClient.from('pools').select('*').eq('pool_id', poolId);
   if (error) throw error;
-
-  return res.status(200).json({
-    success: true,
-    poolId,
-    characterId,
+  if (!data?.[0]) return sendError(res, 404, '卡池不存在', 'pool_not_found');
+  const rows = (await loadPoolCharactersForEdit(adminClient, poolId)).filter((row) => row.character_id !== characterId);
+  return handleSavePool(res, adminClient, authResult, {
+    editingPool: data[0],
+    poolData: { ...data[0], roster_status: rows.length ? 'partial' : 'missing' },
+    editingPoolCharacters: rows,
   });
 }
 
@@ -605,7 +648,7 @@ function buildRecalculationPoolLookup(pools) {
 
 function calculateIsStandard(record, poolInfoMap) {
   const poolInfo = poolInfoMap.get(String(record.pool_id));
-  if (!poolInfo) return record.is_standard ?? false;
+  if (!poolInfo) return record.is_standard;
 
   const capabilities = resolvePoolCapabilities(poolInfo);
   if (!capabilities.isResolved) {
@@ -614,56 +657,73 @@ function calculateIsStandard(record, poolInfoMap) {
   if (capabilities.targetMode === 'none') {
     return true;
   }
-  return !isTargetSixStarHistoryRecord(record, poolInfo);
+  if (capabilities.targetMode === 'four-target-equal') return false;
+  if (capabilities.targetMode !== 'single-up') return record.is_standard;
+  const targetNames = new Set([
+    poolInfo.up_character,
+    ...(Array.isArray(poolInfo.up_character_aliases) ? poolInfo.up_character_aliases : []),
+  ].map(normalizeName).filter(Boolean));
+  if (!targetNames.size) return record.is_standard;
+  if (poolInfo.up_character_id && record.character_id) {
+    return poolInfo.up_character_id !== record.character_id;
+  }
+  const recordName = normalizeName(record.character_name || record.item_name);
+  if (!recordName) return record.is_standard;
+  return !targetNames.has(recordName);
 }
 
 async function handleRecalculateIsStandard(res, adminClient, body) {
-  const pools = Array.isArray(body.pools) ? body.pools : [];
-  if (pools.length === 0) {
-    return sendError(res, 400, '没有找到卡池信息，请先创建卡池', 'pools_required');
+  const mode = body.mode || 'preview';
+  if (!['preview', 'apply'].includes(mode)) {
+    return sendError(res, 400, '请选择预览或应用', 'recalculate_mode_invalid');
   }
-
-  const { data: records, error: fetchError } = await adminClient
-    .from('history')
-    .select('record_id, pool_id, rarity, character_name, item_name, is_standard')
-    .eq('rarity', 6);
+  if (mode === 'apply' && !body.previewToken) {
+    return sendError(res, 400, '请先预览全服重算范围', 'recalculate_preview_required');
+  }
+  const { data: snapshot, error: fetchError } = await adminClient.rpc('admin_pool_recalculation_snapshot');
   if (fetchError) throw fetchError;
-
-  if (!records || records.length === 0) {
-    return res.status(200).json({
-      success: true,
-      changedCount: 0,
-      message: '没有找到6星记录',
-    });
+  if (mode === 'apply' && snapshot.previewToken !== body.previewToken) {
+    return sendError(res, 409, '预览后卡池或记录已变化，请重新预览', 'recalculate_preview_stale');
   }
-
+  const { pools = [], records = [] } = snapshot;
   const poolInfoMap = buildRecalculationPoolLookup(pools);
   const updates = [];
   records.forEach((record) => {
     const nextIsStandard = calculateIsStandard(record, poolInfoMap);
     if (nextIsStandard !== record.is_standard) {
       updates.push({
+        id: record.id,
+        user_id: record.user_id,
+        game_uid: record.game_uid,
+        server_id: record.server_id,
+        pool_id: record.pool_id,
         record_id: record.record_id,
         is_standard: nextIsStandard,
       });
     }
   });
 
-  for (let index = 0; index < updates.length; index += HISTORY_RECALCULATE_BATCH_SIZE) {
-    const batch = updates.slice(index, index + HISTORY_RECALCULATE_BATCH_SIZE);
-    for (const update of batch) {
-      const { error: updateError } = await adminClient
-        .from('history')
-        .update({ is_standard: update.is_standard })
-        .eq('record_id', update.record_id);
-      if (updateError) {
-        throw updateError;
-      }
+  const scope = {
+    kind: 'all-users-six-star',
+    recordCount: records.length,
+    affectedPoolIds: [...new Set(updates.map((record) => record.pool_id))].sort(),
+    affectedUserCount: new Set(updates.map((record) => record.user_id)).size,
+  };
+  if (mode === 'apply') {
+    const { error } = await adminClient.rpc('admin_apply_pool_recalculation', {
+      p_preview_token: body.previewToken,
+      p_updates: updates,
+    });
+    if (error?.message?.includes('recalculate_preview_stale')) {
+      return sendError(res, 409, '预览后卡池或记录已变化，请重新预览', 'recalculate_preview_stale');
     }
+    if (error) throw error;
   }
-
   return res.status(200).json({
     success: true,
+    mode,
+    previewToken: snapshot.previewToken,
+    scope,
     changedCount: updates.length,
     ...(updates.length === 0 ? { message: '所有记录已是最新状态' } : {}),
   });
@@ -680,10 +740,10 @@ async function handlePost(req, res, adminClient, authResult) {
     return handleSavePool(res, adminClient, authResult, body);
   }
   if (action === 'addCharacterToPool') {
-    return handleAddCharacterToPool(res, adminClient, body);
+    return handleAddCharacterToPool(res, adminClient, authResult, body);
   }
   if (action === 'removeCharacterFromPool') {
-    return handleRemoveCharacterFromPool(res, adminClient, body);
+    return handleRemoveCharacterFromPool(res, adminClient, authResult, body);
   }
   if (action === 'recalculateIsStandard') {
     return handleRecalculateIsStandard(res, adminClient, body);
@@ -769,6 +829,9 @@ export default async function adminPoolsHandler(req, res) {
     }
     await handleDelete(req, res, adminClient);
   } catch (error) {
+    if (error?.message?.includes('pool_alias_conflict')) {
+      return sendError(res, 409, '卡池别名已关联其他卡池，请先核对别名归属', 'pool_alias_conflict');
+    }
     const code = req.method === 'GET'
       ? 'admin_pools_load_failed'
       : req.method === 'POST'

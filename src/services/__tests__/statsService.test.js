@@ -33,6 +33,14 @@ vi.mock('../../utils/storageUtils.js', () => ({
 import { normalizeGlobalStats } from '../statsService.js';
 
 describe('normalizeGlobalStats', () => {
+  it('retains metric-specific workbench data through normalization and cache serialization', () => {
+    const workbench = { status: 'ready', supplemental: { totalPulls: 80, sixStarCount: 1 }, rates: { sixStarNumerator: 3, sixStarDenominator: 180 }, coverage: { unknownFourStar: 1 } };
+    const normalized = normalizeGlobalStats({ totalPulls: 100, byType: {}, workbench });
+    expect(normalized.workbench).toEqual(workbench);
+    expect(JSON.parse(JSON.stringify(normalized)).workbench).toEqual(workbench);
+    expect(normalized.totalPulls).toBe(100);
+    expect(normalized.counts[4]).toBeUndefined();
+  });
   it('normalizes contributor activity and region summary fields', () => {
     const normalized = normalizeGlobalStats({
       totalPulls: 10,

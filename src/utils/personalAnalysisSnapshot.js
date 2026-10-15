@@ -32,6 +32,7 @@ import { getOverviewPoolBucket } from './dashboardOverviewPoolFilters.js';
 import { buildSimulatorInheritanceProjection } from '../features/simulator/inheritanceProjection.js';
 import { packInheritanceProjection } from '../../shared/simulator/historyCodec.js';
 import { getRecordPoolVersion } from '../../shared/poolVersion.js';
+import { prepareStatisticsContinuity } from './statisticsContinuity.js';
 
 const LEGACY_ACCOUNT_KEY = 'legacy';
 const GROUP_TYPES = ['all', 'extra', 'limited', 'standard', 'weapon_limited', 'weapon_standard', 'beginner'];
@@ -847,12 +848,22 @@ function buildRecentSixStars(history, poolManifest, resolveCharacter) {
 /**
  * 从已加载的数据构建可直接持久化的个人分析快照，不执行任何外部读取。
  */
-export function buildPersonalAnalysisSnapshots({ history = [], pools = [], characters = [], userId } = {}) {
+export function buildPersonalAnalysisSnapshots({ history = [], pools = [], characters = [], userId, workbenchEntries = [], statisticsExclusions = [] } = {}) {
   const historyArray = asArray(history);
   const poolsArray = asArray(pools);
   const charactersArray = asArray(characters);
   const ownedHistory = historyArray.filter((record) => record?.user_id === userId);
+  const ownedEntries = asArray(workbenchEntries).filter(entry => entry.user_id === userId && !entry.deleted_at && !entry.deletedAt);
+  const eligibleOwnedHistory = prepareStatisticsContinuity({ history: ownedHistory, pools: poolsArray,
+    entries: ownedEntries, exclusions: statisticsExclusions }).history;
+  const eligibleAccounts = Map.groupBy(eligibleOwnedHistory, getRecordAccountKey);
   const accountGroups = buildAccountGroups(ownedHistory);
+  ownedEntries.forEach(entry => {
+    const key = getRecordAccountKey(entry);
+    if (accountGroups.some(group => group.accountKey === key)) return;
+    const metadata = buildAccount(key, [entry]);
+    accountGroups.push({ ...metadata, records: [], recordCount: 0, latestRecordAt: null });
+  });
   const resolveCharacter = createSnapshotCharacterResolver(charactersArray);
 
   const accounts = accountGroups.map(toPublicAccount);
@@ -860,7 +871,7 @@ export function buildPersonalAnalysisSnapshots({ history = [], pools = [], chara
     accounts,
     defaultAccountKey: accounts[0]?.accountKey || null,
     summary: buildSummaryStats({
-      history: ownedHistory,
+      history: eligibleOwnedHistory,
       pools: poolsArray,
       user: { id: userId },
       characters: charactersArray,
@@ -868,7 +879,9 @@ export function buildPersonalAnalysisSnapshots({ history = [], pools = [], chara
   };
   const scopes = accountGroups.map((accountGroup) => {
     const account = toPublicAccount(accountGroup);
-    const poolManifest = buildPoolManifest(accountGroup.records, poolsArray, userId);
+    const entries = ownedEntries.filter(entry => getRecordAccountKey(entry) === account.accountKey);
+    const poolManifest = buildPoolManifest([...accountGroup.records, ...entries.map(entry => ({ poolId: entry.poolId ?? entry.pool_id }))], poolsArray, userId);
+    const eligibleHistory = eligibleAccounts.get(account.accountKey) || [];
     return {
       scopeKey: account.accountKey,
       sourceGameUid: account.gameUid,
@@ -876,8 +889,8 @@ export function buildPersonalAnalysisSnapshots({ history = [], pools = [], chara
       payload: {
         account,
         poolManifest,
-        selector: buildSelector(accountGroup.records),
-        dashboard: buildDashboard(accountGroup.records, poolsArray, poolManifest, resolveCharacter),
+        selector: buildSelector(eligibleHistory),
+        dashboard: buildDashboard(eligibleHistory, poolsArray, poolManifest, resolveCharacter),
         simulatorInheritance: packInheritanceProjection(
           buildSimulatorInheritanceProjection({
             history: accountGroup.records,

@@ -6,6 +6,7 @@ import { decodeHistories } from '../../shared/simulator/historyCodec.js';
 import {
   getPersonalAnalysisWorkerConfigFromEnv,
   loadPersonalAnalysisModel,
+  PERSONAL_ANALYSIS_SCHEMA_VERSION,
   runPersonalAnalysisWorker,
 } from '../_lib/personalAnalysisWorker.js';
 
@@ -61,6 +62,8 @@ function createAdminClient({
   characters = [],
   poolAliases = [],
   characterAliases = [],
+  workbenchEntries = [],
+  statisticsExclusions = [],
   publishOwner = true,
   publishScope = true,
 } = {}) {
@@ -107,6 +110,7 @@ function createAdminClient({
       this.rangeValue = [from, to];
       return this;
     }
+    is(column, value) { this.filters.push(['is', column, value]); return this; }
 
     execute() {
       let data;
@@ -115,10 +119,12 @@ function createAdminClient({
       else if (this.table === 'characters') data = characters;
       else if (this.table === 'pool_id_aliases') data = poolAliases;
       else if (this.table === 'character_id_aliases') data = characterAliases;
+      else if (this.table === 'account_data_workbench_entries') data = workbenchEntries;
       else data = [];
 
       this.filters.forEach(([operator, column, value]) => {
         if (operator === 'eq') data = data.filter((row) => row?.[column] === value);
+        if (operator === 'is') data = data.filter((row) => (row?.[column] ?? null) === value);
         if (operator === 'gt') data = data.filter((row) => row?.[column] > value);
         if (operator === 'in') data = data.filter((row) => value.includes(row?.[column]));
         if (operator === 'or' && column === 'game_uid.is.null,game_uid.eq.') {
@@ -142,6 +148,7 @@ function createAdminClient({
 
   const rpc = vi.fn(async (name) => {
     if (name === 'get_app_visible_pools') return { data: pools.filter((pool) => !pool.user_id), error: null };
+    if (name === 'read_account_statistics_exclusions') return { data: statisticsExclusions, error: null };
     if (name === 'enqueue_personal_analysis_backfill') {
       return {
         data: {
@@ -189,6 +196,31 @@ function enabledConfig(overrides = {}) {
 }
 
 describe('personal analysis worker', () => {
+  it('loads and canonicalizes persisted supplements even without any history', async () => {
+    const { client } = createAdminClient({
+      pools: [createPoolRow()],
+      poolAliases: [{ id: 1, alias_id: 'raw-pool', pool_id: 'pool-1' }],
+      workbenchEntries: [{ id: 'supplement', user_id: USER_ID, entry_id: 'entry', draft_id: 'draft', game_uid: 'game-1', server_scope: '1', pool_id: 'raw-pool', kind: 'pool-summary', time_precision: 'range', values: { drawMethod: 'normal', rangeStart: '2026-08-01T00:00:00Z', rangeEnd: '2026-09-01T00:00:00Z', totalPulls: 180, sixStarCount: 3 } }],
+    });
+    const model = await loadPersonalAnalysisModel(client, USER_ID);
+    expect(model.owner.summary.total).toBe(0);
+    expect(model.owner.summary).not.toHaveProperty('workbench');
+    expect(model.scopes[0].payload).not.toHaveProperty('workbench');
+    expect(model.scopes[0].payload.poolManifest[0].id).toBe('pool-1');
+  });
+  it('reads the permanent scope marker after manual rows were removed, including pool aliases', async () => {
+    const { client, rpc } = createAdminClient({
+      history: [createHistoryRow(), createHistoryRow({ id: 2, record_id: 'record-2', seq_id: '2' })],
+      pools: [createPoolRow()],
+      poolAliases: [{ id: 1, alias_id: 'raw-pool', pool_id: 'pool-1' }],
+      statisticsExclusions: [{ user_id: USER_ID, game_uid: 'game-1', server_scope: 'scope-1', pool_id: 'raw-pool' }],
+    });
+    const model = await loadPersonalAnalysisModel(client, USER_ID);
+    expect(model.owner.summary.total).toBe(0);
+    expect(model.owner.accounts[0].recordCount).toBe(2);
+    expect(model.scopes[0].payload.selector.totalPulls).toBe(0);
+    expect(rpc).toHaveBeenCalledWith('read_account_statistics_exclusions', { p_user_id: USER_ID });
+  });
   it('is disabled by default and clamps environment configuration', async () => {
     const adminClient = { rpc: vi.fn(), from: vi.fn() };
     const result = await runPersonalAnalysisWorker({ adminClient, config: { enabled: false } });
@@ -353,7 +385,7 @@ describe('personal analysis worker', () => {
     expect(ownerCall[1]).toMatchObject({
       p_user_id: USER_ID,
       p_input_revision: LARGE_REVISION,
-      p_analysis_schema_version: 3,
+      p_analysis_schema_version: PERSONAL_ANALYSIS_SCHEMA_VERSION,
       p_lease_id: LEASE_ID,
     });
     expect(ownerCall[1].p_payload.accounts).toHaveLength(2);
@@ -362,7 +394,7 @@ describe('personal analysis worker', () => {
       p_scope_game_uid: 'game-1',
       p_server_scope: 'scope-1',
       p_input_revision: LARGE_REVISION,
-      p_analysis_schema_version: 3,
+      p_analysis_schema_version: PERSONAL_ANALYSIS_SCHEMA_VERSION,
       p_lease_id: LEASE_ID,
     });
     expect(scopeCall[1].p_snapshots).toHaveLength(2);

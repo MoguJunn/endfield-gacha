@@ -22,6 +22,7 @@ import { isReservedPoolTypeId } from '../../../shared/poolIdValidation.js';
 import { handlePoolObservations } from '../../_lib/poolObservations.js';
 import { handleGroupStatistics } from '../../_lib/groupStatistics.js';
 import { handlePersonalStatistics, handleScheduledStatistics, handleStatisticsPoolCounts, readScheduledStatistic } from '../../_lib/scheduledStatistics.js';
+import { fetchGlobalSummary } from '../../_lib/publicCatalog.js';
 
 // 内存缓存
 const cache = {
@@ -198,6 +199,7 @@ function formatVisiblePoolRecord(record) {
     start_time: record.start_time || null,
     end_time: record.end_time || null,
     featured_characters: record.featured_characters || null,
+    roster_status: record.roster_status || 'missing',
     ...(hasSixStarRoster
       ? {
           six_star_entities: record.six_star_entities,
@@ -371,7 +373,7 @@ async function fetchPoolCatalog(supabase) {
   const { data, error } = await supabase
     .from('pools')
     .select(
-      'pool_id, name, name_en, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase, locked, is_limited_weapon, created_at, updated_at, up_character, description, banner_url, start_time, end_time, featured_characters'
+      'pool_id, name, name_en, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase, locked, is_limited_weapon, created_at, updated_at, up_character, description, banner_url, start_time, end_time, featured_characters, roster_status'
     );
 
   if (error) {
@@ -780,7 +782,7 @@ async function handleGlobalSummary(supabase, res, now, context) {
     });
   }
 
-  const { payload: data } = await readScheduledStatistic(supabase, 'global_summary');
+  const data = await fetchGlobalSummary(supabase);
 
   cache.globalSummary = data ?? null;
   cache.globalSummaryLastFetch = now;
@@ -892,7 +894,7 @@ async function handleAll(supabase, res, now, context) {
     fetchVisiblePools(supabase),
     fetchPoolCatalog(supabase),
     fetchCharactersTable(supabase),
-    readScheduledStatistic(supabase, 'global_summary').then(({ payload, meta }) => ({ data: payload ? { ...payload, meta: { ...payload.meta, ...meta } } : null })),
+    fetchGlobalSummary(supabase).then(data => ({ data })),
     fetchCharacterRankingStatsCached(supabase),
     fetchCharacterCatalogForStats(supabase),
   ]);

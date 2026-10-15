@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Eye, EyeOff, Layers } from 'lucide-react';
+import { Eye, EyeOff, Layers, ShieldCheck } from 'lucide-react';
 import { buildDashboardTimelineSections, countDashboardTimelineNodes } from '../../utils/dashboardTimelineSections.js';
 import { isEnglishLocale, useI18n } from '../../i18n/index.js';
 import { getTimelineStageElementId } from '../../utils/poolTimelineView.js';
@@ -87,7 +87,16 @@ function getLeadBadge(entry, featured) {
   );
 }
 
-function getStampConfig(entry, sectionType, t) {
+function getStampConfig(entry, sectionType, t, locale) {
+  if (entry.guaranteePulls) {
+    return {
+      label: isEnglishLocale(locale) ? 'Guaranteed' : '保底',
+      className:
+        'border-amber-500 bg-amber-100 text-amber-900 dark:border-amber-400 dark:bg-amber-400/15 dark:text-amber-200',
+      guaranteed: true,
+    };
+  }
+
   if (entry.stageKind === 'gift') {
     return {
       label: t('dashboard.timeline.badge.free'),
@@ -310,7 +319,7 @@ function StagePortrait({ entry, featured, compact = false, t }) {
   );
 }
 
-function StageBadge({ badge, compact = false, mobile = false }) {
+export function StageBadge({ badge, compact = false, mobile = false }) {
   const isSixStar = badge.rarity >= 6;
   return (
     <div
@@ -362,7 +371,50 @@ function MetricItem({ label, value, mobile = false, dense = false }) {
   );
 }
 
-function TimelineStageCard({
+function WeaponBatchResults({ batch, locale, showFiveStarDrops = true }) {
+  const english = isEnglishLocale(locale);
+  const label = batch.isCompleteTenPull
+    ? english ? 'This 10-pull' : '本次十连'
+    : english ? `Known batch: ${batch.size} pulls` : `该批已知 ${batch.size} 抽`;
+
+  return (
+    <div className="mt-2.5 min-w-0 rounded-lg border border-amber-300/60 bg-amber-50/60 p-2 dark:border-amber-500/25 dark:bg-amber-500/5">
+      <div className="mb-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-bold sm:text-xs">
+        <span className="text-slate-600 dark:text-zinc-400">{label}</span>
+        <span className="text-amber-700 dark:text-amber-300">6★ ×{batch.sixStarCount}</span>
+        {showFiveStarDrops && <span className="text-purple-700 dark:text-purple-300">5★ ×{batch.fiveStarCount}</span>}
+      </div>
+      {batch.isCompleteTenPull && (
+        <div role="list" aria-label={label} className="grid grid-cols-10 gap-1">
+          {batch.slots.map((slot, index) => {
+            const hiddenFive = !showFiveStarDrops && slot.rarity === 5;
+            const result = hiddenFive ? (english ? 'Hidden 5★' : '已隐藏五星') : `${slot.rarity}★ ${slot.label}`;
+            const title = english ? `Pull ${index + 1}: ${result}` : `第 ${index + 1} 抽：${result}`;
+            return (
+              <div
+                key={index}
+                role="listitem"
+                aria-label={title}
+                title={title}
+                className={`flex h-6 min-w-0 items-center justify-center rounded border text-[9px] font-black sm:h-7 sm:text-[10px] ${
+                  slot.rarity >= 6
+                    ? 'border-amber-400 bg-gradient-to-br from-yellow-200 to-amber-400 text-amber-950 dark:from-yellow-300 dark:to-amber-500'
+                    : slot.rarity === 5 && !hiddenFive
+                      ? 'border-purple-300 bg-purple-100 text-purple-800 dark:border-purple-500/50 dark:bg-purple-500/20 dark:text-purple-200'
+                      : 'border-zinc-200 bg-zinc-100 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400'
+                }`}
+              >
+                {hiddenFive ? '·' : `${slot.rarity}★`}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function TimelineStageCard({
   entry,
   sectionId,
   sectionType,
@@ -371,17 +423,29 @@ function TimelineStageCard({
   mobile = false,
   showFiveStarDrops = true,
   dense = false,
+  barValue = entry.pulls,
+  barUnit,
+  barWidthPercent,
+  showWeaponBatch = true,
+  children,
 }) {
+  const { locale } = useI18n();
+  const english = isEnglishLocale(locale);
   const compact = entry.stageKind === 'fiveStar';
   const visibleBadges = getVisibleDropBadges(entry, showFiveStarDrops);
   const resultSummary = getVisibleResultSummary(entry, showFiveStarDrops);
-  const stamp = getStampConfig(entry, sectionType, t);
-  const widthPercent =
+  const stamp = entry.unknownInheritedPity ? null : getStampConfig(entry, sectionType, t, locale);
+  const widthPercent = barWidthPercent ?? (
     entry.stageKind === 'gift'
       ? 100
-      : Math.max(compact ? 10 : 12, Math.min(100, (entry.pulls / Math.max(entry.targetPulls || 1, 1)) * 100));
+      : Math.max(compact ? 10 : 12, Math.min(100, (entry.pulls / Math.max(entry.targetPulls || 1, 1)) * 100)));
   const portraitCompact = compact || dense;
   const summaryTextClass = getLengthAwareSummaryClass(resultSummary, dense, compact);
+  const inheritedPulls = Number(entry.inheritedPulls) || 0;
+  const inheritedLabel = english ? `Previous banner: ${inheritedPulls} pulls` : `上池垫抽 ${inheritedPulls} 抽`;
+  const stageLabel = entry.guaranteePulls
+    ? english ? `${entry.guaranteePulls}-pull guarantee` : `${entry.guaranteePulls} 抽保底出货`
+    : entry.stageLabel;
 
   return (
     <div
@@ -404,9 +468,9 @@ function TimelineStageCard({
       >
         <div className={`flex items-start gap-2 ${dense ? 'mb-2' : compact ? 'mb-1.5 sm:mb-2' : 'mb-2 sm:mb-3'}`}>
           <span
-            className={`${mobile ? 'mobile-ux-card-chip text-slate-500 dark:text-zinc-400' : 'border border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-400'} font-bold uppercase ${compact ? 'px-1.5 py-0.5 text-[8px] sm:text-[9px]' : 'px-1.5 py-0.5 text-[9px] sm:text-[10px]'}`}
+            className={`${entry.guaranteePulls ? 'border border-amber-400/70 bg-amber-100 text-amber-900 dark:border-amber-400/50 dark:bg-amber-400/15 dark:text-amber-200' : mobile ? 'mobile-ux-card-chip text-slate-500 dark:text-zinc-400' : 'border border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-400'} shrink-0 font-bold uppercase ${compact ? 'px-1.5 py-0.5 text-[8px] sm:text-[9px]' : 'px-1.5 py-0.5 text-[9px] sm:text-[10px]'}`}
           >
-            {entry.stageLabel}
+            {stageLabel}
           </span>
           <span
             className={`min-w-0 break-words font-bold ${mobile ? 'text-slate-700 dark:text-zinc-200' : 'text-zinc-700 dark:text-zinc-300'} ${summaryTextClass}`}
@@ -415,34 +479,63 @@ function TimelineStageCard({
           </span>
         </div>
 
-        <div className={`flex items-center ${dense ? 'gap-2' : 'gap-2 sm:gap-3'}`}>
+        <div className={`flex items-center pr-1.5 ${dense ? 'gap-2' : 'gap-2 sm:gap-3'}`}>
           <div
             className={`relative flex-1 overflow-hidden ${mobile ? 'rounded-2xl bg-zinc-100/90 dark:bg-zinc-950/75' : 'border border-zinc-200 bg-zinc-100 shadow-sm dark:border-zinc-700/50 dark:bg-zinc-800/50'} ${dense ? 'h-7 max-w-full' : compact ? 'h-6 sm:h-7 max-w-[70%] sm:max-w-[60%]' : 'h-8 sm:h-10 max-w-[90%] sm:max-w-[85%]'}`}
           >
             <div
               className="absolute inset-y-0 left-0"
-              style={{ width: `${widthPercent}%`, background: getTimelineBarColor(sectionType, entry) }}
+              style={{ width: `${widthPercent}%`, background: entry.guaranteePulls ? 'linear-gradient(90deg, #fbbf24, #f59e0b, #d97706)' : getTimelineBarColor(sectionType, entry) }}
             >
               <div className="absolute inset-0 bg-[linear-gradient(45deg,rgba(255,255,255,0.15)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.15)_50%,rgba(255,255,255,0.15)_75%,transparent_75%,transparent_100%)] bg-[length:12px_12px]" />
+              {inheritedPulls > 0 && (
+                <div
+                  role="img"
+                  aria-label={inheritedLabel}
+                  title={inheritedLabel}
+                  className="absolute bottom-0.5 left-0 h-1.5 rounded-r-full border border-white/70 bg-indigo-900 shadow-sm dark:border-indigo-200/70 dark:bg-indigo-300"
+                  style={{ width: `${Math.min(100, (inheritedPulls / entry.pulls) * 100)}%` }}
+                />
+              )}
             </div>
             <div
-              className={`absolute inset-y-0 left-2 sm:left-3 flex items-center font-black font-mono tracking-tight ${mobile ? 'text-slate-900 dark:text-zinc-100' : 'text-zinc-900 dark:text-zinc-100'} ${dense ? 'text-base' : compact ? 'text-sm sm:text-base' : 'text-lg sm:text-xl'}`}
+              className={`absolute inset-y-0 left-2 sm:left-3 flex items-center font-black font-mono tracking-tight ${entry.guaranteePulls ? 'my-0.5 rounded-sm bg-amber-100/95 px-1 text-amber-950' : mobile ? 'text-slate-900 dark:text-zinc-100' : 'text-zinc-900 dark:text-zinc-100'} ${dense ? 'text-base' : compact ? 'text-sm sm:text-base' : 'text-lg sm:text-xl'}`}
             >
-              {entry.pulls}
+              {entry.unknownInheritedPity ? (english ? 'Unknown' : '继承未知') : barValue}
               <span className={`ml-0.5 font-bold ${compact ? 'text-[10px] sm:text-xs' : 'text-xs sm:text-sm'}`}>
-                {t('dashboard.unit.pull')}
+                {barUnit ?? t('dashboard.unit.pull')}
               </span>
             </div>
           </div>
 
           {stamp && (
             <div
-              className={`shrink-0 flex items-center justify-center rotate-[14deg] rounded-full border-2 font-black shadow-sm ${dense ? 'h-8 w-8 text-[10px]' : compact ? 'h-8 w-8 text-[10px]' : 'h-10 w-10 text-xs sm:text-sm'} ${stamp.className}`}
+              className={`shrink-0 flex items-center justify-center border-2 font-black shadow-sm ${stamp.guaranteed ? 'h-8 gap-1 rounded-md px-2 text-[10px] sm:text-xs' : `rotate-[14deg] rounded-full ${dense || compact ? 'h-8 w-8 text-[10px]' : 'h-10 w-10 text-xs sm:text-sm'}`} ${stamp.className}`}
             >
+              {stamp.guaranteed && <ShieldCheck size={14} aria-hidden="true" />}
               {stamp.label}
             </div>
           )}
         </div>
+
+        {entry.unknownInheritedPity && <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">
+          {english ? `This banner has ${entry.localPulls} stored pulls in this segment; the inherited interval cannot be verified.`
+            : `本段记录包含本池 ${entry.localPulls} 抽，继承间隔无法核实，不参与保底间隔统计。`}
+        </p>}
+        {inheritedPulls > 0 && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-bold sm:text-xs">
+            <span className="inline-flex items-center gap-1 text-indigo-800 dark:text-indigo-300">
+              <span aria-hidden="true" className="h-1.5 w-4 rounded bg-indigo-900 dark:bg-indigo-300" />
+              {inheritedLabel}
+            </span>
+            <span className="text-zinc-500 dark:text-zinc-400">
+              {english ? `+ This banner: ${entry.localPulls} pulls` : `+ 本池 ${entry.localPulls} 抽`}
+            </span>
+          </div>
+        )}
+        {showWeaponBatch && entry.weaponBatch && (
+          <WeaponBatchResults batch={entry.weaponBatch} locale={locale} showFiveStarDrops={showFiveStarDrops} />
+        )}
 
         {visibleBadges.length > 0 && (
           <div
@@ -453,6 +546,7 @@ function TimelineStageCard({
             ))}
           </div>
         )}
+        {children}
       </div>
     </div>
   );
@@ -471,15 +565,21 @@ function TimelineMultiDropGroup({
 }) {
   const count = group.entries.length;
   const labelClass = getMultiDropLabelClass(count);
+  const weaponBatch = sectionType === 'weapon' ? group.entries[0].weaponBatch : null;
 
   return (
     <div
       className={`relative mb-4 border border-yellow-400/25 border-l-[3px] border-l-yellow-400 bg-yellow-400/[0.035] px-2.5 pb-0 pt-5 shadow-[inset_0_1px_0_rgba(250,204,21,0.12)] dark:bg-yellow-400/[0.04] ${mobile ? 'rounded-2xl' : ''} ${dense ? '-mx-1' : '-mx-1 sm:-mx-2'}`}
     >
       <div className="absolute right-3 top-0 border border-yellow-300/45 bg-zinc-950 px-2 py-1 text-[10px] font-black tracking-[0.08em]">
-        <span className={labelClass}>{getMultiDropLabel(count, locale)}</span>
+        <span className={labelClass}>{weaponBatch && !weaponBatch.isCompleteTenPull
+          ? isEnglishLocale(locale) ? `Same batch: ${count} 6★` : `同批 ${count} 个六星`
+          : getMultiDropLabel(count, locale)}</span>
       </div>
       <div className="pointer-events-none absolute left-0 top-0 h-[2px] w-2/5 bg-gradient-to-r from-yellow-300/80 to-transparent" />
+      {weaponBatch && <div className="mb-3">
+        <WeaponBatchResults batch={weaponBatch} locale={locale} showFiveStarDrops={showFiveStarDrops} />
+      </div>}
       <div className="space-y-0">
         {group.entries.map((entry) => (
           <TimelineStageCard
@@ -492,6 +592,7 @@ function TimelineMultiDropGroup({
             mobile={mobile}
             showFiveStarDrops={showFiveStarDrops}
             dense={dense}
+            showWeaponBatch={!weaponBatch}
           />
         ))}
       </div>
@@ -499,7 +600,7 @@ function TimelineMultiDropGroup({
   );
 }
 
-function TimelineSectionCard({
+export function TimelineSectionCard({
   section,
   isOverview,
   embedded,
@@ -508,9 +609,15 @@ function TimelineSectionCard({
   mobile = false,
   showFiveStarDrops = true,
   dense = false,
+  metrics = null,
+  statusText,
+  showMetadata = true,
+  renderEntry,
+  footer,
 }) {
   const tone = getTimelineTone(section.type);
-  const pityValue = section.hidePityState ? t('dashboard.timeline.multiAccount') : `${section.currentPity}`;
+  const pityValue = section.hidePityState ? t('dashboard.timeline.multiAccount')
+    : section.currentPity === null ? (locale === 'en-US' ? 'Unknown' : '未知') : `${section.currentPity}`;
   const titleClass = getLengthAwareTitleClass(section.title, dense, embedded);
   const chipClass = dense ? 'px-1.5 py-0.5 text-[9px] tracking-[0.08em]' : 'px-2 py-0.5 text-[11px] tracking-[0.18em]';
   const renderGroups = buildTimelineRenderGroups(section.entries);
@@ -557,18 +664,19 @@ function TimelineSectionCard({
               )}
             </div>
 
-            <div
+            {showMetadata && <div
               className={`mt-2 flex flex-wrap items-center gap-2 font-mono ${dense ? 'text-[10px]' : 'text-[11px]'} ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-zinc-500 dark:text-zinc-400'}`}
             >
               <span>{section.period}</span>
               <span className={mobile ? 'text-zinc-300 dark:text-zinc-700' : 'text-zinc-300 dark:text-zinc-700'}>
                 |
               </span>
-              <span className={tone.accent}>{getStatusText(section.status, t)}</span>
-            </div>
+              <span className={tone.accent}>{statusText ?? getStatusText(section.status, t)}</span>
+            </div>}
           </div>
 
           <div className={dense ? 'grid grid-cols-4 gap-2' : 'grid grid-cols-2 gap-3 md:grid-cols-4'}>
+            {metrics ? metrics.map((metric) => <MetricItem key={metric.label} {...metric} mobile={mobile} dense={dense} />) : <>
             <MetricItem
               label={t('dashboard.timeline.metric.total')}
               value={t('dashboard.unit.pulls', { count: section.totalPulls })}
@@ -596,6 +704,7 @@ function TimelineSectionCard({
               mobile={mobile}
               dense={dense}
             />
+            </>}
           </div>
         </div>
       </div>
@@ -610,7 +719,7 @@ function TimelineSectionCard({
         ) : (
           <div className="space-y-0">
             {renderGroups.map((group) =>
-              group.type === 'multi' ? (
+              renderEntry ? <React.Fragment key={group.key}>{group.type === 'multi' ? group.entries.map(renderEntry) : renderEntry(group.entry)}</React.Fragment> : group.type === 'multi' ? (
                 <TimelineMultiDropGroup
                   key={group.key}
                   group={group}
@@ -639,6 +748,7 @@ function TimelineSectionCard({
             )}
           </div>
         )}
+        {footer}
       </div>
     </div>
   );

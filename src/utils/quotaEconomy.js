@@ -202,6 +202,9 @@ function isGuaranteedAcquisitionRecord(record) {
 }
 
 function normalizeAcquisitionPull(record, state, rarity, giftRecord, acquisitionMeta = null) {
+  if (record.statisticsContinuity?.sixStarKnown === false && rarity >= 6) {
+    return { pulls: null, kind: 'unknown', poolId: getPoolId(record) || null };
+  }
   if (acquisitionMeta) {
     return {
       pulls: acquisitionMeta.kind === 'free' ? null : toNonNegativeInteger(acquisitionMeta.pulls),
@@ -360,10 +363,10 @@ function finalizeCharacterEntry(entry) {
   return {
     ...entry,
     owned: acquisitionCount > 0,
-    potentialLevel: acquisitionCount > 0 ? Math.min(acquisitionCount - 1, MAX_POTENTIAL_LEVEL) : 0,
+    potentialLevel: entry.historyIncomplete ? null : acquisitionCount > 0 ? Math.min(acquisitionCount - 1, MAX_POTENTIAL_LEVEL) : 0,
     acquisitionPulls: Array.isArray(entry.acquisitionPulls) ? entry.acquisitionPulls : [],
-    trustTokensGained: Math.max(acquisitionCount - 1, 0),
-    excessTrustTokens: Math.max(acquisitionCount - FULL_POTENTIAL_COPY_COUNT, 0),
+    trustTokensGained: entry.historyIncomplete ? null : Math.max(acquisitionCount - 1, 0),
+    excessTrustTokens: entry.historyIncomplete ? null : Math.max(acquisitionCount - FULL_POTENTIAL_COPY_COUNT, 0),
     quota: normalizeQuotaSummary(entry.quota)
   };
 }
@@ -448,6 +451,7 @@ export function buildQuotaLedgerFromHistory(history = [], {
     }
 
     const entry = characterEntries.get(key);
+    if (record.statisticsContinuity?.copyHistoryKnown === false) entry.historyIncomplete = true;
     entry.acquisitionCount += 1;
     entry.rarity = Math.max(toNonNegativeInteger(entry.rarity), rarity);
     const acquisitionMeta = acquisitionByRecordKey?.get(getRecordAcquisitionKey(record)) || null;
@@ -467,7 +471,7 @@ export function buildQuotaLedgerFromHistory(history = [], {
       entry.lastAcquiredPoolName = recordPoolName;
     }
 
-    if (!giftRecord) {
+    if (!giftRecord && record.statisticsContinuity?.copyHistoryKnown !== false) {
       const copyQuota = calculateCharacterQuotaForCopy({
         rarity,
         copyNumber: entry.acquisitionCount

@@ -532,6 +532,7 @@ export function normalizeGlobalStats(rpcData) {
         }
       : null,
     contributorActivity,
+    workbench: rpcData.workbench || null,
     sixStarTotal: rpcData.sixStarTotal || 0,
     sixStarLimited: rpcData.sixStarLimited || 0,
     sixStarStandard: rpcData.sixStarStandard || 0,

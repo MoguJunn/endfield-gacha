@@ -166,6 +166,29 @@ describe('officialImportRecordNormalizer', () => {
     expect(filterOfficialImportPullRecords(records)).toEqual([records[0]]);
   });
 
+  it('filters supplemental weapon boxes by their item name even without a recognized gift event', () => {
+    for (const name of ['补充武库箱', '补充武库箱·军列', '补充武库箱·明曜', '补充武库箱·幽寒']) {
+      for (const field of ['nameText', 'name_text', 'weaponName', 'itemName', 'item_name', 'name']) {
+        const record = { [field]: name, poolId: 'weponbox_1_5_1', seqId: '4161' };
+        expect(isOfficialImportNonPullRecord(record), `${field}: ${name}`).toBe(true);
+        expect(filterOfficialImportPullRecords([record])).toEqual([]);
+      }
+    }
+    expect(isOfficialImportNonPullRecord({
+      nameText: '幽寒申领', weaponName: '补充武库箱·幽寒',
+    })).toBe(true);
+  });
+
+  it('preserves weapon draws and unknown items when filtering supplemental weapon boxes', () => {
+    const records = [
+      { nameText: '测试武器', weaponId: 'wpn_normal', rarity: 4 },
+      { nameText: '测试未知物品' },
+      { poolId: 'weponbox_1_5_1', seqId: '4161' },
+      { nameText: '补充武库箱型测试武器', weaponId: 'wpn_similar_name', rarity: 5 },
+    ];
+    expect(filterOfficialImportPullRecords(records)).toEqual(records);
+  });
+
   it('blocks records without an official sequence id', () => {
     const result = normalizeOfficialImportRecord(
       {

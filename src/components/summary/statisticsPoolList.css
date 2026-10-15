@@ -1,0 +1,32 @@
+/* The host provides .ex-theme and these tokens; no site-wide foundation styles. */
+/* --ex-ink, --ex-muted, --ex-border, --ex-surface, --ex-subtle,
+   --ex-selected, --ex-focus, --ex-ease; --font-sans and --font-number. */
+.ex-theme .ex-pool-list { padding: 0 10px 14px; color: var(--ex-ink); font-family: var(--font-sans); line-height: 1.5; }
+.ex-theme .ex-pool-list *, .ex-theme .ex-pool-list *::before, .ex-theme .ex-pool-list *::after { box-sizing: border-box; }
+.ex-theme .ex-pool-list button { min-height: 38px; font: inherit; color: var(--ex-ink); cursor: pointer; transition: background-color 180ms, border-color 180ms, transform 180ms var(--ex-ease); }
+.ex-theme .ex-pool-list button:hover { background: var(--ex-subtle); border-color: var(--ex-muted); }
+.ex-theme .ex-pool-list button:active { background: var(--ex-border); }
+.ex-theme .ex-pool-list :is(button, input):focus-visible { outline: 2px solid var(--ex-focus); outline-offset: 3px; }
+.ex-theme .ex-pool-list .ex-pool-search { display: flex; align-items: center; gap: 7px; margin: 0 4px 12px; padding: 8px; border: 1px solid var(--ex-border); color: var(--ex-muted); }
+.ex-theme .ex-pool-list .ex-pool-search input { width: 100%; min-width: 0; background: transparent; border: 0; outline-offset: 2px; color: var(--ex-ink); font-family: inherit; font-size: 11px; }
+.ex-theme .ex-pool-list .ex-pool-group-heading { width: 100%; display: flex; align-items: center; justify-content: space-between; border: 0; background: transparent; padding: 9px 5px; font-size: 11px; font-weight: 700; color: var(--ex-muted); }
+.ex-theme .ex-pool-list .ex-pool-group-heading > span:last-child { display: flex; align-items: center; gap: 7px; font-weight: 400; }
+.ex-theme .ex-pool-list .ex-pool-group-heading svg { transition: transform 180ms var(--ex-ease); }
+.ex-theme .ex-pool-list .ex-pool-group-heading .is-closed { transform: rotate(-90deg); }
+.ex-theme .ex-pool-list .ex-pool-row { display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px 8px; margin: 3px 0; text-align: left; border: 1px solid transparent; border-left: 3px solid transparent; background: transparent; border-radius: 0; }
+.ex-theme .ex-pool-list .ex-pool-row[aria-pressed='true'] { background: var(--ex-selected); border-color: transparent; border-left-color: var(--ex-focus); color: var(--ex-ink); }
+.ex-theme .ex-pool-list .ex-pool-row > img { transition: transform 220ms var(--ex-ease); animation: ex-pool-list-fade 300ms ease-out both; }
+.ex-theme .ex-pool-list .ex-pool-row > img, .ex-theme .ex-pool-list .ex-pool-placeholder { width: 44px; height: 54px; object-fit: cover; flex-shrink: 0; background: var(--ex-subtle); }
+.ex-theme .ex-pool-list .ex-pool-placeholder { display: grid; place-items: center; color: var(--ex-muted); }
+.ex-theme .ex-pool-list .ex-pool-copy { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.ex-theme .ex-pool-list .ex-pool-copy strong { font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.ex-theme .ex-pool-list .ex-pool-featured { font-size: 10px; color: var(--ex-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ex-theme .ex-pool-list .ex-pool-count { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 4px; font-size: 11px; font-family: var(--font-number); font-weight: 700; }
+.ex-theme .ex-pool-list .ex-pool-count i { font-family: var(--font-sans); font-size: 9px; font-style: normal; color: var(--ex-muted); font-weight: 400; }
+.ex-theme .ex-pool-list .ex-sidebar-hint { margin-top: 10px; font-size: 11px; line-height: 1.7; color: var(--ex-muted); }
+.ex-theme .ex-pool-list .ex-group-scope { border: 1px solid var(--ex-border); border-left: 3px solid var(--ex-border); background: var(--ex-subtle); }
+.ex-theme .ex-pool-list .ex-group-scope .ex-pool-placeholder { height: 42px; width: 36px; background: transparent; color: var(--ex-focus); }
+@keyframes ex-pool-list-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .ex-theme .ex-pool-list button, .ex-theme .ex-pool-list .ex-pool-group-heading svg, .ex-theme .ex-pool-list .ex-pool-row > img { transition: none; animation: none; }
+}

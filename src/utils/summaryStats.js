@@ -4,6 +4,7 @@ import { buildQuotaLedgerFromHistory } from './quotaEconomy.js';
 import { annotateInfoBookPulls } from './historyInfoBook.js';
 import { classifyGameAccountRegionBucket } from './gameAccountMetadata.js';
 import { resolvePoolCapabilities } from './poolCapabilities.js';
+import { prepareStatisticsContinuity } from './statisticsContinuity.js';
 import {
   buildOneTimeTargetGuaranteeState,
   buildScopedPaidHistoryTimeline,
@@ -141,7 +142,7 @@ function getRuleScopeKey(pool, capabilities, scopeType) {
  */
 export function buildSummaryStats({ history, pools, user, characters = [] }) {
   const myPools = pools && user ? pools : [];
-  const myHistory = history && user ? history.filter((h) => h.user_id === user.id) : [];
+  const myHistory = history && user ? prepareStatisticsContinuity({ history: history.filter((h) => h.user_id === user.id), pools: myPools }).history : [];
   const annotatedMyHistory = annotateInfoBookPulls(myHistory, myPools);
 
   const poolMap = new Map();
@@ -332,6 +333,7 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
   let allSixStarExclFreePitySum = 0,
     allSixStarExclFreePityCount = 0;
   let globalPityLimit = 0;
+  let unknownInheritedIntervalCount = 0;
 
   let charGiftCount = 0;
   let weaponGiftLimitedCount = 0;
@@ -386,6 +388,10 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
       tempCounter++;
 
       if (pull.rarity === 6) {
+        if (pull.statisticsContinuity?.sixStarKnown === false) {
+          unknownInheritedIntervalCount++; tempCounter = 0; continue;
+        }
+        if (pull.statisticsContinuity?.interrupted) tempCounter = pull.statisticsContinuity.sixStarPity;
         const isUp = isTargetSixStarHistoryRecord(pull, sourcePool);
         const recordKey = pull?.id || pull?.record_id;
         const isSpark = recordKey != null && guaranteedRecordKeys.has(String(recordKey));
@@ -454,12 +460,23 @@ export function buildSummaryStats({ history, pools, user, characters = [] }) {
     }
   }
 
+  if (unknownInheritedIntervalCount || normalizedMyHistory.some(row => row.statisticsContinuity?.copyHistoryKnown === false)) {
+    data.statisticsContinuity = { unknownInheritedIntervalCount,
+      unknownCopyHistoryCount: normalizedMyHistory.filter(row => row.statisticsContinuity?.copyHistoryKnown === false).length };
+  }
   const processedRewardScopes = new Set();
   for (const scopePool of poolsWithHistory) {
     const capabilities = resolvePoolCapabilities(scopePool);
     const rewardScopeKey = getRuleScopeKey(scopePool, capabilities, 'reward');
     if (!rewardScopeKey || processedRewardScopes.has(rewardScopeKey)) continue;
     processedRewardScopes.add(rewardScopeKey);
+
+    if (capabilities.rewardScope === 'series' && normalizedMyHistory.some(row =>
+      row.statisticsContinuity?.cumulativeHistoryKnown === false &&
+      getRuleScopeKey(poolMap.get(String(getHistoryPoolId(row))), resolvePoolCapabilities(poolMap.get(String(getHistoryPoolId(row)))), 'reward') === rewardScopeKey)) {
+      data.statisticsContinuity = { ...data.statisticsContinuity, cumulativeHistoryKnown: false };
+      continue;
+    }
 
     const rewardPaidTotal = buildScopedPaidHistoryTimeline({
       history: normalizedMyHistory,

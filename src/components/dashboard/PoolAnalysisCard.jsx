@@ -254,6 +254,7 @@ const WeaponGifts = ({ stats, capabilities, t }) => {
  */
 const PoolAnalysisCard = ({ currentPool, stats, effectivePity, checkLimitedInFirstN, specialProgress, hasMergedAccountView = false }) => {
   const { t, formatDateTime, locale } = useI18n();
+  const unknownPity = locale === 'en-US' ? 'Unknown' : '未知';
   const pityState = getPoolAnalysisPityState(currentPool, stats, effectivePity);
   const capabilities = pityState.capabilities;
   const isExtra = currentPool.type === 'extra';
@@ -275,7 +276,7 @@ const PoolAnalysisCard = ({ currentPool, stats, effectivePity, checkLimitedInFir
     });
   const paidTotal = stats.paidTotal ?? stats.total;
   const currentProbabilityInfo = useMemo(() => {
-    if (currentPool?.isGroupMode || hasMergedAccountView) {
+    if (currentPool?.isGroupMode || hasMergedAccountView || pityState.displayPity6 === null) {
       return null;
     }
 
@@ -350,6 +351,11 @@ const PoolAnalysisCard = ({ currentPool, stats, effectivePity, checkLimitedInFir
       </div>
 
       {/* 保底信息网格 */}
+      {(pityState.displayPity6 === null || pityState.displayPity5 === null || stats.statisticsContinuity?.unknownCopyHistoryCount > 0 || stats.statisticsContinuity?.cumulativeHistoryKnown === false) &&
+        <p role="note" className="mb-4 text-xs text-amber-700 dark:text-amber-300">
+          {locale === 'en-US' ? 'Earlier records are excluded. Carry-over pity stays unknown until a verified reset; copy-dependent resources include only verified contributions. Series reward progress cannot be inferred from an incomplete history.'
+            : '此前记录已退出统计，继承垫抽在可信重置前显示为未知；依赖持有历史的资源仅统计可核实部分。历史不完整的系列累计奖励进度不作推断。'}
+        </p>}
       {!hasMergedAccountView ? (
       <div className="grid grid-cols-2 gap-4 mb-4">
         {/* 6星保底 */}
@@ -360,16 +366,16 @@ const PoolAnalysisCard = ({ currentPool, stats, effectivePity, checkLimitedInFir
                label={isReconstructionWeapon
                  ? t('dashboard.analysis.reconstructionWeaponPity40')
                  : t('dashboard.analysis.pity6', { max: maxPity })}
-               value={Math.max(maxPity - displayPity, 0)}
-               subValue={t('dashboard.unit.pull')}
-               progress={(displayPity / maxPity) * 100}
+               value={displayPity === null ? unknownPity : Math.max(maxPity - displayPity, 0)}
+               subValue={displayPity === null ? '' : t('dashboard.unit.pull')}
+               progress={displayPity === null ? 0 : (displayPity / maxPity) * 100}
                progressColor={progressClass}
                warning={currentProbabilityInfo?.hasSoftPity && currentProbabilityInfo?.isInSoftPity
                  ? t('dashboard.analysis.rateBoost', { percent: (currentProbabilityInfo.probability * 100).toFixed(1) })
                  : null}
                footer={
                  <>
-                    <span>{t('dashboard.analysis.currentPity', { count: displayPity })}</span>
+                    <span>{displayPity === null ? unknownPity : t('dashboard.analysis.currentPity', { count: displayPity })}</span>
                     {pityState.isInherited6 && (
                       <span className="text-purple-600 dark:text-purple-400 flex items-center gap-1"><Sparkles size={10}/> {t('dashboard.analysis.crossPoolCarry')}</span>
                     )}
@@ -384,13 +390,13 @@ const PoolAnalysisCard = ({ currentPool, stats, effectivePity, checkLimitedInFir
           return (
             <StatCard
                label={t('dashboard.analysis.pity5')}
-               value={Math.max(10 - displayPity5, 0)}
-               subValue={t('dashboard.unit.pull')}
-               progress={(displayPity5 / 10) * 100}
+               value={displayPity5 === null ? unknownPity : Math.max(10 - displayPity5, 0)}
+               subValue={displayPity5 === null ? '' : t('dashboard.unit.pull')}
+               progress={displayPity5 === null ? 0 : (displayPity5 / 10) * 100}
                progressColor="bg-amber-500"
                footer={
                  <>
-                    <span>{t('dashboard.analysis.currentPity', { count: displayPity5 })}</span>
+                    <span>{displayPity5 === null ? unknownPity : t('dashboard.analysis.currentPity', { count: displayPity5 })}</span>
                     {pityState.isInherited5 && (
                       <span className="text-purple-600 dark:text-purple-400 flex items-center gap-1"><Sparkles size={10}/> {t('dashboard.analysis.crossPoolCarry')}</span>
                     )}
@@ -440,7 +446,7 @@ const PoolAnalysisCard = ({ currentPool, stats, effectivePity, checkLimitedInFir
       />
 
       {/* 特殊进度列表 (Technical List Style) */}
-      <div className="space-y-3 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+      {stats.statisticsContinuity?.cumulativeHistoryKnown !== false && <div className="space-y-3 pt-4 border-t border-zinc-200 dark:border-zinc-800">
          <div className="text-[11px] uppercase text-slate-600 dark:text-zinc-400 font-bold tracking-wider mb-2">{t('dashboard.analysis.specialProgress')}</div>
          
          {(specialProgress?.freeTenMilestones || []).map((milestone) => (
@@ -559,7 +565,7 @@ const PoolAnalysisCard = ({ currentPool, stats, effectivePity, checkLimitedInFir
                </div>
             </div>
          )}
-      </div>
+      </div>}
     </div>
   );
 };

@@ -2,6 +2,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { packInheritanceProjection, unpackInheritanceProjection } from '../../shared/simulator/historyCodec.js';
+import { PERSONAL_ANALYSIS_SCHEMA_VERSION } from '../_lib/personalAnalysisWorker.js';
 
 const mocks = vi.hoisted(() => ({
   rejectDisallowedBrowserOrigin: vi.fn(() => false),
@@ -345,6 +346,7 @@ function createAdminClient() {
       if (functionName === 'get_app_visible_pools') {
         return { data: state.poolRows, error: null };
       }
+      if (functionName === 'read_account_statistics_exclusions') return { data: [], error: null };
       if (functionName === 'prioritize_personal_analysis_jobs') {
         if (state.priorityRpcError) {
           return { data: null, error: state.priorityRpcError };
@@ -538,6 +540,35 @@ describe('/api/account-gacha-data', () => {
     expect(JSON.stringify(res.body.scope)).not.toContain('pool-other');
   });
 
+  it('projects current pool display fields and timeline titles without rebuilding a ready analysis', async () => {
+    const adminClient = createAdminClient();
+    const snapshot = adminClient.__state.accountSnapshots['game-1::server:2'];
+    snapshot.payload.poolManifest = [{ id: 'pool-current', pool_id: 'pool-current', name: '旧名称',
+      name_en: 'Old name', description: '旧描述', banner_url: 'old.png', type: 'limited', up_character: '原 UP' }];
+    snapshot.payload.dashboard = {
+      views: { 'pool-current': { total: 12 } },
+      timelineViews: { 'en-US': { 'pool-current': [{ id: 'pool-current', title: 'Old name',
+        totalPulls: 12, entries: [{ name: '角色名称', pulls: 12 }] }] } },
+    };
+    adminClient.__state.poolRows = [{ pool_id: 'pool-current', name: '新名称', name_en: 'New name',
+      description: '新描述', banner_url: 'new.png', type: 'weapon', up_character: '另一个 UP' }];
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({
+      url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2&viewKey=pool-current&locale=en-US',
+    }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.availability).toBe('ready');
+    expect(res.body.scope.poolManifest[0]).toMatchObject({ name: '新名称', name_en: 'New name',
+      description: '新描述', banner_url: 'new.png', type: 'limited', up_character: '原 UP' });
+    expect(res.body.scope.dashboard.timelineViews['en-US']['pool-current'][0]).toEqual({ id: 'pool-current',
+      title: 'New name', totalPulls: 12, entries: [{ name: '角色名称', pulls: 12 }] });
+    expect(res.body.meta.generatedAt).toBe('2026-08-04T12:01:00.000Z');
+    expect(adminClient.__state.selectCalls.some((call) => call.table === 'history')).toBe(false);
+    expect(adminClient.__state.rpcCalls).toEqual([]);
+    expect(snapshot.payload.poolManifest[0].name).toBe('旧名称');
+  });
+
   it('projects reserved-character view keys in memory without breaking PostgREST select syntax', async () => {
     const adminClient = createAdminClient();
     adminClient.__state.accountSnapshots['game-1::server:2'].payload.dashboard = {
@@ -611,7 +642,7 @@ describe('/api/account-gacha-data', () => {
     const state = adminClient.__state;
     [state.ownerState, state.scopeState, state.ownerSnapshot, state.accountSnapshots['game-1::server:2']].forEach(
       (row) => {
-        row.analysis_schema_version = 3;
+        row.analysis_schema_version = PERSONAL_ANALYSIS_SCHEMA_VERSION;
       }
     );
     state.scopeState.snapshot_revision = 7;
@@ -644,7 +675,7 @@ describe('/api/account-gacha-data', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({
       availability: 'ready',
-      schemaVersion: 3,
+      schemaVersion: PERSONAL_ANALYSIS_SCHEMA_VERSION,
       simulatorInheritance: { contractVersion: 2, historyEncoding: 1 },
       meta: { accountKey: 'game-1::server:2', scopeRevision: '7', scopeSnapshotRevision: '7' },
     });
@@ -671,7 +702,7 @@ describe('/api/account-gacha-data', () => {
       const state = adminClient.__state;
       [state.ownerState, state.scopeState, state.ownerSnapshot, state.accountSnapshots['game-1::server:2']].forEach(
         (row) => {
-          row.analysis_schema_version = 3;
+          row.analysis_schema_version = PERSONAL_ANALYSIS_SCHEMA_VERSION;
         }
       );
       state.scopeState.snapshot_revision = 7;
@@ -1317,6 +1348,22 @@ describe('/api/account-gacha-data', () => {
         truncated: false,
       },
     });
+  });
+
+  it.each([['2099-01-01', 409], ['2026-01-01', 200]])('checks the canonical pool opening time %s before saving imported history', async (startTime, status) => {
+    const adminClient = createAdminClient();
+    adminClient.__state.poolRows = [{ pool_id: 'special_official_001', name: '目录卡池', start_time: startTime, end_time: '2099-02-01' }];
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({ method: 'POST', body: { history: [{
+      id: '1002', poolId: 'official_pool_alias', character_id: 'char_alias', name: '弭弗', rarity: 6,
+      seqId: '2', gameUid: 'game-1', start_time: '2020-01-01', timestamp: '2099-01-02T12:00:00Z',
+    }] } }), res);
+    expect(res.statusCode).toBe(status);
+    if (status === 409) {
+      expect(res.body.code).toBe('pool_not_open');
+      expect(adminClient.__state.upsertCalls.some(call => call.table === 'history')).toBe(false);
+    } else expect(res.body.saved.history).toBe(1);
   });
 
   it('saves pools and history for the authenticated user, ignoring payload user ids', async () => {

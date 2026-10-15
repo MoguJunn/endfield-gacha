@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, Layers, Search, SlidersHorizontal, Star, Swords, Upload, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { isPoolGroupId, parsePoolGroupId } from '../../stores/usePoolStore';
 import ImportManager from '../../features/import/ImportManager';
+import ImportMethodDialog from '../../features/import/ImportMethodDialog.jsx';
 import { getImportAnomalyCount } from '../../features/import/importCompletionPolicy.js';
 import { getMobilePathForTab } from '../../constants/appRoutes';
 import { useI18n } from '../../i18n/index.js';
@@ -18,6 +19,9 @@ import { MobileGlassPanel } from './ux/MobilePrimitives.jsx';
 import { localizeEntityName, localizePoolName } from '../../utils/gameDataI18n.js';
 import { usePoolScopeSelectorState } from '../../hooks/app/usePoolScopeSelectorState.js';
 import { resolvePoolGroupExpanded } from './mobilePoolRailSelectorState.js';
+import { useImportMethodSelection } from '../../hooks/app/useImportMethodSelection.js';
+
+const WorkbenchFileImport = lazy(() => import('../../features/data-workbench/WorkbenchFileImport.jsx'));
 
 function cx(...classes) {
   return classes.filter(Boolean).join(' ');
@@ -72,7 +76,7 @@ function getPoolTypeConfig(pool) {
 export default function MobilePoolRailSelector() {
   const { t, locale, formatNumber } = useI18n();
   const navigate = useNavigate();
-  const [showImportManager, setShowImportManager] = useState(false);
+  const importSelection = useImportMethodSelection();
   const [searchQuery, setSearchQuery] = useState('');
   const [hideZeroPullPools, setHideZeroPullPools] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
@@ -301,11 +305,11 @@ export default function MobilePoolRailSelector() {
           {user ? (
             <button
               type="button"
-              onClick={() => setShowImportManager(true)}
+              onClick={importSelection.openChooser}
               className="inline-flex h-8 items-center justify-center gap-1 rounded border border-zinc-200 bg-white px-3 text-xs font-bold text-slate-700 transition-colors hover:text-slate-900 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:text-white"
             >
               <Upload size={14} />
-              {t('pool.selector.import')}
+              {locale === 'en-US' ? 'Import & correct' : '导入与补录'}
             </button>
           ) : (
             <div className="text-[10px] font-mono text-zinc-500">{t('pool.selector.loginToImport')}</div>
@@ -673,10 +677,18 @@ export default function MobilePoolRailSelector() {
         </div>
       )}
 
-      {showImportManager ? (
+      {importSelection.method === 'choose' && (
+        <ImportMethodDialog onClose={importSelection.close} onOfficial={importSelection.chooseOfficial}
+          onFile={importSelection.chooseFile} onManual={importSelection.chooseManual} />
+      )}
+      {importSelection.method === 'file' && (
+        <Suspense fallback={null}><WorkbenchFileImport onClose={importSelection.close} /></Suspense>
+      )}
+      {importSelection.method === 'official' ? (
         <ImportManager
-          isOpen={showImportManager}
-          onClose={() => setShowImportManager(false)}
+          isOpen
+          onClose={importSelection.close}
+          onOpenFileImport={importSelection.chooseFile}
           onImportComplete={(result) => {
             navigate(getMobilePathForTab('details'), {
               state: {

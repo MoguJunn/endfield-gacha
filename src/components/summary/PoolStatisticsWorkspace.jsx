@@ -132,6 +132,10 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
   const members = group ? stats?.members || [] : pool ? [{ id: pool.id, name: pool.name, nameEn: pool.name_en, total: stats?.total }] : [];
   const guest = source === 'local' && !user;
   return <div className="experience-ui hl-theme ex-integrated" data-theme={isDark ? 'dark' : 'light'} data-variant={mobile ? 'mobile' : 'desktop'} data-source={source}>
+    <p className="ex-sidebar-hint" role="note" aria-label={t('统计范围说明', 'Statistics eligibility')}>
+      {t('某一卡池被手动添加或修改过，该游戏账号在该区服的整池记录均不参与统计，包括概率、保底、排名、图鉴和资源计算。其他账号和区服不受影响；删除、重新导入或撤回不会恢复统计资格。',
+        'A manual addition or edit excludes the entire banner for that game account and server from rates, pity, rankings, catalogs and resource statistics. Other accounts and servers are unaffected. Deleting, reimporting or reverting does not restore eligibility.')}
+    </p>
     <div className="ex-main ex-workspace-grid">
       <aside className="ex-sidebar" aria-label={t('统计筛选', 'Statistics filters')}>
         <div className="ex-sidebar-heading"><h2><ListFilter size={16} />{t('统计范围', 'Statistics scope')}</h2>

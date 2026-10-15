@@ -43,6 +43,14 @@ vi.mock('../AveragePullStatsPanel.jsx', () => ({
 }));
 
 describe('PoolAnalysisCard profile display', () => {
+  it('shows unknown carry-over without presenting a fresh zero-pity state', () => {
+    render(<PoolAnalysisCard currentPool={{ id: 'b', type: 'limited', name: 'B', up_character: 'Six' }}
+      stats={{ total: 3, currentPity: null, currentPity5: 1, counts: {}, avgPullCost: {}, gifts: {} }}
+      effectivePity={{ pity6: null, pity5: 1, isInherited: false }} checkLimitedInFirstN={{ validPullCount: 3 }} />);
+    expect(screen.getAllByText('未知')).toHaveLength(2);
+    expect(screen.getByRole('note')).toHaveTextContent('继承垫抽在可信重置前显示为未知');
+  });
+
   it('renders reconstruction character milestones with series wording', () => {
     const currentPool = {
       id: 'recon-character-b',
