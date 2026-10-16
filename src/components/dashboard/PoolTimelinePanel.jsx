@@ -937,7 +937,7 @@ const PoolTimelinePanel = ({
         </div>
       )}
 
-      <div className={useMasonryLayout ? 'grid items-start gap-4 xl:grid-cols-3' : 'space-y-4'}>
+      <div className={useMasonryLayout ? 'columns-1 [column-gap:1rem] xl:columns-3' : 'space-y-4'}>
         {sections.length === 0 ? (
           <div
             className={`border border-dashed px-4 py-10 text-center text-sm ${mobile ? 'rounded-2xl border-zinc-200 bg-zinc-50/85 text-slate-500 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-500' : 'border-zinc-200 text-slate-400 dark:border-zinc-800 dark:text-zinc-500'}`}
