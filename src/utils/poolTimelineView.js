@@ -4,6 +4,7 @@ import { getPoolTimingMeta, normalizePoolGroupType } from './poolSelectorDisplay
 import { compareHistoryTimelineAsc, getHistoryTimelineTimestampMs } from './historyTimelineSort.js';
 import { resolvePoolCapabilities } from './poolCapabilities.js';
 import { buildOneTimeTargetGuaranteeState } from './poolScopedHistory.js';
+import { closeWeaponTimelineStage } from './timelinePresentation.js';
 import { getAppLocale, isEnglishLocale } from '../i18n/index.js';
 import {
   localizeEntityName,
@@ -903,7 +904,7 @@ function buildTimelineSection({
   const timing = getPoolTimingMeta(pool, new Date(), locale);
   const beginnerProgressClosed = pool?.type === 'beginner' && metrics.totalPulls >= 40;
   const showCurrentStage =
-    !disablePityState && !beginnerProgressClosed && (normalizedType === 'weapon' || !timing.isTimed || timing.isActive);
+    !disablePityState && !beginnerProgressClosed && (!timing.isTimed || timing.isActive);
   const entries = buildStageEntries({
     history,
     pool,
@@ -912,15 +913,47 @@ function buildTimelineSection({
     crossPoolPityMap,
     guaranteePulls,
     guaranteedRecordKeys,
-    showCurrentStage,
+    showCurrentStage: showCurrentStage || (!disablePityState && normalizedType === 'weapon' && timing.isExpired),
     locale,
     resolveCharacter,
-  });
+  }).flatMap(entry => entry.isCurrentStage && timing.isExpired
+    ? entry.pulls > 0 || entry.dropBadges?.length ? [closeWeaponTimelineStage(entry, locale)] : [] : [entry]);
   const maxEntryPulls = entries.reduce((maxValue, entry) => Math.max(maxValue, entry.pulls || 0), 0);
   const minimumScale = normalizedType === 'weapon' ? 40 : 60;
+  let pullIndex = 0;
+  let pity6 = 0;
+  let pity5 = 0;
+  const acquisitions = [];
+  for (const item of [...history].sort(sortHistoryAsc)) {
+    const gift = isGiftHistoryPull(item);
+    const free = isFreeHistoryPull(item);
+    if (!gift && !free) { pullIndex++; pity6++; pity5++; }
+    const rarity = Number(item.rarity);
+    if (rarity < 5) continue;
+    const continuity = item.statisticsContinuity;
+    const inherited = normalizedType === 'limited' ? crossPoolPityMap?.get(getHistoryRecordKey(item)) : null;
+    const interval = gift || free || disablePityState ? null : item.source === 'workbench'
+      ? item.personalIntervalPulls ?? null : continuity?.interrupted
+      ? rarity === 6 ? continuity.sixStarPity : continuity.fiveStarPity
+      : rarity === 6 ? inherited?.sixStarPity ?? pity6 : inherited?.fiveStarPity ?? pity5;
+    acquisitions.push({
+      id: getHistoryRecordKey(item), name: getItemName(item, locale), rarity,
+      avatarUrl: getAvatarUrl(item.character_name || item.item_name || item.name, resolveCharacter),
+      timestamp: item.timestamp || null,
+      drawMethod: gift ? 'gift' : free ? 'free' : isInfoBookHistoryPull(item) ? 'info_book' : 'normal',
+      pullIndex: gift || free || continuity?.interrupted || item.source === 'workbench' ? null : pullIndex,
+      intervalPulls: interval,
+      stageKind: gift ? 'gift' : rarity === 5 ? 'fiveStar' : normalizedType === 'standard' ? 'sixStar' : classifySixStarStageKind(item, resolveCharacter),
+    });
+    if (!gift && !free) { if (rarity === 6) pity6 = 0; pity5 = 0; }
+  }
 
   return {
     id: pool?.id || 'pool-timeline',
+    startTime: pool?.start_time || null,
+    endTime: pool?.end_time || null,
+    acquisitions: acquisitions.reverse(),
+    presentationVersion: 2,
     title: localizePoolName(pool, { locale }) || (isEnglishLocale(locale) ? 'Unknown Banner' : '未知卡池'),
     type: normalizedType,
     featured:

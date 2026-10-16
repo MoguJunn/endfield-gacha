@@ -1077,6 +1077,10 @@ var init_messages_en_US = __esm({
       "import.fileWizard.bhaoo.note": "Use the exported .xlsx file. Do not upload local userData/gachaData JSON files.",
       "import.fileWizard.helper.title": "EndfieldGachaHelper",
       "import.fileWizard.helper.desc": "Import .endfieldgacha.json or CSV files exported by EndfieldGachaHelper.",
+      "import.fileWizard.highStarSummary.title": "High-rarity Excel (Reserved)",
+      "import.fileWizard.highStarSummary.desc": "A single pull-history sheet with a UID, entity IDs and pull intervals, containing high-rarity results and free ten-pull summaries.",
+      "import.fileWizard.highStarSummary.note": "The source app is unconfirmed and direct import is not available yet. Missing low-rarity history and total pulls remain unknown.",
+      "import.fileWizard.highStarSummary.pending": "Planned",
       "import.fileWizard.endgacha.title": "endgacha.kwer.top",
       "import.fileWizard.endgacha.desc": "Import verified JSON, plain pull-history JSON, or TXT files exported by the website.",
       "import.fileWizard.endgacha.note": "Plain JSON/TXT has no UID or in-game name. Confirm or enter the account during import.",
@@ -1570,9 +1574,9 @@ var init_messages_en_US = __esm({
       "dashboard.analysis.limitedShort": "Limited",
       "dashboard.analysis.standardShort": "Standard",
       "dashboard.analysis.obtainedSummary": "Obtained:",
-      "dashboard.analysis.arsenalGiftReward": "Arsenal Gift",
-      "dashboard.analysis.targetWeaponReward": "Target Weapon",
-      "dashboard.analysis.reconstructionWeaponGiftRule": "The series grants an Arsenal Gift on claim 10, the target weapon on claim 18, then alternates every 8 claims.",
+      "dashboard.analysis.arsenalGiftReward": "Supplemental Arsenal Box",
+      "dashboard.analysis.targetWeaponReward": "Featured UP 6\u2605 Weapon",
+      "dashboard.analysis.reconstructionWeaponGiftRule": "The series grants a Supplemental Arsenal Box on claim 10, the featured UP 6\u2605 weapon on claim 18, then alternates every 8 claims.",
       "dashboard.analysis.firstSelector300": "First selector gift (300)",
       "dashboard.average.title": "Average Drop Cost",
       "dashboard.average.avg5": "Avg 5\u2605",
@@ -3353,6 +3357,10 @@ var messages = {
   "import.fileWizard.bhaoo.note": "\u8BF7\u4F7F\u7528\u8F6F\u4EF6\u5BFC\u51FA\u7684 .xlsx\uFF1B\u4E0D\u8981\u4E0A\u4F20 userData/gachaData \u76EE\u5F55\u91CC\u7684\u672C\u5730\u7528\u6237\u6570\u636E JSON\u3002",
   "import.fileWizard.helper.title": "EndfieldGachaHelper",
   "import.fileWizard.helper.desc": "\u5BFC\u5165 EndfieldGachaHelper \u5BFC\u51FA\u7684 .endfieldgacha.json \u6216 CSV \u6587\u4EF6\u3002",
+  "import.fileWizard.highStarSummary.title": "\u9AD8\u661F\u6458\u8981 Excel\uFF08\u9884\u7559\uFF09",
+  "import.fileWizard.highStarSummary.desc": "\u5355\u9875\u201C\u62BD\u5361\u8BB0\u5F55\u201D\u8868\uFF0C\u5E26 UID\u3001\u89D2\u8272/\u6B66\u5668 ID \u548C\u95F4\u9694\u62BD\u6570\uFF0C\u4EC5\u5305\u542B\u9AD8\u661F\u7ED3\u679C\u53CA\u514D\u8D39\u5341\u8FDE\u6458\u8981\u3002",
+  "import.fileWizard.highStarSummary.note": "\u6765\u6E90\u8F6F\u4EF6\u5F85\u786E\u8BA4\uFF0C\u6B64\u683C\u5F0F\u6682\u672A\u5F00\u653E\u76F4\u63A5\u5BFC\u5165\u3002\u7F3A\u5C11\u7684\u4F4E\u661F\u660E\u7EC6\u548C\u603B\u62BD\u6570\u9700\u4FDD\u7559\u4E3A\u672A\u77E5\u3002",
+  "import.fileWizard.highStarSummary.pending": "\u5F85\u9002\u914D",
   "import.fileWizard.endgacha.title": "endgacha.kwer.top",
   "import.fileWizard.endgacha.desc": "\u5BFC\u5165\u7F51\u7AD9\u5BFC\u51FA\u7684\u6821\u9A8C JSON\u3001\u7EAF\u5BFB\u8BBF JSON \u6216 TXT \u6587\u4EF6\u3002",
   "import.fileWizard.endgacha.note": "\u7EAF\u5BFB\u8BBF JSON/TXT \u6CA1\u6709 UID \u548C\u6635\u79F0\uFF1B\u5BFC\u5165\u786E\u8BA4\u65F6\u9700\u8981\u518D\u6B21\u6821\u9A8C\u6216\u586B\u5199\u8D26\u53F7\u3002",
@@ -3846,9 +3854,9 @@ var messages = {
   "dashboard.analysis.limitedShort": "\u9650\u5B9A",
   "dashboard.analysis.standardShort": "\u5E38\u9A7B",
   "dashboard.analysis.obtainedSummary": "\u5DF2\u83B7\u5F97:",
-  "dashboard.analysis.arsenalGiftReward": "\u6B66\u5E93\u8D60\u793C",
-  "dashboard.analysis.targetWeaponReward": "\u76EE\u6807\u6B66\u5668",
-  "dashboard.analysis.reconstructionWeaponGiftRule": "\u7CFB\u5217\u7B2C10\u6B21\u7533\u9886\u83B7\u6B66\u5E93\u8D60\u793C\uFF0C\u7B2C18\u6B21\u83B7\u76EE\u6807\u6B66\u5668\uFF0C\u4E4B\u540E\u6BCF8\u6B21\u7533\u9886\u4EA4\u66FF\u5956\u52B1\u3002",
+  "dashboard.analysis.arsenalGiftReward": "\u8865\u5145\u6B66\u5E93\u7BB1",
+  "dashboard.analysis.targetWeaponReward": "\u672C\u671F UP \u516D\u661F\u6B66\u5668",
+  "dashboard.analysis.reconstructionWeaponGiftRule": "\u7CFB\u5217\u7B2C10\u6B21\u7533\u9886\u83B7\u8865\u5145\u6B66\u5E93\u7BB1\uFF0C\u7B2C18\u6B21\u83B7\u672C\u671F UP \u516D\u661F\u6B66\u5668\uFF0C\u4E4B\u540E\u6BCF8\u6B21\u7533\u9886\u4EA4\u66FF\u5956\u52B1\u3002",
   "dashboard.analysis.firstSelector300": "\u9996\u6B21\u8D60\u9001\u81EA\u9009 (300\u62BD)",
   "dashboard.average.title": "\u5E73\u5747\u51FA\u8D27",
   "dashboard.average.avg5": "5\u2605 \u5E73\u5747",
@@ -5122,10 +5130,10 @@ function getTimelineBarColor(sectionType, entry) {
     return "linear-gradient(90deg, #f59e0b 0%, #ec4899 35%, #8b5cf6 68%, #3b82f6 100%)";
   }
   if (visualKind === "offStandard") {
-    return "#fb7185";
+    return "#94a3b8";
   }
   if (visualKind === "offLimited") {
-    return "#94a3b8";
+    return "#fb7185";
   }
   if (sectionType === "weapon") {
     return "#f59e0b";
@@ -5150,7 +5158,7 @@ function getTimelineTextBadgeStyle(entry, rarity, theme = "light") {
         borderColor: "rgba(245, 158, 11, 0.38)"
       };
     }
-    if (visualKind === "offStandard") {
+    if (visualKind === "offLimited") {
       return theme === "dark" ? {
         background: "rgba(251, 113, 133, 0.18)",
         color: "#fecdd3",
@@ -5161,7 +5169,7 @@ function getTimelineTextBadgeStyle(entry, rarity, theme = "light") {
         borderColor: "rgba(251, 113, 133, 0.30)"
       };
     }
-    if (visualKind === "offLimited") {
+    if (visualKind === "offStandard") {
       return theme === "dark" ? {
         background: "rgba(148, 163, 184, 0.18)",
         color: "#e2e8f0",

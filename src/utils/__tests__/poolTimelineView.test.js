@@ -40,6 +40,25 @@ vi.mock('../gameDataI18n.js', () => ({
 }));
 
 describe('poolTimelineView', () => {
+  it('projects individual drops with precise times and excludes gifts from pull positions and intervals', () => {
+    const history = [4, 6, 6, 4, 6].map((rarity, index) => ({ id: `r${index}`, poolId: 'weapon', rarity,
+      item_name: `武器${index}`, timestamp: `2026-01-01T00:00:0${index}.000Z`, seqId: String(index),
+      ...(index === 2 ? { specialType: 'gift' } : {}) }));
+    const section = buildSinglePoolTimelineSection({ pool: { id: 'weapon', type: 'weapon' }, history });
+    expect(section.acquisitions.map(row => [row.id, row.pullIndex, row.intervalPulls])).toEqual([
+      ['r4', 4, 2], ['r2', null, null], ['r1', 2, 2],
+    ]);
+    expect(section.acquisitions[0].timestamp).toBe(history[4].timestamp);
+    expect(section.acquisitions[1].drawMethod).toBe('gift');
+  });
+
+  it('leaves unknown workbench order, intervals and timestamps unknown', () => {
+    const section = buildSinglePoolTimelineSection({ pool: { id: 'limited', type: 'limited' }, history: [
+      { id: 'supplement', rarity: 6, name: '角色', source: 'workbench', timestamp: null },
+    ] });
+    expect(section.acquisitions[0]).toMatchObject({ pullIndex: null, intervalPulls: null, timestamp: null });
+  });
+
   it('uses weapon milestones for reconstruction weapon timelines', () => {
     const section = buildSinglePoolTimelineSection({
       pool: {

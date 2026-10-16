@@ -131,7 +131,11 @@ export function normalizeOfficialImportRecord(record = {}, context = {}) {
     && itemName === `${targetName}的信物`
     && !rawItemId
     && sourceQuality === null;
-  const quality = isTrustTokenGift ? 6 : sourceQuality;
+  const isWeaponTargetGift = context.poolType === 'weapon'
+    && context.weaponTargetGift === true && targetName !== '' && itemName === targetName
+    && !rawItemId && sourceQuality === null;
+  const isNamedGift = isTrustTokenGift || isWeaponTargetGift;
+  const quality = isNamedGift ? 6 : sourceQuality;
   const seqId = normalizeText(firstDefined(record.seqId, record.seq_id));
   const sourceTimestamp = firstDefined(record.gachaTs, record.timestamp, record.gacha_ts);
   const timestamp = normalizeTimestamp(sourceTimestamp);
@@ -152,7 +156,7 @@ export function normalizeOfficialImportRecord(record = {}, context = {}) {
         fields: ['itemId', 'itemName'],
       })
     );
-  } else if (!rawItemId && !isTrustTokenGift) {
+  } else if (!rawItemId && !isNamedGift) {
     issues.push(
       createIssue('MISSING_ITEM_ID', 'review', `“${itemName}”缺少物品 ID，需要确认后再导入。`, { fields: ['itemId'] })
     );
@@ -225,7 +229,7 @@ export function normalizeOfficialImportRecord(record = {}, context = {}) {
     itemName: itemName || null,
     itemType,
     quality,
-    specialType: isTrustTokenGift ? 'gift' : null,
+    specialType: isNamedGift ? 'gift' : null,
     giftCharacterName: isTrustTokenGift ? targetName : null,
     poolId: poolId || null,
     poolName: poolName || null,
@@ -254,6 +258,30 @@ export function normalizeOfficialImportRecord(record = {}, context = {}) {
       isInfoBook: record.isInfoBook === true || record.is_info_book === true,
     }),
   });
+}
+
+/** Weapon target rewards can be name-only. Require a complete real ten-pull
+ * beside exactly one additional target with no ID/quality; a missing item alone
+ * is never enough to classify a gift. Groups are isolated by pool and timestamp. */
+export function findOfficialWeaponTargetGifts(records = [], { poolId = '', upCharacter = '' } = {}) {
+  const batches = new Map();
+  const gifts = new Set();
+  for (const record of records) {
+    const normalized = normalizeOfficialImportRecord(record, { poolId, poolType: 'weapon', upCharacter });
+    if (!normalized.poolId || !normalized.timestamp || !normalized.seqId || isOfficialImportNonPullRecord(record)) continue;
+    const key = JSON.stringify([normalized.poolId, normalized.timestamp]);
+    if (!batches.has(key)) batches.set(key, []);
+    batches.get(key).push({ record, normalized });
+  }
+  for (const batch of batches.values()) {
+    const candidates = batch.filter(({ normalized: row }) => row.itemName === upCharacter && !row.rawItemId && row.quality === null);
+    const pulls = batch.filter(({ normalized: row }) => row.rawItemId && [4, 5, 6].includes(row.quality));
+    if (batch.length !== 11 || candidates.length !== 1 || pulls.length !== 10) continue;
+    const rewardSeq = candidates[0].normalized.seqId;
+    if (!/^\d+$/.test(rewardSeq) || !pulls.every(({ normalized: row }) => /^\d+$/.test(row.seqId) && BigInt(row.seqId) < BigInt(rewardSeq))) continue;
+    gifts.add(candidates[0].record);
+  }
+  return gifts;
 }
 
 export function summarizeOfficialImportIssues(records) {

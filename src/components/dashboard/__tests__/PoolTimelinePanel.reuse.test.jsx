@@ -21,6 +21,46 @@ const section = {
     dateLabel: '01/22', leadBadge: { label: '角色 A', rarity: 6 }, dropBadges: [] }],
 };
 describe('timeline shared presentation', () => {
+  it('sorts banners by opening date and filters the displayed cards independently of sharing', async () => {
+    const newer = { ...section, id: 'new', title: '新卡池', startTime: '2026-06-01', endTime: '2026-07-01', acquisitions: [] };
+    const older = { ...section, id: 'old', title: '旧卡池', startTime: '2026-01-01', endTime: '2026-02-01', acquisitions: [] };
+    await renderTimeline({ sections: [older, newer], isGroupMode: true, displayMode: 'card' });
+    expect(screen.getAllByRole('heading', { level: 3 }).map(node => node.textContent)).toEqual(['新卡池', '旧卡池']);
+    fireEvent.change(screen.getByLabelText('开池时间排序'), { target: { value: 'asc' } });
+    expect(screen.getAllByRole('heading', { level: 3 }).map(node => node.textContent)).toEqual(['旧卡池', '新卡池']);
+    fireEvent.click(screen.getByText(/选择展示卡池/));
+    fireEvent.click(screen.getByRole('checkbox', { name: '旧卡池' }));
+    expect(screen.getAllByRole('heading', { level: 3 }).map(node => node.textContent)).toEqual(['新卡池']);
+    fireEvent.click(screen.getByRole('button', { name: '清空' }));
+    expect(screen.queryByRole('heading', { level: 3 })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '全选' }));
+    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(2);
+  });
+
+  it('shows individual outcomes, pull positions, exact times and explicit unknown gift data', async () => {
+    await renderTimeline({ sections: [{ ...section, acquisitions: [
+      { id: 'first', name: '角色 A', rarity: 6, stageKind: 'up', drawMethod: 'normal', pullIndex: 42, intervalPulls: 12, timestamp: '2026-06-01T12:34:56Z' },
+      { id: 'gift', name: '角色 A', rarity: 6, stageKind: 'gift', drawMethod: 'gift', pullIndex: null, intervalPulls: null, timestamp: null },
+    ] }], displayMode: 'card', mobile: true });
+    const [normal, gift] = screen.getAllByRole('article');
+    expect(within(normal).getByText('第 42 抽')).toBeInTheDocument();
+    expect(within(normal).getByText('12 抽')).toBeInTheDocument();
+    expect(normal.querySelector('time').dateTime).toBe('2026-06-01T12:34:56Z');
+    expect(normal.querySelector('time').textContent).toMatch(/:56/);
+    expect(within(gift).getByText('时间未知')).toBeInTheDocument();
+    expect(within(gift).queryByText(/第 .* 抽/)).not.toBeInTheDocument();
+  });
+
+  it('updates an expired weapon snapshot to a closed remainder without losing its five-star results', async () => {
+    await renderTimeline({ sections: [{ ...section, type: 'weapon', startTime: '2020-01-01', endTime: '2020-02-01',
+      entries: [{ ...section.entries[0], id: 'pending', stageKind: 'current', isCurrentStage: true, pulls: 8,
+        stageLabel: '当前推进', resultSummary: '正在推进', dropBadges: [{ label: '五星武器', rarity: 5, count: 1 }] }] }] });
+    expect(screen.queryByText('当前推进')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在推进')).not.toBeInTheDocument();
+    expect(screen.getByText('收池结余')).toBeInTheDocument();
+    expect(screen.getByText('五星武器')).toBeInTheDocument();
+  });
+
   it('preserves the main page default metrics, bar value and UP stamp', async () => {
     await renderTimeline({ sections: [section] });
     expect(screen.getByText('卡池详情')).toBeInTheDocument();

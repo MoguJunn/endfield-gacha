@@ -206,13 +206,9 @@ const WeaponGifts = ({ stats, capabilities, t }) => {
   }
   const currentProgress = isReconstructionWeapon ? paidTotal / 10 : paidTotal;
   const nextProgress = isReconstructionWeapon ? nextWeaponGift / 10 : nextWeaponGift;
-  const nextGiftLabel = isReconstructionWeapon
-    ? nextWeaponGiftType === 'limited'
-      ? t('dashboard.analysis.targetWeaponReward')
-      : t('dashboard.analysis.arsenalGiftReward')
-    : nextWeaponGiftType === 'limited'
-      ? t('dashboard.analysis.limitedShort')
-      : t('dashboard.analysis.standardShort');
+  const nextGiftLabel = nextWeaponGiftType === 'limited'
+    ? t('dashboard.analysis.targetWeaponReward')
+    : t('dashboard.analysis.arsenalGiftReward');
 
   return (
       <div className="bg-zinc-50 dark:bg-zinc-900 p-3 border-l-2 border-red-500 flex flex-col gap-2">
@@ -234,10 +230,10 @@ const WeaponGifts = ({ stats, capabilities, t }) => {
           <div className="flex gap-3 text-[11px] text-slate-600 dark:text-zinc-400 font-mono">
               <span>{t('dashboard.analysis.obtainedSummary')}</span>
               <span className="text-red-600 dark:text-red-400 font-medium">
-                {stats.gifts?.standardCount || 0} {isReconstructionWeapon ? t('dashboard.analysis.arsenalGiftReward') : t('dashboard.analysis.standardShort')}
+                {stats.gifts?.standardCount || 0} {t('dashboard.analysis.arsenalGiftReward')}
               </span>
               <span className="text-blue-600 dark:text-cyan-400 font-medium">
-                {stats.gifts?.limitedCount || 0} {isReconstructionWeapon ? t('dashboard.analysis.targetWeaponReward') : t('dashboard.analysis.limitedShort')}
+                {stats.gifts?.limitedCount || 0} {t('dashboard.analysis.targetWeaponReward')}
               </span>
           </div>
           {isReconstructionWeapon && (

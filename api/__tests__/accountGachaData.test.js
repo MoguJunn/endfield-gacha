@@ -574,7 +574,7 @@ describe('/api/account-gacha-data', () => {
     snapshot.payload.dashboard = {
       views: { 'pool-current': { total: 12 } },
       timelineViews: { 'en-US': { 'pool-current': [{ id: 'pool-current', title: 'Old name',
-        totalPulls: 12, entries: [{ name: '角色名称', pulls: 12 }] }] } },
+        totalPulls: 12, presentationVersion: 2, acquisitions: [], entries: [{ name: '角色名称', pulls: 12 }] }] } },
     };
     adminClient.__state.poolRows = [{ pool_id: 'pool-current', name: '新名称', name_en: 'New name',
       description: '新描述', banner_url: 'new.png', type: 'weapon', up_character: '另一个 UP' }];
@@ -588,11 +588,26 @@ describe('/api/account-gacha-data', () => {
     expect(res.body.scope.poolManifest[0]).toMatchObject({ name: '新名称', name_en: 'New name',
       description: '新描述', banner_url: 'new.png', type: 'limited', up_character: '原 UP' });
     expect(res.body.scope.dashboard.timelineViews['en-US']['pool-current'][0]).toEqual({ id: 'pool-current',
-      title: 'New name', totalPulls: 12, entries: [{ name: '角色名称', pulls: 12 }] });
+      title: 'New name', totalPulls: 12, presentationVersion: 2, acquisitions: [], entries: [{ name: '角色名称', pulls: 12 }] });
     expect(res.body.meta.generatedAt).toBe('2026-08-04T12:01:00.000Z');
     expect(adminClient.__state.selectCalls.some((call) => call.table === 'history')).toBe(false);
     expect(adminClient.__state.rpcCalls).toEqual([]);
     expect(snapshot.payload.poolManifest[0].name).toBe('旧名称');
+  });
+
+  it('queues existing timelines for drop details while retaining the last analysis without reading raw history', async () => {
+    const adminClient = createAdminClient();
+    adminClient.__state.accountSnapshots['game-1::server:2'].payload.dashboard = {
+      views: { 'pool-current': { total: 12 } },
+      timelineViews: { 'zh-CN': { 'pool-current': [{ id: 'pool-current', entries: [] }] } },
+    };
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({ url: '/api/account-gacha-data?mode=analysis&accountKey=game-1%3A%3Aserver%3A2&viewKey=pool-current' }), res);
+    expect(res.body.availability).toBe('stale');
+    expect(res.body.scope.dashboard.views['pool-current']).toEqual({ total: 12 });
+    expect(adminClient.__state.rpcCalls.some(call => call.params?.p_force_scope === true)).toBe(true);
+    expect(adminClient.__state.selectCalls.some(call => call.table === 'history')).toBe(false);
   });
 
   it('projects reserved-character view keys in memory without breaking PostgREST select syntax', async () => {

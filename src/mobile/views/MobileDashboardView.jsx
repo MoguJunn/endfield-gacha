@@ -217,7 +217,6 @@ function MobileDashboardView() {
     weaponGifts,
     currentUpPool,
     getProgressClass,
-    getCharacterAvatar,
     dashboardResourceSummary,
     resourceSummaryVariant,
     isAnalysisBacked,
@@ -1270,13 +1269,9 @@ function MobileDashboardView() {
             <div className="mobile-ux-card-inset space-y-2 border-l-2 border-red-500 p-3">
               <div className="flex items-center justify-between gap-3 text-xs">
                 <span className="font-bold text-slate-800 dark:text-zinc-200">
-                  {t('dashboard.analysis.nextGift')} · {isReconstructionWeapon
-                    ? weaponGifts.nextGiftType === 'limited'
-                      ? t('dashboard.analysis.targetWeaponReward')
-                      : t('dashboard.analysis.arsenalGiftReward')
-                    : weaponGifts.nextGiftType === 'limited'
-                      ? t('dashboard.analysis.limitedShort')
-                      : t('dashboard.analysis.standardShort')}
+                  {t('dashboard.analysis.nextGift')} · {weaponGifts.nextGiftType === 'limited'
+                    ? t('dashboard.analysis.targetWeaponReward')
+                    : t('dashboard.analysis.arsenalGiftReward')}
                 </span>
                 <span className="font-mono text-slate-500 dark:text-zinc-500">
                   {isReconstructionWeapon
@@ -1545,7 +1540,7 @@ function MobileDashboardView() {
                     <span className="flex items-center gap-2 text-xs font-bold uppercase text-slate-700 dark:text-zinc-200">
                       {t('dashboard.analysis.nextGift')}
                       <span className={`px-1 py-0.5 text-[11px] font-bold text-slate-900 dark:text-white ${weaponGifts.nextGiftType === 'limited' ? 'rainbow-bg' : 'bg-red-500'}`}>
-                        {weaponGifts.nextGiftType === 'limited' ? t('dashboard.analysis.limitedShort') : t('dashboard.analysis.standardShort')}
+                        {weaponGifts.nextGiftType === 'limited' ? t('dashboard.analysis.targetWeaponReward') : t('dashboard.analysis.arsenalGiftReward')}
                       </span>
                     </span>
                     <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">{specialProgress?.paidTotal ?? paidTotal} / {weaponGifts.nextGift}</span>
@@ -1558,8 +1553,8 @@ function MobileDashboardView() {
                   </div>
                   <div className="mt-1 flex gap-3 text-[11px] text-slate-500 dark:text-zinc-500 font-mono uppercase">
                     <span>{t('dashboard.analysis.obtainedSummary')}</span>
-                    <span className="text-red-600 dark:text-red-400 font-medium">{weaponGifts.standardCount} {t('dashboard.analysis.standardShort')}</span>
-                    <span className="text-cyan-600 dark:text-cyan-400 font-medium">{weaponGifts.limitedCount} {t('dashboard.analysis.limitedShort')}</span>
+                    <span className="text-red-600 dark:text-red-400 font-medium">{weaponGifts.standardCount} {t('dashboard.analysis.arsenalGiftReward')}</span>
+                    <span className="text-cyan-600 dark:text-cyan-400 font-medium">{weaponGifts.limitedCount} {t('dashboard.analysis.targetWeaponReward')}</span>
                   </div>
                 </div>
               )}
@@ -1618,7 +1613,7 @@ function MobileDashboardView() {
         ) : null}
       >
         {characterStats.length > 0 ? (
-          charViewMode === 'waterfall'
+          (charViewMode === 'waterfall' || charViewMode === 'card')
             && isAnalysisBacked
             && !hasCompleteRawHistory
             && !Array.isArray(snapshotTimelineSections) ? (
@@ -1627,9 +1622,11 @@ function MobileDashboardView() {
                 ? 'The complete timeline is available after all detailed record pages are loaded.'
                 : '完整时间线将在详细记录全部分页加载后显示。'}
             </div>
-          ) : charViewMode === 'waterfall' ? (
+          ) : (
             <div className="pt-2">
               <PoolTimelinePanel
+                key={currentPool?.id || 'overview'}
+                displayMode={charViewMode}
                 sections={timelineSections}
                 currentPool={currentPool}
                 currentPoolHistory={normalizedPoolHistory}
@@ -1649,118 +1646,13 @@ function MobileDashboardView() {
                 onToggleShowFiveStarDrops={setShowTimelineFiveStarDrops}
               />
             </div>
-          ) : (
-          <div className="space-y-2 pt-2">
-            {characterStats.map((char) => {
-              const isSixStar = char.rarity === 6;
-              const isLimitedChar = isSixStar && !char.isStandard;
-              const isStandardChar = isSixStar && char.isStandard;
-              const avatarUrl = getCharacterAvatar(char.name);
-              const localizedCharacterName = localizeEntityName(char.name, {
-                locale,
-                type: isWeapon ? 'weapon' : 'character'
-              });
-
-              // 生成出货抽数描述
-              const pullInfoParts = char.pullIndices.map((idx, i) => {
-                const pity = char.pities[i];
-                const isInfoBook = char.infoBookFlags?.[i] === true;
-                if (idx === 'free' || pity === 'free') return { type: 'free', text: isEnglish ? 'Free' : '免费' };
-                if (pity) return { type: isInfoBook ? 'infoBook' : 'normal', text: isEnglish ? `${pity} pulls (#${idx})` : `${pity}抽(#${idx})` };
-                return { type: isInfoBook ? 'infoBook' : 'normal', text: `#${idx}` };
-              });
-
-              return (
-                <div
-                  key={char.name}
-                  className={`relative flex items-center gap-3 rounded-[1rem] p-2 border transition-all hover:bg-zinc-100 dark:hover:bg-zinc-700 ${
-                    isLimitedChar
-                      ? 'bg-orange-500/6 border-orange-400/20'
-                      : isStandardChar
-                        ? 'bg-red-500/6 border-red-400/18'
-                        : 'bg-zinc-50 dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-800'
-                  }`}
-                >
-                  {/* 左侧颜色条 */}
-                  <div className={`absolute left-0 top-0 bottom-0 w-1 ${
-                    isLimitedChar ? 'rainbow-bg' : isStandardChar ? 'bg-red-500' : 'bg-amber-400'
-                  }`} />
-
-                  {/* 头像 */}
-                  <div className={`ml-2 flex h-10 w-10 items-center justify-center shrink-0 overflow-hidden rounded-[0.95rem] border ${
-                    isLimitedChar
-                      ? 'border-orange-300 dark:border-orange-700 bg-gradient-to-br from-orange-400 to-pink-500 text-slate-900 dark:text-white'
-                      : isStandardChar
-                        ? 'border-red-200 dark:border-red-800 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300'
-                        : 'border-amber-200 dark:border-amber-800 bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-300'
-                  }`}>
-                    {avatarUrl ? (
-                      <img src={avatarUrl} alt={localizedCharacterName} loading="lazy" className="w-full h-full object-cover" />
-                    ) : (
-                      <User size={18} />
-                    )}
-                  </div>
-
-                  {/* 信息 */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-sm font-bold truncate uppercase tracking-tight ${
-                        isLimitedChar ? 'text-slate-900 dark:text-zinc-100' : 'text-slate-700 dark:text-zinc-300'
-                      }`}>
-                        {localizedCharacterName}
-                      </span>
-                      <div className="flex gap-0.5">
-                        {Array.from({ length: char.rarity }).map((_, i) => (
-                          <Star key={i} size={8} className={`${isSixStar ? 'text-orange-400' : 'text-amber-400'} fill-current`} />
-                        ))}
-                      </div>
-                    </div>
-                    <div className="text-[10px] font-mono text-slate-600 dark:text-zinc-400 dark:text-slate-500 dark:text-zinc-500 truncate">
-                      {pullInfoParts.map((part, i) => (
-                        <span key={i}>
-                          {part.type === 'free' ? (
-                            <span className="text-blue-500 font-bold">{part.text}</span>
-                          ) : part.type === 'infoBook' ? (
-                            <span className="text-amber-600 dark:text-amber-400 font-bold">
-                              {t('dashboard.analysis.infoBookPrefix', { value: part.text })}
-                            </span>
-                          ) : (
-                            <span>{part.text}</span>
-                          )}
-                          {i < pullInfoParts.length - 1 && ', '}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* 数量 */}
-                  <div className="flex items-center gap-1">
-                    {char.infoBookCount > 0 && (
-                      <div className="text-[10px] font-mono font-bold px-1.5 py-0.5 border bg-amber-50 dark:bg-amber-900/20 border-amber-200 text-amber-700 dark:text-amber-300">
-                        {t('simulator.characterStats.infoBookCount', { count: char.infoBookCount })}
-                      </div>
-                    )}
-                    {char.freeCount > 0 && (
-                      <div className="rounded-full border border-blue-400/30 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-mono font-bold text-blue-300">
-                        {t('simulator.characterStats.freeCount', { count: char.freeCount })}
-                      </div>
-                    )}
-                    <div className={`text-xs font-mono font-bold px-1.5 py-0.5 border ${
-                      isLimitedChar ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 text-orange-600 dark:text-orange-400' :
-                      isStandardChar ? 'bg-red-50 dark:bg-red-900/10 border-red-200 text-red-600 dark:text-red-400' :
-                      'rounded-full bg-white/6 border-white/10 text-slate-600 dark:text-zinc-400'
-                    }`}>
-                      x{char.count}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
           )
-        ) : normalizedPoolHistory.length > 0 && charViewMode === 'waterfall' ? (
+        ) : normalizedPoolHistory.length > 0 || timelineSections.length > 0 ? (
           <div className="pt-2">
             <PoolTimelinePanel
+              key={currentPool?.id || 'overview'}
+              displayMode={charViewMode}
+              sections={timelineSections}
               currentPool={currentPool}
               currentPoolHistory={normalizedPoolHistory}
               groupedHistory={groupedHistory}

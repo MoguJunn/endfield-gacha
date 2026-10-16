@@ -1,9 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Eye, EyeOff, Layers, ShieldCheck } from 'lucide-react';
 import { buildDashboardTimelineSections, countDashboardTimelineNodes } from '../../utils/dashboardTimelineSections.js';
 import { isEnglishLocale, useI18n } from '../../i18n/index.js';
 import { getTimelineStageElementId } from '../../utils/poolTimelineView.js';
 import { getTimelineBarColor, getTimelineTextBadgeStyle } from '../../utils/timelineVisuals.js';
+import { prepareTimelineSections } from '../../utils/timelinePresentation.js';
+import PoolAcquisitionCards from './PoolAcquisitionCards.jsx';
 
 function formatAverage(value, t) {
   if (!Number.isFinite(value)) {
@@ -117,8 +119,9 @@ function getStampConfig(entry, sectionType, t, locale) {
     if (sectionType === 'limited' || sectionType === 'extra' || sectionType === 'weapon') {
       return {
         label: t('dashboard.timeline.badge.offrate'),
-        className:
-          'border-rose-400 bg-rose-50 text-rose-600 dark:border-rose-500/70 dark:bg-rose-500/10 dark:text-rose-400',
+        className: entry.stageKind === 'offLimited'
+          ? 'border-rose-400 bg-rose-50 text-rose-600 dark:border-rose-500/70 dark:bg-rose-500/10 dark:text-rose-400'
+          : 'border-slate-400 bg-slate-50 text-slate-600 dark:border-slate-500/70 dark:bg-slate-500/10 dark:text-slate-400',
       };
     }
 
@@ -772,9 +775,13 @@ const PoolTimelinePanel = ({
   mobile = false,
   showFiveStarDrops = true,
   onToggleShowFiveStarDrops = null,
+  displayMode = 'waterfall',
 }) => {
   const { t, locale } = useI18n();
-  const sections = useMemo(() => {
+  const [order, setOrder] = useState('desc');
+  const [selectedIds, setSelectedIds] = useState(null);
+  const english = isEnglishLocale(locale);
+  const sourceSections = useMemo(() => {
     if (Array.isArray(precomputedSections)) {
       return precomputedSections;
     }
@@ -810,19 +817,23 @@ const PoolTimelinePanel = ({
     precomputedSections,
     selectedPools,
   ]);
+  const availableSections = prepareTimelineSections(sourceSections, selectedPools, { order, locale });
+  const sections = availableSections.filter(section => selectedIds === null || selectedIds.includes(section.id));
 
   const totalNodes = countDashboardTimelineNodes(sections);
-  const title = isAllPoolsOverview
+  const title = displayMode === 'card' ? english ? 'Drops by banner' : '各池出货明细' : isAllPoolsOverview
     ? t('dashboard.timeline.title.overview')
     : isGroupMode
       ? t('dashboard.timeline.title.group', { name: currentPool?.name || t('dashboard.timeline.overview') })
       : t('dashboard.timeline.title.single');
-  const subtitle = isAllPoolsOverview
+  const subtitle = displayMode === 'card'
+    ? english ? 'Individual 5★ and 6★ results with pull positions and local acquisition times.' : '按卡池逐条查看五星、六星结果、出货抽数和本地时间。'
+    : isAllPoolsOverview
     ? t('dashboard.timeline.subtitle.overview')
     : isGroupMode
       ? t('dashboard.timeline.subtitle.group')
       : t('dashboard.timeline.subtitle.single');
-  const useMasonryLayout = !mobile && (isAllPoolsOverview || isGroupMode);
+  const useMasonryLayout = displayMode !== 'card' && !mobile && (isAllPoolsOverview || isGroupMode);
 
   return (
     <div
@@ -840,7 +851,7 @@ const PoolTimelinePanel = ({
             <div
               className={`text-[10px] font-bold uppercase tracking-[0.2em] ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-slate-500 dark:text-zinc-500'}`}
             >
-              {t('dashboard.timeline.header')}
+              {displayMode === 'card' ? english ? 'Drop cards' : '出货卡片' : t('dashboard.timeline.header')}
             </div>
             <div className="mt-1 flex items-center gap-2">
               <Layers
@@ -862,7 +873,7 @@ const PoolTimelinePanel = ({
         ) : (
           <div className="min-w-0">
             <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500 dark:text-zinc-500">
-              {t('dashboard.timeline.mode')}
+              {displayMode === 'card' ? english ? 'Drop cards' : '出货卡片' : t('dashboard.timeline.mode')}
             </div>
             <p
               className={`mt-1 text-[11px] ${mobile ? 'text-slate-500 dark:text-zinc-500' : 'text-zinc-500 dark:text-zinc-500'}`}
@@ -873,6 +884,24 @@ const PoolTimelinePanel = ({
         )}
 
         <div className="flex flex-wrap items-center gap-2.5">
+          {(isGroupMode || isAllPoolsOverview) && <>
+            <label className="text-xs text-zinc-500">{english ? 'Banner order ' : '开池顺序 '}
+              <select aria-label={english ? 'Banner opening order' : '开池时间排序'} value={order} onChange={event => setOrder(event.target.value)} className="ml-1 border border-zinc-300 bg-transparent px-2 py-1.5 dark:border-zinc-700">
+                <option value="desc">{english ? 'Newest first' : '最新开池在前'}</option>
+                <option value="asc">{english ? 'Oldest first' : '最早开池在前'}</option>
+              </select>
+            </label>
+            <details className="relative text-xs text-zinc-500">
+              <summary className="cursor-pointer border border-zinc-300 px-3 py-2 dark:border-zinc-700">{english ? 'Choose banners' : '选择展示卡池'} ({sections.length}/{availableSections.length})</summary>
+              <div className="absolute right-0 z-30 mt-1 max-h-80 w-72 overflow-y-auto border border-zinc-300 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+                <div className="mb-2 flex gap-3"><button type="button" onClick={() => setSelectedIds(null)}>{english ? 'Select all' : '全选'}</button><button type="button" onClick={() => setSelectedIds([])}>{english ? 'Clear' : '清空'}</button></div>
+                {availableSections.map(section => <label key={section.id} className="flex items-start gap-2 py-2"><input type="checkbox" checked={selectedIds === null || selectedIds.includes(section.id)} onChange={() => setSelectedIds(previous => {
+                  const ids = previous ?? availableSections.map(item => item.id);
+                  return ids.includes(section.id) ? ids.filter(id => id !== section.id) : [...ids, section.id];
+                })} /><span>{section.title}</span></label>)}
+              </div>
+            </details>
+          </>}
           <div
             className={`border px-3 py-1.5 text-xs font-mono ${mobile ? 'rounded-xl border-zinc-200 bg-zinc-50 text-slate-600 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-400' : 'border-zinc-200 text-slate-600 dark:border-zinc-800 dark:text-zinc-400'}`}
           >
@@ -908,7 +937,7 @@ const PoolTimelinePanel = ({
         </div>
       )}
 
-      <div className={useMasonryLayout ? 'columns-1 [column-gap:1rem] xl:columns-3' : 'space-y-4'}>
+      <div className={useMasonryLayout ? 'grid items-start gap-4 xl:grid-cols-3' : 'space-y-4'}>
         {sections.length === 0 ? (
           <div
             className={`border border-dashed px-4 py-10 text-center text-sm ${mobile ? 'rounded-2xl border-zinc-200 bg-zinc-50/85 text-slate-500 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-500' : 'border-zinc-200 text-slate-400 dark:border-zinc-800 dark:text-zinc-500'}`}
@@ -918,7 +947,7 @@ const PoolTimelinePanel = ({
         ) : (
           sections.map((section) => (
             <div key={section.id} className={useMasonryLayout ? 'mb-4 break-inside-avoid' : undefined}>
-              <TimelineSectionCard
+              {displayMode === 'card' ? <PoolAcquisitionCards section={section} showFiveStarDrops={showFiveStarDrops} /> : <TimelineSectionCard
                 section={section}
                 isOverview={isGroupMode}
                 embedded={embedded}
@@ -927,7 +956,7 @@ const PoolTimelinePanel = ({
                 mobile={mobile}
                 showFiveStarDrops={showFiveStarDrops}
                 dense={useMasonryLayout}
-              />
+              />}
             </div>
           ))
         )}

@@ -38,11 +38,11 @@ export function getTimelineBarColor(sectionType, entry) {
   }
 
   if (visualKind === 'offStandard') {
-    return '#fb7185';
+    return '#94a3b8';
   }
 
   if (visualKind === 'offLimited') {
-    return '#94a3b8';
+    return '#fb7185';
   }
 
   if (sectionType === 'weapon') {
@@ -74,7 +74,7 @@ export function getTimelineTextBadgeStyle(entry, rarity, theme = 'light') {
           };
     }
 
-    if (visualKind === 'offStandard') {
+    if (visualKind === 'offLimited') {
       return theme === 'dark'
         ? {
             background: 'rgba(251, 113, 133, 0.18)',
@@ -88,7 +88,7 @@ export function getTimelineTextBadgeStyle(entry, rarity, theme = 'light') {
           };
     }
 
-    if (visualKind === 'offLimited') {
+    if (visualKind === 'offStandard') {
       return theme === 'dark'
         ? {
             background: 'rgba(148, 163, 184, 0.18)',

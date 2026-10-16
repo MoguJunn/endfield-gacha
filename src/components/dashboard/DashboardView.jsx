@@ -29,7 +29,6 @@ import PoolTimelinePanel from './PoolTimelinePanel';
 import AveragePullStatsPanel from './AveragePullStatsPanel';
 import DashboardShareCard from './DashboardShareCard';
 import ShareActionStatus from '../share/ShareActionStatus';
-import { characterCache } from '../../utils/characterUtils';
 import ResourceSummaryPanel from '../resources/ResourceSummaryPanel';
 import { buildCharacterStats } from '../../utils/dashboardCharacterStats';
 import { buildPoolSelectorGroups } from '../../utils/poolSelectorDisplay';
@@ -2126,7 +2125,7 @@ const DashboardView = ({ showToast }) => {
               </div>
             </div>
 
-            {charViewMode === 'waterfall' &&
+            {(charViewMode === 'waterfall' || charViewMode === 'card') &&
             isAnalysisBacked &&
             !hasCompleteRawHistory &&
             !Array.isArray(snapshotTimelineSections) ? (
@@ -2135,8 +2134,10 @@ const DashboardView = ({ showToast }) => {
                   ? 'The complete timeline is available after all detailed record pages are loaded.'
                   : '完整时间线将在详细记录全部分页加载后显示。'}
               </div>
-            ) : charViewMode === 'waterfall' ? (
+            ) : (
               <PoolTimelinePanel
+                key={currentPool?.id || 'overview'}
+                displayMode={charViewMode}
                 sections={timelineSections}
                 currentPool={currentPool}
                 currentPoolHistory={normalizedPoolHistory}
@@ -2154,183 +2155,6 @@ const DashboardView = ({ showToast }) => {
                 showFiveStarDrops={showTimelineFiveStarDrops}
                 onToggleShowFiveStarDrops={setShowTimelineFiveStarDrops}
               />
-            ) : visibleCharacterStats.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 dark:text-zinc-600 text-sm">
-                {t('dashboard.empty.noHighRarityRecords')}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {visibleCharacterStats.map((char) => {
-                  const isSixStar = char.rarity === 6;
-                  const isLimitedChar = isSixStar && !char.isStandard;
-                  const isStandardChar = isSixStar && char.isStandard;
-                  const localizedCharacterName = localizeEntityName(char.name, {
-                    locale,
-                    type: isWeapon ? 'weapon' : 'character',
-                  });
-
-                  // 生成出货抽数描述
-                  // 格式：68抽(#120), 24抽(#300) - 保底计数(总抽数位置)
-                  const pullInfoParts = char.pullIndices.map((idx, i) => {
-                    const pity = char.pities[i];
-                    const isFree = idx === 'free' || pity === 'free';
-                    const isInfoBook = char.infoBookFlags?.[i] === true;
-
-                    if (isFree) {
-                      return { type: 'free', text: isEnglish ? 'Free' : '免费' };
-                    }
-
-                    if (pity) {
-                      // 显示 保底计数(#总抽数位置)
-                      return {
-                        type: isInfoBook ? 'infoBook' : 'normal',
-                        text: isEnglish ? `${pity} pulls (#${idx})` : `${pity}抽(#${idx})`,
-                      };
-                    } else {
-                      // 没有保底数据时只显示总抽数位置
-                      return { type: isInfoBook ? 'infoBook' : 'normal', text: `#${idx}` };
-                    }
-                  });
-
-                  return (
-                    <div
-                      key={char.name}
-                      className={`
-                        relative flex flex-col justify-between p-3 border transition-all h-full
-                        hover:translate-y-[-1px] hover:shadow-sm
-                        ${
-                          isLimitedChar
-                            ? 'bg-zinc-50 dark:bg-zinc-900/50 border-orange-200 dark:border-orange-900/30'
-                            : isStandardChar
-                              ? 'bg-white dark:bg-zinc-900 border-red-100 dark:border-red-900/20'
-                              : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800'
-                        }
-                      `}
-                    >
-                      {/* 左侧颜色条 */}
-                      <div
-                        className={`absolute left-0 top-0 bottom-0 w-1 ${
-                          isLimitedChar ? 'rainbow-bg' : isStandardChar ? 'bg-red-500' : 'bg-amber-400'
-                        }`}
-                      ></div>
-
-                      {/* 角色头像和信息 */}
-                      <div className="ml-2 mb-2 flex items-start gap-2">
-                        {/* 角色头像 */}
-                        <div
-                          className={`
-                          w-10 h-10 rounded-full flex items-center justify-center shrink-0 overflow-hidden
-                          ${
-                            isLimitedChar
-                              ? 'bg-gradient-to-br from-orange-400 to-pink-500 text-white'
-                              : isStandardChar
-                                ? 'bg-red-200 dark:bg-red-800 text-red-600 dark:text-red-300'
-                                : 'bg-amber-200 dark:bg-amber-800 text-amber-600 dark:text-amber-300'
-                          }
-                        `}
-                        >
-                          {(() => {
-                            const charData = characterCache.searchByName(char.name, false);
-                            const avatarUrl = charData?.avatar_url;
-                            if (avatarUrl) {
-                              return (
-                                <img
-                                  src={avatarUrl}
-                                  alt={localizedCharacterName}
-                                  className="w-full h-full object-cover"
-                                  onError={(e) => {
-                                    e.target.style.display = 'none';
-                                    e.target.nextSibling.style.display = 'flex';
-                                  }}
-                                />
-                              );
-                            }
-                            return null;
-                          })()}
-                          <div
-                            className={`w-full h-full items-center justify-center ${
-                              characterCache.searchByName(char.name, false)?.avatar_url ? 'hidden' : 'flex'
-                            }`}
-                          >
-                            <User size={18} />
-                          </div>
-                        </div>
-
-                        {/* 角色名和星星 */}
-                        <div className="flex-1 min-w-0">
-                          <div
-                            className={`text-sm font-bold truncate ${
-                              isLimitedChar ? 'text-slate-800 dark:text-zinc-200' : 'text-slate-700 dark:text-zinc-400'
-                            }`}
-                          >
-                            {localizedCharacterName}
-                          </div>
-                          <div className="flex gap-0.5 mt-0.5">
-                            {Array.from({ length: char.rarity }).map((_, i) => (
-                              <Star
-                                key={i}
-                                size={8}
-                                className={`${isSixStar ? 'text-orange-400' : 'text-amber-400'} fill-current`}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* 底部信息栏：抽数详情 + 数量 */}
-                      <div className="ml-2 mt-auto">
-                        {/* 抽数详情 - 允许换行，但每项作为整体 */}
-                        <div className="text-xs font-mono leading-relaxed mb-1">
-                          {pullInfoParts.map((part, i) => (
-                            <span key={i}>
-                              <span className="whitespace-nowrap">
-                                {part.type === 'free' ? (
-                                  <span className="text-blue-500 font-bold">{part.text}</span>
-                                ) : part.type === 'infoBook' ? (
-                                  <span className="text-amber-600 dark:text-amber-400 font-bold">
-                                    {isEnglish ? `Intel ${part.text}` : `情报书 ${part.text}`}
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-400 dark:text-zinc-600">{part.text}</span>
-                                )}
-                              </span>
-                              {i < pullInfoParts.length - 1 && (
-                                <span className="text-slate-400 dark:text-zinc-600">, </span>
-                              )}
-                            </span>
-                          ))}
-                        </div>
-                        {/* 数量标签 - 右下角 */}
-                        <div className="flex justify-end">
-                          <div className="flex items-center gap-1.5">
-                            {char.infoBookCount > 0 && (
-                              <div className="text-xs font-mono font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
-                                {isEnglish ? `Intel×${char.infoBookCount}` : `情报书×${char.infoBookCount}`}
-                              </div>
-                            )}
-                            {char.freeCount > 0 && (
-                              <div className="text-xs font-mono font-bold px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-                                {isEnglish ? `Free×${char.freeCount}` : `免费×${char.freeCount}`}
-                              </div>
-                            )}
-                            <div
-                              className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded ${
-                                isLimitedChar
-                                  ? 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400'
-                                  : isStandardChar
-                                    ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400'
-                                    : 'bg-zinc-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-500'
-                              }`}
-                            >
-                              x{char.count}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
             )}
           </div>
         </div>

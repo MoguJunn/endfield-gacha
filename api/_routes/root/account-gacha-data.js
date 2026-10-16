@@ -892,11 +892,15 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
   const ownerFresh = isPersonalAnalysisSnapshotFresh(ownerSnapshot, ownerState);
   const scopeFresh =
     !accountSnapshot ||
-    (scopeState?.available &&
+      (scopeState?.available &&
       accountSnapshot.inputRevision === scopeState.historyRevision &&
       accountSnapshot.analysisSchemaVersion === scopeState.analysisSchemaVersion);
+  const requestedTimeline = accountSnapshot?.payload?.dashboard?.timelineViews?.[locale]?.[viewKey];
+  const needsDropDetails = Array.isArray(requestedTimeline) && requestedTimeline.some(
+    section => section.presentationVersion !== 2 || !Array.isArray(section.acquisitions)
+  );
   const verifiedEmpty = ownerFresh && ownerAccountKeys.size === 0;
-  const availability = verifiedEmpty ? 'empty' : ownerFresh && scopeFresh ? 'ready' : 'stale';
+  const availability = verifiedEmpty ? 'empty' : ownerFresh && scopeFresh && !needsDropDetails ? 'ready' : 'stale';
   const warnings = [];
   if (!ownerFresh) {
     warnings.push({ code: 'personal_analysis_owner_stale' });
@@ -915,8 +919,9 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
         : null;
   const updateQueued =
     availability === 'stale'
-      ? await prioritizePersonalAnalysisJobs(dbClient, userId, {
+        ? await prioritizePersonalAnalysisJobs(dbClient, userId, {
           scope: queueScope,
+          forceScope: scopeFresh && needsDropDetails,
         })
       : false;
   const immediateDispatch =
