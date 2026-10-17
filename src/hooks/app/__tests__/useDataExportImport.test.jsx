@@ -3,9 +3,8 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useDataExportImport } from '../useDataExportImport.js';
-import { loadAllAccountGachaHistoryForAccounts } from '../../../services/accountGachaDataService.js';
+import { loadAccountGachaData, loadAllAccountGachaHistoryForAccounts } from '../../../services/accountGachaDataService.js';
 import { loadWorkbenchEntriesForExport, importWorkbenchEntries } from '../../../services/workbenchTransferService.js';
-import { loadWorkbenchContext } from '../../../services/dataWorkbenchService.js';
 import { importRescueSupplements } from '../../../services/rescueImportService.js';
 import {
   useAuthStore,
@@ -21,6 +20,7 @@ import {
 } from '../../../utils/dataExport.js';
 
 vi.mock('../../../services/accountGachaDataService.js', () => ({
+  loadAccountGachaData: vi.fn(),
   loadAllAccountGachaHistoryForAccounts: vi.fn(),
 }));
 vi.mock('../../../services/dataWorkbenchService.js', () => ({ loadWorkbenchContext: vi.fn() }));
@@ -66,8 +66,8 @@ vi.mock('../../../i18n/index.js', () => ({
 
 function createCloudSync() {
   return {
-    savePoolToCloud: vi.fn(),
-    saveHistoryToCloud: vi.fn(),
+    savePoolToCloud: vi.fn().mockResolvedValue(true),
+    saveHistoryToCloud: vi.fn(async batch => ({ saved: { history: batch.length }, skipped: { history: 0 } })),
     refreshPersonalData: vi.fn(),
   };
 }
@@ -75,6 +75,7 @@ function createCloudSync() {
 describe('useDataExportImport export', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    loadAccountGachaData.mockResolvedValue({ history: [], meta: { ownerId: 'user-1', truncated: false } });
     window.localStorage.clear();
     window.sessionStorage.clear();
     Object.defineProperty(URL, 'createObjectURL', {
@@ -212,14 +213,15 @@ describe('useDataExportImport export', () => {
     const pending = { willSyncToCloud: true, data: { pools: [], history: [], workbenchEntries: [{ entryId: 'supplement' }] } };
     act(() => result.current.setPendingImport(pending));
     await act(async () => { await result.current.confirmImport(); });
-    expect(result.current.pendingImport).toEqual(pending);
-    expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'warning', message: expect.stringContaining('补录预览已保留') }));
+    expect(result.current.pendingImport.data).toEqual(pending.data);
+    expect(result.current.pendingImport.progress.phase).toBe('failed');
+    expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'warning', message: expect.stringContaining('导入预览已保留') }));
   });
 
   it('checks all saved wiki history when the store only holds a partial snapshot and preserves existing official records', async () => {
     useAuthStore.setState({ user: { id: 'user-1' }, setSyncing: vi.fn() });
     useHistoryStore.setState({ history: [], setHistory: vi.fn() });
-    loadWorkbenchContext.mockResolvedValue({ history: [{ game_uid: '123', server_scope: '1', pool_id: 'pool-1', seq_id: '11' }] });
+    loadAccountGachaData.mockResolvedValue({ meta: { ownerId: 'user-1' }, history: [{ game_uid: '123', server_scope: '1', pool_id: 'pool-1', seq_id: '11' }] });
     const cloudSync = createCloudSync(); cloudSync.refreshPersonalData.mockResolvedValue({ ok: true });
     const { result } = renderHook(() => useDataExportImport({ showToast: vi.fn(), cloudSync }));
     act(() => result.current.setPendingImport({ willSyncToCloud: true, data: { sourceFormatId: 'lcx_wiki_json', pools: [],
@@ -227,10 +229,55 @@ describe('useDataExportImport export', () => {
       history: [{ gameUid: '123', serverScope: '1', poolId: 'pool-1', seqId: '11', name: '角色' }],
       workbenchEntries: [{ entryId: 'unknowns', gameUid: '123', serverScope: '1' }] } }));
     await act(async () => result.current.confirmImport());
-    expect(loadWorkbenchContext).toHaveBeenCalledWith({ gameUid: '123', serverScope: '1' });
+    expect(loadAccountGachaData).toHaveBeenCalled();
     expect(cloudSync.saveHistoryToCloud).not.toHaveBeenCalled();
     expect(importRescueSupplements).toHaveBeenCalled();
     expect(result.current.pendingImport).toBeNull();
+  });
+
+  it('resumes a 2164-pull import after 400 saves, even when local history contains the entire failed import', async () => {
+    const rows = Array.from({ length: 2164 }, (_, index) => ({ id: `endgacha:uid:pool-1:time:${index}`,
+      gameUid: 'uid', serverId: 'bilibili', poolId: 'pool-1', seqId: String(index + 1), name: '武器', rarity: 4 }));
+    useAuthStore.setState({ user: { id: 'user-1' }, setSyncing: vi.fn() });
+    const setHistory = vi.fn();
+    useHistoryStore.setState({ history: rows, setHistory });
+    loadAccountGachaData.mockResolvedValue({ history: [], meta: { ownerId: 'user-1' } });
+    const cloudSync = createCloudSync();
+    let calls = 0;
+    cloudSync.saveHistoryToCloud.mockImplementation(async batch => {
+      if (++calls === 5) throw new Error('网络中断');
+      return { saved: { history: batch.length }, skipped: { history: 0 } };
+    });
+    cloudSync.refreshPersonalData.mockResolvedValue({ ok: true });
+    const { result } = renderHook(() => useDataExportImport({ showToast: vi.fn(), cloudSync }));
+    act(() => result.current.setPendingImport({ willSyncToCloud: true, data: { pools: [], history: rows } }));
+    await act(async () => result.current.confirmImport());
+    expect(result.current.pendingImport.progress).toEqual({ phase: 'failed', completed: 400, total: 2164 });
+    expect(setHistory).not.toHaveBeenCalled();
+    expect(cloudSync.refreshPersonalData).not.toHaveBeenCalled();
+    loadAccountGachaData.mockResolvedValue({ history: rows.slice(0, 400), meta: { ownerId: 'user-1' } });
+    cloudSync.saveHistoryToCloud.mockClear();
+    await act(async () => result.current.confirmImport());
+    const resumed = cloudSync.saveHistoryToCloud.mock.calls.flatMap(([batch]) => batch);
+    expect(resumed).toHaveLength(1764);
+    expect(resumed[0].seqId).toBe('401');
+    expect(result.current.pendingImport).toBeNull();
+    expect(cloudSync.refreshPersonalData).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { meta: { ownerId: 'someone-else' }, history: [] },
+    { meta: { ownerId: 'user-1', truncated: true }, history: [] },
+  ])('keeps the preview if existing cloud history cannot be trusted: %j', async saved => {
+    useAuthStore.setState({ user: { id: 'user-1' }, setSyncing: vi.fn() });
+    useHistoryStore.setState({ history: [], setHistory: vi.fn() });
+    loadAccountGachaData.mockResolvedValue(saved);
+    const cloudSync = createCloudSync();
+    const { result } = renderHook(() => useDataExportImport({ showToast: vi.fn(), cloudSync }));
+    act(() => result.current.setPendingImport({ willSyncToCloud: true, data: { pools: [], history: [{ id: 'r' }] } }));
+    await act(async () => result.current.confirmImport());
+    expect(result.current.pendingImport.progress.phase).toBe('failed');
+    expect(cloudSync.saveHistoryToCloud).not.toHaveBeenCalled();
   });
 
   it('falls back to current history when a logged-in legacy session has no analysis snapshot', async () => {

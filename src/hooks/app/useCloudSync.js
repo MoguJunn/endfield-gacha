@@ -337,7 +337,7 @@ export function useCloudSync({ showToast }) {
       if (!user || records.length === 0) return;
 
       try {
-        await saveAccountGachaData({ history: records });
+        return await saveAccountGachaData({ history: records });
       } catch (error) {
         const errorMessage = error.message || '';
         if (errorMessage.includes('policy') || errorMessage.includes('violates row-level security')) {

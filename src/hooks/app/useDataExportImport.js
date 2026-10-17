@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   useHistoryStore,
   usePoolStore,
@@ -6,7 +6,7 @@ import {
   usePersonalAnalysisStore,
 } from '../../stores';
 import { supabase } from '../../supabaseClient';
-import { loadAllAccountGachaHistoryForAccounts } from '../../services/accountGachaDataService.js';
+import { loadAccountGachaData, loadAllAccountGachaHistoryForAccounts } from '../../services/accountGachaDataService.js';
 import { applyCloudDataToStores } from '../../utils/cloudDataSync.js';
 import {
   buildImportedGameAccountMetadataEntries,
@@ -23,6 +23,7 @@ import { resolveImportResultActionHref } from '../../utils/importResultSummary.j
 import { characterCache } from '../../utils/characterUtils.js';
 import { useI18n } from '../../i18n/index.js';
 import { validateWorkbenchPoolOperations } from '../../../shared/workbenchPoolAvailability.js';
+import { filterImportedHistory } from '../../utils/importHistoryMerge.js';
 
 function normalizeImportAccountOverride(accountOverride = null) {
   if (!accountOverride || typeof accountOverride !== 'object') {
@@ -37,7 +38,7 @@ function normalizeImportAccountOverride(accountOverride = null) {
   }
 
   const serverId = String(accountOverride.serverId || '').trim();
-  return { gameUid, nickName, ...(['1', '2', '3'].includes(serverId) ? { serverId, serverScope: serverId, region: serverId === '1' ? 'cn' : 'intl' } : {}) };
+  return { gameUid, nickName, ...(['1', '2', '3', 'bilibili'].includes(serverId) ? { serverId, serverScope: serverId, region: ['1', 'bilibili'].includes(serverId) ? 'cn' : 'intl' } : {}) };
 }
 
 function applyImportAccountOverride(importedData, accountOverride = null) {
@@ -94,6 +95,7 @@ export function useDataExportImport({
   const [pendingImport, setPendingImportState] = useState(() => restoredDraftInfo.pendingImport);
   const [importWizardOpen, setImportWizardOpen] = useState(false);
   const [hasShownDraftRestoreToast, setHasShownDraftRestoreToast] = useState(false);
+  const importInFlight = useRef(false);
 
   const openImportWizard = useCallback(() => {
     setImportWizardOpen(true);
@@ -380,9 +382,10 @@ export function useDataExportImport({
 
   // 确认导入
   const confirmImport = useCallback(async (options = {}) => {
-    if (!pendingImport) return;
+    if (!pendingImport || importInFlight.current) return;
+    importInFlight.current = true;
+    try {
 
-    const { getHistoryImportDedupKey } = await import('../../utils/dataImport.js');
     const { willSyncToCloud } = pendingImport;
     const importedData = applyImportAccountOverride(pendingImport.data, options.accountOverride);
     const authoritativePools = [...(pools || []), ...(importedData.pools || []).filter(pool => !(pools || []).some(existing => existing.id === pool.id))];
@@ -402,13 +405,19 @@ export function useDataExportImport({
       showToast('补录数据需要登录后由服务器校验保存，导入预览已保留。', 'warning');
       return;
     }
-    let savedRescueHistory = [];
-    if (importedData.sourceFormatId === 'lcx_wiki_json' && willSyncToCloud && user) {
+    let savedHistory = history;
+    let savedCount = 0;
+    const updateProgress = (phase, completed, total) => setPendingImportState(current => current
+      ? { ...current, data: importedData, progress: { phase, completed, total } } : current);
+    if (willSyncToCloud && user) {
+      setSyncing(true);
+      updateProgress('checking', 0, importedData.history.length);
       try {
-        const { loadWorkbenchContext } = await import('../../services/dataWorkbenchService.js');
-        const account = importedData.accounts[0];
-        savedRescueHistory = (await loadWorkbenchContext({ gameUid: account.gameUid, serverScope: String(account.serverId) })).history;
+        const saved = await loadAccountGachaData();
+        if (saved.meta?.truncated || saved.meta?.ownerId !== user.id) throw new Error('未能确认完整的账号已有记录');
+        savedHistory = saved.history;
       } catch (error) {
+        updateProgress('failed', 0, importedData.history.length);
         showToast(`读取已有记录失败：${error.message}。导入预览已保留，请重试。`, 'warning');
         return;
       }
@@ -425,24 +434,8 @@ export function useDataExportImport({
       }
     });
 
-    const newHistory = [...history];
-    const existingHistoryKeys = new Set(
-      [...newHistory, ...savedRescueHistory]
-        .map(getHistoryImportDedupKey)
-        .filter(Boolean)
-    );
-    const addedHistory = [];
-
-    importedData.history.forEach((impItem) => {
-      const dedupKey = getHistoryImportDedupKey(impItem);
-      if (!dedupKey || !existingHistoryKeys.has(dedupKey)) {
-        newHistory.push(impItem);
-        addedHistory.push(impItem);
-        if (dedupKey) {
-          existingHistoryKeys.add(dedupKey);
-        }
-      }
-    });
+    const addedHistory = filterImportedHistory(importedData.history, savedHistory, newPools);
+    const newHistory = [...history, ...filterImportedHistory(importedData.history, history, newPools)];
 
     const importedAccounts = buildImportedGameAccountMetadataEntries({
       accounts: importedData.accounts || [],
@@ -486,7 +479,8 @@ export function useDataExportImport({
       error,
     });
 
-    applyCloudDataToStores(
+    const applyImportedData = () => {
+      applyCloudDataToStores(
       { pools: newPools, history: newHistory },
       {
         setPools,
@@ -499,20 +493,27 @@ export function useDataExportImport({
     if (preferredImportedGameUid) {
       switchGameAccount(preferredImportedGameUid);
     }
-    if (!supplementCount) setPendingImport(null);
+    };
 
-    if (willSyncToCloud && (addedPools.length > 0 || addedHistory.length > 0 || supplementCount > 0)) {
+    if (willSyncToCloud && user) {
       setSyncing(true);
+      updateProgress('saving', 0, addedHistory.length);
       try {
         for (const pool of addedPools) {
           // eslint-disable-next-line no-await-in-loop -- imported pools are synced sequentially so partial failures stay attributable
-          await savePoolToCloud(pool);
+          const saved = await savePoolToCloud(pool);
+          if (!saved) throw new Error(`卡池“${pool.name}”保存失败，请重试`);
         }
         const batchSize = 100;
         for (let i = 0; i < addedHistory.length; i += batchSize) {
           const batch = addedHistory.slice(i, i + batchSize);
           // eslint-disable-next-line no-await-in-loop -- imported history batches are intentionally serialized
-          await saveHistoryToCloud(batch);
+          const receipt = await saveHistoryToCloud(batch);
+          if (Number(receipt?.saved?.history) + Number(receipt?.skipped?.history) !== batch.length) {
+            throw new Error('服务器未确认这一批记录全部保存，请重试继续导入');
+          }
+          savedCount += batch.length;
+          updateProgress('saving', savedCount, addedHistory.length);
         }
         if (supplementCount) {
           if (['endfield_helper_summary_xlsx', 'lcx_wiki_json'].includes(importedData.sourceFormatId)) {
@@ -524,7 +525,9 @@ export function useDataExportImport({
           }
         }
 
+        applyImportedData();
         if (typeof refreshPersonalData === 'function' && user) {
+          updateProgress('refreshing', savedCount, addedHistory.length);
           const refreshResult = await refreshPersonalData(user, {
             kind: 'mutation',
             reason: 'file_import_complete',
@@ -556,11 +559,12 @@ export function useDataExportImport({
           completedAt,
         }), { locale }));
       } catch (syncError) {
+        updateProgress('failed', savedCount, addedHistory.length);
         const completedAt = new Date().toISOString();
         showToast({
           type: 'warning',
           title: '部分成功',
-          message: supplementCount ? `云端保存未全部完成：${syncError.message}。补录预览已保留，可核对后重试。` : `已在本机新增 ${addedHistory.length} 条记录，但云端同步失败。稍后刷新或重新登录后可再尝试同步。`,
+          message: `服务器已确认 ${savedCount}/${addedHistory.length} 条待保存明细。${syncError.message}。导入预览已保留，重试会核对服务端记录并继续。`,
           source: 'import.cloudSync',
           diagnostic: {
             phase: 'file_import_cloud_sync',
@@ -584,6 +588,8 @@ export function useDataExportImport({
         setSyncing(false);
       }
     } else {
+      applyImportedData();
+      setPendingImport(null);
       const duplicateHistory = Math.max((importedData.history?.length || 0) - addedHistory.length, 0);
       const completedAt = new Date().toISOString();
       showToast({
@@ -599,6 +605,10 @@ export function useDataExportImport({
         syncedToCloud: false,
         completedAt,
       }), { locale }));
+    }
+    } finally {
+      importInFlight.current = false;
+      setSyncing(false);
     }
   }, [addDurableNotification, pendingImport, pools, history, currentPoolId, locale, refreshPersonalData, resolvePreferredImportedGameUid, savePoolToCloud, saveHistoryToCloud, setHistory, setPendingImport, setPools, setSyncing, showToast, switchGameAccount, switchPool, user]);
 

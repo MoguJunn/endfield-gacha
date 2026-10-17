@@ -23,7 +23,7 @@ import { PRESET_POOLS } from '../../constants';
 import { buildUsernameHandle } from '../../utils/usernameValidation.js';
 import { useI18n } from '../../i18n/index.js';
 import { fetchAccountsList } from '../../utils/endfieldAuthChain.js';
-import { buildGameAccountServerTag, localizeGameAccountServerTag } from '../../utils/gameAccountMetadata.js';
+import { buildGameAccountServerTag, localizeGameAccountServerTag, normalizeGameAccountServerId } from '../../utils/gameAccountMetadata.js';
 import { buildPendingImportPreview, normalizeImportPreviewText } from './importPreviewUtils.js';
 
 const DEFAULT_POOL_FORM = {
@@ -269,6 +269,8 @@ export default function GachaModals({
     error: '',
   });
   const importPreview = useMemo(() => buildPendingImportPreview(pendingImport), [pendingImport]);
+  const importProgress = pendingImport?.progress;
+  const importBusy = Boolean(importProgress && importProgress.phase !== 'failed');
   const canOverrideImportAccount = importPreview.accountCount <= 1;
   const importVerificationResult = useMemo(
     () => buildImportVerificationResult(importPreview.primaryAccount, importVerifyState.selectedAccount, t),
@@ -292,6 +294,7 @@ export default function GachaModals({
   }, [modalState]);
 
   useEffect(() => {
+    if (pendingImport?.progress) return;
     if (!pendingImport) {
       queueMicrotask(() => {
         setImportAccountForm({ gameUid: '', nickName: '' });
@@ -367,7 +370,7 @@ export default function GachaModals({
     setImportAccountForm({
       gameUid: normalizeComparableGameUid(account.gameUid),
       nickName: account.nickName || normalizeComparableGameUid(account.gameUid),
-      serverId: String(account.serverId || ''),
+      serverId: normalizeGameAccountServerId(account) || '',
     });
   };
 
@@ -902,13 +905,19 @@ export default function GachaModals({
               </div>
               <button
                 onClick={() => setPendingImport(null)}
+                disabled={importBusy}
                 className="app-modal-icon-button text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 transition-colors"
                 aria-label={t('common.cancel')}
               >
                 <X size={18} />
               </button>
             </div>
-            <div className="p-4 sm:p-5 space-y-5">
+            <div className="app-modal-body p-4 sm:p-5 space-y-5">
+              {importProgress && <p role="status" className="border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100">
+                {locale === 'en-US'
+                  ? ({ checking: 'Checking saved records…', saving: `Server confirmed ${importProgress.completed}/${importProgress.total} records. Keep this page open.`, refreshing: 'Records saved. Updating overview…', failed: `Import incomplete: ${importProgress.completed}/${importProgress.total} records confirmed. Retry to continue.` })[importProgress.phase]
+                  : ({ checking: '正在核对服务器已有记录…', saving: `服务器已确认 ${importProgress.completed}/${importProgress.total} 条记录，请保持页面打开。`, refreshing: '明细已保存，正在更新总览…', failed: `导入尚未完成：已确认 ${importProgress.completed}/${importProgress.total} 条，点击确认导入可继续。` })[importProgress.phase]}
+              </p>}
               <p className="text-xs text-slate-500 dark:text-zinc-500">
                 {t('modals.import.dateRange', { value: importDateRange })}
               </p>
@@ -1150,13 +1159,14 @@ export default function GachaModals({
             <div className="app-modal-actions p-4 border-t border-zinc-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex flex-wrap gap-3 justify-end">
               <button
                 onClick={() => setPendingImport(null)}
+                disabled={importBusy}
                 className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 hover:bg-slate-200 dark:hover:bg-zinc-800 rounded-none transition-colors"
               >
                 {t('common.cancel')}
               </button>
               <button
                 onClick={() => confirmImport({ accountOverride: canOverrideImportAccount ? importAccountForm : null })}
-                disabled={syncing || !importAccountReady}
+                disabled={syncing || importBusy || !importAccountReady}
                 className="px-4 py-2 text-sm font-bold text-white bg-blue-500 hover:bg-blue-600 disabled:bg-blue-300 disabled:cursor-not-allowed rounded-none shadow-sm transition-all flex items-center gap-2"
               >
                 {syncing ? <RefreshCw size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}

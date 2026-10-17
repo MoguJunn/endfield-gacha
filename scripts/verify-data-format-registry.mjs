@@ -294,8 +294,8 @@ assert.equal(endgachaVerifiedValidation.normalizedData.history[0].timestamp, '20
 assert.deepEqual(endgachaVerifiedValidation.normalizedData.history.map(record => record.seqId), ['1', '2', '3', '4'], 'endgacha 校验 JSON 应按批次 seq 还原单条寻访序号');
 assert.equal(
   getHistoryImportDedupKey(endgachaVerifiedValidation.normalizedData.history[0]),
-  getHistoryImportDedupKey({ gameUid: '1545604131', poolId: 'beginner', seqId: '1' }),
-  'endgacha 校验 JSON 记录应与本站同 UID/卡池/seqId 记录使用相同去重键'
+  getHistoryImportDedupKey({ gameUid: '1545604131', serverScope: '1', poolId: 'beginner', seqId: '1' }),
+  'endgacha 校验 JSON 记录应与本站同区服/UID/卡池/seqId 记录使用相同去重键'
 );
 assert.equal(endgachaVerifiedValidation.normalizedData.history.find(record => record.name === '秋栗')?.rarity, 4, 'endgacha raw rarity=3 应映射为 4★');
 assert.equal(endgachaVerifiedValidation.normalizedData.history.find(record => record.name === '大潘')?.rarity, 5, 'endgacha raw rarity=4 应映射为 5★');

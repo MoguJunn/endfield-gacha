@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { useCloudSync, useDataExportImport, useToast } from '../../hooks';
 import DataImportWizardModal from '../../components/modals/DataImportWizardModal.jsx';
 import GachaModals from '../../components/modals/GachaModals.jsx';
@@ -15,7 +16,7 @@ export default function WorkbenchFileImport({ onClose }) {
   return (
     <>
       <DataImportWizardModal isOpen={!pendingImport} onClose={onClose} onImportFile={handleImportFile} />
-      {pendingImport && (
+      {pendingImport && createPortal(
         <GachaModals
           pendingImport={pendingImport}
           setPendingImport={(next) => {
@@ -27,7 +28,7 @@ export default function WorkbenchFileImport({ onClose }) {
           toasts={[]}
           confirmState={{ isOpen: false }}
           canEdit={false}
-        />
+        />, document.body
       )}
       <Toast toasts={toasts} onRemove={removeToast} />
     </>

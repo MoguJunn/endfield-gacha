@@ -218,8 +218,8 @@ function MobileSettingsView() {
   }, [history, user]);
 
   const userPoolCount = myPools.length;
-  const userHistoryCount = myHistory.length;
   const gameAccounts = usePersonalGameAccounts();
+  const userHistoryCount = Math.max(myHistory.length, gameAccounts.reduce((sum, account) => sum + (Number(account.recordCount) || 0), 0));
   const duplicateGameUidServerGroups = useMemo(
     () => buildDuplicateGameUidServerGroups(gameAccounts),
     [gameAccounts]
@@ -671,7 +671,7 @@ function MobileSettingsView() {
   };
 
   const handleDeleteAllData = async () => {
-    if (deleteConfirmText !== deletePhrase) return;
+    if (deleteLoading || deleteConfirmText !== deletePhrase) return;
     setDeleteLoading(true);
     setDeleteError('');
     try {

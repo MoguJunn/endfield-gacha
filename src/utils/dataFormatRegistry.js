@@ -175,13 +175,18 @@ function hashEndgachaPoolName(poolName) {
   return hash.toString(36);
 }
 
-function resolveEndgachaPoolId(poolName, explicitPoolId) {
+function resolveEndgachaPoolId(poolName, explicitPoolId, existingPools = []) {
   const poolId = pickText(explicitPoolId);
   if (poolId) {
     return poolId;
   }
 
   const normalizedPoolName = pickText(poolName);
+  const matches = existingPools.filter(pool => pickText(pool.name) === normalizedPoolName
+    && !pickText(pool.pool_id, pool.id).startsWith('endgacha_kwer_'));
+  const matchedIds = [...new Set(matches.map(pool => pickText(pool.pool_id, pool.id)).filter(Boolean))];
+  if (matchedIds.length > 1) throw new Error(`卡池“${normalizedPoolName}”匹配到多个目录条目，请核对后导入。`);
+  if (matchedIds.length === 1) return matchedIds[0];
   return ENDGACHA_KWER_POOL_NAME_TO_ID[normalizedPoolName]
     || `endgacha_kwer_${hashEndgachaPoolName(normalizedPoolName)}`;
 }
@@ -286,10 +291,13 @@ function normalizeEndgachaAccountInfo(info = {}) {
   }
 
   const channelName = pickText(info.channelName, info.channel_name, info.channel);
+  const channel = channelName.toLowerCase();
+  const serverId = channel === 'bilibili' ? 'bilibili' : channel === 'official' ? '1' : null;
   return {
     gameUid,
     nickName: pickText(info.nickName, info.nick_name, gameUid),
     channelName,
+    serverId, serverScope: serverId, region: serverId ? 'cn' : null,
     isOfficial: normalizeText(channelName).toLowerCase() === 'official' ? true : null
   };
 }
@@ -333,7 +341,7 @@ function normalizeEndgachaEntrySeqId(batch, itemIndex, itemCount) {
   return String(entrySeq);
 }
 
-function normalizeEndgachaKwerTopPayload(data) {
+function normalizeEndgachaKwerTopPayload(data, options = {}) {
   const batchMap = looksLikeEndgachaPlainTxtPayload(data)
     ? data.data
     : looksLikeEndgachaVerifiedPayload(data)
@@ -349,7 +357,7 @@ function normalizeEndgachaKwerTopPayload(data) {
 
   sortedBatches.forEach(([timestampKey, batch]) => {
     const poolName = pickText(batch.p, batch.poolName, batch.pool_name);
-    const poolId = resolveEndgachaPoolId(poolName, batch.pi || batch.poolId || batch.pool_id);
+    const poolId = resolveEndgachaPoolId(poolName, batch.pi || batch.poolId || batch.pool_id, options.existingPools);
     const poolType = inferEndgachaPoolType(poolId, poolName);
     const timestamp = normalizeExternalTimestamp(timestampKey);
     const category = poolType === 'weapon' ? 'weapon' : 'character';
@@ -401,6 +409,9 @@ function normalizeEndgachaKwerTopPayload(data) {
         nick_name: account?.nickName || null,
         channelName: account?.channelName || null,
         channel_name: account?.channelName || null,
+        serverId: account?.serverId || null, server_id: account?.serverId || null,
+        serverScope: account?.serverScope || null, server_scope: account?.serverScope || null,
+        region: account?.region || null,
         isOfficial: account?.isOfficial ?? null,
         is_official: account?.isOfficial ?? null,
         category
