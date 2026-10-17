@@ -12,6 +12,40 @@ const overlaps = (a, b) => poolId(a) === poolId(b) && a.values.drawMethod === b.
     || Date.parse(a.values.rangeStart) < Date.parse(b.values.rangeEnd) && Date.parse(b.values.rangeStart) < Date.parse(a.values.rangeEnd));
 const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
   ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+const sameIdentity = (a, b) => a.entryId === b.entryId
+  && (a.draftId ?? a.draft_id) === (b.draftId ?? b.draft_id);
+const inRange = (point, entry) => poolId(point) === entry.poolId && method(point) === entry.values.drawMethod
+  && at(point) >= Date.parse(entry.values.rangeStart) && at(point) < Date.parse(entry.values.rangeEnd);
+const overlapError = () => new Error('文件与已有卡池汇总范围重叠，请在数据工作台核对后合并，现有数据不会被覆盖。');
+
+function appendUncovered(points, additions) {
+  const matched = new Set();
+  return [...points, ...additions.filter(row => {
+    const index = points.findIndex((point, index) => !matched.has(index) && sameAcquisition(row, point));
+    if (index < 0) return true;
+    matched.add(index); return false;
+  })];
+}
+
+function removeEvidencedCounts(values, prior, confirmedPoints) {
+  const known = appendUncovered(confirmedPoints.filter(point => inRange(point, prior)),
+    (prior.values.acquisitions || []).map(row => ({ ...row, poolId: prior.poolId })));
+  for (const [rarity, key] of [[4, 'fourStarCount'], [5, 'fiveStarCount'], [6, 'sixStarCount']]) {
+    // Counts may include unnamed wins. Auto-merge only when concrete evidence
+    // already proves them, then let metrics derive counts for the wider range.
+    if (prior.values[key] != null && Number(prior.values[key]) > known.filter(row => method(row) === prior.values.drawMethod && Number(row.rarity) === rarity).length) {
+      throw new Error('已有补录包含尚未确认具体出货的数量，请在数据工作台核对后合并。');
+    }
+    delete values[key];
+  }
+}
+
+function setWikiCounts(entry, history) {
+  const covered = history.filter(row => inRange(row, entry));
+  for (const [rarity, key] of [[4, 'fourStarCount'], [5, 'fiveStarCount'], [6, 'sixStarCount']]) {
+    entry.values[key] = covered.filter(row => Number(row.rarity) === rarity).length;
+  }
+}
 
 /** Compare against the complete server context, including previous file repairs.
  * Preserve multiplicity: two copies of one entity in one ten-pull are two wins. */
@@ -21,12 +55,9 @@ export function planRescueSupplements(data, context) {
   const supplementPoints = existing.flatMap(entry => entry.kind === 'pool-ledger'
     ? (entry.values.acquisitions || []).map(row => ({ ...row, poolId: entry.poolId }))
     : entry.kind === 'detail' ? [{ ...entry.values, poolId: entry.poolId }] : []);
-  const coveredHistory = new Set();
-  const points = [...history, ...supplementPoints.filter(row => {
-    const index = history.findIndex((point, index) => !coveredHistory.has(index) && sameAcquisition(row, point));
-    if (index < 0) return true;
-    coveredHistory.add(index); return false;
-  })];
+  const points = appendUncovered(history, supplementPoints);
+  const confirmedPoints = appendUncovered(history, existing.filter(entry => entry.kind === 'detail')
+    .map(entry => ({ ...entry.values, poolId: entry.poolId })));
   const consumed = new Set(), entries = [], supplementChanges = [];
   for (const raw of data.workbenchEntries || []) {
     const incoming = normalizeWorkbenchEntry(raw);
@@ -54,31 +85,29 @@ export function planRescueSupplements(data, context) {
         && String(known.seq_id ?? known.seqId) === String(row.seqId) && Boolean(known.character_id || known.characterId)
         && [4, 5, 6].includes(Number(known.rarity))));
       if (resolved) continue;
-      const covered = history.filter(row => poolId(row) === incoming.poolId && method(row) === 'normal'
-        && at(row) >= Date.parse(incoming.values.rangeStart) && at(row) < Date.parse(incoming.values.rangeEnd));
-      incoming.values = { ...incoming.values, ...Object.fromEntries([[4,'fourStarCount'],[5,'fiveStarCount'],[6,'sixStarCount']]
-        .map(([rarity, key]) => [key, covered.filter(row => Number(row.rarity) === rarity).length])) };
+      setWikiCounts(incoming, history);
     } else if (!fresh.length) continue;
-    const overlapping = existing.filter(row => ['pool-ledger', 'pool-summary', 'batch-summary'].includes(row.kind) && overlaps(row, incoming));
+    const overlapping = existing.filter(row => sameIdentity(row, incoming)
+      || ['pool-ledger', 'pool-summary', 'batch-summary'].includes(row.kind) && overlaps(row, incoming));
     if (overlapping.length) {
       const prior = overlapping[0];
       if (wiki && prior.entryId === incoming.entryId && JSON.stringify(canonical(prior.values)) === JSON.stringify(canonical(incoming.values))) continue;
       if (overlapping.length !== 1 || prior.kind !== 'pool-ledger' || prior.source !== 'file' || prior.values.complete !== false
-        || prior.values.totalPulls != null || prior.values.coverageMode !== 'range' || wiki && prior.entryId !== incoming.entryId) {
-        throw new Error('文件与已有卡池汇总范围重叠，请在数据工作台核对后合并，现有数据不会被覆盖。');
+        || prior.poolId !== incoming.poolId || prior.values.drawMethod !== incoming.values.drawMethod
+        || prior.values.totalPulls != null || prior.values.pity != null || prior.values.initialPity != null
+        || prior.values.coverageMode !== 'range' || wiki && prior.entryId !== incoming.entryId) {
+        throw overlapError();
       }
       fresh = [...(prior.values.acquisitions || []), ...fresh];
       const values = { ...prior.values, ...incoming.values, acquisitions: fresh,
         rangeStart: new Date(Math.min(Date.parse(prior.values.rangeStart), Date.parse(incoming.values.rangeStart))).toISOString(),
         rangeEnd: new Date(Math.max(Date.parse(prior.values.rangeEnd), Date.parse(incoming.values.rangeEnd))).toISOString() };
-      // Old repairs may explicitly contain only the known acquisition counts.
-      // Derive the corresponding merged counts; never introduce a total.
-      if (!wiki) for (const [rarity,key] of [[5,'fiveStarCount'],[6,'sixStarCount']]) {
-        if (prior.values[key] != null) values[key] = Number(prior.values[key]) + (incoming.values.acquisitions || [])
-          .filter(row => !prior.values.acquisitions?.some(old => old.id === row.id) && fresh.includes(row) && row.rarity === rarity).length;
-      }
+      const merged = { ...prior, values };
+      if (existing.some(row => row !== prior && ['pool-ledger', 'pool-summary', 'batch-summary'].includes(row.kind) && overlaps(row, merged))) throw overlapError();
+      if (wiki) setWikiCounts(merged, history);
+      else removeEvidencedCounts(values, prior, confirmedPoints);
       supplementChanges.push({ id: prior.id, expectedRevision: prior.revision, action: 'update',
-        reason: '合并已确认的文件补录，保留原有出货和未知总量。', entry: { ...prior, values } });
+        reason: '合并已确认的文件补录，保留原有出货和未知总量。', entry: merged });
     } else entries.push({ ...incoming, values: { ...incoming.values, acquisitions: fresh } });
   }
   return { entries, historyChanges: [], supplementChanges };
