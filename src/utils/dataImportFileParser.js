@@ -1,4 +1,5 @@
 import { unzipSync } from 'fflate';
+import { normalizeHelperSummaryExport } from './rescueImport.js';
 
 function normalizeText(value) {
   return value === null || value === undefined ? '' : String(value).trim();
@@ -329,7 +330,8 @@ function parseBhaooSheetRows(rows, category, account) {
   return { pools: Array.from(pools.values()), history };
 }
 
-async function parseBhaooXlsxContent(content, { fileName = '' } = {}) {
+async function parseBhaooXlsxContent(content, options = {}) {
+  const { fileName = '' } = options;
   if (!isArrayBufferLike(content)) {
     throw new Error('Excel 导入需要读取二进制文件内容');
   }
@@ -337,6 +339,34 @@ async function parseBhaooXlsxContent(content, { fileName = '' } = {}) {
   const entries = unzipXlsxEntries(content);
   const sharedStrings = parseSharedStrings(decodeZipText(entries, 'xl/sharedStrings.xml'));
   const workbookSheets = getWorkbookSheets(entries);
+  const parsedSheets = workbookSheets.map(sheet => ({ ...sheet, rows: parseSheetRows(decodeZipText(entries, sheet.path), sharedStrings) }));
+  const summarySheets = parsedSheets.filter(sheet => sheet.rows.some(row => ['抽卡时间', '卡池ID', '获得内容', '抽取序列ID'].every(header => row.includes(header))));
+  if (summarySheets.length) {
+    const summaryRows = [];
+    const uids = new Set();
+    const date1904 = /date1904="(?:1|true)"/.test(decodeZipText(entries, 'xl/workbook.xml'));
+    for (const sheet of summarySheets) {
+      const headerIndex = sheet.rows.findIndex(row => row.includes('抽取序列ID') && row.includes('获得内容'));
+      for (const row of sheet.rows.slice(0, headerIndex)) {
+        const index = row.findIndex(cell => normalizeText(cell).toUpperCase() === 'UID');
+        if (index >= 0 && normalizeText(row[index+1])) uids.add(normalizeText(row[index+1]));
+      }
+      const headers = sheet.rows[headerIndex].map(normalizeText);
+      for (const row of sheet.rows.slice(headerIndex+1)) {
+        const item = Object.fromEntries(headers.map((header, index) => [header, row[index] ?? '']));
+        if (!normalizeText(item['获得内容']) && !normalizeText(item['卡池ID'])) throw new Error('高星摘要表存在无法识别的数据行，请核对表头及内容。');
+        const value = normalizeText(item['抽卡时间']);
+        const serial = Number(value);
+        const at = value && Number.isFinite(serial)
+          ? new Date((date1904 ? Date.UTC(1904,0,1) : Date.UTC(1899,11,30)) + Math.round(serial*86400000) - 8*3600000).toISOString()
+          : normalizeXlsxTimestamp(value);
+        if (!at || !Number.isFinite(Date.parse(at))) throw new Error('高星摘要表的抽卡时间无效。');
+        summaryRows.push({ ...item, timestamp: at });
+      }
+    }
+    if (uids.size !== 1) throw new Error('高星摘要表需要且只能包含一个有效 UID。');
+    return normalizeHelperSummaryExport({ gameUid: [...uids][0], summaryRows }, options);
+  }
   const account = parseBhaooXlsxFileName(fileName);
   const poolMap = new Map();
   const history = [];
@@ -503,14 +533,17 @@ function parseEndgachaKwerTopTxt(text) {
   };
 }
 
-export async function parseImportFileContent(content, { fileName = '' } = {}) {
+export async function parseImportFileContent(content, options = {}) {
+  const { fileName = '' } = options;
   const normalizedFileName = normalizeText(fileName).toLowerCase();
 
   if (normalizedFileName.endsWith('.xlsx')) {
-    return parseBhaooXlsxContent(content, { fileName });
+    return parseBhaooXlsxContent(content, options);
   }
 
   const text = stripBom(content);
+  // Wiki exports may be JSON in a .txt file, or have no extension at all.
+  if (text.trimStart().startsWith('{') || text.trimStart().startsWith('[')) return JSON.parse(text);
   if (normalizedFileName.endsWith('.csv')) {
     return buildHelperCsvPayload(text);
   }

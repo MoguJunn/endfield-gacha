@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useDataExportImport } from '../useDataExportImport.js';
 import { loadAllAccountGachaHistoryForAccounts } from '../../../services/accountGachaDataService.js';
 import { loadWorkbenchEntriesForExport, importWorkbenchEntries } from '../../../services/workbenchTransferService.js';
+import { loadWorkbenchContext } from '../../../services/dataWorkbenchService.js';
+import { importRescueSupplements } from '../../../services/rescueImportService.js';
 import {
   useAuthStore,
   useHistoryStore,
@@ -21,6 +23,8 @@ import {
 vi.mock('../../../services/accountGachaDataService.js', () => ({
   loadAllAccountGachaHistoryForAccounts: vi.fn(),
 }));
+vi.mock('../../../services/dataWorkbenchService.js', () => ({ loadWorkbenchContext: vi.fn() }));
+vi.mock('../../../services/rescueImportService.js', () => ({ importRescueSupplements: vi.fn().mockResolvedValue({ saved: 1 }) }));
 vi.mock('../../../services/workbenchTransferService.js', () => ({
   loadWorkbenchEntriesForExport: vi.fn().mockResolvedValue([]),
   importWorkbenchEntries: vi.fn().mockResolvedValue({ saved: 1, skipped: 0 }),
@@ -210,6 +214,23 @@ describe('useDataExportImport export', () => {
     await act(async () => { await result.current.confirmImport(); });
     expect(result.current.pendingImport).toEqual(pending);
     expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'warning', message: expect.stringContaining('补录预览已保留') }));
+  });
+
+  it('checks all saved wiki history when the store only holds a partial snapshot and preserves existing official records', async () => {
+    useAuthStore.setState({ user: { id: 'user-1' }, setSyncing: vi.fn() });
+    useHistoryStore.setState({ history: [], setHistory: vi.fn() });
+    loadWorkbenchContext.mockResolvedValue({ history: [{ game_uid: '123', server_scope: '1', pool_id: 'pool-1', seq_id: '11' }] });
+    const cloudSync = createCloudSync(); cloudSync.refreshPersonalData.mockResolvedValue({ ok: true });
+    const { result } = renderHook(() => useDataExportImport({ showToast: vi.fn(), cloudSync }));
+    act(() => result.current.setPendingImport({ willSyncToCloud: true, data: { sourceFormatId: 'lcx_wiki_json', pools: [],
+      accounts: [{ gameUid: '123', nickName: '测试', serverId: '1' }],
+      history: [{ gameUid: '123', serverScope: '1', poolId: 'pool-1', seqId: '11', name: '角色' }],
+      workbenchEntries: [{ entryId: 'unknowns', gameUid: '123', serverScope: '1' }] } }));
+    await act(async () => result.current.confirmImport());
+    expect(loadWorkbenchContext).toHaveBeenCalledWith({ gameUid: '123', serverScope: '1' });
+    expect(cloudSync.saveHistoryToCloud).not.toHaveBeenCalled();
+    expect(importRescueSupplements).toHaveBeenCalled();
+    expect(result.current.pendingImport).toBeNull();
   });
 
   it('falls back to current history when a logged-in legacy session has no analysis snapshot', async () => {

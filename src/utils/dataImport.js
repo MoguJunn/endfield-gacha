@@ -352,7 +352,7 @@ export function validateAndNormalizeImportData(data, options = {}) {
   if (!detectedFormat) {
     return {
       valid: false,
-      errors: ['暂不支持该导入格式；当前兼容站内 JSON、endfield-gacha Excel、EndfieldGachaHelper JSON/CSV、endgacha.kwer.top JSON/TXT'],
+      errors: ['暂不支持该导入格式；请从文件导入入口选择本站 JSON、终末地小助手 Excel、离愁轩 Wiki JSON/TXT 或其他已支持来源'],
     };
   }
 
@@ -471,6 +471,10 @@ export function validateAndNormalizeImportData(data, options = {}) {
       schemaVersion: normalizeString(sourceData.schemaVersion || sourceData.version),
       importedAt: normalizeString(sourceData.exportTime || sourceData.exportedAt) || new Date().toISOString(),
       accountInfoMissing: sourceData.accountInfoMissing === true,
+      accountServerMissing: sourceData.accountServerMissing === true,
+      calendarConflictCount: Number(sourceData.calendarConflictCount) || 0,
+      intervalConflictCount: Number(sourceData.intervalConflictCount) || 0,
+      unresolvedRecords: Array.isArray(sourceData.unresolvedRecords) ? sourceData.unresolvedRecords : [],
       importWarningCodes: Array.isArray(sourceData.importWarningCodes) ? [...sourceData.importWarningCodes] : [],
       filters: sourceData.filters || null,
       summary: sourceData.summary || null,

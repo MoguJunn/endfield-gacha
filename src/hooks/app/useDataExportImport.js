@@ -36,7 +36,8 @@ function normalizeImportAccountOverride(accountOverride = null) {
     return null;
   }
 
-  return { gameUid, nickName };
+  const serverId = String(accountOverride.serverId || '').trim();
+  return { gameUid, nickName, ...(['1', '2', '3'].includes(serverId) ? { serverId, serverScope: serverId, region: serverId === '1' ? 'cn' : 'intl' } : {}) };
 }
 
 function applyImportAccountOverride(importedData, accountOverride = null) {
@@ -49,17 +50,19 @@ function applyImportAccountOverride(importedData, accountOverride = null) {
     ...importedData,
     accounts: [{
       ...(Array.isArray(importedData.accounts) ? importedData.accounts[0] : {}),
-      gameUid: normalizedAccount.gameUid,
-      nickName: normalizedAccount.nickName
+      ...normalizedAccount,
     }],
     history: (importedData.history || []).map((record) => ({
       ...record,
       gameUid: normalizedAccount.gameUid,
       game_uid: normalizedAccount.gameUid,
       nickName: normalizedAccount.nickName,
-      nick_name: normalizedAccount.nickName
+      nick_name: normalizedAccount.nickName,
+      ...(normalizedAccount.serverId ? { serverId: normalizedAccount.serverId, server_id: normalizedAccount.serverId,
+        serverScope: normalizedAccount.serverId, server_scope: normalizedAccount.serverId, region: normalizedAccount.region } : {})
     })),
-    workbenchEntries: (importedData.workbenchEntries || []).map(entry => ({ ...entry, gameUid: normalizedAccount.gameUid }))
+    workbenchEntries: (importedData.workbenchEntries || []).map(entry => ({ ...entry, gameUid: normalizedAccount.gameUid,
+      ...(normalizedAccount.serverId ? { serverScope: normalizedAccount.serverId } : {}) }))
   };
 }
 
@@ -145,11 +148,8 @@ export function useDataExportImport({
 
   const resolvePreferredImportedGameUid = useCallback((historyRecords, importedAccounts = []) => {
     const availableGameUids = [
-      ...new Set(
-        (Array.isArray(historyRecords) ? historyRecords : [])
-          .map(getRecordGameUid)
-          .filter(Boolean)
-      )
+      ...new Set([...(Array.isArray(historyRecords) ? historyRecords : []).map(getRecordGameUid),
+        ...importedAccounts.map(account => account.gameUid || account.game_uid)].filter(Boolean))
     ];
 
     if (currentGameUid && availableGameUids.includes(currentGameUid)) {
@@ -303,14 +303,16 @@ export function useDataExportImport({
           import('../../utils/dataImportFileParser.js'),
           import('../../utils/dataImport.js')
         ]);
-        const importedData = await parseImportFileContent(e.target.result, {
-          fileName: file.name
-        });
+        if (file.name.toLowerCase().endsWith('.xlsx')) await characterCache.load();
+        const importOptions = { fileName: file.name, existingPools: pools, characters: characterCache.getAll() };
+        const importedData = await parseImportFileContent(e.target.result, importOptions);
+        if (importedData?.code === 0 && Array.isArray(importedData.data?.list)) await characterCache.load();
 
         const validation = validateAndNormalizeImportData(importedData, {
           existingPools: pools,
           currentUserId: user?.id || null,
-          sourceFileName: file.name
+          sourceFileName: file.name,
+          characters: characterCache.getAll(),
         });
         if (!validation.valid) {
           showToast({
@@ -348,7 +350,7 @@ export function useDataExportImport({
         showToast({
           type: 'info',
           title: '导入预览已生成',
-          message: `已解析 ${validation.stats.historyCount} 条记录、${validation.stats.poolCount} 个卡池。确认前会保留在本标签页，刷新后也可恢复。`,
+          message: `已解析 ${validation.stats.historyCount} 条明细、${validation.stats.supplementCount || 0} 条补录、${validation.stats.poolCount} 个卡池。请在预览中核对后保存。`,
           source: 'import.filePreview'
         });
 
@@ -392,9 +394,24 @@ export function useDataExportImport({
       return;
     }
     const supplementCount = importedData.workbenchEntries?.length || 0;
+    if (importedData.accountServerMissing && !['1', '2', '3'].includes(importedData.accounts?.[0]?.serverId)) {
+      showToast('请先选择这份 Excel 对应的游戏区服，导入预览已保留。', 'warning');
+      return;
+    }
     if (supplementCount && (!willSyncToCloud || !user)) {
       showToast('补录数据需要登录后由服务器校验保存，导入预览已保留。', 'warning');
       return;
+    }
+    let savedRescueHistory = [];
+    if (importedData.sourceFormatId === 'lcx_wiki_json' && willSyncToCloud && user) {
+      try {
+        const { loadWorkbenchContext } = await import('../../services/dataWorkbenchService.js');
+        const account = importedData.accounts[0];
+        savedRescueHistory = (await loadWorkbenchContext({ gameUid: account.gameUid, serverScope: String(account.serverId) })).history;
+      } catch (error) {
+        showToast(`读取已有记录失败：${error.message}。导入预览已保留，请重试。`, 'warning');
+        return;
+      }
     }
 
     const newPools = [...(pools || [])];
@@ -410,7 +427,7 @@ export function useDataExportImport({
 
     const newHistory = [...history];
     const existingHistoryKeys = new Set(
-      newHistory
+      [...newHistory, ...savedRescueHistory]
         .map(getHistoryImportDedupKey)
         .filter(Boolean)
     );
@@ -498,8 +515,13 @@ export function useDataExportImport({
           await saveHistoryToCloud(batch);
         }
         if (supplementCount) {
-          const { importWorkbenchEntries } = await import('../../services/workbenchTransferService.js');
-          await importWorkbenchEntries(importedData.workbenchEntries);
+          if (['endfield_helper_summary_xlsx', 'lcx_wiki_json'].includes(importedData.sourceFormatId)) {
+            const { importRescueSupplements } = await import('../../services/rescueImportService.js');
+            await importRescueSupplements(importedData);
+          } else {
+            const { importWorkbenchEntries } = await import('../../services/workbenchTransferService.js');
+            await importWorkbenchEntries(importedData.workbenchEntries);
+          }
         }
 
         if (typeof refreshPersonalData === 'function' && user) {

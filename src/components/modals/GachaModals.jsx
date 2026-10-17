@@ -256,7 +256,7 @@ export default function GachaModals({
 
   const history = useHistoryStore((state) => state.history);
   const [poolForm, setPoolForm] = useState(DEFAULT_POOL_FORM);
-  const [importAccountForm, setImportAccountForm] = useState({ gameUid: '', nickName: '' });
+  const [importAccountForm, setImportAccountForm] = useState({ gameUid: '', nickName: '', serverId: '' });
   const [importManualAccountMode, setImportManualAccountMode] = useState(false);
   const [showImportAccountVerifyModal, setShowImportAccountVerifyModal] = useState(false);
   const [importVerifyState, setImportVerifyState] = useState({
@@ -274,12 +274,12 @@ export default function GachaModals({
     () => buildImportVerificationResult(importPreview.primaryAccount, importVerifyState.selectedAccount, t),
     [importPreview.primaryAccount, importVerifyState.selectedAccount, t]
   );
-  const importAccountReady =
+  const importAccountReady = (!importPreview.accountServerMissing || ['1', '2', '3'].includes(importAccountForm.serverId)) && (
     !pendingImport ||
     !canOverrideImportAccount ||
     (importManualAccountMode
       ? importAccountForm.gameUid.trim() && importAccountForm.nickName.trim()
-      : importVerificationResult.canImport);
+      : importVerificationResult.canImport));
   const importDateRange = useMemo(
     () => formatImportDateRange(importPreview, formatDateTime, t),
     [formatDateTime, importPreview, t]
@@ -315,8 +315,9 @@ export default function GachaModals({
       setImportAccountForm({
         gameUid: primaryAccount?.gameUid || '',
         nickName: primaryAccount?.nickName || '',
+        serverId: primaryAccount?.serverId || '',
       });
-      setImportManualAccountMode(false);
+      setImportManualAccountMode(pendingImport.data?.sourceFormatId === 'endfield_helper_summary_xlsx');
       setShowImportAccountVerifyModal(false);
       setImportVerifyState({
         source: 'cn',
@@ -366,6 +367,7 @@ export default function GachaModals({
     setImportAccountForm({
       gameUid: normalizeComparableGameUid(account.gameUid),
       nickName: account.nickName || normalizeComparableGameUid(account.gameUid),
+      serverId: String(account.serverId || ''),
     });
   };
 
@@ -912,7 +914,7 @@ export default function GachaModals({
               </p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
-                  [t('modals.import.totalPulls'), importPreview.historyCount],
+                  [importPreview.sparseSummary ? (locale === 'en-US' ? 'Known high-rarity drops' : '已知高星出货') : t('modals.import.totalPulls'), importPreview.sparseSummary ? importPreview.supplementalDropCount : importPreview.historyCount],
                   [t('modals.import.poolCount'), importPreview.poolCount],
                   [t('modals.import.sixStarCount'), importPreview.rarityCounts[6] || 0],
                   [t('modals.import.fiveStarCount'), importPreview.rarityCounts[5] || 0],
@@ -930,6 +932,39 @@ export default function GachaModals({
                   </div>
                 ))}
               </div>
+
+              {(importPreview.sparseSummary || importPreview.unresolvedCount > 0) && (
+                <div className="border border-amber-300 bg-amber-50 p-4 text-xs leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
+                  {importPreview.sparseSummary
+                    ? (locale === 'en-US' ? `${importPreview.supplementalDropCount} known drops and ${importPreview.supplementCount} supplementary entries. Missing totals and low-rarity history remain unknown; supplements are excluded from community statistics.`
+                      : `${importPreview.supplementalDropCount} 条已知高星出货，整理为 ${importPreview.supplementCount} 条补录。缺失的低星、总抽数和累计位置保持未知；补录不参与全服统计。`)
+                    : (locale === 'en-US' ? `${importPreview.unresolvedCount} unknown results from the source will be retained for review. Their identity and quality are not inferred; affected totals and pity remain unknown.`
+                      : `原站有 ${importPreview.unresolvedCount} 条“三星未知角色／武器”。原始条目将保存为待核对资料，不猜测其身份或赠礼类型；受影响的总量和保底保持未知。`)}
+                </div>
+              )}
+
+              {importPreview.accountServerMissing && (
+                <label className="block border border-yellow-300 bg-yellow-50 p-4 text-sm dark:border-yellow-700 dark:bg-yellow-950/20">
+                  {locale === 'en-US' ? 'Game server for this Excel' : '这份 Excel 对应的游戏区服'}
+                  <select aria-label={locale === 'en-US' ? 'Excel game server' : 'Excel 游戏区服'} className="mt-2 block w-full border border-zinc-300 bg-white p-2 dark:border-zinc-700 dark:bg-zinc-900" value={importAccountForm.serverId || ''} onChange={event => setImportAccountForm(previous => ({ ...previous, serverId: event.target.value }))}>
+                    <option value="">{locale === 'en-US' ? 'Select a server' : '请选择区服'}</option>
+                    <option value="1">{locale === 'en-US' ? 'CN (official / Bilibili)' : '国服（官服／B服）'}</option>
+                    <option value="2">{locale === 'en-US' ? 'International · Asia' : '国际服 · 亚洲'}</option>
+                    <option value="3">{locale === 'en-US' ? 'International · EU/NA' : '国际服 · 欧美'}</option>
+                  </select>
+                </label>
+              )}
+
+              {importPreview.calendarConflictCount > 0 && <p className="border border-amber-300 bg-amber-50 p-4 text-xs leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
+                {locale === 'en-US'
+                  ? `${importPreview.calendarConflictCount} source timestamps conflict with the banner calendar. Original times are retained in source notes for review and excluded from exact time analysis.`
+                  : `${importPreview.calendarConflictCount} 条原表时间与当前卡池日历不一致。原始时间保留在来源说明中待核对，暂不参与准确时间分析。`}
+              </p>}
+              {importPreview.intervalConflictCount > 0 && <p className="border border-amber-300 bg-amber-50 p-4 text-xs leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
+                {locale === 'en-US'
+                  ? `${importPreview.intervalConflictCount} source pull intervals exceed the banner pity limit. Original values are retained in source notes for review and excluded from exact interval analysis.`
+                  : `${importPreview.intervalConflictCount} 条原表间隔超过本池保底上限。原值保留在来源说明中待核对，暂不参与准确间隔分析。`}
+              </p>}
 
               {importPreview.accountInfoMissing && (
                 <div className="border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/20">

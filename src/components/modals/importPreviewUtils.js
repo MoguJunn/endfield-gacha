@@ -56,7 +56,8 @@ function collectImportAccounts(data) {
         || account?.nickname
         || (options.allowNameFallback ? account?.name : null)
       ),
-      channelName: current.channelName || normalizeImportPreviewText(account?.channelName || account?.channel_name)
+      channelName: current.channelName || normalizeImportPreviewText(account?.channelName || account?.channel_name),
+      serverId: current.serverId || normalizeImportPreviewText(account?.serverId || account?.server_id),
     });
   };
 
@@ -97,6 +98,7 @@ export function buildPendingImportPreview(pendingImport) {
 
   const data = pendingImport.data;
   const history = Array.isArray(data.history) ? data.history : [];
+  const supplements = data.workbenchEntries || [];
   const pools = Array.isArray(data.pools) ? data.pools : [];
   const poolLookup = new Map(pools.map(pool => [pool?.id, pool]));
   const rarityCounts = {};
@@ -105,7 +107,9 @@ export function buildPendingImportPreview(pendingImport) {
   let startMs = null;
   let endMs = null;
 
-  history.forEach((record) => {
+  const supplementalDrops = supplements.flatMap(entry => (entry.values?.acquisitions || []).map(row => ({ ...row,
+    poolId: entry.poolId, name: row.name || row.entityName || row.entityId })));
+  [...history, ...supplementalDrops].forEach((record) => {
     const rarity = Number(record?.rarity);
     if (Number.isInteger(rarity)) {
       rarityCounts[rarity] = (rarityCounts[rarity] || 0) + 1;
@@ -138,6 +142,13 @@ export function buildPendingImportPreview(pendingImport) {
 
   return {
     historyCount: history.length,
+    supplementCount: supplements.length,
+    supplementalDropCount: supplementalDrops.length,
+    unresolvedCount: data.unresolvedRecords?.length || 0,
+    calendarConflictCount: data.calendarConflictCount || 0,
+    intervalConflictCount: data.intervalConflictCount || 0,
+    sparseSummary: data.importWarningCodes?.includes('sparse_high_star_summary') === true,
+    accountServerMissing: data.accountServerMissing === true,
     poolCount: pools.length,
     rarityCounts,
     sixStarDrops: Array.from(sixStarMap.entries())

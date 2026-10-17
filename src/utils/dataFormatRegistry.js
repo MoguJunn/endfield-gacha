@@ -1,4 +1,5 @@
 import { isReservedPoolTypeId } from '../../shared/poolIdValidation.js';
+import { HELPER_RESCUE_FORMAT, LCX_RESCUE_FORMAT, looksLikeLcxWikiExport, normalizeLcxWikiExport } from './rescueImport.js';
 
 function normalizeText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -760,6 +761,20 @@ function looksLikeBhaooEndfieldGachaXlsxPayload(data) {
 }
 
 export const DATA_FORMAT_REGISTRY = Object.freeze([
+  {
+    id: HELPER_RESCUE_FORMAT,
+    label: '终末地小助手高星摘要 Excel',
+    direction: ['import'], kind: 'xlsx', fileExtensions: ['xlsx'],
+    detect: data => looksLikeInternalPayload(data) && data.formatId === HELPER_RESCUE_FORMAT,
+    normalizeImportPayload: passthroughImportPayload,
+  },
+  {
+    id: LCX_RESCUE_FORMAT,
+    label: '离愁轩 Wiki 抽卡记录',
+    direction: ['import'], kind: 'json', fileExtensions: ['json', 'txt'],
+    detect: looksLikeLcxWikiExport,
+    normalizeImportPayload: normalizeLcxWikiExport,
+  },
   {
     id: 'internal_json_v3',
     label: '站内 JSON v3',

@@ -338,7 +338,14 @@ function historicalCatalogIssues(entry, { pools, entities }) {
   if (!entry.values?.entityId || !entity) return [];
   const expectedType = resolvePoolCapabilities(pool).entityType;
   if (entity.type !== expectedType) return [issue(entry.entryId, 'entity_pool_type_mismatch', '实体类型与卡池不匹配')];
-  const release = Date.parse(entity.release_date || entity.pool_config?.introduced_at);
+  const catalogRelease = Date.parse(entity.release_date || entity.pool_config?.introduced_at);
+  // A confirmed UP roster and the banner's opening date are direct historical
+  // evidence of availability, even if a later catalog edit set introduced_at.
+  const ownBannerStart = pool.up_character === entity.name
+    && pool.six_star_entities?.some(row => row.id === entity.id && row.is_up)
+    ? Date.parse(pool.start_time ?? pool.startTime) : NaN;
+  const release = Number.isFinite(ownBannerStart) && Number.isFinite(catalogRelease)
+    ? Math.min(ownBannerStart, catalogRelease) : catalogRelease;
   const [, upper] = timeBounds(entry);
   // 未标注 release_date 的实体不能仅凭时间推断，交由名单核对（191 的 roster_status）判定。
   if (Number.isFinite(release) && Number.isFinite(upper) && upper < release) {

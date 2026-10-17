@@ -122,7 +122,7 @@ export default function DataImportWizardModal({
           </button>
         </div>
 
-        <div className="grid gap-3 p-4 sm:gap-4 sm:p-6 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 p-4 sm:gap-4 sm:p-6 md:grid-cols-2 xl:grid-cols-3">
           <ImportSourceCard
             icon={Database}
             title={t('import.fileWizard.internal.title')}
@@ -181,8 +181,21 @@ export default function DataImportWizardModal({
             badge="XLSX"
             description={t('import.fileWizard.highStarSummary.desc')}
             note={t('import.fileWizard.highStarSummary.note')}
-            actionLabel={t('import.fileWizard.highStarSummary.pending')}
-            disabled
+            accept=".xlsx"
+            onImportFile={onImportFile}
+            actionLabel={t('import.fileWizard.chooseFile')}
+            accent="cyan"
+          />
+          <ImportSourceCard
+            icon={Globe2}
+            title={t('import.fileWizard.lcx.title')}
+            badge="JSON / TXT"
+            description={t('import.fileWizard.lcx.desc')}
+            note={t('import.fileWizard.lcx.note')}
+            links={[{ label: t('import.fileWizard.website'), href: 'https://wiki.lcx.cab/zmd/gacha_tracker.php' }]}
+            onImportFile={onImportFile}
+            actionLabel={t('import.fileWizard.chooseFile')}
+            accent="emerald"
           />
         </div>
 
