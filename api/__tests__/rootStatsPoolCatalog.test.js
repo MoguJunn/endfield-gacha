@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
   serverLogger: { error: vi.fn() },
   poolRosterError: null,
   rosterStatus: 'complete',
+  rosterRows: null,
+  rosterRanges: [],
+  truncateRosterPage: false,
 }));
 
 vi.mock('@supabase/supabase-js', () => ({
@@ -70,6 +73,9 @@ describe('/api/stats pool_catalog', () => {
     vi.clearAllMocks();
     mocks.poolRosterError = null;
     mocks.rosterStatus = 'complete';
+    mocks.rosterRows = null;
+    mocks.rosterRanges = [];
+    mocks.truncateRosterPage = false;
     mocks.createClient.mockReturnValue({ from: mocks.from, rpc: vi.fn() });
     mocks.from.mockImplementation((table) => {
       if (table === 'site_config') {
@@ -121,18 +127,25 @@ describe('/api/stats pool_catalog', () => {
         };
       }
       if (table === 'pool_characters') {
-        return {
-          select: () => ({
-            in: async (_column, poolIds) => {
+        const query = {
+          select: (_columns, options) => {
+            expect(options).toEqual({ count: 'exact' });
+            return query;
+          },
+          in: (_column, poolIds) => {
               expect(poolIds).toEqual(['special_1_0_1']);
+              return query;
+          },
+          order: () => query,
+          range: async (from, to) => {
+              mocks.rosterRanges.push([from, to]);
               if (mocks.poolRosterError) {
                 return {
                   data: null,
                   error: mocks.poolRosterError,
                 };
               }
-              return {
-                data: [
+              const rows = mocks.rosterRows || [
                   {
                     pool_id: 'special_1_0_1',
                     character_id: 'chr_0016_laevat',
@@ -151,12 +164,15 @@ describe('/api/stats pool_catalog', () => {
                     is_up: false,
                     characters: { id: 'chr_five', name: '五星角色', rarity: 5, type: 'character' },
                   },
-                ],
+                ];
+              return {
+                data: rows.slice(from, mocks.truncateRosterPage ? Math.min(to+1, from+100) : to+1),
+                count: rows.length,
                 error: null,
               };
-            },
-          }),
+          },
         };
+        return query;
       }
       throw new Error(`unexpected table: ${table}`);
     });
@@ -207,6 +223,30 @@ describe('/api/stats pool_catalog', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.data.pools[0]).toMatchObject({ roster_status: 'partial', six_star_roster_complete: false });
     expect(res.body.data.pools[0].six_star_entities).toHaveLength(2);
+  });
+
+  it('reads every roster page so a six-star UP after the first 1000 relations is preserved', async () => {
+    mocks.rosterRows = Array.from({ length: 1001 }, (_, index) => ({
+      pool_id: 'special_1_0_1', character_id: `filler_${String(index).padStart(4, '0')}`, is_up: false,
+      characters: { id: `filler_${index}`, name: `四星${index}`, rarity: 4, type: 'character' },
+    }));
+    mocks.rosterRows.push({ pool_id: 'special_1_0_1', character_id: 'up_tail', is_up: true,
+      characters: { id: 'up_tail', name: '莱万汀', rarity: 6, type: 'character' } });
+    const res = await callPoolCatalog('pool-roster-over-limit-test');
+    expect(res.body.partial).toBe(false);
+    expect(res.body.data.pools[0].six_star_entities).toEqual([{ id: 'up_tail', name: '莱万汀', type: 'character', is_up: true }]);
+    expect(mocks.rosterRanges).toEqual([[0,499], [500,999], [1000,1499]]);
+  });
+
+  it('reports incomplete responses instead of publishing a shortened roster as complete', async () => {
+    mocks.rosterRows = Array.from({ length: 501 }, (_, index) => ({
+      pool_id: 'special_1_0_1', character_id: `entity_${index}`, is_up: false,
+      characters: { id: `entity_${index}`, name: `角色${index}`, rarity: 6, type: 'character' },
+    }));
+    mocks.truncateRosterPage = true;
+    const res = await callPoolCatalog('pool-roster-truncated-test');
+    expect(res.body).toMatchObject({ partial: true, error: 'pool_catalog_roster_unavailable' });
+    expect(res.body.data.pools[0]).toMatchObject({ six_star_entities: [], six_star_roster_complete: false });
   });
 
   it('keeps the pool catalog available when the optional roster query fails', async () => {

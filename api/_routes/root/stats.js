@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { rejectDisallowedBrowserOrigin } from '../../_lib/http.js';
 import { attachPoolSixStarRoster, buildPoolSixStarRosterMap } from '../../_lib/poolCatalogRoster.js';
+import { readPoolRosterRows } from '../../_lib/readPoolRosterRows.js';
 import {
   buildPublicCacheKey,
   PUBLIC_CACHE_CONTROL,
@@ -345,10 +346,9 @@ async function fetchPoolSixStarRosterMap(supabase, poolIds = []) {
     return new Map();
   }
 
-  const { data, error } = await supabase
-    .from('pool_characters')
-    .select(
-      `
+  const data = await readPoolRosterRows(supabase, {
+    poolIds: normalizedPoolIds,
+    columns: `
       pool_id,
       character_id,
       is_up,
@@ -358,13 +358,8 @@ async function fetchPoolSixStarRosterMap(supabase, poolIds = []) {
         rarity,
         type
       )
-    `
-    )
-    .in('pool_id', normalizedPoolIds);
-
-  if (error) {
-    throw error;
-  }
+    `,
+  });
 
   return buildPoolSixStarRosterMap(data || [], normalizedPoolIds);
 }
