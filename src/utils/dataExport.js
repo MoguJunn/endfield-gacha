@@ -1021,7 +1021,7 @@ function buildEndgachaKwerTopPlainTxtContent(payload) {
   return buildEndgachaKwerTopBatches(payload)
     .map((batch) => {
       const entries = batch.entries
-        .map(([name, rarity, isNew]) => `${name}-${rarity}-${isNew}`)
+        .map(([name, rarity, isNew, isFree]) => `${name}-${rarity}-${isNew}-${isFree}`)
         .join('@');
       return `${batch.timestampKey},${batch.poolName},${entries}`;
     })

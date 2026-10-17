@@ -308,7 +308,8 @@ function normalizeEndgachaEntry(entry) {
       name: pickText(entry[0]),
       rarity: normalizeEndgachaRarity(entry[1]),
       isNew: normalizeExternalBoolean(entry[2]),
-      isFree: normalizeExternalBoolean(entry[3])
+      isFree: normalizeExternalBoolean(entry[3]),
+      importFreeStatusKnown: entry[3] !== undefined && entry[3] !== null
     };
   }
 
@@ -316,7 +317,8 @@ function normalizeEndgachaEntry(entry) {
     name: pickText(entry.name, entry.n, entry.itemName),
     rarity: normalizeEndgachaRarity(entry.rarity ?? entry.r),
     isNew: normalizeExternalBoolean(entry.isNew ?? entry.is_new ?? entry.new),
-    isFree: normalizeExternalBoolean(entry.isFree ?? entry.is_free ?? entry.free)
+    isFree: normalizeExternalBoolean(entry.isFree ?? entry.is_free ?? entry.free),
+    importFreeStatusKnown: (entry.isFree ?? entry.is_free ?? entry.free) != null
   };
 }
 
@@ -403,6 +405,7 @@ function normalizeEndgachaKwerTopPayload(data, options = {}) {
         is_new: normalizedEntry.isNew,
         isFree: normalizedEntry.isFree,
         is_free: normalizedEntry.isFree,
+        importFreeStatusKnown: normalizedEntry.importFreeStatusKnown,
         gameUid: account?.gameUid || null,
         game_uid: account?.gameUid || null,
         nickName: account?.nickName || null,

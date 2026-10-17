@@ -511,12 +511,13 @@ function parseEndgachaKwerTopTxt(text) {
         throw new Error(`endgacha.kwer.top TXT 第 ${lineIndex + 1} 行存在无法解析的寻访项`);
       }
 
-      return [
+      const pull = [
         match[1],
         Number.parseInt(match[2], 10),
-        Number.parseInt(match[3], 10),
-        Number.parseInt(match[4] || '0', 10)
+        Number.parseInt(match[3], 10)
       ];
+      if (match[4] !== undefined) pull.push(Number.parseInt(match[4], 10));
+      return pull;
     });
 
     data[normalizedTimestamp] = {

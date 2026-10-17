@@ -296,6 +296,7 @@ function normalizeImportedHistoryRecord(record, context) {
       is_new: normalizeBoolean(record?.isNew ?? record?.is_new) === true,
       isFree: normalizeBoolean(record?.isFree ?? record?.is_free) === true,
       is_free: normalizeBoolean(record?.isFree ?? record?.is_free) === true,
+      ...(typeof record?.importFreeStatusKnown === 'boolean' ? { importFreeStatusKnown: record.importFreeStatusKnown } : {}),
       isInfoBook: normalizeBoolean(record?.isInfoBook ?? record?.is_info_book) === true,
       is_info_book: normalizeBoolean(record?.isInfoBook ?? record?.is_info_book) === true,
       gameUid: metadata?.gameUid || normalizeString(record?.gameUid || record?.game_uid),
