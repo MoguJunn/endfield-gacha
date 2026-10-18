@@ -14,12 +14,16 @@ function client(history, { shortPage = false, pageCap = 1000, gaps = [] } = {}) 
         ? shortPage ? [] : statisticsHistory(history).filter((row) => params.p_pool_ids.includes(row.pool_id)
           && row.id > params.p_after && row.id <= params.p_upper).sort((a, b) => a.id - b.id)
           .slice(0, Math.min(params.p_limit, pageCap))
-        : pools,
+        : name === 'read_statistics_history_count'
+          ? statisticsHistory(history).filter(row => params.p_pool_ids.includes(row.pool_id) && row.id <= params.p_upper).length : pools,
     }) })),
     from: vi.fn((table) => {
       const state = { filters: [], start: 0, end: Infinity, ascending: true, head: false };
       const query = {
-        select: (_fields, options) => { state.head = options?.head; return query; },
+        select: (fields, options) => {
+          if (table === 'history') expect(fields).toBe('id');
+          state.head = options?.head; return query;
+        },
         in: (key, values) => { state.filters.push((row) => values.includes(row[key])); return query; },
         gt: (key, value) => { state.filters.push((row) => row[key] > value); return query; },
         lte: (key, value) => { state.filters.push((row) => row[key] <= value); return query; },
@@ -30,6 +34,11 @@ function client(history, { shortPage = false, pageCap = 1000, gaps = [] } = {}) 
           if (table === 'characters') return { data: directory };
           if (table === 'pools') return { data: pools.map((pool, index) => ({ ...pool, id: `internal-${index}` })) };
           if (table === 'statistics_history_gaps') return { data: gaps.slice(state.start, state.end + 1) };
+          if (table === 'history') {
+            expect(state.ascending).toBe(false);
+            expect(state.end).toBe(0);
+            return { data: history.length ? [{ id: Math.max(...history.map(row => row.id)) }] : [] };
+          }
           expect(table).toBe('statistics_history');
           const selected = statisticsHistory(history).filter((row) => state.filters.every((filter) => filter(row))).sort((a, b) => state.ascending ? a.id - b.id : b.id - a.id);
           return state.head ? { count: selected.length } : { data: shortPage && state.filters.length ? []
@@ -41,6 +50,30 @@ function client(history, { shortPage = false, pageCap = 1000, gaps = [] } = {}) 
   };
 }
 describe('scope worker context', () => {
+  it('loads 5000-row pages serially and checks for interactive work between pages', async () => {
+    const db = client(Array.from({ length: 6001 }, (_, i) => row(i + 1, 'p', { rarity: 4 })), { pageCap: 5000 });
+    const beforeRead = vi.fn();
+    const dataset = await readStatisticsPreviewDataset(db, { beforeRead });
+    expect(dataset.history).toHaveLength(6001);
+    expect(db.rpc.mock.calls.filter(([name]) => name === 'read_statistics_history_page').map(([, p]) => p.p_after)).toEqual([0, 5000]);
+    expect(beforeRead).toHaveBeenCalledTimes(3);
+    expect(db.from).not.toHaveBeenCalledWith('statistics_history');
+  });
+
+  it('uses an excluded newest ID only as a bound without admitting excluded outcomes', async () => {
+    const trusted = [row(1)];
+    const history = [...trusted, row(999, 'p', { user_id: 'excluded-owner', statistics_excluded: true }),
+      row(1000, 'p', { user_id: 'manual-owner', record_id: 'manual_1000' })];
+    const expected = await readStatisticsScopeAggregate(client(trusted), 'pool:p');
+    const db = client(history);
+    const actual = await readStatisticsScopeAggregate(db, 'pool:p');
+    const dataset = await readStatisticsPreviewDataset(db);
+    expect(actual.observations).toEqual(expected.observations);
+    expect(actual.legacy).toEqual(expected.legacy);
+    expect(dataset.history.map(row => row.id)).toEqual([1]);
+    expect(JSON.stringify(actual)).not.toMatch(/excluded-owner|manual-owner/);
+  });
+
   it('loads other pools for contributing accounts, without exposing identities or other-account observations', async () => {
     const history = [row(1, 's'), row(2, 'p'), row(3, 's', { game_uid: 'other' }), row(4, 's', { user_id: 'different' })];
     const result = await readStatisticsScopeAggregate(client(history), 'group:limited');
@@ -76,7 +109,7 @@ describe('scope worker context', () => {
     expect(result.observations.total).toBe(1);
     expect(result.meta).toMatchObject({ storedRows: 1, contextRows: 1 });
     expect(result.legacy.regularTotal).toBe(1);
-    expect(db.from).not.toHaveBeenCalledWith('history');
+    expect(db.from).toHaveBeenCalledWith('history'); // Strict mock allows only a one-ID upper bound.
   });
   it('applies the same exclusion to a preloaded preview dataset', async () => {
     const result = await readStatisticsScopeAggregate(null, 'pool:p', { dataset: {
@@ -98,7 +131,7 @@ describe('scope worker context', () => {
     const result = await readStatisticsScopeAggregate(db, 'pool:p');
     expect(result.legacy).toMatchObject({ regularTotal: 1, sixStarCount: 1, avgSixStarInterval: null,
       meta: { unknownInheritedIntervalCount: 1 } });
-    expect(db.from).not.toHaveBeenCalledWith('history');
+    expect(db.from).toHaveBeenCalledWith('history'); // Outcomes still come from the filtered RPC.
     expect(JSON.stringify(result)).not.toContain('previous');
   });
 });

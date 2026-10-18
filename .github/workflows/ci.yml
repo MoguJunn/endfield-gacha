@@ -56,6 +56,9 @@ jobs:
       - name: Manual personal analysis and community isolation SQL behavior
         run: node scripts/verify-manual-personal-analysis.mjs
 
+      - name: Background statistics priority and bounded reads SQL behavior
+        run: node scripts/verify-background-statistics.mjs
+
       - name: Official rerun period and promotion SQL behavior
         run: node scripts/verify-supabase-baseline-smoke.mjs --history-pool-version
 

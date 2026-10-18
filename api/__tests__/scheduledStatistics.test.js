@@ -13,6 +13,37 @@ const res = () => ({ setHeader: vi.fn(), status: vi.fn().mockReturnThis(), json:
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); });
 
 describe('scheduled statistics', () => {
+  it('does not claim background work while personal analysis is waiting', async () => {
+    const db = { rpc: vi.fn() };
+    const onProgress = vi.fn();
+    expect(await runStatisticsWorker(db, { shouldYield: async () => true, onProgress })).toEqual([]);
+    expect(db.rpc).not.toHaveBeenCalled();
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ phase: 'yielded-to-personal' }));
+  });
+  it('releases a public lease without marking failure when personal work arrives during reading', async () => {
+    const db = { rpc: vi.fn(name => {
+      const result = { data: name === 'claim_statistics_job' ? { scopeKey: 'pool:p', revision: 1 }
+        : name === 'read_statistics_job_revisions' ? { 'pool:p': 1 } : true };
+      return Object.assign(Promise.resolve(result), { abortSignal: async () => result });
+    }) };
+    const shouldYield = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+    const result = await runStatisticsWorker(db, { shouldYield,
+      datasetLoader: async (_db, { beforeRead }) => { await beforeRead(); return { history: [] }; } });
+    expect(result).toEqual([{ scope: 'pool:p', status: 'yielded-to-personal' }]);
+    expect(db.rpc).toHaveBeenCalledWith('defer_statistics_job', expect.objectContaining({ p_scope: 'pool:p' }));
+    expect(db.rpc.mock.calls.some(([name]) => ['fail_statistics_job', 'publish_statistics_snapshot'].includes(name))).toBe(false);
+  });
+  it('logs SQLSTATE and controlled phase without the database error message or details', async () => {
+    const db = { rpc: vi.fn(async name => ({ data: name === 'claim_statistics_job'
+      ? { scopeKey: 'global_summary', revision: 1 } : true,
+    error: name === 'compute_and_publish_legacy_statistics'
+      ? { code: '57014', message: 'private SQL and user payload', details: 'sensitive' } : null })) };
+    const onProgress = vi.fn();
+    const result = await runStatisticsWorker(db, { maxJobs: 1, onProgress });
+    expect(result[0]).toMatchObject({ status: 'failed', code: '57014', failurePhase: 'legacy-compute' });
+    expect(JSON.stringify(onProgress.mock.calls)).not.toMatch(/private SQL|sensitive/);
+  });
+
   it('serves a whitelisted complete group snapshot without reading history', async () => {
     const members = [{ pool_id: 'p', type: 'limited', up_character: 'A' }];
     const payload = { observations: { total: 10 }, memberSignature: statisticsMemberSignature(members) };
@@ -130,6 +161,31 @@ describe('scheduled statistics', () => {
       p_scope: 'pool:changed', p_revision: '4', p_payload: null,
     }));
     expect(db.rpc.mock.calls.some(([name]) => name === 'fail_statistics_job')).toBe(false);
+  });
+  it('does not repeat a failed shared history read and still processes independent personal jobs', async () => {
+    const makeJobs = () => [{ scopeKey: 'pool:p', revision: 1 }, { scopeKey: 'group:limited', revision: 2 },
+      { scopeKey: 'owner:test-user', revision: 3 }, null];
+    let jobs = makeJobs();
+    const db = { rpc: vi.fn(name => {
+      const result = { data: name === 'claim_statistics_job' ? jobs.shift()
+        : name === 'read_statistics_job_revisions' ? { 'pool:p': 1, 'group:limited': 2 } : true };
+      return Object.assign(Promise.resolve(result), { abortSignal: async () => result });
+    }) };
+    const datasetLoader = vi.fn().mockRejectedValueOnce(new Error('Read deadline exceeded'))
+      .mockResolvedValue({ history: [] });
+    const scopeAggregate = vi.fn().mockResolvedValue({ observations: { total: 1 } });
+    const personal = vi.fn().mockResolvedValue({ total: 3 });
+    const first = await runStatisticsWorker(db, { datasetLoader, scopeAggregate, personal });
+    expect(first.map(row => row.status)).toEqual(['failed', 'failed', 'published']);
+    expect(datasetLoader).toHaveBeenCalledTimes(1);
+    expect(scopeAggregate).not.toHaveBeenCalled();
+    expect(personal).toHaveBeenCalledTimes(1);
+    expect(db.rpc.mock.calls.filter(([name]) => name === 'fail_statistics_job')).toHaveLength(2);
+    // Failure memoization belongs to one run. The next normal round can recover.
+    jobs = makeJobs();
+    const second = await runStatisticsWorker(db, { datasetLoader, scopeAggregate, personal });
+    expect(second.map(row => row.status)).toEqual(['published', 'published', 'published']);
+    expect(datasetLoader).toHaveBeenCalledTimes(2);
   });
   it('reads snapshots only and does not compute missing snapshots on page visits', async () => {
     const db = { rpc: vi.fn().mockResolvedValue({ data: null }), from: vi.fn() };

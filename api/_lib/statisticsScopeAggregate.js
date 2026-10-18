@@ -23,38 +23,37 @@ function compactHistoryReader() {
     is_new: row.is_new, is_free: row.is_free, is_info_book: row.is_info_book, special_type: row.special_type });
 }
 
-async function readRows(db, poolIds, lastId, signal, accept = () => true) {
+async function readRows(db, poolIds, lastId, signal, accept = () => true, { beforeRead = async () => {}, onProgress = () => {} } = {}) {
   if (lastId == null) return [];
-  const { count, error } = await db.from('statistics_history').select('id', { count: 'exact', head: true })
-    .in('pool_id', poolIds).lte('id', lastId).abortSignal(signal);
-  if (error || !Number.isInteger(count)) throw new Error(`Cannot count complete statistics context (${error?.code || 'invalid-count'})`);
+  await beforeRead();
+  const { data: count, error } = await db.rpc('read_statistics_history_count', {
+    p_pool_ids: poolIds, p_upper: lastId,
+  }).abortSignal(signal);
+  if (error || !Number.isInteger(count)) throw Object.assign(new Error('Cannot count complete statistics context'), { code: error?.code });
   if (!count) return [];
-  // history.id is a positive SERIAL. Partition its fixed upper bound and page
-  // by ID, avoiding deep OFFSET scans on the largest aggregate scope.
-  const partitions = Math.min(2, Math.ceil(count / 1000));
-  const width = Math.ceil(Number(lastId) / partitions);
+  onProgress({ phase: 'history-counted', rows: count });
+  // Read one 5,000-row page at a time: fewer gateway/JSON round trips and no
+  // competing database readers. The fixed bound and exact count stay enforced.
   const compact = compactHistoryReader();
-  let scanned = 0;
-  const batches = await Promise.all(Array.from({ length: partitions }, async (_, index) => {
-    let after = index * width;
-    const upper = Math.min(Number(lastId), (index + 1) * width);
-    const rows = [];
-    while (after < upper) {
-      const { data, error: readError } = await db.rpc('read_statistics_history_page', {
-        p_pool_ids: poolIds, p_after: after, p_upper: upper, p_limit: 1000,
-      }).abortSignal(signal);
-      if (readError) throw new Error(signal?.aborted ? 'Statistics read deadline exceeded' : 'Cannot read complete statistics context');
-      if (!Array.isArray(data)) throw new Error('Statistics context changed during reading');
-      if (!data.length) break;
-      const next = Number(data.at(-1).id);
-      if (!(next > after && next <= upper)) throw new Error('Invalid statistics page order');
-      scanned += data.length;
-      for (const row of data) if (accept(row)) rows.push(compact(row));
-      after = next;
-    }
-    return rows;
-  }));
-  const rows = batches.flat();
+  let scanned = 0, after = 0, pages = 0;
+  const rows = [];
+  while (after < Number(lastId)) {
+    await beforeRead();
+    const { data, error: readError } = await db.rpc('read_statistics_history_page', {
+      p_pool_ids: poolIds, p_after: after, p_upper: lastId, p_limit: 5000,
+    }).abortSignal(signal);
+    if (readError) throw Object.assign(new Error(signal?.aborted ? 'Statistics read deadline exceeded' : 'Cannot read complete statistics context'),
+      { code: readError.code, name: signal?.aborted ? 'TimeoutError' : 'Error' });
+    if (!Array.isArray(data)) throw new Error('Statistics context changed during reading');
+    if (!data.length) break;
+    const next = Number(data.at(-1).id);
+    if (!(next > after && next <= Number(lastId))) throw new Error('Invalid statistics page order');
+    scanned += data.length;
+    for (const row of data) if (accept(row)) rows.push(compact(row));
+    after = next;
+    pages++;
+    if (pages % 20 === 0) onProgress({ phase: 'history-reading', rows: scanned, expectedRows: count });
+  }
   if (scanned !== count) throw new Error('Statistics context changed during reading');
   return rows;
 }
@@ -90,7 +89,10 @@ export async function readStatisticsScopeAggregate(db, scope, { signal, onProgre
   const { data: contextCatalog, error: contextError } = await db.from('pools').select('*').abortSignal(signal);
   if (contextError || !Array.isArray(contextCatalog)) throw new Error('Statistics history context catalog unavailable');
   const contextPools = contextCatalog.map(normalizeStatisticsPool);
-  const { data: newest, error: newestError } = await db.from('statistics_history').select('id').order('id', { ascending: false }).limit(1).abortSignal(signal);
+  // Only capture an upper bound here. Sorting the security-barrier statistics
+  // view scans all eligible rows; the raw primary key needs just its last entry.
+  // Counts and every outcome page still use the trusted statistics filters.
+  const { data: newest, error: newestError } = await db.from('history').select('id').order('id', { ascending: false }).limit(1).abortSignal(signal);
   if (newestError) throw newestError;
   const lastId = newest?.[0]?.id;
   const scopedRows = memberIds.length ? await readRows(db, memberIds, lastId, signal) : [];
@@ -133,14 +135,14 @@ function computeScopePayload({ pools, contextPools, directory, members, groupKey
 /** Complete context shared by previews and one worker run. The worker must
  * check the captured scope revision before reusing this data for a later job.
  * Raw rows stay in memory and are released when the worker process ends. */
-export async function readStatisticsPreviewDataset(db, { signal } = {}) {
+export async function readStatisticsPreviewDataset(db, { signal, beforeRead, onProgress = () => {} } = {}) {
   const [{ data: visible, error: visibleError }, { data: catalog, error: catalogError }, { data: directory, error: directoryError }, { data: newest, error: newestError }] = await Promise.all([
     db.rpc('get_app_visible_pools').abortSignal(signal), db.from('pools').select('*').abortSignal(signal),
-    db.from('characters').select('*').abortSignal(signal), db.from('statistics_history').select('id').order('id', { ascending: false }).limit(1).abortSignal(signal),
+    db.from('characters').select('*').abortSignal(signal), db.from('history').select('id').order('id', { ascending: false }).limit(1).abortSignal(signal),
   ]);
   if (visibleError || catalogError || directoryError || newestError) throw new Error('Preview statistics context unavailable');
   const contextPools = catalog.map(normalizeStatisticsPool);
-  const history = await readRows(db, contextPools.map((pool) => pool.id), newest?.[0]?.id, signal);
+  const history = await readRows(db, contextPools.map((pool) => pool.id), newest?.[0]?.id, signal, () => true, { beforeRead, onProgress });
   const exclusions = await readStatisticsHistoryGaps(db, { signal });
   const trusted = prepareStatisticsContinuity({ history, pools: contextPools, exclusions }).history;
   return { pools: visible.map(normalizeStatisticsPool), contextPools, directory, history: trusted,

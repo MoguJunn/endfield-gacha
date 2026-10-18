@@ -14,6 +14,12 @@ if (!Number.isInteger(maxJobs) || maxJobs < 1 || maxJobs > 1000) throw new Error
 const snapshotVersion = process.env.STATISTICS_SNAPSHOT_SCHEMA_VERSION || STATISTICS_SNAPSHOT_VERSION;
 if (!/^public-statistics-v[1-9]\d*$/.test(snapshotVersion)) throw new Error('Invalid STATISTICS_SNAPSHOT_SCHEMA_VERSION');
 const results = await runStatisticsWorker(db, { maxJobs, snapshotVersion,
+  shouldYield: async () => {
+    const { data, error } = await db.rpc('statistics_personal_analysis_pending').abortSignal(AbortSignal.timeout(8000));
+    if (error) throw error;
+    if (typeof data !== 'boolean') throw new Error('Invalid statistics priority response');
+    return data;
+  },
   onProgress: (progress) => console.log(JSON.stringify({ checkedAt: new Date().toISOString(), ...progress,
     memoryMiB: Math.round(process.memoryUsage().rss / 1024 / 1024) })) });
 console.log(JSON.stringify({ checkedAt: new Date().toISOString(), results }));
