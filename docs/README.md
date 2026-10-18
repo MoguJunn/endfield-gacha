@@ -4,9 +4,13 @@
 
 当前正式版为 **v4.6.4 / Build 2026.10.09**，已完成主线合并、生产部署、数据库升级与双语公告发布，交付证据见 [发布记录](RELEASE_4.6.4.md)。
 
+发布后进展更新至 2026-10-17：第三方迁入、文件保存恢复与手机交互修复已上线，当前状态见 [项目进展](RECENT_DELIVERY_STATUS.md)；版本发布记录保留其当时范围。
+
 ## 使用与项目进展
 
 - [项目进展](RECENT_DELIVERY_STATUS.md)：可用功能、已知限制与开发方向。
+- [第三方历史记录迁入](RESCUE_FILE_IMPORT.md)：endgacha.kwer.top、小助手高星 Excel 与离愁轩 Wiki 的格式和资料边界。
+- [文件导入、去重与失败恢复](FILE_IMPORT_RELIABILITY.md)：服务器保存进度、跨格式逐条匹配、草稿有效期、手机弹窗与删除入口。
 - [统计指标](STATS_OBSERVATION_CONTRACT.md)：单池／合池、首次样本、账号覆盖与未知数据的解释。
 - [卡池与日历时间](POOL_SCHEDULE_MANAGEMENT.md)：武器池关联、重构期次、官方日期与缓存传播。
 - [桌面界面](DESKTOP_HOME_DEMO.md)：新版／经典主页、导航、消息与响应式布局。
@@ -22,6 +26,7 @@
 - [认证与会话](AUTH_SECURITY_HARDENING.md)：身份归属、邮箱验证、凭据撤销与 provider 集成。
 - [浏览器认证锁](SUPABASE_AUTH_LOCK_FIX.md)：后台刷新与 SDK 升级验证。
 - [个人分析 Worker](PERSONAL_ANALYSIS_WORKER.md)、[统计快照调度](STATISTICS_SCHEDULING.md)：异步计算、部署与诊断。
+- [个人补录分析](PERSONAL_MANUAL_ANALYSIS.md)、[手动资料与全服隔离](MANUAL_DATA_STATISTICS_EXCLUSION.md)：已知量、未知量及统计资格。
 - [模拟器引擎](SIMULATOR_ENGINE.md)：统一水位、完整继承历史、增量资源、事务存档与版本迁移。
 - [卡池阵容读取](POOL_ROSTER_READS.md)：超过 1,000 条关系的完整读取、后台失败反馈与工作台接口合同。
 - [卡池保存与统计更新](POOL_CATALOG_STATISTICS_UPDATES.md)：展示字段、ID 归并、定向失效与迁移部署顺序。

@@ -2,7 +2,7 @@
 
 这份文件只保留“从哪里开始读代码”的索引。系统边界、数据流、缓存和数据库分层详见 [ARCHITECTURE.md](ARCHITECTURE.md)；部署、环境变量和维护命令详见 [PROJECT_GUIDE.md](PROJECT_GUIDE.md)。
 
-当前索引对应已发布的 `v4.6.4` 代码，变更与上线验证见 [RELEASE_4.6.4.md](RELEASE_4.6.4.md)。
+当前索引包含 `v4.6.4` 及截至 2026-10-17 的发布后修复；版本记录见 [RELEASE_4.6.4.md](RELEASE_4.6.4.md)，后续交付见 [项目进展](RECENT_DELIVERY_STATUS.md)。
 
 武器池时间管理入口：`shared/weaponPoolSchedule.js`（自动识别／三期截止预览）、`src/components/admin/pools/PoolEditDialog.jsx`（关联选择及一键填入）、`src/hooks/admin/usePools.js`（草稿和保存）、`supabase/migrations/2026100701_weapon_character_pool_schedule.sql`（持久关联与 RPC）。独立日历数据库时间优先规则位于 `endfield-version-calendar/lib/calendar-core.js`；说明见 [卡池时间管理](POOL_SCHEDULE_MANAGEMENT.md)。
 
@@ -85,6 +85,16 @@
 | Toast / 持久通知模型 | `src/hooks/useToast.js`、`src/components/ui/Toast.jsx`、`src/utils/notificationModel.js` |
 | 贡献者内容沙盒 / 正式目录缓存 / 真实 fallback / synthetic 会话 | `src/dev/contributorDemoMode.js`、`src/dev/contributorDemoSandboxStore.js`、`src/dev/contributorRealFallbackCatalog.js`、`src/dev/contributorDemoRuntimeData.js`、`src/dev/contributorDemoSession.js` |
 | 沙盒同步桥 / 横幅 / 本地管理控制台 | `src/hooks/app/useContributorDemoSandboxBridge.js`、`src/components/dev/ContributorDemoBanner.jsx`、`src/components/admin/ContributorDemoAdminPanel.jsx` |
+
+### 文件迁入与手机交互定位
+
+- 解析、格式归一化、导出：`src/utils/dataImportFileParser.js`、`dataFormatRegistry.js`、`dataImport.js`、`dataExport.js`；kwer 的 `importFreeStatusKnown` 只表示来源是否给出免费字段，不是数据库新增列。
+- 服务端已有明细核对、100 条批次回执、失败预览和重试：`src/hooks/app/useDataExportImport.js`、`src/hooks/app/useCloudSync.js`、`src/services/accountGachaDataService.js`；单次标签页草稿：`src/utils/importPendingDraft.js`。
+- 跨格式逐条消耗、真实序号优先与缺字段匹配：`src/utils/importHistoryMerge.js`；回归：`src/utils/__tests__/importHistoryMerge.test.js`、`src/hooks/app/__tests__/useDataExportImport.test.jsx`。
+- 小助手／Wiki 适配与补录合并：`src/utils/rescueImport.js`、`src/services/rescueImportService.js`；通用补录传输：`src/services/workbenchTransferService.js`。
+- 文件选择、账号确认与进度：`src/components/modals/DataImportWizardModal.jsx`、`GachaModals.jsx`；工作台确认弹窗挂载到页面根层：`src/features/data-workbench/WorkbenchFileImport.jsx`。
+- 设置删除入口：`src/components/SettingsPanel.jsx`、`src/mobile/views/MobileSettingsView.jsx`、`src/hooks/app/usePersonalGameAccounts.js`；手机弹窗高度及层级：`src/index.css` 的 `.mobile-ux-modal`。
+- 格式合同检查：`scripts/verify-data-format-registry.mjs`；用户操作及开发边界见 [文件导入恢复](FILE_IMPORT_RELIABILITY.md)和[第三方迁入](RESCUE_FILE_IMPORT.md)。
 
 ## Vercel API
 

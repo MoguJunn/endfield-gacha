@@ -8,6 +8,8 @@
 
 “统计 → 我的数据”使用原始个人明细及已保存的补录，展示个人已知结果；缺少完整次序时不提供会误导的首次花费、出率和间隔图表。公开统计与排名不读取工作台补录。
 
+第三方文件先核对服务器已有明细再保存，补录继续按修订和覆盖范围合并。预览中的已知高星、文件明细条数及保存回执不能直接替代总览的统计分母；部分保存失败可保留预览继续，不需要先清空个人资料。格式与恢复边界见 [第三方迁入](RESCUE_FILE_IMPORT.md)和[文件导入恢复](FILE_IMPORT_RELIABILITY.md)。
+
 发布时同步更新网站、个人分析 Worker 和统计 Worker，再执行 `2026101412_restore_manual_personal_analysis.sql`。该迁移仅将受影响账号的个人分析与 `owner:` 任务标记为待更新，并确保后续手动修改、补录删除与撤回仍触发个人任务。个人分析快照沿用 schema 5，`personalData` 是兼容新增字段；全服统计版本不变。
 
 验证使用 `src/utils/__tests__/personalAnalysisData.test.js`、个人 Worker 与个人统计快照测试，以及 `node scripts/verify-manual-personal-analysis.mjs`。数据库验证使用隔离 PostgreSQL，并核对个人任务变化时全服计数和无关账号不变。

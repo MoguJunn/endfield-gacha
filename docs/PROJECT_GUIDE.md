@@ -31,6 +31,7 @@ npm run dev
 - `/summary`：全服统计，私有数据读取失败不应阻塞该页面。
 - `/simulator`：桌面模拟器；`/m/simulator` 保持使用桌面版的引导提示。
 - `/m/`：手机入口；`/m/stats` 为手机统计。
+- `/data-workbench`、`/m/data-workbench`：手动导入与修改；文件入口复用主站格式解析、账号确认与保存流程。
 - `/statistics-preview.html`：开发专用统计与指南样例，按钮不执行真实登录、导入或备份。
 
 布局与消息合同见 [桌面界面](DESKTOP_HOME_DEMO.md)，统计口径见 [统计指标](STATS_OBSERVATION_CONTRACT.md)。
@@ -68,11 +69,13 @@ npm run perf:report
 
 卡池阵容完整读取使用 `npm run test:pool-rosters:sql`，验证超过 1,000 条关系、零历史卡池、范围读取、服务角色权限和重复迁移。后台／公开 API 回归还需覆盖名单读取失败时的 503、缓存 stale 和后台重试提示，详见 [阵容读取合同](POOL_ROSTER_READS.md)。
 
+文件导入改动先运行 `node scripts/verify-data-format-registry.mjs`，再覆盖 `importHistoryMerge.test.js`、`useDataExportImport.test.jsx` 和相关补录往返测试；检查服务端完整历史去重、每批保存回执、失败重试与手机确认按钮命中。步骤和验证边界见 [文件导入恢复](FILE_IMPORT_RELIABILITY.md)。原始用户文件与只读账号快照留在本地，公开测试使用构造资料。
+
 ## 自建部署
 
 1. 配置 Supabase/PostgreSQL，按 [数据库指南](../supabase/README.md) 执行完整 baseline；不要重复执行已包含的历史迁移。
 2. 在服务端配置 Supabase secret、会话密钥与所需功能变量；浏览器只接收公开变量。
-3. 配置个人分析 schema 3 队列及 `pg_cron + pg_net` 调度。部署目标 Worker 后同步 Vault 中不可变 `personal_analysis_worker_url`，确认可以领取并发布匹配版本的任务；不能只验证 HTTP 200。
+3. 配置当前个人分析 schema 5 队列，按 [Worker 指南](PERSONAL_ANALYSIS_WORKER.md)核对目标环境的实际调度方式。使用 `pg_cron + pg_net` 时同步 Vault 中不可变 `personal_analysis_worker_url`，确认可以领取并发布匹配版本的任务；不能只验证 HTTP 200，也不能覆盖已有环境的同机调度配置。
 4. 按 [统计调度](STATISTICS_SCHEDULING.md) 部署常驻统计 Worker，并完成对应计算版本的公开／个人快照预热。
 5. 构建并部署主站与 API，配置 `vercel.json` 的路由和响应头；数据库必须先于依赖新字段／RPC 的代码。
 6. 核对正式域名、版本、公共页面、认证边界、快照读取与缓存失效。需要的邮件、BOT 和代理逐项配置及验证。
@@ -84,6 +87,8 @@ npm run perf:report
 管理后台使用同源 `/api/admin`，兼容 URL 由路由表映射；无需部署旧 Supabase 管理 Edge Functions。
 
 ## 官方导入与数据维护
+
+第三方文件使用主站鉴权 API 分批保存，不调用下述官方抓取任务。2026-10-17 的文件修复只更新网站代码，没有新增数据库迁移或更换 CN／INTL 导入服务。格式及资料精度见 [第三方迁入](RESCUE_FILE_IMPORT.md)，预览、服务器已保存量与总览快照的区别见 [文件导入恢复](FILE_IMPORT_RELIABILITY.md)。
 
 官方数据获取由独立 CN／INTL 后端承接。浏览器提交 `import-full` 后轮询 `import-status`；后端规范化、过滤非寻访事件、内部暂存并通过 RPC 原子写入。可精确定位的未知记录产生核对提醒，缺少账号／区服／卡池／序号等安全归属的记录跳过。
 

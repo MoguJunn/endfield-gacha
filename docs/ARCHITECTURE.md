@@ -1,6 +1,6 @@
 # Architecture
 
-本文档描述已发布的 `v4.6.4` 架构，包括默认新版桌面主页与经典主页切换、分池／合池统计、共享模拟器引擎与事务存档。上线证据见 [RELEASE_4.6.4.md](RELEASE_4.6.4.md)。独立 CN / INTL 后端承接官方数据获取、规范化、内部暂存与原子写入。
+本文档描述 `v4.6.4` 架构及截至 2026-10-17 的文件导入修复，包括默认新版桌面主页与经典主页切换、分池／合池统计、共享模拟器引擎与事务存档。原版本上线证据见 [RELEASE_4.6.4.md](RELEASE_4.6.4.md)，后续交付见 [项目进展](RECENT_DELIVERY_STATUS.md)。独立 CN / INTL 后端承接官方数据获取、规范化、内部暂存与原子写入。
 
 限定武器池通过 `pools.character_pool_id` 保存同期限定角色池；后台共用 `shared/weaponPoolSchedule.js` 识别与预览三期截止时间，经管理员填入和既有 RPC 原子保存，不自动追写截止日期。独立版本日历读取主站数据库时间，卡池时间不再由本地备份覆盖；缓存和操作边界见 [卡池时间管理](POOL_SCHEDULE_MANAGEMENT.md)。
 
@@ -57,7 +57,7 @@ flowchart LR
 | 私有读取 / 写入 | `src/services/accountGachaDataService.js`、`src/hooks/app/useCloudSync.js`、`src/utils/cloudDataSync.js` | 个人分析读取、历史分页、精确变更、池信息和 owner 隔离同步 |
 | 官方导入 | `src/features/import/useOfficialImportController.js`、`src/features/import/ImportManager.jsx` | 创建 `import-full` 后台任务、轮询 `import-status`、结果刷新、导入后异常提示，以及兼容期遗留审阅元数据清理 |
 
-模拟器已分为共享纯引擎、专用继承投影、IndexedDB 事务仓库、展示与分享适配；资源增量累计，scope 状态统一装配。个人快照 schema 3 与部署要求见 [模拟器合同](SIMULATOR_ENGINE.md)。桌面／移动 dashboard、settings 仍可进一步共享控制器逻辑。
+模拟器已分为共享纯引擎、专用继承投影、IndexedDB 事务仓库、展示与分享适配；资源增量累计，scope 状态统一装配。原 v4.6.4 使用个人快照 schema 3，当前个人分析为 schema 5，部署状态见 [Worker 指南](PERSONAL_ANALYSIS_WORKER.md)，继承合同见 [模拟器合同](SIMULATOR_ENGINE.md)。桌面／移动 dashboard、settings 仍可进一步共享控制器逻辑。
 
 ### 2.1 新版桌面主页与经典主页切换
 
@@ -73,7 +73,7 @@ flowchart LR
 
 `SummaryView` 和移动统计入口复用 `PoolStatisticsWorkspace`，提供单池及限定角色、限定武器、常驻武器、重构寻访、重构申领五类范围。十图、头像选择、分类排序与旧指标／资源读取同一选择范围。合池先逐账号、逐期、逐对象计算首次，再按当期身份汇总类别；账号覆盖跨期去重，不能相加各池账号数。
 
-`statistics_jobs`、`statistics_snapshots` 与 `statistics_activity` 由常驻 `statisticsWorker` 按 5/30/60 分钟策略处理。公共与认证后的个人读取仅返回 `public-statistics-v4` 快照；GET 不扫描历史、不触发重算。目录成员或目标签名变化、租约与修订冲突、分页不完整均阻止发布不完整结果。旧 `metrics` / `resources` 随范围迁入快照，资源次序仍读取完整相关账号上下文；已有 owner/account 个人分析 Worker 保持独立职责。
+`statistics_jobs`、`statistics_snapshots` 与 `statistics_activity` 由常驻 `statisticsWorker` 按范围策略处理；实际刷新周期和快照版本以[调度说明](STATISTICS_SCHEDULING.md)为准。GET 读取匹配版本的快照，不扫描历史、不触发重算。目录成员或目标签名变化、租约与修订冲突、分页不完整均阻止发布不完整结果。旧 `metrics` / `resources` 随范围迁入快照，资源次序仍读取完整相关账号上下文；已有 owner/account 个人分析 Worker 保持独立职责。
 
 详情见 [统计合同](STATS_OBSERVATION_CONTRACT.md) 与 [调度说明](STATISTICS_SCHEDULING.md)。指南仅存在于 Vite DEV 的 `/statistics-preview.html`，不属于生产业务路由。
 
@@ -81,7 +81,17 @@ flowchart LR
 
 `shared/simulator/engine.js` 以外部随机源、时间与目录执行纯函数命令。普通限定共享五星／六星水位，单池目标与重构系列进度由能力解析指定；零抽池通过同一 selector 读取状态。免费、情报书和赠送记录统一分类，资源与持有数在追加时累计，账本读取不扫描全部历史。
 
-专用继承 GET 只读匹配账号、来源、契约与修订的 schema 3 快照，返回合同 2 的状态和编码 1 的完整历史；普通分析不附带它。游客本地历史也通过相同投影继承。会话按用户／完整游戏账号键隔离，IndexedDB 同一事务校验 revision 并保存状态与历史，成功后更新 UI；旧 localStorage 只读迁移并保留原键。移动端保持引导提示。
+专用继承 GET 只读匹配账号、来源、契约、当前个人分析 schema 与修订的快照，返回合同 2 的状态和编码 1 的完整历史；普通分析不附带它。游客本地历史也通过相同投影继承。会话按用户／完整游戏账号键隔离，IndexedDB 同一事务校验 revision 并保存状态与历史，成功后更新 UI；旧 localStorage 只读迁移并保留原键。移动端保持引导提示。
+
+### 2.4 文件导入与失败恢复（2026-10-17）
+
+`dataImportFileParser` 解析文件，`dataFormatRegistry` 按来源展开批次，`dataImport` 校验账号／卡池引用。`useDataExportImport` 保存前通过私有账号接口读取当前用户完整明细，校验 owner 和截断标记，再用 `importHistoryMerge` 去重；不能把分析页的部分本地历史当作已存全量。
+
+真实序号先匹配，缺少原始序号的 kwer 合成记录再按相同账号／区服／卡池／毫秒时间／名称／星级匹配。已有记录逐条消耗，明确属性优先；来源缺少免费或特殊获取字段时不覆盖已有属性，`importFreeStatusKnown` 只在导入资料中保留字段存在性，不新增数据库列。
+
+缺少的卡池先保存，明细每 100 条串行写入并核对 `saved.history + skipped.history`。保存补录沿用工作台校验与原子提交；整份文件的多个明细批次和补录并非一个事务。错误保留预览，重试重新读取服务端状态；全部写入完成后才应用本地历史并请求刷新分析，快照可能仍在构建。
+
+工作台确认弹窗 portal 到 `document.body`，手机设置弹窗按动态视口和安全区限制高度并可滚动。设置删除入口取本机历史与账号快照 `recordCount` 的较大值，避免空的本机明细误禁用。格式、恢复及验证合同见 [文件导入说明](FILE_IMPORT_RELIABILITY.md)；补录口径见 [个人补录分析](PERSONAL_MANUAL_ANALYSIS.md)。
 
 ## 3. API 层
 
@@ -132,7 +142,7 @@ Supabase 目录采用“baseline + 归档迁移 + 手工脚本”结构：
 
 附加寻访数据库面由 181–183 提供：`extra_subtype / extra_rule_profile / extra_series_key / extra_series_phase`，并把产品语义区分为 `reconstruction`、`reconstruction_claim` 和 `special`。相同分类贯穿可见卡池 RPC、管理写入、官方导入、版本绑定、分析与模拟器；旧 `type=extra` 仍作为粗粒度兼容类型。
 
-统计队列和五类合池由 PR #37 引入。`2026100601_reuse_pool_counts_for_catalog_groups.sql` 使角色／阵容写入仅递增统计 revision，卡池／权限变化复用同事务单池计数生成组合计数，保留原超时与 ACL；`2026100701_weapon_character_pool_schedule.sql` 保存限定武器同期角色关联。`2026100901_simulator_inheritance_v2.sql` 更新个人分析快照 schema 3 与目录失效；`2026101101_complete_pool_roster_reads.sql` 为后台和公开 API 提供单值 JSON 完整阵容，避免 REST 行数截断，详见 [阵容读取](POOL_ROSTER_READS.md)。baseline 当前包含 195 个迁移，手动补录工作台尚未成为正式数据入口。
+统计队列和五类合池由 PR #37 引入。`2026100601_reuse_pool_counts_for_catalog_groups.sql` 使角色／阵容写入仅递增统计 revision，卡池／权限变化复用同事务单池计数生成组合计数，保留原超时与 ACL；`2026100701_weapon_character_pool_schedule.sql` 保存限定武器同期角色关联。`2026100901_simulator_inheritance_v2.sql` 是原 schema 3 升级记录；`2026101101_complete_pool_roster_reads.sql` 为后台和公开 API 提供单值 JSON 完整阵容，避免 REST 行数截断，详见 [阵容读取](POOL_ROSTER_READS.md)。后续工作台、统计隔离及个人分析升级以[数据库指南](../supabase/README.md)和[个人补录分析](PERSONAL_MANUAL_ANALYSIS.md)为准；手动补录已成为正式个人资料入口。2026-10-17 的文件导入修复没有新增迁移。
 
 ## 6. 运营自动化
 
