@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildDashboardOverviewSplitStats } from '../dashboardOverviewSplitStats.js';
+import { resolveCharacterRecordByName } from '../characterUtils.js';
 
 vi.mock('../characterUtils.js', () => ({
   resolveCharacterRecordByName: vi.fn((value) => {
@@ -12,6 +13,26 @@ vi.mock('../characterUtils.js', () => ({
 }));
 
 describe('buildDashboardOverviewSplitStats', () => {
+  it('uses the injected server catalog for off-rate limited copies instead of the browser cache', () => {
+    const resolver = vi.fn(value => value === 'server-only-id'
+      ? { id: value, name: 'Server limited', type: 'character', is_limited: true } : null);
+    const cacheCallsBefore = resolveCharacterRecordByName.mock.calls.length;
+    const stats = buildDashboardOverviewSplitStats({
+      selectedPools: [{ id: 'limited', type: 'limited', up_character: 'Target' }],
+      resolveCharacter: resolver,
+      history: [
+        { id: 1, poolId: 'limited', rarity: 4 },
+        { id: 2, poolId: 'limited', rarity: 6, name: 'Target', isStandard: false },
+        { id: 3, poolId: 'limited', rarity: 6, character_id: 'server-only-id', isStandard: true },
+        { id: 4, poolId: 'limited', rarity: 6, name: 'Standard', isStandard: true },
+      ],
+    });
+    expect(stats.character.avgPullCost[6]).toBe('4.00');
+    expect(stats.character.avgPullCost['6_limited']).toBe('2.00');
+    expect(resolver).toHaveBeenCalledWith('server-only-id', { fuzzy: true });
+    expect(resolveCharacterRecordByName.mock.calls).toHaveLength(cacheCallsBefore);
+  });
+
   it('counts off-rate limited characters in character split limited six-star averages', () => {
     const stats = buildDashboardOverviewSplitStats({
       selectedPools: [

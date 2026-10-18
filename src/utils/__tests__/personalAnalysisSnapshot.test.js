@@ -41,6 +41,35 @@ function assertNoMapOrSet(value, seen = new WeakSet()) {
 }
 
 describe('buildPersonalAnalysisSnapshots', () => {
+  it('角色分栏用服务端目录区分11次目标和13次限定，无需浏览器角色缓存', () => {
+    const pools = [
+      { id: 'limited-a', type: 'limited', up_character: 'Target A' },
+      { id: 'limited-b', type: 'limited', up_character: 'Target B' },
+    ];
+    const characters = [
+      { id: 'target-a', name: 'Target A', type: 'character', rarity: 6, is_limited: true },
+      { id: 'target-b', name: 'Target B', type: 'character', rarity: 6, is_limited: true },
+    ];
+    const history = Array.from({ length: 143 }, (_, index) => createPull({
+      id: `split-${index}`, seq_id: String(index + 1),
+      poolId: index < 100 ? 'limited-a' : 'limited-b',
+      timestamp: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+      rarity: index < 11 || index === 110 || index === 120 ? 6 : 4,
+      character_name: index < 11 || index === 110 || index === 120 ? 'Target A' : 'Four star',
+      character_id: index < 11 || index === 110 || index === 120 ? 'target-a' : null,
+      is_standard: index >= 100,
+    }));
+    const { scopes } = buildPersonalAnalysisSnapshots({ history, pools, characters, userId: USER_ID });
+    const views = JSON.parse(JSON.stringify(scopes[0].payload.dashboard.views));
+    for (const variant of ['excludeFree', 'includeFree']) {
+      const split = views.__group_all[variant].splitOverviewStats.character;
+      expect(split.counts).toMatchObject({ 6: 11, '6_std': 2 });
+      expect(split.avgPullCost[6]).toBe('13.00');
+      expect(split.avgPullCost['6_limited']).toBe('11.00');
+      expect(views.__group_limited[variant].stats.avgPullCost['6_limited']).toBe('11.00');
+    }
+  });
+
   it('只处理目标用户，并按记录数选择默认账号', () => {
     const history = [
       createPull({ id: 'mine-1' }),

@@ -76,7 +76,7 @@ function getHistoryItemLookupValues(item) {
     .filter(Boolean);
 }
 
-function isLimitedCharacterOffrate(item) {
+function isLimitedCharacterOffrate(item, resolveCharacter) {
   const explicitFlag = readExplicitLimitedFlag(item);
   if (explicitFlag !== null) {
     return explicitFlag;
@@ -84,7 +84,7 @@ function isLimitedCharacterOffrate(item) {
 
   const lookupValues = getHistoryItemLookupValues(item);
   for (const value of lookupValues) {
-    const itemInfo = resolveCharacterRecordByName(value, { fuzzy: true });
+    const itemInfo = resolveCharacter(value, { fuzzy: true });
     if (itemInfo) {
       return itemInfo.type !== 'weapon' && itemInfo.is_limited === true;
     }
@@ -154,7 +154,8 @@ function buildDistributionData(sixStarPulls, hardPityLimit) {
 export function buildDashboardOverviewSplitStats({
   history = [],
   selectedPools = [],
-  includeFreePullsInStats = false
+  includeFreePullsInStats = false,
+  resolveCharacter = resolveCharacterRecordByName
 } = {}) {
   const poolById = new Map(
     selectedPools.flatMap((pool) => (
@@ -267,7 +268,7 @@ export function buildDashboardOverviewSplitStats({
       if (rarity >= 6) {
         const isTargetSixStar = isTargetSixStarHistoryRecord(item, sourcePool);
         const isLimitedSixStar = isLimitedCharacterScope(capabilities)
-          && (isTargetSixStar || isLimitedCharacterOffrate(item));
+          && (isTargetSixStar || isLimitedCharacterOffrate(item, resolveCharacter));
 
         if (isTargetSixStar) {
           bucket.counts[6] += 1;
