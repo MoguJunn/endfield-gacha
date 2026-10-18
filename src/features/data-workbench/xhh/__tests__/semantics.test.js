@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeScreenshot, applyNormalCountMeaning, buildScreenshotEntries, matchCatalogText, poolEntityType, poolType } from '../semantics.js';
 import { buildTilePlan, dedupeOcrTokens, mapOcrItemsToTokens } from '../tokens.js';
+import { poolSelectGroups, screenshotPoolType } from '../../workbenchCatalog.js';
 import { barTokens, bounds, entities, pools, token } from './tokens.fixture.js';
 
 const analyze = tokens => analyzeScreenshot({ tokens, diagnostics: bounds, pools, entities, selectedPoolId: 'limited-1' });
@@ -8,6 +9,23 @@ const confirm = segment => ({ ...segment, poolConfirmed: true, countsConfirmed: 
   rows: segment.rows.map(row => ({ ...row, confirmed: true, entityConfirmed: true })) });
 
 describe('小黑盒截图语义与草稿边界', () => {
+  it('按正式ID将常驻规则的启程寻访归入新手池，识别标题后保留六星身份', () => {
+    const beginner = { id: 'beginner', name: '启程寻访', type: 'standard', rosterEntityIds: ['char-6', 'char-5'] };
+    const catalog = [...pools, beginner];
+    expect(screenshotPoolType(beginner)).toBe('beginner');
+    expect(poolType(beginner)).toBe('beginner');
+    expect(screenshotPoolType({ pool_id: 'beginner', type: 'standard' })).toBe('beginner');
+    expect(poolType({ type: 'beginner' })).toBe('beginner');
+    const groups = poolSelectGroups(catalog);
+    expect(groups.find(group => group.id === 'beginner').options.map(option => option.value)).toEqual(['beginner']);
+    expect(groups.find(group => group.id === 'standard').options.map(option => option.value)).toEqual(['standard-1']);
+    const result = analyzeScreenshot({ tokens: [token('启程寻访', 50, 130), token('合计40抽', 50, 165),
+      token('40抽', 180, 250), token('莱万汀', 300, 250)], diagnostics: bounds, pools: catalog, entities, selectedType: 'beginner' });
+    expect(result.segments).toHaveLength(1);
+    expect(result.segments[0]).toMatchObject({ poolId: 'beginner', poolGuess: true });
+    expect(result.segments[0].rows[0]).toMatchObject({ entityId: 'char-6', rarity: 6 });
+  });
+
   it('附加池只按项目既有能力 profile 分类，武器重构选择武器实体', () => {
     const extra = { id: 'extra-weapon', name: '新芽申领', type: 'extra', extra_rule_profile: 'reconstruction_weapon_v1', rosterEntityIds: ['weapon-6'] };
     expect(poolType(extra)).toBe('weapon');

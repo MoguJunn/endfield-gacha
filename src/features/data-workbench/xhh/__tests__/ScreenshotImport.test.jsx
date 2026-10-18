@@ -2,7 +2,7 @@ import React from 'react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import WorkbenchScreenshotImport from '../../WorkbenchScreenshotImport.jsx';
-import { barTokens, bounds, entities, pools } from './tokens.fixture.js';
+import { barTokens, bounds, entities, pools, token } from './tokens.fixture.js';
 
 const mocks = vi.hoisted(() => ({ recognize: vi.fn(), cancel: vi.fn(), dispose: vi.fn(), hints: [] }));
 vi.mock('../ocrClient.js', () => ({ createOcrClient: () => mocks }));
@@ -21,13 +21,38 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const upload = () => fireEvent.change(screen.getByLabelText('选择小黑盒截图'), { target: { files: [new File(['fixture'], 'screenshot.png', { type: 'image/png' })] } });
-const mount = () => {
+const mount = ({ catalog = pools, selectedPoolId = 'limited-1' } = {}) => {
   const onApply = vi.fn(); const onClose = vi.fn();
-  render(<WorkbenchScreenshotImport pools={pools} entities={entities} selectedPoolId="limited-1" scope={{ gameUid: 'test', serverScope: 'cn' }} onApply={onApply} onClose={onClose} />);
+  render(<WorkbenchScreenshotImport pools={catalog} entities={entities} selectedPoolId={selectedPoolId} scope={{ gameUid: 'test', serverScope: 'cn' }} onApply={onApply} onClose={onClose} />);
   return { onApply, onClose };
 };
 
 describe('截图导入人工确认交互', () => {
+  it('新手池未识别时可搜索启程寻访、手动选六星并加入待审草稿', async () => {
+    const beginner = { id: 'beginner', name: '启程寻访', type: 'standard', rosterEntityIds: ['char-6', 'char-5'] };
+    mocks.recognize.mockResolvedValue({ tokens: [token('40抽', 180, 250)], diagnostics: { ...bounds, failedTiles: [] } });
+    const { onApply } = mount({ catalog: [...pools, beginner], selectedPoolId: 'beginner' });
+    expect(screen.getByRole('combobox', { name: '截图的卡池类型' })).toHaveTextContent('新手池');
+    upload(); fireEvent.click(screen.getByRole('button', { name: '开始识别' }));
+    await screen.findByText('池段 1 · 未匹配卡池');
+    fireEvent.click(screen.getByRole('combobox', { name: '池段 1 所属卡池' }));
+    fireEvent.change(screen.getByRole('searchbox', { name: '搜索池段 1 所属卡池' }), { target: { value: '启程寻访' } });
+    fireEvent.click(screen.getByRole('option', { name: /启程寻访/ }));
+    fireEvent.click(screen.getByRole('combobox', { name: '记录 1 角色 / 武器' }));
+    const choices = screen.getByRole('listbox', { name: '记录 1 角色 / 武器' });
+    expect(within(choices).getByRole('group', { name: '6★ 角色' })).toBeInTheDocument();
+    expect(within(choices).queryByRole('option', { name: /熔铸火焰/ })).not.toBeInTheDocument();
+    fireEvent.click(within(choices).getByRole('option', { name: /莱万汀/ }));
+    fireEvent.change(screen.getByLabelText('所有普通横条数字含义'), { target: { value: 'interval' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /所属卡池正确/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /数量与获得方式已核对/ }));
+    fireEvent.click(screen.getByLabelText('我已对照裁图确认身份、抽数含义与获得方式'));
+    fireEvent.click(screen.getByRole('button', { name: '加入工作台草稿' }));
+    expect(onApply).toHaveBeenCalledOnce();
+    expect(onApply.mock.calls[0][0].entries[0]).toMatchObject({ poolId: 'beginner',
+      values: { acquisitions: [expect.objectContaining({ entityId: 'char-6', rarity: 6, intervalPulls: 40 })] } });
+  });
+
   it('取消移除池段时保留修改，确认后才移除整个池段', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     mount(); upload(); fireEvent.click(screen.getByRole('button', { name: '开始识别' }));

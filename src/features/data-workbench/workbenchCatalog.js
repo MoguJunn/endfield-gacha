@@ -7,7 +7,9 @@ export const SCREENSHOT_TYPES = [
   { id: 'celebration', label: '附加寻访／辉光庆典' }, { id: 'standard', label: '常驻池' }, { id: 'beginner', label: '新手池' },
 ];
 export function screenshotPoolType(pool) {
-  if (pool?.type === 'beginner') return 'beginner';
+  // The public catalog uses standard rules for beginner, but screenshot
+  // categories must keep its canonical pool identity separate from standard.
+  if (pool?.id === 'beginner' || pool?.pool_id === 'beginner' || (pool?.type || pool?.pool_type) === 'beginner') return 'beginner';
   const type = resolvePoolCapabilities(pool).basePoolType;
   return type === 'extra' ? 'celebration' : type;
 }

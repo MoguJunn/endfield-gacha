@@ -1,14 +1,12 @@
 // V2 token-line / evidence-row parser. Catalog aliases replace the demo's old fixed pool list.
 import { centerX, centerY, normalizeText, unionRects } from './tokens.js';
 import { resolvePoolCapabilities } from '../../../utils/poolCapabilities.js';
-import { entitiesForWorkbenchPool } from '../workbenchCatalog.js';
+import { entitiesForWorkbenchPool, screenshotPoolType } from '../workbenchCatalog.js';
 import { isWorkbenchPoolUnopened, workbenchPoolUnavailableMessage } from '../../../../shared/workbenchPoolAvailability.js';
 
 export function poolType(pool) {
-  if ((pool?.type || pool?.pool_type) === 'beginner') return 'beginner';
-  const capabilities = resolvePoolCapabilities(pool);
-  if (!capabilities.isResolved) return 'unknown';
-  return capabilities.basePoolType === 'extra' ? 'celebration' : capabilities.basePoolType;
+  const type = screenshotPoolType(pool);
+  return type === 'beginner' || resolvePoolCapabilities(pool).isResolved ? type : 'unknown';
 }
 
 export const poolEntityType = pool => resolvePoolCapabilities(pool).entityType;
