@@ -8,6 +8,19 @@ import { readStatisticsHistoryGaps } from './statisticsHistoryGaps.js';
 
 const PREPARED_CONTINUITY = Symbol('prepared-statistics-continuity');
 
+function scopeMembers(pools, scope) {
+  return scope.startsWith('group:') ? getStatisticsGroupPools(pools, scope.slice(6))
+    : pools.filter(pool => pool.id === scope.slice(5));
+}
+
+export function statisticsDatasetCoversScope(dataset, scope) {
+  const covered = new Set(dataset.coveredPoolIds);
+  const members = scopeMembers(dataset.pools, scope);
+  const required = members.some(pool => resolvePoolCapabilities(pool).entityType === 'character')
+    ? dataset.contextPools.filter(pool => resolvePoolCapabilities(pool).entityType === 'character') : members;
+  return members.length > 0 && required.every(pool => covered.has(pool.id));
+}
+
 function compactHistoryReader() {
   const strings = new Map();
   const intern = (value) => {
@@ -140,16 +153,25 @@ function computeScopePayload({ pools, contextPools, directory, members, groupKey
 /** Complete context shared by previews and one worker run. The worker must
  * check the captured scope revision before reusing this data for a later job.
  * Raw rows stay in memory and are released when the worker process ends. */
-export async function readStatisticsPreviewDataset(db, { signal, beforeRead, onProgress = () => {} } = {}) {
+export async function readStatisticsPreviewDataset(db, { signal, scope, beforeRead, onProgress = () => {} } = {}) {
   const [{ data: visible, error: visibleError }, { data: catalog, error: catalogError }, { data: directory, error: directoryError }, { data: newest, error: newestError }] = await Promise.all([
     db.rpc('get_app_visible_pools').abortSignal(signal), db.from('pools').select('*').abortSignal(signal),
     db.from('characters').select('*').abortSignal(signal), db.from('history').select('id').order('id', { ascending: false }).limit(1).abortSignal(signal),
   ]);
   if (visibleError || catalogError || directoryError || newestError) throw new Error('Preview statistics context unavailable');
+  const pools = visible.map(normalizeStatisticsPool);
   const contextPools = catalog.map(normalizeStatisticsPool);
-  const history = await readRows(db, contextPools.map((pool) => pool.id), newest?.[0]?.id, signal, () => true, { beforeRead, onProgress });
+  let selected = contextPools;
+  if (scope) {
+    const members = scopeMembers(pools, scope);
+    if (!members.length) throw new Error('Unknown statistics scope');
+    selected = members.some(pool => resolvePoolCapabilities(pool).entityType === 'character')
+      ? contextPools.filter(pool => resolvePoolCapabilities(pool).entityType === 'character') : members;
+  }
+  const coveredPoolIds = selected.map(pool => pool.id);
+  const history = await readRows(db, coveredPoolIds, newest?.[0]?.id, signal, () => true, { beforeRead, onProgress });
   const exclusions = await readStatisticsHistoryGaps(db, { signal });
   const trusted = prepareStatisticsContinuity({ history, pools: contextPools, exclusions }).history;
-  return { pools: visible.map(normalizeStatisticsPool), contextPools, directory, history: trusted,
+  return { pools, contextPools, coveredPoolIds, directory, history: trusted,
     exclusions, [PREPARED_CONTINUITY]: true };
 }

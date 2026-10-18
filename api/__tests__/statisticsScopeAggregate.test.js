@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import { readStatisticsPreviewDataset, readStatisticsScopeAggregate } from '../_lib/statisticsScopeAggregate.js';
+import { readStatisticsPreviewDataset, readStatisticsScopeAggregate, statisticsDatasetCoversScope } from '../_lib/statisticsScopeAggregate.js';
 import { statisticsHistory } from '../../shared/statisticsEligibility.js';
 
-const pools = [{ pool_id: 'p', type: 'limited', up_character: 'A' }, { pool_id: 's', type: 'standard' }];
+const pools = [{ pool_id: 'p', type: 'limited', up_character: 'A' }, { pool_id: 's', type: 'standard' }, { pool_id: 'w', type: 'weapon' }];
 const directory = [{ id: 'a', name: 'A', rarity: 6, type: 'character', is_limited: true }];
 const row = (id, pool = 'p', extra = {}) => ({ id, record_id: String(id), user_id: 'owner', game_uid: 'uid', server_scope: 'cn',
   pool_id: pool, character_id: 'a', character_name: 'untrusted user label', rarity: 6, timestamp: new Date(1700000000000 + id * 1000).toISOString(), ...extra });
@@ -52,6 +52,25 @@ function client(history, { shortPage = false, pageCap = 1000, gaps = [] } = {}) 
   };
 }
 describe('scope worker context', () => {
+  it('loads only a weapon scope or complete character context and produces the same statistics as full history', async () => {
+    const db = client([row(1, 's'), row(2, 'p'), row(3, 'w')]);
+    const full = await readStatisticsPreviewDataset(db);
+    const character = await readStatisticsPreviewDataset(db, { scope: 'pool:p' });
+    const weapon = await readStatisticsPreviewDataset(db, { scope: 'pool:w' });
+    expect(character.history.map(row => row.id)).toEqual([1, 2]);
+    expect(weapon.history.map(row => row.id)).toEqual([3]);
+    for (const [scope, dataset] of [['pool:p', character], ['pool:w', weapon]]) {
+      const expected = await readStatisticsScopeAggregate(null, scope, { dataset: full });
+      const actual = await readStatisticsScopeAggregate(null, scope, { dataset });
+      expect(actual.legacy).toEqual(expected.legacy);
+      expect(actual.observations).toEqual(expected.observations);
+    }
+    expect(statisticsDatasetCoversScope(character, 'group:limited')).toBe(true);
+    expect(statisticsDatasetCoversScope(weapon, 'pool:p')).toBe(false);
+    expect(statisticsDatasetCoversScope(character, 'pool:w')).toBe(false);
+    expect(statisticsDatasetCoversScope({ ...character, coveredPoolIds: ['p'] }, 'pool:p')).toBe(false);
+  });
+
   it('loads compact 10000-row pages serially and checks for interactive work between pages', async () => {
     const db = client(Array.from({ length: 10001 }, (_, i) => row(i + 1, 'p', { rarity: 4 })), { pageCap: 10000 });
     const beforeRead = vi.fn();

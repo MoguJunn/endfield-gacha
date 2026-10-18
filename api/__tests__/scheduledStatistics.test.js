@@ -145,7 +145,8 @@ describe('scheduled statistics', () => {
           : name === 'publish_statistics_snapshot' && params.p_payload === null ? false : true };
       return Object.assign(Promise.resolve(result), { abortSignal: async () => result });
     }) };
-    const dataset = { history: [] };
+    const catalog = [{ id: 'p', type: 'limited' }, { id: 'changed', type: 'limited' }];
+    const dataset = { history: [], pools: catalog, contextPools: catalog, coveredPoolIds: ['p', 'changed'] };
     const datasetLoader = vi.fn(async () => {
       expect(db.rpc).toHaveBeenCalledWith('read_statistics_job_revisions', {});
       return dataset;
@@ -162,6 +163,23 @@ describe('scheduled statistics', () => {
     }));
     expect(db.rpc.mock.calls.some(([name]) => name === 'fail_statistics_job')).toBe(false);
   });
+  it('reloads missing character context after a weapon job instead of publishing from a partial shared dataset', async () => {
+    const jobs = [{ scopeKey: 'pool:w', revision: 1 }, { scopeKey: 'pool:p', revision: 2 }, { scopeKey: 'group:limited', revision: 3 }, null];
+    const catalog = [{ id: 'p', type: 'limited' }, { id: 'w', type: 'weapon' }];
+    const db = { rpc: vi.fn(name => {
+      const result = { data: name === 'claim_statistics_job' ? jobs.shift()
+        : name === 'read_statistics_job_revisions' ? { 'pool:w': 1, 'pool:p': 2, 'group:limited': 3 } : true };
+      return Object.assign(Promise.resolve(result), { abortSignal: async () => result });
+    }) };
+    const datasetLoader = vi.fn(async (_db, { scope }) => ({ history: [], pools: catalog, contextPools: catalog,
+      coveredPoolIds: scope === 'pool:w' ? ['w'] : ['p'] }));
+    const scopeAggregate = vi.fn(async (_db, scope, { dataset }) => {
+      expect(dataset.coveredPoolIds).toEqual(scope === 'pool:w' ? ['w'] : ['p']);
+      return { total: 1 };
+    });
+    expect((await runStatisticsWorker(db, { datasetLoader, scopeAggregate })).map(row => row.status)).toEqual(['published', 'published', 'published']);
+    expect(datasetLoader).toHaveBeenCalledTimes(2);
+  });
   it('stops after a shared history failure without failing unrelated queued jobs and recovers next run', async () => {
     const makeJobs = () => [{ scopeKey: 'pool:p', revision: 1 }, { scopeKey: 'group:limited', revision: 2 },
       { scopeKey: 'owner:test-user', revision: 3 }, null];
@@ -172,7 +190,7 @@ describe('scheduled statistics', () => {
       return Object.assign(Promise.resolve(result), { abortSignal: async () => result });
     }) };
     const datasetLoader = vi.fn().mockRejectedValueOnce(new Error('Read deadline exceeded'))
-      .mockResolvedValue({ history: [] });
+      .mockResolvedValue({ history: [], pools: [{ id: 'p', type: 'limited' }], contextPools: [{ id: 'p', type: 'limited' }], coveredPoolIds: ['p'] });
     const scopeAggregate = vi.fn().mockResolvedValue({ observations: { total: 1 } });
     const personal = vi.fn().mockResolvedValue({ total: 3 });
     const first = await runStatisticsWorker(db, { datasetLoader, scopeAggregate, personal });

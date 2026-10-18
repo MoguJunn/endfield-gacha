@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readStatisticsPreviewDataset, readStatisticsScopeAggregate } from './statisticsScopeAggregate.js';
+import { readStatisticsPreviewDataset, readStatisticsScopeAggregate, statisticsDatasetCoversScope } from './statisticsScopeAggregate.js';
 import { STATISTICS_SNAPSHOT_VERSION } from '../../shared/statisticsRefreshPolicy.js';
 import { buildPersonalStatisticsSnapshot } from './personalStatisticsSnapshot.js';
 
@@ -33,6 +33,12 @@ export async function runStatisticsWorker(db, { maxJobs = 8, timeBudgetMs = 2400
     }
   };
   const computePublicScope = async (job, signal) => {
+    if (shared && !statisticsDatasetCoversScope(shared.dataset, job.scopeKey)) {
+      // A weapon-only read must never be reused for character context or a
+      // different weapon pool. Release the old rows before loading that scope.
+      shared = null;
+      sharedLoad = null;
+    }
     if (!shared) {
       // Capture BEFORE reading history. A later claim may reuse the rows only
       // if its revision matches; publishing still checks the current revision.
@@ -43,7 +49,7 @@ export async function runStatisticsWorker(db, { maxJobs = 8, timeBudgetMs = 2400
         const revisions = await rpc(db, 'read_statistics_job_revisions', {}, signal);
         if (!revisions || typeof revisions !== 'object' || Array.isArray(revisions)) throw new Error('Statistics revisions unavailable');
         failurePhase = 'shared-history';
-        const dataset = await datasetLoader(db, { signal, beforeRead: yieldToPersonal,
+        const dataset = await datasetLoader(db, { signal, scope: job.scopeKey, beforeRead: yieldToPersonal,
           onProgress: progress => { failurePhase = progress.phase; onProgress(progress); } });
         onProgress({ phase: 'shared-history-ready', rows: dataset.history.length });
         return { revisions, dataset };
