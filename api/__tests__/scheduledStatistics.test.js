@@ -162,7 +162,7 @@ describe('scheduled statistics', () => {
     }));
     expect(db.rpc.mock.calls.some(([name]) => name === 'fail_statistics_job')).toBe(false);
   });
-  it('does not repeat a failed shared history read and still processes independent personal jobs', async () => {
+  it('stops after a shared history failure without failing unrelated queued jobs and recovers next run', async () => {
     const makeJobs = () => [{ scopeKey: 'pool:p', revision: 1 }, { scopeKey: 'group:limited', revision: 2 },
       { scopeKey: 'owner:test-user', revision: 3 }, null];
     let jobs = makeJobs();
@@ -176,11 +176,12 @@ describe('scheduled statistics', () => {
     const scopeAggregate = vi.fn().mockResolvedValue({ observations: { total: 1 } });
     const personal = vi.fn().mockResolvedValue({ total: 3 });
     const first = await runStatisticsWorker(db, { datasetLoader, scopeAggregate, personal });
-    expect(first.map(row => row.status)).toEqual(['failed', 'failed', 'published']);
+    expect(first.map(row => row.status)).toEqual(['failed']);
     expect(datasetLoader).toHaveBeenCalledTimes(1);
     expect(scopeAggregate).not.toHaveBeenCalled();
-    expect(personal).toHaveBeenCalledTimes(1);
-    expect(db.rpc.mock.calls.filter(([name]) => name === 'fail_statistics_job')).toHaveLength(2);
+    expect(personal).not.toHaveBeenCalled();
+    expect(db.rpc.mock.calls.filter(([name]) => name === 'claim_statistics_job')).toHaveLength(1);
+    expect(db.rpc.mock.calls.filter(([name]) => name === 'fail_statistics_job')).toHaveLength(1);
     // Failure memoization belongs to one run. The next normal round can recover.
     jobs = makeJobs();
     const second = await runStatisticsWorker(db, { datasetLoader, scopeAggregate, personal });

@@ -26,6 +26,7 @@ try {
   const migration = await readFile(new URL('../supabase/migrations/2026101800_bound_background_statistics.sql', import.meta.url), 'utf8');
   await root.query(migration);
   await root.query(migration);
+  await root.query(await readFile(new URL('../supabase/migrations/2026101801_tune_statistics_job_budgets.sql', import.meta.url), 'utf8'));
   const expected = Number((await one('SELECT count(*) AS n FROM statistics_history')).n);
   const upper = (await one('SELECT max(id) AS id FROM history')).id;
   assert.equal(Number((await one("SELECT read_statistics_history_count(ARRAY['p','q'],$1) AS n", [upper])).n), expected);
@@ -59,6 +60,7 @@ try {
   assert.deepEqual(await one("SELECT lease_id,failure_count,retry_at>now() AS deferred FROM statistics_jobs WHERE scope_key='pool:p'"),
     { lease_id: null, failure_count: 2, deferred: true });
   const config = (await one("SELECT proconfig FROM pg_proc WHERE oid='compute_and_publish_legacy_statistics(text,bigint,uuid,text)'::regprocedure")).proconfig;
-  for (const setting of ['jit=off', 'max_parallel_workers_per_gather=0', 'work_mem=16MB', 'statement_timeout=180s']) assert.ok(config.includes(setting));
+  for (const setting of ['jit=off', 'max_parallel_workers_per_gather=0', 'work_mem=16MB', 'statement_timeout=60s']) assert.ok(config.includes(setting));
+  assert.ok((await one("SELECT proconfig FROM pg_proc WHERE oid='read_statistics_history_count(text[],bigint)'::regprocedure")).proconfig.includes('statement_timeout=30s'));
   console.log('通过：主动让出只释放匹配租约，不增加失败次数；后台SQL资源设置只作用于指定函数。');
 } finally { await db.close(); }

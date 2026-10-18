@@ -22,6 +22,7 @@ export async function runStatisticsWorker(db, { maxJobs = 8, timeBudgetMs = 2400
   const results = [];
   let shared = null;
   let sharedLoad = null;
+  let sharedReadFailed = false;
   let nextPriorityCheck = 0;
   let failurePhase = 'compute';
   const yieldToPersonal = async (force = false) => {
@@ -47,7 +48,7 @@ export async function runStatisticsWorker(db, { maxJobs = 8, timeBudgetMs = 2400
         onProgress({ phase: 'shared-history-ready', rows: dataset.history.length });
         return { revisions, dataset };
       })();
-      shared = await sharedLoad;
+      try { shared = await sharedLoad; } catch (error) { sharedReadFailed = true; throw error; }
     }
     if (String(shared.revisions[job.scopeKey]) !== String(job.revision)) return DEFER_CHANGED_SCOPE;
     failurePhase = 'scope-compute';
@@ -103,6 +104,9 @@ export async function runStatisticsWorker(db, { maxJobs = 8, timeBudgetMs = 2400
       results.push({ scope: job.scopeKey.startsWith('owner:') ? 'personal' : job.scopeKey, status: 'failed', failurePhase, code });
     }
     onProgress({ phase: 'job-finished', ...results.at(-1), elapsedMs: now() - started });
+    // A shared source failure applies to this run, not to every queued pool.
+    // Leave other leases untouched and let the next normal run try again.
+    if (sharedReadFailed) break;
   }
   return results;
 }

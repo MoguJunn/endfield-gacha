@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-10-18T11:23:35.627Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/2026101800_bound_background_statistics.sql
+--   4. 生成时间: 2026-10-18T11:30:18.169Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/2026101801_tune_statistics_job_budgets.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -39534,4 +39534,15 @@ GRANT EXECUTE ON FUNCTION public.read_statistics_history_count(TEXT[],BIGINT),
 NOTIFY pgrst,'reload schema';
 COMMIT;
 -- <<< END MIGRATION: active/2026101800_bound_background_statistics.sql
+
+-- >>> BEGIN MIGRATION: active/2026101801_tune_statistics_job_budgets.sql
+-- Under sustained CPU steal, the serial full count was measured at 22.5s.
+-- Keep its bound separate from expensive legacy reports, which must release
+-- the shared worker slot sooner. Ordinary API/import limits are unchanged.
+BEGIN;
+ALTER FUNCTION public.read_statistics_history_count(TEXT[],BIGINT) SET statement_timeout='30s';
+ALTER FUNCTION public.compute_and_publish_legacy_statistics(TEXT,BIGINT,UUID,TEXT) SET statement_timeout='60s';
+NOTIFY pgrst,'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026101801_tune_statistics_job_budgets.sql
 
