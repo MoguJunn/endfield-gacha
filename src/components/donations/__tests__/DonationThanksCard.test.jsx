@@ -27,12 +27,14 @@ describe('DonationThanksCard', () => {
     expect(supporterAvatar.closest('article')).toHaveTextContent('Neptune');
     expect(supporterAvatar.closest('[class*="overflow-y-auto"]')).toBeInTheDocument();
     expect(screen.getByText(/home.donation.summary/)).toBeInTheDocument();
-    expect(screen.getAllByText('¥200')).toHaveLength(2);
+    expect(screen.getByText('¥206')).toBeInTheDocument();
+    expect(screen.getByText('¥200')).toBeInTheDocument();
+    expect(screen.getByText('爱发电用户_e2927')).toBeInTheDocument();
     expect(DONATION_LEDGER[0]).toMatchObject({ name: 'Neptune', pinned: true });
     expect(screen.getByText(/home.donation.pinned/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /home.donation.amountLink/ })).toHaveClass(
-      'donation-rainbow-amount'
-    );
+    const amountLinks = screen.getAllByRole('link', { name: /home.donation.amountLink/ });
+    expect(amountLinks).toHaveLength(DONATION_LEDGER.length);
+    amountLinks.forEach((link) => expect(link).toHaveClass('donation-rainbow-amount'));
     expect(screen.getByRole('link', { name: /home.donation.action/ })).toHaveAttribute(
       'href',
       DONATION_PLATFORM_URL
@@ -52,12 +54,13 @@ describe('DonationThanksCard', () => {
     );
 
     expect(screen.getByText('Neptune')).toBeInTheDocument();
+    expect(screen.getByText('爱发电用户_e2927')).toBeInTheDocument();
     expect(screen.getAllByText('¥200').length).toBeGreaterThan(0);
     expect(screen.getByText(/donations.process.received.title/)).toBeInTheDocument();
     expect(screen.getByText(/donations.processTitle/)).toBeInTheDocument();
     expect(AFDIAN_SUPPORT_TIERS.map((tier) => tier.amountCny)).toEqual([6, 12, 32, 70, 125]);
     AFDIAN_SUPPORT_TIERS.forEach((tier) => {
-      expect(screen.getByText(`¥${tier.amountCny}`)).toBeInTheDocument();
+      expect(screen.getAllByText(`¥${tier.amountCny}`).length).toBeGreaterThan(0);
     });
     expect(screen.getByRole('link', { name: /donations.supportAction/ })).toHaveAttribute(
       'href',

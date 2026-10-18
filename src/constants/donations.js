@@ -14,6 +14,17 @@ export const FEATURED_SUPPORTER = Object.freeze({
 
 const DONATION_RECORDS = [
   FEATURED_SUPPORTER,
+  {
+    id: 'afdian-e2927-20261017',
+    name: '爱发电用户_e2927',
+    avatarUrl: '/avatars/donation-supporter.svg',
+    roleKey: 'donations.process.site.title',
+    donatedAt: '2026-10',
+    amountCny: 6,
+    raffleAmountCny: 0,
+    siteAmountCny: 6,
+    pinned: false,
+  },
 ];
 
 export const DONATION_LEDGER = Object.freeze([...DONATION_RECORDS].sort((left, right) => {
