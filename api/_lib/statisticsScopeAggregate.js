@@ -16,11 +16,12 @@ function compactHistoryReader() {
     if (!strings.has(key)) strings.set(key, key);
     return strings.get(key);
   };
-  return (row) => ({ id: row.id, record_id: row.record_id, user_id: intern(row.user_id), game_uid: intern(row.game_uid),
-    server_scope: intern(row.server_scope ?? row.server_id ?? row.region ?? 'unknown'), pool_id: intern(row.pool_id), pool_version: row.pool_version,
-    character_id: intern(row.character_id), character_name: row.character_id ? '' : intern(row.character_name),
-    rarity: row.rarity, timestamp: typeof row.timestamp === 'number' ? row.timestamp : Date.parse(row.timestamp), seq_id: row.seq_id,
-    is_new: row.is_new, is_free: row.is_free, is_info_book: row.is_info_book, special_type: row.special_type });
+  return ([id, record_id, user_id, game_uid, server_scope, pool_id, pool_version, character_id,
+    character_name, rarity, timestamp, seq_id, is_new, is_free, is_info_book, special_type]) => ({
+    id, record_id, user_id: intern(user_id), game_uid: intern(game_uid), server_scope: intern(server_scope),
+    pool_id: intern(pool_id), pool_version, character_id: intern(character_id), character_name: character_id ? '' : intern(character_name),
+    rarity, timestamp: typeof timestamp === 'number' ? timestamp : Date.parse(timestamp), seq_id,
+    is_new, is_free, is_info_book, special_type });
 }
 
 async function readRows(db, poolIds, lastId, signal, accept = () => true, { beforeRead = async () => {}, onProgress = () => {} } = {}) {
@@ -32,24 +33,28 @@ async function readRows(db, poolIds, lastId, signal, accept = () => true, { befo
   if (error || !Number.isInteger(count)) throw Object.assign(new Error('Cannot count complete statistics context'), { code: error?.code });
   if (!count) return [];
   onProgress({ phase: 'history-counted', rows: count });
-  // Read one 5,000-row page at a time: fewer gateway/JSON round trips and no
+  // Read one compact 10,000-row page at a time: fewer gateway/JSON round trips and no
   // competing database readers. The fixed bound and exact count stay enforced.
   const compact = compactHistoryReader();
   let scanned = 0, after = 0, pages = 0;
   const rows = [];
   while (after < Number(lastId)) {
     await beforeRead();
-    const { data, error: readError } = await db.rpc('read_statistics_history_page', {
-      p_pool_ids: poolIds, p_after: after, p_upper: lastId, p_limit: 5000,
+    const { data, error: readError } = await db.rpc('read_statistics_history_compact_page', {
+      p_pool_ids: poolIds, p_after: after, p_upper: lastId, p_limit: 10000,
     }).abortSignal(signal);
     if (readError) throw Object.assign(new Error(signal?.aborted ? 'Statistics read deadline exceeded' : 'Cannot read complete statistics context'),
       { code: readError.code, name: signal?.aborted ? 'TimeoutError' : 'Error' });
     if (!Array.isArray(data)) throw new Error('Statistics context changed during reading');
     if (!data.length) break;
-    const next = Number(data.at(-1).id);
+    const next = Number(data.at(-1)?.[0]);
     if (!(next > after && next <= Number(lastId))) throw new Error('Invalid statistics page order');
     scanned += data.length;
-    for (const row of data) if (accept(row)) rows.push(compact(row));
+    for (const tuple of data) {
+      if (!Array.isArray(tuple) || tuple.length !== 16) throw new Error('Invalid statistics compact page');
+      const row = compact(tuple);
+      if (accept(row)) rows.push(row);
+    }
     after = next;
     pages++;
     if (pages % 20 === 0) onProgress({ phase: 'history-reading', rows: scanned, expectedRows: count });

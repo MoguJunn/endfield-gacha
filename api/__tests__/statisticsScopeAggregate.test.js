@@ -10,10 +10,12 @@ const row = (id, pool = 'p', extra = {}) => ({ id, record_id: String(id), user_i
 function client(history, { shortPage = false, pageCap = 1000, gaps = [] } = {}) {
   return {
     rpc: vi.fn((name, params) => ({ abortSignal: async () => ({
-      data: name === 'read_statistics_history_page'
+      data: name === 'read_statistics_history_compact_page'
         ? shortPage ? [] : statisticsHistory(history).filter((row) => params.p_pool_ids.includes(row.pool_id)
           && row.id > params.p_after && row.id <= params.p_upper).sort((a, b) => a.id - b.id)
-          .slice(0, Math.min(params.p_limit, pageCap))
+          .slice(0, Math.min(params.p_limit, pageCap)).map(row => [row.id,row.record_id,row.user_id,row.game_uid,
+            row.server_scope,row.pool_id,row.pool_version,row.character_id,row.character_name,row.rarity,row.timestamp,
+            row.seq_id,row.is_new,row.is_free,row.is_info_book,row.special_type])
         : name === 'read_statistics_history_count'
           ? statisticsHistory(history).filter(row => params.p_pool_ids.includes(row.pool_id) && row.id <= params.p_upper).length : pools,
     }) })),
@@ -50,12 +52,12 @@ function client(history, { shortPage = false, pageCap = 1000, gaps = [] } = {}) 
   };
 }
 describe('scope worker context', () => {
-  it('loads 5000-row pages serially and checks for interactive work between pages', async () => {
-    const db = client(Array.from({ length: 6001 }, (_, i) => row(i + 1, 'p', { rarity: 4 })), { pageCap: 5000 });
+  it('loads compact 10000-row pages serially and checks for interactive work between pages', async () => {
+    const db = client(Array.from({ length: 10001 }, (_, i) => row(i + 1, 'p', { rarity: 4 })), { pageCap: 10000 });
     const beforeRead = vi.fn();
     const dataset = await readStatisticsPreviewDataset(db, { beforeRead });
-    expect(dataset.history).toHaveLength(6001);
-    expect(db.rpc.mock.calls.filter(([name]) => name === 'read_statistics_history_page').map(([, p]) => p.p_after)).toEqual([0, 5000]);
+    expect(dataset.history).toHaveLength(10001);
+    expect(db.rpc.mock.calls.filter(([name]) => name === 'read_statistics_history_compact_page').map(([, p]) => p.p_after)).toEqual([0, 10000]);
     expect(beforeRead).toHaveBeenCalledTimes(3);
     expect(db.from).not.toHaveBeenCalledWith('statistics_history');
   });
