@@ -28,6 +28,7 @@ try {
   await root.query(migration);
   await root.query(await readFile(new URL('../supabase/migrations/2026101801_tune_statistics_job_budgets.sql', import.meta.url), 'utf8'));
   await root.query(await readFile(new URL('../supabase/migrations/2026101802_compact_statistics_history_pages.sql', import.meta.url), 'utf8'));
+  await root.query(await readFile(new URL('../supabase/migrations/2026101803_index_statistics_pool_pagination.sql', import.meta.url), 'utf8'));
   const expected = Number((await one('SELECT count(*) AS n FROM statistics_history')).n);
   const upper = (await one('SELECT max(id) AS id FROM history')).id;
   assert.equal(Number((await one("SELECT read_statistics_history_count(ARRAY['p','q'],$1) AS n", [upper])).n), expected);
@@ -68,5 +69,7 @@ try {
   const config = (await one("SELECT proconfig FROM pg_proc WHERE oid='compute_and_publish_legacy_statistics(text,bigint,uuid,text)'::regprocedure")).proconfig;
   for (const setting of ['jit=off', 'max_parallel_workers_per_gather=0', 'work_mem=16MB', 'statement_timeout=60s']) assert.ok(config.includes(setting));
   assert.ok((await one("SELECT proconfig FROM pg_proc WHERE oid='read_statistics_history_count(text[],bigint)'::regprocedure")).proconfig.includes('statement_timeout=30s'));
+  assert.equal((await one("SELECT indisvalid FROM pg_index WHERE indexrelid='idx_history_statistics_pool_page'::regclass")).indisvalid, true);
+  assert.ok((await one("SELECT proconfig FROM pg_proc WHERE oid='read_statistics_history_compact_page(text[],bigint,bigint,integer)'::regprocedure")).proconfig.includes('plan_cache_mode=force_custom_plan'));
   console.log('通过：主动让出只释放匹配租约，不增加失败次数；后台SQL资源设置只作用于指定函数。');
 } finally { await db.close(); }

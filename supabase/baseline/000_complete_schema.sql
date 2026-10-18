@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-10-18T11:43:06.609Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/2026101802_compact_statistics_history_pages.sql
+--   4. 生成时间: 2026-10-18T12:03:44.974Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/2026101803_index_statistics_pool_pagination.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -39586,4 +39586,22 @@ GRANT EXECUTE ON FUNCTION public.read_statistics_history_compact_page(TEXT[],BIG
 NOTIFY pgrst,'reload schema';
 COMMIT;
 -- <<< END MIGRATION: active/2026101802_compact_statistics_history_pages.sql
+
+-- >>> BEGIN MIGRATION: active/2026101803_index_statistics_pool_pagination.sql
+-- On a live database build this same index CONCURRENTLY before applying the
+-- migration, so imports do not wait for index construction. IF NOT EXISTS then
+-- keeps the installed index. Fresh databases can build it normally.
+CREATE INDEX IF NOT EXISTS idx_history_statistics_pool_page
+  ON public.history(pool_id,id) WHERE NOT statistics_excluded;
+
+BEGIN;
+-- Pool selectivity varies from a handful of rows to nearly the entire table.
+-- A generic PL/pgSQL plan can choose the wrong access path after a few calls.
+ALTER FUNCTION public.read_statistics_history_compact_page(TEXT[],BIGINT,BIGINT,INTEGER)
+  SET plan_cache_mode=force_custom_plan;
+ALTER FUNCTION public.read_statistics_history_count(TEXT[],BIGINT)
+  SET plan_cache_mode=force_custom_plan;
+NOTIFY pgrst,'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026101803_index_statistics_pool_pagination.sql
 
