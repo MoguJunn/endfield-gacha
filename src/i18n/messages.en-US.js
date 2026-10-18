@@ -1062,7 +1062,7 @@ const messages = {
   "import.fileWizard.highStarSummary.note": "Sign in and select the game server. Known drops are saved as personal supplements, excluded from community statistics. Missing low-rarity history, totals and positions remain unknown.",
   "import.fileWizard.lcx.title": "LCX Wiki Refuge",
   "import.fileWizard.lcx.desc": "Import wiki.lcx.cab exports as JSON, TXT or files without extensions. No renaming or conversion required.",
-  "import.fileWizard.lcx.note": "Matches banners and items by name against our catalog. Unknown source results are retained for review; no rewards or pull counts are invented.",
+  "import.fileWizard.lcx.note": "Handles legacy names and source rarity labels. Unknown low-rarity results count as 4-star pulls without assigning an entity. Checks duplicates and keeps Bilibili accounts separate.",
   "import.fileWizard.endgacha.title": "endgacha.kwer.top",
   "import.fileWizard.endgacha.desc": "Import verified JSON, plain pull-history JSON, or TXT files exported by the website.",
   "import.fileWizard.endgacha.note": "Plain JSON/TXT has no UID or in-game name. Confirm or enter the account during import.",

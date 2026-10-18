@@ -1013,7 +1013,7 @@ const messages = {
   "import.fileWizard.highStarSummary.note": "需要登录并选择游戏区服。高星资料作为个人补录保存，缺失的低星、总抽数和累计位置保持未知，不参与全服统计。",
   "import.fileWizard.lcx.title": "离愁轩 Wiki 难民收留处",
   "import.fileWizard.lcx.desc": "导入 wiki.lcx.cab 导出的抽卡记录，支持 JSON、TXT，以及没有扩展名的文件。无需改名或转换。",
-  "import.fileWizard.lcx.note": "按名称匹配本站卡池和角色目录。原站的未知结果保留为待核对资料，不猜测赠礼或补造抽数。",
+  "import.fileWizard.lcx.note": "兼容旧名称和原站星级标注。未知低星结果按四星占位保留，计入抽数和保底，不指定具体角色；自动核对重复记录与B服归属。",
   "import.fileWizard.endgacha.title": "endgacha.kwer.top",
   "import.fileWizard.endgacha.desc": "导入网站导出的校验 JSON、纯寻访 JSON 或 TXT 文件。",
   "import.fileWizard.endgacha.note": "纯寻访 JSON/TXT 没有 UID 和昵称；导入确认时需要再次校验或填写账号。",

@@ -116,7 +116,7 @@ export function planRescueSupplements(data, context) {
 export async function importRescueSupplements(data) {
   const account = data.accounts?.[0];
   const scope = { gameUid: account?.gameUid, serverScope: String(account?.serverId || '') };
-  if (!scope.gameUid || !['1','2','3'].includes(scope.serverScope)) throw new Error('请先选择有效的游戏账号和区服。');
+  if (!scope.gameUid || !['1','2','3','bilibili'].includes(scope.serverScope)) throw new Error('请先选择有效的游戏账号和区服。');
   const context = await loadWorkbenchContext(scope);
   const operations = planRescueSupplements(data, context);
   const count = operations.entries.length + operations.supplementChanges.length;

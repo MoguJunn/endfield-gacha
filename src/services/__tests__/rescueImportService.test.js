@@ -9,6 +9,21 @@ const entry = acquisitions => ({ entryId: 'new', draftId: 'draft', gameUid: '123
 const data = entries => ({ sourceFormatId: 'endfield_helper_summary_xlsx', accounts: [{ gameUid: '123', serverId: '1' }], workbenchEntries: entries });
 describe('rescue supplement saving', () => {
   beforeEach(() => vi.clearAllMocks());
+  it('keeps Bilibili scope for context validation and commit, then skips a fully saved retry', async () => {
+    const incoming = { ...entry([acquisition('a')]), serverScope: 'bilibili' };
+    const imported = { ...data([incoming]), accounts: [{ gameUid: '123', serverId: 'bilibili' }] };
+    loadWorkbenchContext.mockResolvedValue({ history: [], entries: [] });
+    validateWorkbenchWorkspace.mockResolvedValue({ preview: { canCommit: true }, validationToken: 'b-checked' });
+    commitWorkbenchEntries.mockResolvedValue({ operationCount: 1 });
+    expect(await importRescueSupplements(imported)).toEqual({ saved: 1, skipped: 0 });
+    expect(loadWorkbenchContext).toHaveBeenCalledWith({ gameUid: '123', serverScope: 'bilibili' });
+    expect(commitWorkbenchEntries).toHaveBeenCalledWith(expect.objectContaining({
+      scope: { gameUid: '123', serverScope: 'bilibili' }, validationToken: 'b-checked',
+    }));
+    loadWorkbenchContext.mockResolvedValue({ history: [], entries: [incoming] });
+    expect(await importRescueSupplements(imported)).toEqual({ saved: 0, skipped: 1 });
+    expect(commitWorkbenchEntries).toHaveBeenCalledTimes(1);
+  });
   it('subtracts saved results one at a time and keeps distinct copies within one ten-pull', () => {
     const incoming = entry([acquisition('a'), acquisition('b')]);
     const plan = planRescueSupplements(data([incoming]), { entries: [], history: [{ pool_id: 'pool', character_id: 'weapon', rarity: 6, timestamp: '2026-10-16T00:00:00Z' }] });

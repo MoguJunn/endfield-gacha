@@ -942,6 +942,14 @@ export default function GachaModals({
                 ))}
               </div>
 
+              {importPreview.fourStarPlaceholderCount > 0 && (
+                <p className="border border-sky-300 bg-sky-50 p-4 text-xs leading-5 text-sky-900 dark:border-sky-800 dark:bg-sky-950/20 dark:text-sky-200">
+                  {locale === 'en-US'
+                    ? `${importPreview.fourStarPlaceholderCount} unidentified source results are retained as 4-star pulls. Their timestamps and sequence IDs count toward totals and pity; no specific character or weapon is assigned.`
+                    : `原站有 ${importPreview.fourStarPlaceholderCount} 条未知结果，已按四星寻访保留时间与序号，正常计入抽数和保底，不归到任何具体角色或武器。`}
+                </p>
+              )}
+
               {(importPreview.sparseSummary || importPreview.unresolvedCount > 0) && (
                 <div className="border border-amber-300 bg-amber-50 p-4 text-xs leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
                   {importPreview.sparseSummary

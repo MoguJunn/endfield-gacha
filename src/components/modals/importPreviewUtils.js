@@ -1,3 +1,5 @@
+import { isLcxFourStarPlaceholder } from '../../../shared/lcxImportPlaceholder.js';
+
 export function normalizeImportPreviewText(value) {
   if (value === null || value === undefined) {
     return '';
@@ -145,6 +147,7 @@ export function buildPendingImportPreview(pendingImport) {
     supplementCount: supplements.length,
     supplementalDropCount: supplementalDrops.length,
     unresolvedCount: data.unresolvedRecords?.length || 0,
+    fourStarPlaceholderCount: history.filter(isLcxFourStarPlaceholder).length,
     calendarConflictCount: data.calendarConflictCount || 0,
     intervalConflictCount: data.intervalConflictCount || 0,
     sparseSummary: data.importWarningCodes?.includes('sparse_high_star_summary') === true,

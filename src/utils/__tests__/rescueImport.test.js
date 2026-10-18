@@ -4,6 +4,8 @@ import { parseImportFileContent } from '../dataImportFileParser.js';
 import { validateAndNormalizeImportData } from '../dataImport.js';
 import { normalizeLcxWikiExport, normalizeHelperSummaryExport } from '../rescueImport.js';
 import { buildPendingImportPreview } from '../../components/modals/importPreviewUtils.js';
+import { buildQuotaLedgerFromHistory } from '../quotaEconomy.js';
+import { LCX_FOUR_STAR_PLACEHOLDER, LCX_FOUR_STAR_EXCESS } from '../../../shared/lcxImportPlaceholder.js';
 
 const pools = [{ id: 'special_1_6_1', name: '万物更新', type: 'limited', up_character: '缇缇' },
   { id: 'weaponbox_1_6_1', name: '篆玉申领', type: 'weapon', up_character: '玉中身' }];
@@ -21,17 +23,61 @@ describe('rescue imports', () => {
     const result = validateAndNormalizeImportData(parsed, options);
     expect(result.valid).toBe(true);
     expect(result.normalizedData.sourceFormatId).toBe('lcx_wiki_json');
-    expect(result.normalizedData.history[0]).toMatchObject({ character_id: 'wpn_jade', poolId: 'weaponbox_1_6_1', rarity: 6, isStandard: false, serverScope: '1', seqId: '11' });
+    expect(result.normalizedData.history[0]).toMatchObject({ character_id: 'wpn_jade', poolId: 'weaponbox_1_6_1', rarity: 6, isStandard: false, serverScope: 'bilibili', seqId: '11' });
     expect(result.normalizedData.history[0].id).not.toBe('18');
   });
-  it('retains source unknowns as incomplete coverage evidence without creating fake pulls or gifts', () => {
+  it('retains unknown low-rarity weapons as 4-star pulls without catalog ownership or fake first-copy rewards', () => {
     const unknown = { ...row, seqId: '12', weaponId: '', weaponName: '未知武器', rarity: 3 };
     const data = normalizeLcxWikiExport(payload([row, unknown]), options);
-    expect(data.history).toHaveLength(1);
-    expect(data.unresolvedRecords).toHaveLength(1);
-    expect(data.supplements.workbenchEntries[0].values.totalPulls).toBeUndefined();
-    expect(data.supplements.workbenchEntries[0].values.notes).toContain('未知武器');
-    expect(data.supplements.workbenchEntries[0].values.acquisitions).toEqual([]);
+    expect(data.history).toHaveLength(2);
+    expect(data.history[1]).toMatchObject({ rarity: 4, character_id: null, seqId: '12', specialType: LCX_FOUR_STAR_PLACEHOLDER });
+    expect(data.unresolvedRecords).toEqual([]);
+    expect(data.supplements.workbenchEntries).toEqual([]);
+    const validated = validateAndNormalizeImportData(payload([row, unknown]), options);
+    expect(buildPendingImportPreview({ data: validated.normalizedData })).toMatchObject({ historyCount: 2, fourStarPlaceholderCount: 1, rarityCounts: { 4: 1, 6: 1 } });
+    expect(buildQuotaLedgerFromHistory([data.history[1]], { pools, characters }).characterRows).toEqual([]);
+  });
+  it('recognizes generic star scaling by a unique known entity without shifting correct named results', () => {
+    const five = { id: 'wpn_five', name: '五星武器', rarity: 5, type: 'weapon' };
+    const data = normalizeLcxWikiExport(payload([{ ...row, rarity: 5 }, { ...row, seqId: '12', weaponName: '五星武器', rarity: 5 },
+      { ...row, seqId: '13', weaponName: '五星武器', rarity: 4 }]), { ...options, characters: [...characters, five] });
+    expect(data.history.map(record => record.rarity)).toEqual([6, 5, 5]);
+    expect(() => normalizeLcxWikiExport(payload([{ ...row, rarity: 3 }]), options)).toThrow('唯一匹配');
+  });
+  it('normalizes the legacy weapon name before deduplication and rejects conflicting sequence payloads', () => {
+    const weapon = { id: 'wpn_sword_0008', name: '显锋', rarity: 4, type: 'weapon' };
+    const old = { ...row, rarity: 4, weaponName: '应急手段', weaponId: '43' };
+    const corrected = { ...old, weaponName: '显锋', weaponId: '' };
+    const catalog = { ...options, characters: [...characters, weapon] };
+    const data = normalizeLcxWikiExport(payload([old, corrected, { ...corrected, seqId: '12' }]), catalog);
+    expect(data.history).toHaveLength(2);
+    expect(data.history[0]).toMatchObject({ name: '显锋', character_id: weapon.id });
+    for (const change of [{ gachaTs: '1792161253144' }, { isFree: true }, { weaponName: '玉中身', rarity: 6 }]) {
+      expect(() => normalizeLcxWikiExport(payload([old, { ...corrected, ...change }]), catalog)).toThrow('内容冲突');
+    }
+  });
+  it('proves full potential before awarding unnamed four-star duplicate quota and never invents a catalog entry', () => {
+    const unknown = { seqId: '99', gachaTs: '1792161252144', poolName: '万物更新', charName: '未知角色', rarity: 3, isFree: false };
+    const known = Array.from({ length: 6 }, (_, index) => ({ ...unknown, seqId: String(index + 1),
+      gachaTs: '1792161242144', charName: '萤石', rarity: 4 }));
+    const data = normalizeLcxWikiExport(payload([...known, unknown]), options);
+    expect(data.history.at(-1)).toMatchObject({ specialType: LCX_FOUR_STAR_EXCESS, character_id: null, rarity: 4 });
+    const baseline = buildQuotaLedgerFromHistory(data.history.slice(0, -1), { pools, characters });
+    const withPlaceholder = buildQuotaLedgerFromHistory(data.history, { pools, characters });
+    expect(withPlaceholder.characterRows).toEqual(baseline.characterRows);
+    expect(withPlaceholder.quota.aicQuotaDirect).toBe(baseline.quota.aicQuotaDirect);
+    expect(withPlaceholder.quota.aicQuotaConvertible - baseline.quota.aicQuotaConvertible).toBe(5);
+    const incomplete = normalizeLcxWikiExport(payload([unknown, ...known.slice(1)]), options);
+    expect(incomplete.history[0].specialType).toBe(LCX_FOUR_STAR_PLACEHOLDER);
+    const sameTimestamp = normalizeLcxWikiExport(payload([...known.map(record => ({ ...record, gachaTs: unknown.gachaTs })), unknown]), options);
+    expect(sameTimestamp.history.at(-1).specialType).toBe(LCX_FOUR_STAR_PLACEHOLDER);
+    const otherFour = { id: 'another_4', name: '另一四星', rarity: 4, type: 'character' };
+    expect(normalizeLcxWikiExport(payload([...known, unknown]), { ...options, characters: [...characters, otherFour] }).history.at(-1).specialType)
+      .toBe(LCX_FOUR_STAR_PLACEHOLDER);
+  });
+  it.each(['1', '2', '3'])('keeps source server %s distinct from the Bilibili channel', serverId => {
+    const input = payload([row]); input.data.serverId = serverId; input.data.server = 'official';
+    expect(normalizeLcxWikiExport(input, options).history[0].serverScope).toBe(serverId);
   });
   it('rejects ambiguous banners and inconsistent export totals instead of choosing one or dropping rows', () => {
     expect(() => normalizeLcxWikiExport(payload([row]), { ...options, existingPools: [...pools, { ...pools[1], id: 'other' }] })).toThrow('匹配到多项');

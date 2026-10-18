@@ -1,5 +1,6 @@
 import { normalizeEntityNameForMatch } from './canonicalEntityUtils.js';
 import { resolvePoolCapabilities } from './poolCapabilities.js';
+import { LCX_FOUR_STAR_PLACEHOLDER, LCX_FOUR_STAR_EXCESS, isLcxFourStarPlaceholder } from '../../shared/lcxImportPlaceholder.js';
 
 export const HELPER_RESCUE_FORMAT = 'endfield_helper_summary_xlsx';
 export const LCX_RESCUE_FORMAT = 'lcx_wiki_json';
@@ -32,10 +33,14 @@ function directory(options) {
       if (matches.length !== 1) throw new Error(`卡池“${name || rawId}”${matches.length ? '匹配到多项' : '未匹配本站目录'}，请先在卡池目录核对。`);
       return { ...matches[0], id: idOf(matches[0]), pool_id: idOf(matches[0]) };
     },
-    entity(name, rawId, rarity, type) {
-      const matches = entities.filter(entity => Number(entity.rarity) === Number(rarity) && entity.type === type
+    entity(name, rawId, rarity, type, lcxStarScale = false) {
+      const named = entities.filter(entity => entity.type === type
         && (rawId ? text(entity.id) === rawId : [entity.name, entity.name_en, ...(entity.aliases || [])]
           .some(alias => normalizeEntityNameForMatch(alias) === normalizeEntityNameForMatch(name))));
+      let matches = named.filter(entity => Number(entity.rarity) === Number(rarity));
+      // Some LCX exports retain the generic 3/4/5-star scale. Existing 4/5/6
+      // exports are already correct; never raise all records indiscriminately.
+      if (!matches.length && lcxStarScale) matches = named.filter(entity => Number(entity.rarity) === Number(rarity) + 1);
       if (matches.length !== 1) throw new Error(`“${name}”无法按名称、星级和类型唯一匹配目录，请核对文件。`);
       if (rawId && normalizeEntityNameForMatch(matches[0].name) !== normalizeEntityNameForMatch(name)) {
         throw new Error(`“${name}”的实体 ID 与目录名称不一致，请核对文件。`);
@@ -70,50 +75,59 @@ export function normalizeLcxWikiExport(payload, options = {}) {
   const account = { gameUid: text(data.uid), nickName: text(data.nickName) || text(data.uid),
     serverId: text(data.serverId), region: text(data.serverId) === '1' ? 'cn' : 'intl', channelName: text(data.server) };
   if (!['1', '2', '3'].includes(account.serverId)) throw new Error('原站文件没有可识别的区服，请核对 serverId。');
-  const catalog = directory(options), poolMap = new Map(), history = [], unresolvedRecords = [], seen = new Set();
+  if (account.serverId === '1' && /^(bilibili|bili|b服)$/i.test(account.channelName)) account.serverId = 'bilibili';
+  const catalog = directory(options), poolMap = new Map(), history = [], seen = new Map();
   for (const row of data.list) {
     const type = Object.hasOwn(row, 'weaponName') ? 'weapon' : 'character';
-    const at = timestamp(row.gachaTs), seqId = text(row.seqId), name = text(row.weaponName || row.charName);
+    const at = timestamp(row.gachaTs), seqId = text(row.seqId);
+    const rawName = text(row.weaponName || row.charName);
+    const name = type === 'weapon' && rawName === '应急手段' ? '显锋' : rawName;
     if (!/^\d+$/.test(seqId)) throw new Error('原站记录缺少有效序号，无法安全去重。');
     const pool = catalog.pool(text(row.poolName), '', type, at);
     poolMap.set(pool.id, pool);
     const identity = `${pool.id}|${seqId}`;
-    if (seen.has(identity)) throw new Error(`原站文件存在重复记录：${row.poolName} / ${seqId}`);
-    seen.add(identity);
-    // The source has already replaced unrecognized rewards with 3★ "unknown".
-    // Their original identity/quality is lost. Never invent a weapon or gift.
-    if (Number(row.rarity) === 3 && /^未知(?:角色|武器)$/.test(name)) {
-      unresolvedRecords.push({ ...row, poolId: pool.id, timestamp: at });
+    const placeholder = [3, 4].includes(Number(row.rarity)) && name === (type === 'weapon' ? '未知武器' : '未知角色');
+    if (![3, 4, 5, 6].includes(Number(row.rarity))) throw new Error(`“${name}”的星级无法识别。`);
+    // LCX numeric IDs belong to its own directory. Resolve trusted names instead.
+    const entity = placeholder ? { id: null, name: type === 'weapon' ? '未知四星武器（离愁轩）' : '未知四星角色（离愁轩）', rarity: 4 }
+      : catalog.entity(name, '', row.rarity, type, true);
+    const isFree = row.isFree === true;
+    const signature = JSON.stringify([type, at, entity.id, entity.name, Number(entity.rarity), isFree]);
+    if (seen.has(identity)) {
+      if (seen.get(identity) !== signature) throw new Error(`原站同一序号的记录内容冲突：${row.poolName} / ${seqId}`);
       continue;
     }
-    if (![4, 5, 6].includes(Number(row.rarity))) throw new Error(`“${name}”的星级无法识别。`);
-    // LCX numeric IDs belong to its own directory. Resolve trusted names instead.
-    const entity = catalog.entity(name, '', row.rarity, type);
-    const isFree = row.isFree === true;
+    seen.set(identity, signature);
     const featured = text(pool.up_character || pool.upCharacter);
     history.push({ id: `lcx:${account.gameUid}:${account.serverId}:${pool.id}:${seqId}`, poolId: pool.id, seqId, rarity: Number(entity.rarity),
       name: entity.name, character_id: entity.id, timestamp: at, isFree,
+      ...(placeholder ? { specialType: LCX_FOUR_STAR_PLACEHOLDER } : {}),
       isStandard: resolvePoolCapabilities(pool).basePoolType === 'standard' || Boolean(featured && featured !== entity.name),
       gameUid: account.gameUid, nickName: account.nickName, serverId: account.serverId, serverScope: account.serverId,
       region: account.region, channelName: account.channelName, batchId: `lcx:${pool.id}:${at}:${isFree ? 'free' : 'normal'}` });
   }
-  const workbenchEntries = [];
-  for (const poolId of new Set(unresolvedRecords.map(row => row.poolId))) {
-    const unknown = unresolvedRecords.filter(row => row.poolId === poolId);
-    const known = history.filter(row => row.poolId === poolId && !row.isFree);
-    const times = [...known, ...unknown].map(row => Date.parse(row.timestamp));
-    workbenchEntries.push(supplement(account, poolId, 'lcx-unresolved', 'pool-ledger', {
-      drawMethod: 'normal', coverageMode: 'range', complete: false,
-      rangeStart: new Date(Math.min(...times)).toISOString(), rangeEnd: new Date(Math.max(...times) + 1).toISOString(),
-      fourStarCount: known.filter(row => row.rarity === 4).length, fiveStarCount: known.filter(row => row.rarity === 5).length,
-      sixStarCount: known.filter(row => row.rarity === 6).length, acquisitions: [],
-      notes: `离愁轩原站存在身份及品质不明的结果；不推断为赠礼或计入抽数，总量和受影响保底保持未知。原始条目：${JSON.stringify(unknown)}`,
-    }));
+  const fourStarCharacters = new Set((options.characters || [])
+    .filter(entity => entity.type === 'character' && Number(entity.rarity) === 4).map(entity => text(entity.id)));
+  const copies = new Map();
+  const sorted = [...history].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+  // Prove full potential from named acquisitions strictly before the unknown
+  // pull. Do not allocate an unknown result to a real character or a new copy.
+  for (let start = 0; start < sorted.length;) {
+    let end = start + 1;
+    while (end < sorted.length && sorted[end].timestamp === sorted[start].timestamp) end++;
+    for (const record of sorted.slice(start, end)) {
+      if (isLcxFourStarPlaceholder(record) && !record.name.includes('武器') && fourStarCharacters.size > 0
+        && [...fourStarCharacters].every(id => (copies.get(id) || 0) >= 6)) record.specialType = LCX_FOUR_STAR_EXCESS;
+    }
+    for (const record of sorted.slice(start, end)) {
+      if (fourStarCharacters.has(record.character_id)) copies.set(record.character_id, (copies.get(record.character_id) || 0) + 1);
+    }
+    start = end;
   }
   return { formatId: LCX_RESCUE_FORMAT, schemaVersion: '3.0.0', exportTime: timestamp(data.exportTs),
-    accounts: [account], pools: [...poolMap.values()], history, unresolvedRecords,
-    importWarningCodes: unresolvedRecords.length ? ['lcx_unknown_records'] : [],
-    supplements: { schemaVersion: 1, workbenchEntries } };
+    accounts: [account], pools: [...poolMap.values()], history, unresolvedRecords: [],
+    importWarningCodes: history.some(isLcxFourStarPlaceholder) ? ['lcx_four_star_placeholders'] : [],
+    supplements: { schemaVersion: 1, workbenchEntries: [] } };
 }
 
 export function normalizeHelperSummaryExport(data, options = {}) {

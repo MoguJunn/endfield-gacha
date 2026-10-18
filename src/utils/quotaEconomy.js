@@ -1,4 +1,5 @@
 import { resolvePoolCapabilities } from './poolCapabilities.js';
+import { LCX_FOUR_STAR_EXCESS, isLcxFourStarPlaceholder } from '../../shared/lcxImportPlaceholder.js';
 
 export const QUOTA_RESOURCE_KEYS = {
   aicQuota: 'aicQuota',
@@ -427,6 +428,18 @@ export function buildQuotaLedgerFromHistory(history = [], {
     const rarity = toNonNegativeInteger(record?.rarity);
     const name = getRecordName(record);
     if (!name || rarity < 4) {
+      return;
+    }
+
+    if (isLcxFourStarPlaceholder(record)) {
+      // A placeholder is a real 4★ pull, but cannot establish a character's
+      // ownership, first-copy reward, or potential. LCX may prove that every
+      // 4★ character was already full potential before this acquisition.
+      if (!giftRecord && (record.specialType || record.special_type) === LCX_FOUR_STAR_EXCESS) {
+        const copyQuota = calculateCharacterQuotaForCopy({ rarity: 4, copyNumber: FULL_POTENTIAL_COPY_COUNT + 1 });
+        addQuota(quota, copyQuota);
+        addQuota(characterQuota, copyQuota);
+      }
       return;
     }
 
