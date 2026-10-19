@@ -4,6 +4,7 @@ import { Monitor, Smartphone } from 'lucide-react';
 import { useDeviceDetection } from '../../hooks/useDeviceDetection';
 import { getDeviceRedirectTarget, shouldBypassDeviceRedirect } from '../../utils/deviceRedirect.js';
 import { useI18n } from '../../i18n/index.js';
+import SiteMaintenanceBanner from '../layout/SiteMaintenanceBanner.jsx';
 
 function RememberedPlatformCountdown({ preference, onContinue, tt }) {
   const [seconds, setSeconds] = useState(5);
@@ -59,7 +60,8 @@ function DeviceRedirectGuard({ children }) {
 
   if (needsPlatformChoice) {
     return (
-      <main className="min-h-dvh flex items-center justify-center bg-slate-50 dark:bg-zinc-950 p-5 text-slate-800 dark:text-zinc-100">
+      <main className="min-h-dvh flex flex-col items-center justify-center gap-4 bg-slate-50 dark:bg-zinc-950 p-5 text-slate-800 dark:text-zinc-100">
+        <SiteMaintenanceBanner />
         <section className="w-full max-w-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-6 sm:p-8" aria-labelledby="platform-choice-title">
           <p className="text-xs font-bold tracking-widest text-yellow-700 dark:text-yellow-400">ENDFIELD GACHA</p>
           <h1 id="platform-choice-title" className="mt-4 text-2xl font-bold">{tt('选择适合你的浏览版本', 'Choose your viewing experience')}</h1>

@@ -55,6 +55,7 @@ describe('DeviceRedirectGuard platform choice', () => {
     vi.useFakeTimers();
     if (preference) localStorage.setItem('platform-preference', preference);
     open();
+    expect(screen.getByRole('region', { name: '服务维护通知' })).toBeInTheDocument();
     tick(10);
     expect(screen.queryByRole('timer')).toBeNull();
     expect(screen.queryByTestId('destination')).toBeNull();
