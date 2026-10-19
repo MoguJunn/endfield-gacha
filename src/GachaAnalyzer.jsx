@@ -28,6 +28,7 @@ import {
 } from './utils/gameAccountMetadata.js';
 import { useSummerLotterySsoContinuation } from './hooks/auth/useSummerLotterySsoContinuation.js';
 import ContributorDemoBanner from './components/dev/ContributorDemoBanner.jsx';
+import SiteMaintenanceBanner from './components/layout/SiteMaintenanceBanner.jsx';
 import { isContributorDemoUser } from './dev/contributorDemoMode.js';
 import { useContributorDemoSandboxBridge } from './hooks/app/useContributorDemoSandboxBridge.js';
 
@@ -450,6 +451,7 @@ export default function GachaAnalyzer() {
       />
       </React.Suspense>
 
+      <SiteMaintenanceBanner />
       <ContributorDemoBanner />
 
       <main className={`dp-main ${isLatestDesktopHome ? 'dh-main' : ''}`}>

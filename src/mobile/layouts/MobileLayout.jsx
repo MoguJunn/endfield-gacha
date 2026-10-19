@@ -13,6 +13,7 @@ import { useOAuthCallbackNotice } from '../../hooks/auth/useOAuthCallbackNotice.
 import { useSummerLotterySsoContinuation } from '../../hooks/auth/useSummerLotterySsoContinuation.js';
 import PersonalDataBoundary from '../../components/app/PersonalDataBoundary.jsx';
 import ContributorDemoBanner from '../../components/dev/ContributorDemoBanner.jsx';
+import SiteMaintenanceBanner from '../../components/layout/SiteMaintenanceBanner.jsx';
 
 const DeveloperApiDocsPage = lazy(() => import('../../components/docs/DeveloperApiDocsPage'));
 const SummerLotteryOperatorPage = lazy(() => import('../../components/admin/SummerLotteryOperatorPage'));
@@ -83,6 +84,7 @@ function MobileLayout({ onOAuthSessionSynced, onRetryPersonalData }) {
   return (
     <div data-testid="mobile-app-shell" className="flex flex-col h-[100dvh] w-full overflow-hidden bg-ef-light dark:bg-ef-dark text-slate-900 dark:text-white font-sans transition-colors duration-300">
       {previewHome ? <Suspense fallback={<div className="h-14 shrink-0" />}><HomeLandingHeader mobile /></Suspense> : <MobileHeader onMenuClick={() => setIsDrawerOpen(true)} activeTab={activeTab} />}
+      <SiteMaintenanceBanner />
       <ContributorDemoBanner />
 
       <main className="flex-1 relative overflow-hidden flex flex-col">

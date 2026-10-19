@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import SiteGateCaptcha from '../captcha/SiteGateCaptcha.jsx';
+import SiteMaintenanceBanner from '../layout/SiteMaintenanceBanner.jsx';
 import { STORAGE_KEYS, writeNumberStorageValue } from '../../utils/storageUtils.js';
 import { hasTrustedGateSession } from '../../utils/startupGateSession.js';
 import { useI18n } from '../../i18n/index.js';
@@ -43,6 +44,7 @@ export default function AppStartupGate({ children, isMobile = false }) {
       </div>
 
       <div className="relative z-10 flex w-full max-w-2xl flex-col items-center gap-5">
+        <SiteMaintenanceBanner />
         <img
           src="/endfield-logo.svg"
           alt="Endfield Logo"

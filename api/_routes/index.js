@@ -37,6 +37,7 @@ import authPowChallengeHandler from './root/auth-pow-challenge.js';
 import authRateLimitHandler from './root/auth-rate-limit.js';
 import automationFeedHandler from './root/automation-feed.js';
 import bootstrapHandler from './root/bootstrap.js';
+import maintenanceHandler from './root/maintenance.js';
 import mailInboundHandler from './root/mail-inbound.js';
 import mailDeliveryFeedbackHandler from './root/mail-delivery-feedback.js';
 import mailOutboxWorkerHandler from './root/mail-outbox-worker.js';
@@ -107,6 +108,7 @@ function normalizeRoutePath(path) {
 }
 
 export const API_ROUTE_ENTRIES = [
+  ['/api/maintenance', maintenanceHandler],
   ['/api/account-recovery-request', accountRecoveryRequestHandler],
   ['/api/account-email-action', accountEmailActionHandler],
   ['/api/account-email-merge', accountEmailMergeHandler],

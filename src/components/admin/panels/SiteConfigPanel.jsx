@@ -17,6 +17,8 @@ import {
 } from '../../../utils/homeVersionTimelineEditor.js';
 import VirtualizedList from '../VirtualizedList';
 import { PanelSection, PanelToolbarButton } from './shared/PanelUi.jsx';
+import SiteMaintenanceSettings from './SiteMaintenanceSettings.jsx';
+import { MAINTENANCE_CONFIG_KEY } from '../../../../shared/siteMaintenance.js';
 
 const CATEGORY_META = {
   legal: { label: '法律合规', icon: Scale, color: 'text-red-600 dark:text-red-400' },
@@ -576,6 +578,7 @@ const SiteConfigPanel = ({ showToast, configAdapter = null }) => {
   // 按 category 分组
   const grouped = Object.create(null);
   configItems.forEach(item => {
+    if (item.key === MAINTENANCE_CONFIG_KEY) return;
     const cat = item.category || 'general';
     if (!grouped[cat]) grouped[cat] = [];
     grouped[cat].push(item);
@@ -650,6 +653,12 @@ const SiteConfigPanel = ({ showToast, configAdapter = null }) => {
         </div>
         <span className="shrink-0 font-mono text-[11px] text-slate-400 dark:text-zinc-500">{configItems.length} 项配置</span>
       </div>
+
+      <SiteMaintenanceSettings value={configItems.find(item => item.key === MAINTENANCE_CONFIG_KEY)?.value}
+        configAdapter={configAdapter} showToast={showToast} onSaved={value => setConfigItems(previous => [
+          ...previous.filter(item => item.key !== MAINTENANCE_CONFIG_KEY),
+          { key: MAINTENANCE_CONFIG_KEY, value, label: '维护模式与横幅', category: 'alert' },
+        ])} />
 
       {categoryOrder.map((cat, catIndex) => {
         const items = grouped[cat];
