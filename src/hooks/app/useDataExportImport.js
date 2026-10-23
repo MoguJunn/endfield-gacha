@@ -305,13 +305,22 @@ export function useDataExportImport({
           import('../../utils/dataImportFileParser.js'),
           import('../../utils/dataImport.js')
         ]);
-        if (file.name.toLowerCase().endsWith('.xlsx')) await characterCache.load();
-        const importOptions = { fileName: file.name, existingPools: pools, characters: characterCache.getAll() };
+        let importPools = pools;
+        const loadRescueDirectory = async () => {
+          const { loadAllPoolsForCatalog, mergePoolCollections } = await import('../../services/poolReadService.js');
+          const [catalog] = await Promise.all([loadAllPoolsForCatalog(), characterCache.load()]);
+          if (!catalog.length) throw new Error('未能加载卡池目录，请稍后重试文件导入。');
+          // The personal pool list may only contain pools with existing history.
+          // Name-based third-party files need the full public catalog as well.
+          importPools = mergePoolCollections(catalog, pools);
+        };
+        if (file.name.toLowerCase().endsWith('.xlsx')) await loadRescueDirectory();
+        const importOptions = { fileName: file.name, existingPools: importPools, characters: characterCache.getAll() };
         const importedData = await parseImportFileContent(e.target.result, importOptions);
-        if (importedData?.code === 0 && Array.isArray(importedData.data?.list)) await characterCache.load();
+        if (importedData?.code === 0 && Array.isArray(importedData.data?.list)) await loadRescueDirectory();
 
         const validation = validateAndNormalizeImportData(importedData, {
-          existingPools: pools,
+          existingPools: importPools,
           currentUserId: user?.id || null,
           sourceFileName: file.name,
           characters: characterCache.getAll(),

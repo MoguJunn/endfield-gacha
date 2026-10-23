@@ -740,6 +740,56 @@ describe('executeFullImport import mode metadata', () => {
     expect(grantAppToken).not.toHaveBeenCalled();
   });
 
+  it.each([null, '', '   '])('rejects a missing game UID before reading account history: %j', async gameUid => {
+    mockSupabaseClient = {
+      auth: { admin: { getUserById: vi.fn(async () => ({ data: { user: { id: 'user-1' } }, error: null })) } },
+      rpc: vi.fn(async () => ({ data: true, error: null })),
+      from: vi.fn(),
+    };
+    const authChainFunctions = {
+      grantAppToken: vi.fn(async () => ({ success: true, data: { token: 'app-token' } })),
+      fetchBindingList: vi.fn(async () => ({ success: true, data: { accounts: [
+        { uid: 'official-login', gameUid: '10001', isOfficial: true },
+        { uid: 'bili-login-not-game-uid', gameUid, channelMasterId: '2', isOfficial: false },
+      ] } })),
+      fetchU8TokenByUid: vi.fn(),
+      fetchAllRecordsConcurrent: vi.fn(),
+    };
+    const { executeFullImport, initSupabaseAdmin } = await import('../../backend/fullImportService.js');
+    initSupabaseAdmin('https://example.supabase.co', 'service-role-key');
+
+    await expect(executeFullImport({ token: 'AbCdEfGhIjKlMnOpQrStUvWx', accountIndex: 1, userId: 'user-1',
+      updateProgress: vi.fn(), authChainFunctions }))
+      .rejects.toMatchObject({ code: 'IMPORT_ACCOUNT_ROLE_MISSING', message: expect.stringContaining('游戏 UID') });
+
+    expect(mockSupabaseClient.from).not.toHaveBeenCalled();
+    expect(authChainFunctions.fetchU8TokenByUid).not.toHaveBeenCalled();
+    expect(authChainFunctions.fetchAllRecordsConcurrent).not.toHaveBeenCalled();
+    expect(officialImportStagingMocks.stageOfficialImportTask).not.toHaveBeenCalled();
+  });
+
+  it('continues the auth chain for a valid Bilibili game role', async () => {
+    const historyQuery = { eq: () => historyQuery, range: async () => ({ data: [], error: null }) };
+    mockSupabaseClient = {
+      auth: { admin: { getUserById: vi.fn(async () => ({ data: { user: { id: 'user-1' } }, error: null })) } },
+      rpc: vi.fn(async () => ({ data: true, error: null })),
+      from: () => ({ select: () => historyQuery }),
+    };
+    const stoppedAfterU8Request = new Error('test stopped at U8 request');
+    const fetchU8TokenByUid = vi.fn(async () => { throw stoppedAfterU8Request; });
+    const { executeFullImport, initSupabaseAdmin } = await import('../../backend/fullImportService.js');
+    initSupabaseAdmin('https://example.supabase.co', 'service-role-key');
+    await expect(executeFullImport({ token: 'AbCdEfGhIjKlMnOpQrStUvWx', accountIndex: 0, userId: 'user-1',
+      updateProgress: vi.fn(), authChainFunctions: {
+        grantAppToken: async () => ({ success: true, data: { token: 'app-token' } }),
+        fetchBindingList: async () => ({ success: true, data: { accounts: [
+          { uid: 'bili-login-not-game-uid', gameUid: '10002', serverId: '1', channelMasterId: '2', isOfficial: false },
+        ] } }),
+        fetchU8TokenByUid,
+      } })).rejects.toBe(stoppedAfterU8Request);
+    expect(fetchU8TokenByUid).toHaveBeenCalledWith('bili-login-not-game-uid', 'app-token');
+  });
+
   it('keeps anomaly metadata paired with its record when timestamps reorder the batch', async () => {
     const { buildStagedRecordsWithMetadata } = await import('../../backend/fullImportService.js');
     const result = buildStagedRecordsWithMetadata(
