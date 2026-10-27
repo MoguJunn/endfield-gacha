@@ -1,11 +1,9 @@
 export function isPoolSelectorGroupCollapsed({
   group,
   collapsedGroupTypes,
-  hasSelectedSubgroup = false,
 }) {
   return !group?.disableCollapse
-    && collapsedGroupTypes?.has(group?.type)
-    && !hasSelectedSubgroup;
+    && collapsedGroupTypes?.has(group?.type);
 }
 
 export default {

@@ -495,18 +495,19 @@ export function applyPoolSelectorScopeView({
 
       const subgroups = group.subgroups.map((subgroup) => {
         const expansionOverride = subgroupExpansionOverrides[subgroup.groupId];
-        const selectionForcesExpanded = isSubgroupSelection(currentPoolId, subgroup);
+        const hasSelectedItem = isSubgroupSelection(currentPoolId, subgroup);
         const searchForcesExpanded = hasSearchQuery && subgroup.pools.length > 0;
         const isExpanded =
-          selectionForcesExpanded ||
           searchForcesExpanded ||
-          (typeof expansionOverride === 'boolean' ? expansionOverride : subgroup.defaultExpanded);
+          (typeof expansionOverride === 'boolean' ? expansionOverride : hasSelectedItem || subgroup.defaultExpanded);
         const manualSpecialExpansion = subgroup.subtype === 'special' && expansionOverride === true;
         const showZeroPullPools =
-          !hideZeroPullPools || selectionForcesExpanded || searchForcesExpanded || manualSpecialExpansion;
-        const visiblePools = isExpanded
-          ? subgroup.pools.filter((pool) => showZeroPullPools || (pool.pullCount || 0) > 0 || pool.id === currentPoolId)
-          : [];
+          !hideZeroPullPools || hasSelectedItem || searchForcesExpanded || manualSpecialExpansion;
+        const visiblePools = subgroup.pools.filter((pool) =>
+          isExpanded
+            ? showZeroPullPools || (pool.pullCount || 0) > 0 || pool.id === currentPoolId
+            : pool.id === currentPoolId
+        );
 
         return {
           ...subgroup,
@@ -535,6 +536,21 @@ export function getPoolSelectorVisiblePoolCount(groups) {
         : group.pools.length),
     0
   );
+}
+
+export function getCollapsedPoolPreviewPools(group, currentPoolId, referenceDate = new Date()) {
+  const pools = group.pools || [];
+  if (!['limited', 'weapon_limited'].includes(group.type)) {
+    return pools.filter((pool) => pool.id === currentPoolId);
+  }
+
+  const timedPools = pools.map((pool) => ({ pool, timing: getPoolTimingMeta(pool, referenceDate) }));
+  const latestPastPool = timedPools
+    .filter(({ timing }) => timing.isExpired)
+    .sort((left, right) => right.timing.end - left.timing.end)[0]?.pool;
+  return timedPools
+    .filter(({ pool, timing }) => timing.isActive || pool.id === latestPastPool?.id || pool.id === currentPoolId)
+    .map(({ pool }) => pool);
 }
 
 export function getSelectorVisiblePools({ pools, currentPoolId = null, expanded = false, limit = 5 }) {
