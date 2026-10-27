@@ -1116,6 +1116,7 @@ const messages = {
   "import.error.serverConnection": "服务器连接异常: {message}",
   "import.error.riskControl": "触发频率限制，请稍候再试。",
   "import.error.authFailed": "认证失败: {message}",
+  "import.error.sessionExpired": "登录或验证已过期，请重新登录／验证后继续导入。当前输入和待确认内容已保留。",
   "import.error.emptyToken": "请输入Token",
   "import.error.tokenLength": "Token长度错误：期望24位，实际{length}位",
   "import.error.tokenFormat": "Token格式错误：包含不支持的字符",

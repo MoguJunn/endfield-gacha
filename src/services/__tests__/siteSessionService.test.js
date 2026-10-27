@@ -241,4 +241,24 @@ describe('siteSessionService', () => {
     expect(fetchJsonWithTimeout).toHaveBeenCalledTimes(2);
     expect(supabase.auth.setSession).toHaveBeenCalledTimes(1);
   });
+
+  it.each([401, 403])('clears the known session after an explicit %s rejection', async (status) => {
+    fetchJsonWithTimeout.mockResolvedValueOnce({
+      response: { ok: true }, data: { success: true, authenticated: true, data: { user: { id: 'user-1' } } },
+    });
+    await getCurrentSiteSession();
+    fetchJsonWithTimeout.mockResolvedValueOnce({ response: { ok: false, status }, data: { success: false } });
+    await expect(getCurrentSiteSession()).resolves.toMatchObject({ authenticated: false });
+    expect(hasKnownAuthenticatedSiteSession()).toBe(false);
+  });
+
+  it.each([503, 429, 200])('preserves the known session on an inconclusive %s response', async (status) => {
+    fetchJsonWithTimeout.mockResolvedValueOnce({
+      response: { ok: true }, data: { success: true, authenticated: true, data: { user: { id: 'user-1' } } },
+    });
+    await getCurrentSiteSession();
+    fetchJsonWithTimeout.mockResolvedValueOnce({ response: { ok: status === 200, status }, data: null });
+    await expect(getCurrentSiteSession()).rejects.toThrow('暂时无法验证登录状态');
+    expect(getKnownSiteSessionUserId()).toBe('user-1');
+  });
 });

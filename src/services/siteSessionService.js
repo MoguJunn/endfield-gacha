@@ -206,7 +206,13 @@ export async function getCurrentSiteSession({
       retries: 0,
     });
 
-    if (!response.ok || data?.success !== true || data?.authenticated !== true) {
+    // 临时断网、服务故障和异常响应不等于会话已失效，不能据此清空登录状态。
+    if ((!response.ok && ![401, 403].includes(response.status))
+      || (response.ok && (data?.success !== true || typeof data.authenticated !== 'boolean'))) {
+      throw new Error('暂时无法验证登录状态，请稍后重试');
+    }
+
+    if (!response.ok || data.authenticated !== true) {
       clearSiteSessionCache();
       return {
         authenticated: false,

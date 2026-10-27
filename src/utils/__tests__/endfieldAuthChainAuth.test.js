@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getSupabaseAccessToken } from '../../services/authFetchService.js';
+import { emitAuthSessionSync } from '../../services/authSessionEvents.js';
 import { fetchWithTimeout } from '../../services/supabaseRequest.js';
 import { queuedFetch } from '../requestQueue.js';
 import {
@@ -11,6 +12,8 @@ import {
 vi.mock('../../services/authFetchService.js', () => ({
   getSupabaseAccessToken: vi.fn(),
 }));
+
+vi.mock('../../services/authSessionEvents.js', () => ({ emitAuthSessionSync: vi.fn() }));
 
 vi.mock('../../services/supabaseRequest.js', () => ({
   fetchWithTimeout: vi.fn(),
@@ -28,9 +31,10 @@ vi.mock('../appLogger.js', () => ({
   },
 }));
 
-function jsonResponse(payload) {
+function jsonResponse(payload, status = 200) {
   return {
-    ok: true,
+    ok: status >= 200 && status < 300,
+    status,
     text: vi.fn().mockResolvedValue(JSON.stringify(payload)),
   };
 }
@@ -144,6 +148,60 @@ describe('endfieldAuthChain auth headers', () => {
       }),
       expect.any(Object)
     );
+  });
+
+  it.each(['cn', 'intl'])('refreshes and resubmits once after an explicit %s authentication rejection', async (source) => {
+    queuedFetch.mockResolvedValueOnce(jsonResponse({ success: false, code: 'AUTH_SESSION_INVALID', error: 'missing access token' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ success: true, taskId: 'task-1' }));
+    getSupabaseAccessToken.mockResolvedValueOnce('expired').mockResolvedValue('fresh');
+    fetchWithTimeout.mockResolvedValue(jsonResponse({ success: true, data: { status: 'completed', result: { savedRecords: 1 } } }));
+    await expect(importAllRecordsFullyOnBackend('official-token', 2, 'user-1', null, source, { importMode: 'full' }))
+      .resolves.toEqual({ savedRecords: 1 });
+    expect(queuedFetch).toHaveBeenCalledTimes(2);
+    const [first, second] = queuedFetch.mock.calls;
+    expect(first[1].body).toBe(second[1].body);
+    expect(JSON.parse(second[1].body)).toMatchObject({ source, accountIndex: 2, importMode: 'full' });
+    expect(first[1].headers.Authorization).toBe('Bearer expired');
+    expect(second[1].headers.Authorization).toBe('Bearer fresh');
+    expect(second[2].maxRetries).toBe(0);
+    expect(emitAuthSessionSync).toHaveBeenCalled();
+  });
+
+  it('stops after a second explicit authentication rejection', async () => {
+    queuedFetch.mockResolvedValue(jsonResponse({ success: false, code: 'AUTH_SESSION_INVALID', error: 'rejected' }, 401));
+    await expect(importAllRecordsFullyOnBackend('official-token', 0, 'user-1', null)).rejects.toMatchObject({ step: 'import-full' });
+    expect(queuedFetch).toHaveBeenCalledTimes(2);
+    expect(fetchWithTimeout).not.toHaveBeenCalled();
+  });
+
+  it('updates page authentication state and stops before submission when no token can recover', async () => {
+    getSupabaseAccessToken.mockResolvedValue(null);
+    await expect(importAllRecordsFullyOnBackend('official-token', 0, 'user-1', null))
+      .rejects.toMatchObject({ step: 'auth', data: { code: 'missing_access_token' } });
+    expect(emitAuthSessionSync).toHaveBeenCalledWith({ source: 'import_token_missing' });
+    expect(queuedFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([500, 200, 401])('does not replay an ambiguous creation result with HTTP %s', async (status) => {
+    queuedFetch.mockResolvedValue(jsonResponse({ success: false, error: 'unknown result' }, status));
+    await expect(importAllRecordsFullyOnBackend('official-token', 0, 'user-1', null)).rejects.toMatchObject({ step: 'import-full' });
+    expect(queuedFetch).toHaveBeenCalledTimes(1);
+    expect(queuedFetch.mock.calls[0][2].maxRetries).toBe(0);
+  });
+
+  it('does not replay a timed-out creation request', async () => {
+    queuedFetch.mockRejectedValue(new Error('Request timeout'));
+    await expect(importAllRecordsFullyOnBackend('official-token', 0, 'user-1', null)).rejects.toThrow('Request timeout');
+    expect(queuedFetch).toHaveBeenCalledTimes(1);
+    expect(queuedFetch.mock.calls[0][2].maxRetries).toBe(0);
+  });
+
+  it('uses the completed result returned by the single status authentication retry', async () => {
+    fetchWithTimeout.mockResolvedValueOnce(jsonResponse({ success: false, code: 'AUTH_SESSION_INVALID' }, 401))
+      .mockResolvedValueOnce(jsonResponse({ success: true, data: { status: 'completed', result: { savedRecords: 3 } } }));
+    await expect(importAllRecordsFullyOnBackend('official-token', 0, 'user-1', null)).resolves.toEqual({ savedRecords: 3 });
+    expect(queuedFetch).toHaveBeenCalledTimes(1);
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(2);
   });
 
   it('stops polling a cancelled persistent task immediately', async () => {

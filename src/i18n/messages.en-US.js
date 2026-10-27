@@ -1165,6 +1165,7 @@ const messages = {
   "import.error.serverConnection": "Server connection error: {message}",
   "import.error.riskControl": "Rate limit triggered. Try again later.",
   "import.error.authFailed": "Authentication failed: {message}",
+  "import.error.sessionExpired": "Your sign-in or verification has expired. Sign in or verify again to continue importing. Your current input and pending preview have been kept.",
   "import.error.emptyToken": "Enter the token first.",
   "import.error.tokenLength": "Invalid token length: expected 24 characters, got {length}.",
   "import.error.tokenFormat": "Invalid token format: unsupported characters detected.",

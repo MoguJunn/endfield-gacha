@@ -6,6 +6,21 @@ import {
 } from './siteSessionService.js';
 import { isContributorDemoModeEnabled } from '../dev/contributorDemoMode.js';
 
+let pendingNativeSessionRefresh = null;
+
+function isInvalidSessionError(error) {
+  return [400, 401, 403].includes(error?.status)
+    || ['bad_jwt', 'session_not_found', 'refresh_token_not_found', 'refresh_token_already_used'].includes(error?.code);
+}
+
+async function refreshNativeSession() {
+  if (!pendingNativeSessionRefresh) {
+    pendingNativeSessionRefresh = supabase.auth.refreshSession()
+      .finally(() => { pendingNativeSessionRefresh = null; });
+  }
+  return pendingNativeSessionRefresh;
+}
+
 async function clearInvalidSupabaseSession() {
   await supabase?.auth?.signOut?.({ scope: 'local' }).catch(() => null);
 }
@@ -51,7 +66,7 @@ async function getSiteSessionAccessToken({
   const siteSession = await getCurrentSiteSession({
     syncSupabase: false,
     useCache: useSiteSessionCache,
-  }).catch(() => null);
+  });
   const siteSessionToken = allowSiteSessionToken ? siteSession?.supabase?.accessToken || null : null;
   if (siteSessionToken) {
     return siteSessionToken;
@@ -67,18 +82,33 @@ export async function getValidatedSupabaseSession() {
     return null;
   }
 
-  const currentSession = await supabase.auth.getSession().catch(() => null);
+  const currentSession = await supabase.auth.getSession();
+  if (currentSession?.error) {
+    if (!isInvalidSessionError(currentSession.error)) throw currentSession.error;
+    await clearInvalidSupabaseSession();
+    return null;
+  }
   const nativeSession = currentSession?.data?.session || null;
   const accessToken = nativeSession?.access_token || '';
   const sessionUserId = nativeSession?.user?.id || '';
-  if (!accessToken || !sessionUserId) {
+  // 兼容令牌的有效身份必须来自站内会话，不能在 Cookie 失效后继续使用本地副本。
+  if (!accessToken || !sessionUserId || isSiteSessionCompatToken(accessToken)) {
     return null;
   }
 
-  const userResult = await supabase.auth.getUser(accessToken).catch((error) => ({
-    error,
-    data: null,
-  }));
+  let session = nativeSession;
+  let userResult = await supabase.auth.getUser(accessToken);
+  if (userResult?.error && isInvalidSessionError(userResult.error)) {
+    const refreshed = await refreshNativeSession();
+    if (refreshed?.error && !isInvalidSessionError(refreshed.error)) throw refreshed.error;
+    session = refreshed?.data?.session;
+    if (refreshed?.error || !session?.access_token || session.user?.id !== sessionUserId) {
+      await clearInvalidSupabaseSession();
+      return null;
+    }
+    userResult = await supabase.auth.getUser(session.access_token);
+  }
+  if (userResult?.error && !isInvalidSessionError(userResult.error)) throw userResult.error;
   const verifiedUser = userResult?.data?.user || null;
   if (userResult?.error || !verifiedUser?.id || verifiedUser.id !== sessionUserId) {
     await clearInvalidSupabaseSession();
@@ -86,7 +116,7 @@ export async function getValidatedSupabaseSession() {
   }
 
   return {
-    ...nativeSession,
+    ...session,
     user: verifiedUser,
   };
 }
@@ -101,7 +131,8 @@ export async function getSupabaseAccessToken({
     return null;
   }
 
-  if (syncSiteSession && allowSiteSessionToken && preferSiteSessionToken) {
+  const siteSessionChecked = syncSiteSession && allowSiteSessionToken && preferSiteSessionToken;
+  if (siteSessionChecked) {
     const siteSessionToken = await getSiteSessionAccessToken({
       useSiteSessionCache,
       allowSiteSessionToken,
@@ -113,23 +144,10 @@ export async function getSupabaseAccessToken({
 
   const nativeSession = await getValidatedSupabaseSession();
   if (nativeSession?.access_token) {
-    const isCompatToken = isSiteSessionCompatToken(nativeSession.access_token);
-    if (isCompatToken && !allowSiteSessionToken) {
-      return null;
-    }
-    if (syncSiteSession && allowSiteSessionToken && isCompatToken) {
-      const siteSessionToken = await getSiteSessionAccessToken({
-        useSiteSessionCache,
-        allowSiteSessionToken,
-      });
-      if (siteSessionToken) {
-        return siteSessionToken;
-      }
-    }
     return nativeSession.access_token;
   }
 
-  if (syncSiteSession) {
+  if (syncSiteSession && allowSiteSessionToken && !siteSessionChecked) {
     const siteSessionToken = await getSiteSessionAccessToken({
       useSiteSessionCache,
       allowSiteSessionToken,

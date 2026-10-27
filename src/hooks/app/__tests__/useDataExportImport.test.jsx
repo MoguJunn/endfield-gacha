@@ -167,6 +167,20 @@ describe('useDataExportImport export', () => {
     expect(input.value).toBe('');
   });
 
+  it('retains the pending file preview and options across session expiry and recovery', () => {
+    useAuthStore.setState({ user: { id: 'user-1' } });
+    const cloudSync = createCloudSync();
+    const { result } = renderHook(() => useDataExportImport({ showToast: vi.fn(), cloudSync }));
+    const pending = { fileName: 'history.json', willSyncToCloud: true,
+      data: { pools: [], history: [{ id: 'preview-1', gameUid: 'game-1' }] } };
+    act(() => { result.current.setPendingImport(pending); });
+    act(() => { useAuthStore.setState({ user: null }); });
+    expect(result.current.pendingImport).toBe(pending);
+    act(() => { useAuthStore.setState({ user: { id: 'user-1' } }); });
+    expect(result.current.pendingImport).toBe(pending);
+    expect(cloudSync.saveHistoryToCloud).not.toHaveBeenCalled();
+  });
+
   it('loads paged analysis history on click without exporting or replacing the partial store', async () => {
     const setSyncing = vi.fn();
     const setHistory = vi.fn();

@@ -18,6 +18,7 @@
 import { queuedFetch } from './requestQueue.js';
 import { appLogger } from './appLogger.js';
 import { getSupabaseAccessToken } from '../services/authFetchService.js';
+import { emitAuthSessionSync } from '../services/authSessionEvents.js';
 import { fetchWithTimeout } from '../services/supabaseRequest.js';
 import {
   OFFICIAL_CHARACTER_POOL_TYPES,
@@ -130,7 +131,8 @@ async function getAuthHeaders(required = false, options = {}) {
   }
   if (!accessToken) {
     if (required) {
-      throw new AuthChainError('请先登录后再导入数据', 'auth');
+      emitAuthSessionSync({ source: 'import_token_missing' });
+      throw new AuthChainError('登录或验证已过期，请重新登录／验证后继续导入', 'auth', { code: 'missing_access_token' });
     }
     return {};
   }
@@ -138,6 +140,12 @@ async function getAuthHeaders(required = false, options = {}) {
   return {
     Authorization: `Bearer ${accessToken}`
   };
+}
+
+function isSessionRejected(response, result) {
+  return response.status === 401 && result?.success === false && !result.taskId
+    && (result.code === 'AUTH_SESSION_INVALID' || result.code === 'missing_access_token'
+      || result.auth?.reason === 'missing_access_token' || result.auth?.reason?.startsWith('compat_jwt_'));
 }
 
 /**
@@ -593,6 +601,10 @@ export async function fetchFullImportStatus(taskId, source = 'cn', options = {})
   });
   const result = await safeParseJSON(response, 'Import Status API');
 
+  if (isSessionRejected(response, result)) {
+    emitAuthSessionSync({ source: 'import_session_rejected' });
+    if (!options.forceRefresh) return fetchFullImportStatus(taskId, source, { forceRefresh: true });
+  }
   if (!result.success) {
     throw new AuthChainError(result.error || 'Import status failed', 'import-status', result);
   }
@@ -681,7 +693,6 @@ export async function rejectFullImportReviewOnBackend({ taskId, accessKey }, sou
 async function pollFullImportUntilComplete(taskId, onProgress, maxWaitTime = 30 * 60 * 1000, source = 'cn') {
   const startTime = Date.now();
   const pollInterval = 2000;
-  let authRefreshRetried = false;
 
   while (Date.now() - startTime < maxWaitTime) {
     try {
@@ -708,24 +719,6 @@ async function pollFullImportUntilComplete(taskId, onProgress, maxWaitTime = 30 
       await delay(pollInterval);
     } catch (error) {
       if (error instanceof AuthChainError) {
-        const reason = error?.data?.auth?.reason || '';
-        if (
-          error.step === 'import-status' &&
-          !authRefreshRetried &&
-          (
-            error.data?.code === 'AUTH_SESSION_INVALID' ||
-            reason.startsWith('compat_jwt_') ||
-            reason === 'access_token_malformed'
-          )
-        ) {
-          authRefreshRetried = true;
-          appLogger.warn('[pollFullImportUntilComplete] 登录令牌校验失败，刷新后重试一次...', reason || error.message);
-          // eslint-disable-next-line no-await-in-loop -- one forced auth refresh belongs to the current polling task
-          await fetchFullImportStatus(taskId, source, { forceRefresh: true });
-          // eslint-disable-next-line no-await-in-loop -- retry pacing is intentionally sequential
-          await delay(pollInterval);
-          continue;
-        }
         throw error;
       }
 
@@ -745,7 +738,7 @@ export async function importAllRecordsFullyOnBackend(initialToken, accountIndex,
     throw new AuthChainError('请先登录后再导入数据', 'import-full');
   }
 
-  const authHeaders = await getAuthHeaders(true, {
+  let authHeaders = await getAuthHeaders(true, {
     forceRefresh: true,
     allowSiteSessionToken: true,
     preferSiteSessionToken: true,
@@ -759,7 +752,7 @@ export async function importAllRecordsFullyOnBackend(initialToken, accountIndex,
     });
   }
 
-  const response = await queuedFetch(`${proxyBase}?action=import-full`, {
+  const submit = () => queuedFetch(`${proxyBase}?action=import-full`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -774,11 +767,23 @@ export async function importAllRecordsFullyOnBackend(initialToken, accountIndex,
     })
   }, {
     priority: 4,
-    maxRetries: 1,
+    // 创建结果不明时不能自动重放；只有下面明确的认证拒绝允许重试。
+    maxRetries: 0,
     timeout: 30000
   });
 
-  const result = await safeParseJSON(response, 'Full Import API');
+  let response = await submit();
+  let result = await safeParseJSON(response, 'Full Import API');
+  if (isSessionRejected(response, result)) {
+    emitAuthSessionSync({ source: 'import_session_rejected' });
+    authHeaders = await getAuthHeaders(true, {
+      forceRefresh: true,
+      allowSiteSessionToken: true,
+      preferSiteSessionToken: true,
+    });
+    response = await submit();
+    result = await safeParseJSON(response, 'Full Import API');
+  }
 
   if (result.riskControl) {
     throw new RiskControlError(result.error);

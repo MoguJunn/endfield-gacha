@@ -70,6 +70,11 @@ function appendAuthDiagnostic(errorMessage, err) {
 
 export function normalizeImportError(err, t) {
   let errorMessage = err.message || t('import.error.unknown');
+  if (err.data?.code === 'missing_access_token'
+    || err.data?.auth?.reason === 'compat_jwt_expired'
+    || /missing[ _]access[ _]token/i.test(errorMessage)) {
+    return appendAuthDiagnostic(t('import.error.sessionExpired'), err);
+  }
 
   if (err instanceof ServerConnectionError) {
     errorMessage = t('import.error.serverConnection', { message: err.message });

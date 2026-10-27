@@ -6,6 +6,7 @@ import {
   getCurrentAuthenticatedUser,
   getSameOriginAuthHeaders,
   getSupabaseAccessToken,
+  getValidatedSupabaseSession,
   withAuthenticatedSupabaseRequest,
 } from '../authFetchService.js';
 import {
@@ -19,6 +20,7 @@ vi.mock('../../supabaseClient.js', () => ({
     auth: {
       getSession: vi.fn(),
       getUser: vi.fn(),
+      refreshSession: vi.fn(),
       signOut: vi.fn(),
     },
   },
@@ -73,6 +75,7 @@ describe('authFetchService', () => {
       },
     });
     supabase.auth.signOut.mockResolvedValue({ error: null });
+    supabase.auth.refreshSession.mockResolvedValue({ data: { session: null }, error: { status: 400 } });
   });
 
   it('uses the known same-origin site session without revalidating a native token', async () => {
@@ -277,12 +280,54 @@ describe('authFetchService', () => {
     supabase.auth.getUser.mockResolvedValue({
       error: {
         message: 'invalid JWT',
+        status: 401,
       },
       data: null,
     });
 
     await expect(getSupabaseAccessToken()).resolves.toBe('site-session-token');
     expect(supabase.auth.signOut).toHaveBeenCalledWith({ scope: 'local' });
+  });
+
+  it('refreshes a rejected native token once and verifies the refreshed identity', async () => {
+    supabase.auth.getSession.mockResolvedValue({ data: { session: { access_token: 'expired', user: { id: 'user-1' } } } });
+    supabase.auth.getUser.mockResolvedValueOnce({ error: { status: 401 }, data: null })
+      .mockResolvedValueOnce({ data: { user: { id: 'user-1' } } });
+    supabase.auth.refreshSession.mockResolvedValue({ data: { session: { access_token: 'fresh', user: { id: 'user-1' } } } });
+    await expect(getSupabaseAccessToken()).resolves.toBe('fresh');
+    expect(supabase.auth.refreshSession).toHaveBeenCalledOnce();
+    expect(supabase.auth.getUser).toHaveBeenLastCalledWith('fresh');
+    expect(supabase.auth.signOut).not.toHaveBeenCalled();
+  });
+
+  it('shares one native refresh across concurrent authentication requests', async () => {
+    supabase.auth.getSession.mockResolvedValue({ data: { session: { access_token: 'expired', user: { id: 'user-1' } } } });
+    supabase.auth.getUser.mockImplementation(async (token) => token === 'expired'
+      ? { error: { status: 401 } } : { data: { user: { id: 'user-1' } } });
+    supabase.auth.refreshSession.mockResolvedValue({ data: { session: { access_token: 'fresh', user: { id: 'user-1' } } } });
+    await expect(Promise.all([getValidatedSupabaseSession(), getValidatedSupabaseSession()]))
+      .resolves.toEqual([expect.objectContaining({ access_token: 'fresh' }), expect.objectContaining({ access_token: 'fresh' })]);
+    expect(supabase.auth.refreshSession).toHaveBeenCalledOnce();
+  });
+
+  it.each(['validation', 'refresh'])('does not sign out on transient %s failure', async (step) => {
+    supabase.auth.getSession.mockResolvedValue({ data: { session: { access_token: 'native', user: { id: 'user-1' } } } });
+    if (step === 'validation') supabase.auth.getUser.mockResolvedValue({ error: { status: 503 } });
+    else {
+      supabase.auth.getUser.mockResolvedValue({ error: { status: 401 } });
+      supabase.auth.refreshSession.mockResolvedValue({ error: { status: 503 } });
+    }
+    await expect(getValidatedSupabaseSession()).rejects.toMatchObject({ status: 503 });
+    expect(supabase.auth.signOut).not.toHaveBeenCalled();
+  });
+
+  it('does not revive a cached compatibility token after the site session expires', async () => {
+    supabase.auth.getSession.mockResolvedValue({ data: { session: { access_token: createSiteSessionCompatToken(), user: { id: 'user-1' } } } });
+    supabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'user-1' } } });
+    await expect(getSupabaseAccessToken({ preferSiteSessionToken: true, useSiteSessionCache: false })).resolves.toBeNull();
+    expect(supabase.auth.getUser).not.toHaveBeenCalled();
+    expect(supabase.auth.refreshSession).not.toHaveBeenCalled();
+    expect(getCurrentSiteSession).toHaveBeenCalledTimes(1);
   });
 
   it('throws the shared expired-session error when a required token is missing', async () => {

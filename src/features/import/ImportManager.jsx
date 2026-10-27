@@ -218,6 +218,7 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
   const [fetchStatus, setFetchStatus] = useState('idle'); // 追踪子组件的获取状态
   const [completionPending, setCompletionPending] = useState(false);
   const [accountSecuritySnapshot, setAccountSecuritySnapshot] = useState(null);
+  const [importOwnerId, setImportOwnerId] = useState(null);
   const completionGenerationRef = useRef(0);
 
   // 从 stores 获取数据
@@ -235,6 +236,10 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
     && user
     && isOAuthAccountCompletionRequired(accountSecurityState)
   );
+
+  useEffect(() => {
+    if (user?.id) setImportOwnerId(user.id);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!isOpen || !user?.id) {
@@ -1039,16 +1044,19 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
           )}
 
           {/* 官网 API 导入子组件 */}
-          {importStatus === ImportStatus.IDLE && user && (
-            <OfficialAPIImport
-              onImportComplete={handleAPIImportComplete}
-              onBack={handleClose}
-              onOpenFileImport={onOpenFileImport}
-              onFetchStatusChange={handleFetchStatusChange}
-              userId={user.id}
-              accountCompletionRequired={officialImportBlocked}
-              onOpenSettings={handleOpenSettings}
-            />
+          {importStatus === ImportStatus.IDLE && importOwnerId && (
+            <div hidden={!user || user.id !== importOwnerId}>
+              <OfficialAPIImport
+                key={importOwnerId}
+                onImportComplete={handleAPIImportComplete}
+                onBack={handleClose}
+                onOpenFileImport={onOpenFileImport}
+                onFetchStatusChange={handleFetchStatusChange}
+                userId={user?.id}
+                accountCompletionRequired={officialImportBlocked}
+                onOpenSettings={handleOpenSettings}
+              />
+            </div>
           )}
         </div>
       </div>
