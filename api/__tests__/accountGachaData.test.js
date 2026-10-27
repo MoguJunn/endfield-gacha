@@ -319,7 +319,7 @@ function createAdminClient() {
         payload: {
           account: { accountKey: 'game-1::server:2' },
           selector: { totalPulls: 1 },
-          dashboard: { views: {} },
+          dashboard: { views: {}, mergedUpAverage: { version: 1, pools: [] } },
         },
       },
     },
@@ -492,6 +492,36 @@ describe('/api/account-gacha-data', () => {
     expect(adminClient.__state.selectCalls.some((call) => call.table === 'history')).toBe(false);
   });
 
+  it('keeps projected merged UP facts without loading raw history', async () => {
+    const adminClient = createAdminClient();
+    const snapshot = adminClient.__state.accountSnapshots['game-1::server:2'];
+    const facts = { version: 1, pools: [{ poolId: 'limited', entityType: 'character', category: 'limited',
+      excludeFree: { pulls: 100, upCount: 2, unknownSixCount: 0 }, includeFree: { pulls: 110, upCount: 3, unknownSixCount: 0 } }] };
+    delete snapshot.payload;
+    Object.assign(snapshot, { account: { accountKey: 'game-1::server:2' }, merged_up_average: facts,
+      view: { excludeFree: { stats: { total: 100 } } }, timeline: [] });
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({ url: '/api/account-gacha-data?mode=analysis&viewKey=__group_all' }), res);
+    expect(res.body.availability).toBe('ready');
+    expect(res.body.scope.dashboard.mergedUpAverage).toEqual(facts);
+    expect(adminClient.__state.selectCalls.some(call => call.table === 'history')).toBe(false);
+    expect(adminClient.__state.selectCalls.some(call => call.selection.includes('merged_up_average:payload->dashboard->mergedUpAverage'))).toBe(true);
+  });
+
+  it('queues a snapshot missing merged UP facts while preserving existing statistics', async () => {
+    const adminClient = createAdminClient();
+    delete adminClient.__state.accountSnapshots['game-1::server:2'].payload.dashboard.mergedUpAverage;
+    mocks.getSupabaseAdminClient.mockReturnValue(adminClient);
+    const res = createJsonResponseRecorder();
+    await accountGachaDataHandler(createRequest({ url: '/api/account-gacha-data?mode=analysis' }), res);
+    expect(res.body.availability).toBe('stale');
+    expect(res.body.warnings).toContainEqual({ code: 'personal_analysis_up_average_pending' });
+    expect(res.body.scope.selector.totalPulls).toBe(1);
+    expect(adminClient.__state.rpcCalls.some(call => call.params?.p_force_scope === true)).toBe(true);
+    expect(adminClient.__state.selectCalls.some(call => call.table === 'history')).toBe(false);
+  });
+
   it('projects only the requested dashboard view and locale from an account snapshot', async () => {
     const adminClient = createAdminClient();
     adminClient.__state.accountSnapshots['game-1::server:2'].payload.dashboard = {
@@ -528,6 +558,7 @@ describe('/api/account-gacha-data', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.meta).toMatchObject({ viewKey: 'pool-current', locale: 'en-US' });
     expect(res.body.scope.dashboard).toEqual({
+      mergedUpAverage: null,
       views: { 'pool-current': { total: 12 } },
       timelineViews: { 'en-US': { 'pool-current': [{ id: 'current-en' }] } },
     });
@@ -572,6 +603,7 @@ describe('/api/account-gacha-data', () => {
     snapshot.payload.poolManifest = [{ id: 'pool-current', pool_id: 'pool-current', name: '旧名称',
       name_en: 'Old name', description: '旧描述', banner_url: 'old.png', type: 'limited', up_character: '原 UP' }];
     snapshot.payload.dashboard = {
+      mergedUpAverage: { version: 1, pools: [] },
       views: { 'pool-current': { total: 12 } },
       timelineViews: { 'en-US': { 'pool-current': [{ id: 'pool-current', title: 'Old name',
         totalPulls: 12, presentationVersion: 2, acquisitions: [], entries: [{ name: '角色名称', pulls: 12 }] }] } },
@@ -636,6 +668,7 @@ describe('/api/account-gacha-data', () => {
 
     expect(res.statusCode).toBe(200);
     expect(res.body.scope.dashboard).toEqual({
+      mergedUpAverage: null,
       views: { '__group_extra:reconstruction': { total: 56 } },
       timelineViews: {
         'zh-CN': {

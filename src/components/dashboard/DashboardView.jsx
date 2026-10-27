@@ -27,6 +27,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import PoolAnalysisCard from './PoolAnalysisCard';
 import PoolTimelinePanel from './PoolTimelinePanel';
 import AveragePullStatsPanel from './AveragePullStatsPanel';
+import MergedUpAveragePanel from './MergedUpAveragePanel.jsx';
 import DashboardShareCard from './DashboardShareCard';
 import ShareActionStatus from '../share/ShareActionStatus';
 import ResourceSummaryPanel from '../resources/ResourceSummaryPanel';
@@ -314,6 +315,7 @@ const DashboardView = ({ showToast }) => {
     resourceSummaryVariant,
     isAnalysisBacked,
     snapshotSplitOverviewStats,
+    mergedUpAverage,
     snapshotOverviewCharacterStats,
     snapshotTimelineSections,
   } = useDashboardViewState();
@@ -1568,6 +1570,7 @@ const DashboardView = ({ showToast }) => {
                   </h3>
                   <span className="h-px flex-1 bg-zinc-100 dark:bg-zinc-800" />
                 </div>
+                <MergedUpAveragePanel data={mergedUpAverage} pools={selectedPools} includeFree={includeFreePullsInStats} />
                 <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
                   <AveragePullStatsPanel
                     stats={splitOverviewStats.character}

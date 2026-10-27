@@ -148,6 +148,23 @@ describe('useDashboardViewState', () => {
     expect(result.current.groupedHistory).toEqual([]);
   });
 
+  it('缺少合并UP快照时不以部分raw历史代算，且账号切换不会使用旧快照', () => {
+    mocks.currentPoolData = createAllPoolsData({ annotatedAccountHistoryArray: [{ id: 'partial', poolId: 'limited-a', rarity: 4 }] });
+    const facts = { version: 1, pools: [] };
+    mocks.analysisState = { ownerId: 'user-1', availability: 'ready', scope: {
+      account: { accountKey: 'game-1::server:1' }, dashboard: { mergedUpAverage: facts },
+    } };
+    const { result, rerender } = renderHook(() => useDashboardViewState());
+    expect(result.current.mergedUpAverage).toBe(facts);
+    mocks.currentGameUid = 'game-2::server:1';
+    rerender();
+    expect(result.current.mergedUpAverage).toBeNull();
+    mocks.currentGameUid = 'game-1::server:1';
+    delete mocks.analysisState.scope.dashboard.mergedUpAverage;
+    rerender();
+    expect(result.current.mergedUpAverage).toBeNull();
+  });
+
   it('分析不可用时保持原有 raw history 计算路径', () => {
     const rawHistory = [{
       id: 'raw-five',

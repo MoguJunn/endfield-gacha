@@ -22,6 +22,7 @@ import { loadPersonalAnalysisModel, PERSONAL_ANALYSIS_SCHEMA_VERSION } from '../
 import { serverLogger } from '../../_lib/serverLogger.js';
 import { validateWorkbenchPoolOperations } from '../../../shared/workbenchPoolAvailability.js';
 import { projectPersonalAnalysisPoolLabels } from '../../../shared/statisticsPoolLabels.js';
+import { MERGED_UP_AVERAGE_VERSION } from '../../../src/utils/mergedUpAverage.js';
 
 const PAGE_SIZE = 1000;
 const MAX_PAGES = 500;
@@ -610,6 +611,7 @@ function buildProjectedAccountPayload(data, viewKey, locale) {
     selector: data?.selector && typeof data.selector === 'object' ? data.selector : fallbackPayload.selector || {},
     dashboard: viewKey
       ? {
+          mergedUpAverage: data?.merged_up_average || fallbackPayload.dashboard?.mergedUpAverage || null,
           views: view ? { [viewKey]: view } : {},
           timelineViews: timeline ? { [locale]: { [viewKey]: timeline } } : {},
         }
@@ -644,6 +646,7 @@ async function loadProjectedPersonalAnalysisAccountSnapshot(dbClient, userId, sc
     'overview_total_known:payload->dashboard->views->__group_all->excludeFree->stats->personalData->totalKnown',
     'pool_manifest:payload->poolManifest',
     'selector:payload->selector',
+    'merged_up_average:payload->dashboard->mergedUpAverage',
     ...(safeView
       ? [
           `view:payload->dashboard->views->${viewKey}`,
@@ -702,6 +705,7 @@ function projectTransientScopePayload(payload, viewKey, locale) {
   return {
     ...analysisPayload,
     dashboard: {
+      mergedUpAverage: analysisPayload.dashboard?.mergedUpAverage || null,
       views: view ? { [viewKey]: view } : {},
       timelineViews: Array.isArray(timeline) ? { [locale]: { [viewKey]: timeline } } : {},
     },
@@ -899,8 +903,10 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
   const needsDropDetails = Array.isArray(requestedTimeline) && requestedTimeline.some(
     section => section.presentationVersion !== 2 || !Array.isArray(section.acquisitions)
   );
+  const needsMergedUpAverage = Boolean(accountSnapshot &&
+    accountSnapshot.payload?.dashboard?.mergedUpAverage?.version !== MERGED_UP_AVERAGE_VERSION);
   const verifiedEmpty = ownerFresh && ownerAccountKeys.size === 0;
-  const availability = verifiedEmpty ? 'empty' : ownerFresh && scopeFresh && !needsDropDetails ? 'ready' : 'stale';
+  const availability = verifiedEmpty ? 'empty' : ownerFresh && scopeFresh && !needsDropDetails && !needsMergedUpAverage ? 'ready' : 'stale';
   const warnings = [];
   if (!ownerFresh) {
     warnings.push({ code: 'personal_analysis_owner_stale' });
@@ -908,6 +914,7 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
   if (!scopeFresh) {
     warnings.push({ code: 'personal_analysis_scope_stale' });
   }
+  if (needsMergedUpAverage) warnings.push({ code: 'personal_analysis_up_average_pending' });
   const queueScope =
     manifestScope?.gameUid && manifestScope?.serverScope
       ? manifestScope
@@ -921,7 +928,7 @@ async function handleLoadPersonalAnalysis(url, res, dbClient, authResult) {
     availability === 'stale'
         ? await prioritizePersonalAnalysisJobs(dbClient, userId, {
           scope: queueScope,
-          forceScope: scopeFresh && needsDropDetails,
+          forceScope: scopeFresh && (needsDropDetails || needsMergedUpAverage),
         })
       : false;
   const immediateDispatch =

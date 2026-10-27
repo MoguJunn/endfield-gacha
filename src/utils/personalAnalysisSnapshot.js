@@ -33,6 +33,7 @@ import { buildSimulatorInheritanceProjection } from '../features/simulator/inher
 import { packInheritanceProjection } from '../../shared/simulator/historyCodec.js';
 import { getRecordPoolVersion } from '../../shared/poolVersion.js';
 import { applyPersonalAnalysisCoverage, personalAnalysisCoverage, preparePersonalAnalysisData } from './personalAnalysisData.js';
+import { buildMergedUpAverage } from './mergedUpAverage.js';
 
 const LEGACY_ACCOUNT_KEY = 'legacy';
 const GROUP_TYPES = ['all', 'extra', 'limited', 'standard', 'weapon_limited', 'weapon_standard', 'beginner'];
@@ -845,7 +846,9 @@ function buildDashboard(history, pools, poolManifest, resolveCharacter, { origin
       }
     }
   }
-  return { views, timelineViews };
+  return { views, timelineViews,
+    mergedUpAverage: buildMergedUpAverage({ history, pools: poolManifest, characters, entries }),
+  };
 }
 
 function buildRecentSixStars(history, poolManifest, resolveCharacter) {

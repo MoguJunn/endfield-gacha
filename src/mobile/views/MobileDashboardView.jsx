@@ -14,6 +14,7 @@ import MobilePoolRailSelector from '../components/MobilePoolRailSelector';
 import MobileChartContainer from '../components/MobileChartContainer.jsx';
 import ResourceSummaryPanel from '../../components/resources/ResourceSummaryPanel';
 import AveragePullStatsPanel from '../../components/dashboard/AveragePullStatsPanel';
+import MergedUpAveragePanel from '../../components/dashboard/MergedUpAveragePanel.jsx';
 import PoolTimelinePanel from '../../components/dashboard/PoolTimelinePanel';
 import DashboardShareCard from '../../components/dashboard/DashboardShareCard';
 import ShareActionStatus from '../../components/share/ShareActionStatus';
@@ -221,6 +222,7 @@ function MobileDashboardView() {
     resourceSummaryVariant,
     isAnalysisBacked,
     snapshotSplitOverviewStats,
+    mergedUpAverage,
     snapshotTimelineSections
   } = useDashboardViewState();
   const currentPoolCapabilities = React.useMemo(
@@ -1423,6 +1425,8 @@ function MobileDashboardView() {
         </div>
       )}
 
+      {isAllPoolsOverview && <MergedUpAveragePanel data={mergedUpAverage} pools={selectedPools}
+        includeFree={includeFreePullsInStats} mobile className="mx-4 mb-4" />}
       <AveragePullStatsPanel
         stats={stats}
         poolType={analysisPity.normalizedType}

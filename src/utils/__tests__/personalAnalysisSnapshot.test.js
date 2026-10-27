@@ -6,6 +6,7 @@ import {
 } from '../personalAnalysisSnapshot.js';
 import { buildSummaryStats } from '../summaryStats.js';
 import { decodeHistories } from '../../../shared/simulator/historyCodec.js';
+import { aggregateMergedUpAverage } from '../mergedUpAverage.js';
 
 const USER_ID = 'user-1';
 
@@ -60,6 +61,8 @@ describe('buildPersonalAnalysisSnapshots', () => {
       is_standard: index >= 100,
     }));
     const { scopes } = buildPersonalAnalysisSnapshots({ history, pools, characters, userId: USER_ID });
+    expect(aggregateMergedUpAverage(JSON.parse(JSON.stringify(scopes[0].payload.dashboard.mergedUpAverage)), { entityType: 'character' }))
+      .toMatchObject({ pulls: 143, upCount: 11, unknownSixCount: 0, average: 13 });
     const views = JSON.parse(JSON.stringify(scopes[0].payload.dashboard.views));
     for (const variant of ['excludeFree', 'includeFree']) {
       const split = views.__group_all[variant].splitOverviewStats.character;
@@ -68,6 +71,22 @@ describe('buildPersonalAnalysisSnapshots', () => {
       expect(split.avgPullCost['6_limited']).toBe('11.00');
       expect(views.__group_limited[variant].stats.avgPullCost['6_limited']).toBe('11.00');
     }
+  });
+
+  it('合并UP事实按账号与区服隔离，快照不带原始记录', () => {
+    const pools = [{ id: 'limited-a', type: 'limited', up_character: 'Target A' }];
+    const characters = [{ id: 'a', name: 'Target A', type: 'character', rarity: 6 }];
+    const history = [
+      createPull({ id: 'one', poolId: 'limited-a', rarity: 6, character_id: 'a', character_name: 'Target A' }),
+      createPull({ id: 'two', poolId: 'limited-a', serverId: '2' }),
+      createPull({ id: 'other', poolId: 'limited-a', userId: 'user-2', rarity: 6, character_id: 'a' }),
+    ];
+    const { scopes } = buildPersonalAnalysisSnapshots({ history, pools, characters, userId: USER_ID });
+    expect(aggregateMergedUpAverage(scopes.find(scope => scope.sourceServerScope === '1').payload.dashboard.mergedUpAverage, { entityType: 'character' }))
+      .toMatchObject({ pulls: 1, upCount: 1, average: 1 });
+    expect(aggregateMergedUpAverage(scopes.find(scope => scope.sourceServerScope === '2').payload.dashboard.mergedUpAverage, { entityType: 'character' }))
+      .toMatchObject({ pulls: 1, upCount: 0, average: null });
+    expect(JSON.stringify(scopes.map(scope => scope.payload.dashboard.mergedUpAverage))).not.toContain('character_name');
   });
 
   it('只处理目标用户，并按记录数选择默认账号', () => {
