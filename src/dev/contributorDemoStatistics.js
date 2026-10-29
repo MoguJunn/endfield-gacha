@@ -6,6 +6,7 @@ import { buildGroupPoolObservations } from '../utils/groupPoolObservations.js';
 import { prepareScopedLegacyStatistics } from '../utils/scopedLegacyStatistics.js';
 import { resolvePoolCapabilities } from '../utils/poolCapabilities.js';
 import { STATISTICS_GROUPS, getStatisticsGroupPools, normalizeStatisticsPool } from '../../shared/statisticsScopes.js';
+import { buildPersonalLuck } from '../utils/personalLuck.js';
 
 let cached = null;
 
@@ -42,7 +43,10 @@ function getStatistics() {
     }
   }
   const updatedAt = new Date().toISOString();
-  cached = { revision: snapshot.revision, data: { pools, accounts, scopes, legacyScopes, groupScopes },
+  const versionConfig = snapshot.siteConfigItems.find(item => item.key === 'home_version_timeline')?.value;
+  const luck = buildPersonalLuck({ history, pools, characters: snapshot.characters,
+    versionConfig, fetchedAt: updatedAt });
+  cached = { revision: snapshot.revision, data: { pools, accounts, scopes, legacyScopes, groupScopes, luck },
     meta: { source: 'contributor-local-sandbox', ownerId: CONTRIBUTOR_DEMO_USER.id, truncated: false,
       updatedAt, nextRefreshAt: new Date(Date.now() + 3600000).toISOString(), refreshIntervalMinutes: 60 } };
   return cached;

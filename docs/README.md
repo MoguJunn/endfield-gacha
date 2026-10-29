@@ -12,6 +12,7 @@
 - [第三方历史记录迁入](RESCUE_FILE_IMPORT.md)：endgacha.kwer.top、小助手高星 Excel 与离愁轩 Wiki 的格式和资料边界。
 - [文件导入、去重与失败恢复](FILE_IMPORT_RELIABILITY.md)：服务器保存进度、跨格式逐条匹配、草稿有效期、手机弹窗与删除入口。
 - [统计指标](STATS_OBSERVATION_CONTRACT.md)：单池／合池、首次样本、账号覆盖与未知数据的解释。
+- [个人手气与高光](PERSONAL_LUCK.md)：评价分档、最近三个版本、奖励跳号与后台快照更新。
 - [卡池与日历时间](POOL_SCHEDULE_MANAGEMENT.md)：武器池关联、重构期次、官方日期与缓存传播。
 - [桌面界面](DESKTOP_HOME_DEMO.md)：新版／经典主页、导航、消息与响应式布局。
 - [首次指南设计](ONBOARDING_GUIDE_PLAN.md)、[移动首页设计](MOBILE_HOME_PLAN.md)：尚未完成的交互方案与验收要求。

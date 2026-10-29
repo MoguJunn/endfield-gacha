@@ -113,9 +113,12 @@ async function run() {
     await page.waitForFunction(() => document.body.textContent.includes('128,640'), null, { timeout: 15000 });
 
     await page.goto(`${baseUrl}/dashboard?view=overview`, { waitUntil: 'domcontentloaded' });
-    await page.locator('.ex-integrated[data-source="local"]').waitFor({ timeout: 15000 });
-    await page.getByTestId('observation-total').waitFor({ timeout: 15000 });
-    assert.ok(Number((await page.getByTestId('observation-total').textContent()).replaceAll(',', '')) > 0, '个人统计应读取沙盒演示历史');
+    await page.locator('[data-personal-luck-overview] .personal-luck').waitFor({ timeout: 15000 });
+    assert.ok(Number((await page.locator('.pl-summary-strip strong').first().textContent()).replaceAll(',', '')) > 0, '个人概览应读取完整沙盒账号快照');
+    await page.getByRole('button', { name: '最近三个版本', exact: true }).click();
+    await page.getByRole('button', { name: '查看本次统计说明' }).click();
+    await page.getByRole('dialog', { name: '本次统计说明' }).waitFor();
+    await page.keyboard.press('Escape');
 
     await page.goto(`${baseUrl}/admin`, { waitUntil: 'domcontentloaded' });
     await page.getByTestId('contributor-demo-admin-panel').waitFor({ timeout: 15000 });

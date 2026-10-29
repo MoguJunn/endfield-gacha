@@ -17,6 +17,7 @@ import { isGameAccountSelectionMatch, localizeGameAccountServerTag } from '../..
 import { filterHistoryForEffectiveGameUid, resolveEffectiveGameUid } from '../../utils/accountScopeUtils.js';
 import { useHorizontalWheelScroll } from '../../hooks/useHorizontalWheelScroll.js';
 import { resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
+import PersonalLuckOverview from '../../components/dashboard/PersonalLuckOverview.jsx';
 
 function getFreshnessToneClasses(tone) {
   switch (tone) {
@@ -285,6 +286,10 @@ export default function MobileOverviewView() {
             <div className="mt-1 font-mono text-3xl font-black text-amber-600 dark:text-ef-yellow">{totalSixStars}</div>
           </div>
         </div>
+      </section>
+
+      <section className="mb-6" aria-label={locale === 'en-US' ? 'Personal luck and highlights' : '个人手气与高光'}>
+        <PersonalLuckOverview />
       </section>
 
       <section className="mobile-ux-card mb-6 p-4">
