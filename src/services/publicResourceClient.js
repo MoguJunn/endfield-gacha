@@ -18,6 +18,7 @@ const versionState = {
   value: null,
   fetchedAt: 0,
   promise: null,
+  forced: false,
 };
 const resourceMemoryCache = new Map();
 const resourceRequests = new Map();
@@ -87,7 +88,7 @@ export async function getPublicCacheVersion(forceRefresh = false) {
     return versionState.value;
   }
 
-  if (!forceRefresh && versionState.promise) {
+  if (versionState.promise && (!forceRefresh || versionState.forced)) {
     return versionState.promise;
   }
 
@@ -115,6 +116,7 @@ export async function getPublicCacheVersion(forceRefresh = false) {
     return version;
   })();
   versionState.promise = request;
+  versionState.forced = forceRefresh;
 
   try {
     return await request;

@@ -23,4 +23,11 @@ describe('public cache version browser reuse', () => {
     expect(mocks.fetch).toHaveBeenLastCalledWith(expect.stringMatching(/^\/api\/public-cache-version\?ts=\d+$/),
       expect.objectContaining({ cache: 'no-store' }), expect.any(Object));
   });
+  it('shares the same forced version check across simultaneously refreshing panels', async () => {
+    const { getPublicCacheVersion } = await import('../publicResourceClient.js');
+    await getPublicCacheVersion();
+    expect(await Promise.all([getPublicCacheVersion(true), getPublicCacheVersion(true), getPublicCacheVersion(true)]))
+      .toEqual(['public-version', 'public-version', 'public-version']);
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  });
 });
