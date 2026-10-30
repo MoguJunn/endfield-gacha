@@ -50,6 +50,16 @@ describe('real statistics workspace', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     expect(state.load).not.toHaveBeenCalled();
   });
+  it('bypasses public caches only for the explicit refresh button', async () => {
+    render(<PoolStatisticsWorkspace lockedDataSource="global" overview={() => <div>overview</div>} />);
+    await waitFor(() => expect(fetch.mock.calls.some(([url]) => String(url).includes('pool_observations'))).toBe(true));
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('ts='))).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '综合概览与图鉴' }));
+    await waitFor(() => expect(state.load).toHaveBeenLastCalledWith(false));
+    fireEvent.click(screen.getByRole('button', { name: '获取最新结果' }));
+    await waitFor(() => expect(state.load).toHaveBeenLastCalledWith(true));
+    await waitFor(() => expect(fetch.mock.calls.some(([url, options]) => String(url).includes('ts=') && options.cache === 'no-store')).toBe(true));
+  });
   it('filters game accounts by UID and region using all saved rows', async () => {
     state.user = { id: 'owner' };
     state.load.mockResolvedValue(snapshot([record(1, 'same'), record(2, 'same'), record(3, 'same', 'intl')]));

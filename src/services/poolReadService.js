@@ -65,12 +65,13 @@ async function runCachedCollectionRequest(state, fetcher, { forceRefresh = false
   }
 }
 
-async function fetchPublicPoolCollection(type) {
+async function fetchPublicPoolCollection(type, forceRefresh = false) {
   const result = await fetchPublicApiJson('/api/stats', {
     params: { type },
     label: `public ${type} api`,
     timeoutMs: PUBLIC_STATS_API_TIMEOUT_MS,
-    retries: 1
+    retries: 1,
+    forceRefresh,
   });
 
   return Array.isArray(result?.data?.pools) ? result.data.pools : null;
@@ -245,7 +246,7 @@ export async function loadVisiblePools(options = {}) {
   const { forceRefresh = false } = options;
 
   return runCachedCollectionRequest(requestState.visiblePools, async () => {
-    const apiPools = await fetchPublicPoolCollection('pools').catch(() => null);
+    const apiPools = await fetchPublicPoolCollection('pools', forceRefresh).catch(() => null);
     if (Array.isArray(apiPools) && apiPools.length > 0) {
       return dedupeVisiblePoolRecords(apiPools).map(formatVisiblePoolRecord);
     }
@@ -328,7 +329,7 @@ export async function loadAllPoolsForCatalog(options = {}) {
   const { forceRefresh = false } = options;
 
   return runCachedCollectionRequest(requestState.poolCatalog, async () => {
-    const apiPools = await fetchPublicPoolCollection('pool_catalog').catch(() => null);
+    const apiPools = await fetchPublicPoolCollection('pool_catalog', forceRefresh).catch(() => null);
     if (Array.isArray(apiPools) && apiPools.length > 0) {
       return dedupeVisiblePoolRecords(apiPools).map(formatVisiblePoolRecord);
     }

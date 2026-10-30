@@ -12,6 +12,7 @@ vi.mock('../../dev/contributorDemoSandboxStore.js', () => ({
   getContributorDemoSandboxSnapshot: () => ({ revision: state.revision,
     pools: [{ id: 'p', name: '演示限定池', type: 'limited', up_character: 'A' }],
     characters: [{ id: 'a', name: 'A', rarity: 6, type: 'character' }],
+    siteConfigItems: [{ key: 'home_version_timeline', value: { versions: [{ id: 'v1', name: '测试版本', starts_at: '2023-01-01T00:00:00Z' }] } }],
     poolCharacters: { p: [{ characters: { id: 'a', name: 'A', rarity: 6, type: 'character' }, is_up: true }] },
   }),
 }));
@@ -27,6 +28,7 @@ beforeEach(() => {
   state.demo = true;
   state.active = true;
   state.revision++;
+  localStorage.clear();
   vi.stubEnv('DEV', true);
   vi.stubGlobal('fetch', vi.fn());
 });
@@ -67,10 +69,13 @@ describe('scheduled statistics data source', () => {
 
   it('uses same-origin APIs outside the development sandbox', async () => {
     vi.stubEnv('DEV', false);
+    state.demo = false;
     fetch.mockResolvedValue({ ok: true, json: async () => ({ success: true, data: {} }) });
     const controller = new AbortController();
     await loadPublicStatistics('group_statistics', controller.signal, { kind: 'group', groupKey: 'extra:reconstruction' });
-    expect(fetch).toHaveBeenCalledWith('/api/stats?type=group_statistics&groupKey=extra%3Areconstruction', { signal: controller.signal });
+    const [url, options] = fetch.mock.calls[0];
+    expect(url).toContain('/api/stats?type=group_statistics&groupKey=extra%3Areconstruction');
+    expect(options.signal).toBeInstanceOf(AbortSignal);
     await loadPersonalStatistics(controller.signal);
     expect(fetch).toHaveBeenLastCalledWith('/api/stats?type=personal_statistics', expect.objectContaining({ credentials: 'same-origin', signal: controller.signal }));
   });

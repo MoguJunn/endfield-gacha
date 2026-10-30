@@ -41,6 +41,8 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
   const [globalCounts, setGlobalCounts] = useState({});
   const [tab, setTab] = useState('observed');
   const [refresh, setRefresh] = useState(0);
+  const [forcedRefresh, setForcedRefresh] = useState(-1);
+  const forceRefresh = forcedRefresh === refresh;
   const [privateResponse, setPrivateData] = useState(EMPTY_PRIVATE_DATA);
   const [globalData, setGlobalData] = useState({ scopeKey: null, data: null, error: false });
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -48,14 +50,14 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
   const privateData = privateResponse;
   useEffect(() => {
     const controller = new AbortController();
-    Promise.all([readStats('pools', controller.signal), source === 'global' ? readStats('pool_counts', controller.signal) : null]).then(([result, counts]) => {
+    Promise.all([readStats('pools', controller.signal, null, { forceRefresh }), source === 'global' ? readStats('pool_counts', controller.signal, null, { forceRefresh }) : null]).then(([result, counts]) => {
       if (controller.signal.aborted) return;
       const pools = result.data?.pools;
       setCatalog({ pools: Array.isArray(pools) ? pools : [], error: !Array.isArray(pools) });
       if (source === 'global') setGlobalCounts(counts.data?.counts || {});
     }).catch(() => { if (!controller.signal.aborted) setCatalog((old) => ({ ...old, error: true })); });
     return () => controller.abort();
-  }, [refresh, source]);
+  }, [refresh, source, forceRefresh]);
   useEffect(() => {
     if (source !== 'local' || !user?.id) return undefined;
     const controller = new AbortController();
@@ -93,15 +95,15 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
     if (source !== 'global' || (!poolId && !groupKey)) return undefined;
     const controller = new AbortController();
     const requestScope = groupKey ? { kind: 'group', groupKey } : { kind: 'pool', poolId };
-    readStats(groupKey ? 'group_statistics' : 'pool_observations', controller.signal, requestScope).then((result) => {
+    readStats(groupKey ? 'group_statistics' : 'pool_observations', controller.signal, requestScope, { forceRefresh }).then((result) => {
       if (!controller.signal.aborted) setGlobalData({ scopeKey, data: result.data, error: !result.data, refresh });
     }).catch(() => { if (!controller.signal.aborted) setGlobalData({ scopeKey, data: null, error: true, refresh }); });
     return () => controller.abort();
-  }, [source, poolId, groupKey, scopeKey, refresh]);
+  }, [source, poolId, groupKey, scopeKey, refresh, forceRefresh]);
   useEffect(() => {
     if (source !== 'global' || tab !== 'overview') return undefined;
-    fetchGlobalStats(true);
-  }, [source, tab, refresh, fetchGlobalStats]);
+    fetchGlobalStats(forceRefresh);
+  }, [source, tab, refresh, fetchGlobalStats, forceRefresh]);
   const localGroup = privateData.data?.groupScopes?.[selectedAccountKey]?.[groupKey];
   const localStats = group ? localGroup?.observations : personalScope?.[poolId];
   const hasGlobalResponse = globalData.scopeKey === scopeKey;
@@ -152,7 +154,7 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
             {source === 'local' && accounts.map((account) => <option key={account.key} value={account.key}>{account.name} · {account.gameUid} · {account.serverScope}</option>)}
           </select></label></section>
           <p className="ex-sidebar-hint">{t('首次均指同一对象在本期卡池内首次获得。', 'First acquisition always means the first copy of an item within this banner period.')}</p>
-          <button className="ex-refresh" onClick={() => setRefresh((value) => value + 1)}><RefreshCw key={refresh} className={refresh ? 'ex-refresh-feedback' : ''} size={14} />{t('获取最新结果', 'Get latest results')}</button>
+          <button className="ex-refresh" onClick={() => { setForcedRefresh(refresh + 1); setRefresh((value) => value + 1); }}><RefreshCw key={refresh} className={refresh ? 'ex-refresh-feedback' : ''} size={14} />{t('获取最新结果', 'Get latest results')}</button>
           <StatisticsPoolList pools={pools} counts={source === 'local' ? poolPullCounts : { ...globalCounts, ...(stats && !group ? { [poolId]: stats.total } : {}) }}
             scope={scope} onSelect={selectScope} locale={locale} t={t} />
         </div>

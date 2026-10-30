@@ -195,12 +195,13 @@ function withStatsMeta(stats, meta = {}) {
   };
 }
 
-async function fetchStatsApi(type) {
+async function fetchStatsApi(type, forceRefresh = false) {
   const result = await fetchPublicApiJson('/api/stats', {
     params: { type },
     label: `stats api ${type}`,
     timeoutMs: STATS_API_TYPE_TIMEOUT_MS[type] || STATS_API_TIMEOUT_MS,
-    retries: type === 'character_catalog' ? 0 : 1
+    retries: type === 'character_catalog' ? 0 : 1,
+    forceRefresh,
   });
 
   return result?.data || null;
@@ -687,7 +688,7 @@ export async function getGlobalSummaryStats(forceRefresh = false) {
       globalStatsRequestState,
       async () => {
         const [apiPayload, catalogPayload] = await Promise.all([
-          fetchStatsApi('global_summary').catch(() => null),
+          fetchStatsApi('global_summary', forceRefresh).catch(() => null),
           getCharacterCatalogStats(forceRefresh).catch(() => null)
         ]);
         if (apiPayload?.globalSummary) {
@@ -762,7 +763,7 @@ export async function getCharacterCatalogStats(forceRefresh = false) {
     return await runCachedRequest(
       characterCatalogRequestState,
       async () => {
-        const apiPayload = await fetchStatsApi('character_catalog').catch(() => null);
+        const apiPayload = await fetchStatsApi('character_catalog', forceRefresh).catch(() => null);
         if (apiPayload?.characterCatalog) {
           const normalizedFromApi = sanitizeCharacterCatalogMedia(
             normalizeGlobalCharacterCatalog(apiPayload.characterCatalog)
@@ -801,7 +802,7 @@ export async function getCharacterRankingStats(forceRefresh = false) {
     return await runCachedRequest(
       characterRankingRequestState,
       async () => {
-        const apiPayload = await fetchStatsApi('character_ranking').catch(() => null);
+        const apiPayload = await fetchStatsApi('character_ranking', forceRefresh).catch(() => null);
         if (apiPayload?.characterRanking) {
           writePersistedSnapshot(STORAGE_KEYS.CHARACTER_RANKING_SNAPSHOT, apiPayload.characterRanking);
           return apiPayload.characterRanking;

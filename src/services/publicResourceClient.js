@@ -1,10 +1,14 @@
 import { fetchJsonWithTimeout, fetchWithTimeout } from './supabaseRequest.js';
 import { readStorageValue, writeStorageValue } from '../utils/storageUtils.js';
+import { readBrowserPublicCache, writeBrowserPublicCache } from './browserPublicCache.js';
 
 const PUBLIC_CACHE_VERSION_TIMEOUT_MS = 8000;
-const PUBLIC_CACHE_VERSION_MEMORY_TTL = 30 * 1000;
+const PUBLIC_CACHE_VERSION_MEMORY_TTL = 10 * 60 * 1000;
 const PUBLIC_RESOURCE_MEMORY_TTL = 60 * 1000;
 const PUBLIC_RESOURCE_SNAPSHOT_PREFIX = 'public_resource_snapshot_v1:';
+const VERSION_STORAGE_KEY = 'endfield-public-version-v1';
+const CATALOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const STATISTICS_MAX_AGE_MS = 5 * 60 * 1000;
 
 const IS_LOCAL_DEV = Boolean(import.meta.env?.DEV);
 const ALLOW_EMERGENCY_PUBLIC_SUPABASE_FALLBACK = ['1', 'true', 'yes']
@@ -16,6 +20,49 @@ const versionState = {
   promise: null,
 };
 const resourceMemoryCache = new Map();
+const resourceRequests = new Map();
+const resourceGenerations = new Map();
+
+function cachePolicy(path, params) {
+  // An explicit allowlist keeps session, owner, admin and import data out of disk.
+  if (path === '/api/bootstrap') return { maxAgeMs: CATALOG_MAX_AGE_MS };
+  if (path === '/api/pool-rosters') return { maxAgeMs: CATALOG_MAX_AGE_MS };
+  if (path !== '/api/stats') return null;
+  const type = new URLSearchParams(params || undefined).get('type');
+  if (['characters', 'pools', 'pool_catalog'].includes(type)) return { maxAgeMs: CATALOG_MAX_AGE_MS };
+  if (['global_summary', 'character_ranking', 'character_catalog', 'pool_counts', 'pool_observations', 'group_statistics'].includes(type)) {
+    return { maxAgeMs: STATISTICS_MAX_AGE_MS };
+  }
+  return null;
+}
+
+function rememberVersion(value, checkedAt = Date.now()) {
+  versionState.value = String(value);
+  versionState.fetchedAt = checkedAt;
+  writeStorageValue(VERSION_STORAGE_KEY, JSON.stringify({ value: versionState.value, checkedAt }), { raw: true });
+}
+
+function restoreVersion() {
+  if (versionState.value !== null) return;
+  try {
+    const saved = JSON.parse(readStorageValue(VERSION_STORAGE_KEY, null, { raw: true }));
+    if (typeof saved?.value === 'string' && Number.isFinite(saved.checkedAt) && saved.checkedAt <= Date.now()) {
+      versionState.value = saved.value;
+      versionState.fetchedAt = saved.checkedAt;
+    }
+  } catch { /* A missing or corrupt version is checked over the network. */ }
+}
+
+function waitForResource(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason || new DOMException('Aborted', 'AbortError'));
+  return new Promise((resolve, reject) => {
+    const aborted = () => reject(signal.reason || new DOMException('Aborted', 'AbortError'));
+    signal.addEventListener('abort', aborted, { once: true });
+    promise.then(value => { signal.removeEventListener('abort', aborted); resolve(value); },
+      error => { signal.removeEventListener('abort', aborted); reject(error); });
+  });
+}
 
 export function shouldUsePublicApi() {
   return !IS_LOCAL_DEV;
@@ -35,6 +82,7 @@ export async function getPublicCacheVersion(forceRefresh = false) {
     return 'dev';
   }
 
+  restoreVersion();
   if (isFreshVersion(forceRefresh)) {
     return versionState.value;
   }
@@ -43,7 +91,7 @@ export async function getPublicCacheVersion(forceRefresh = false) {
     return versionState.promise;
   }
 
-  versionState.promise = (async () => {
+  const request = (async () => {
     const query = forceRefresh ? `?ts=${Date.now()}` : '';
     const response = await fetchWithTimeout(`/api/public-cache-version${query}`, {
       method: 'GET',
@@ -63,15 +111,15 @@ export async function getPublicCacheVersion(forceRefresh = false) {
 
     const payload = await response.json();
     const version = String(payload?.cacheVersion || payload?.meta?.cacheVersion || '0');
-    versionState.value = version;
-    versionState.fetchedAt = Date.now();
+    if (versionState.promise === request) rememberVersion(version);
     return version;
   })();
+  versionState.promise = request;
 
   try {
-    return await versionState.promise;
+    return await request;
   } finally {
-    versionState.promise = null;
+    if (versionState.promise === request) versionState.promise = null;
   }
 }
 
@@ -160,14 +208,16 @@ export async function fetchPublicApiJson(path, {
   snapshotKey = null,
   useSnapshotFallback = false,
   usePublicApiInDev = false,
+  signal,
 } = {}) {
+  if (signal?.aborted) throw signal.reason || new DOMException('Aborted', 'AbortError');
   const usePublicApi = shouldUsePublicApi() || usePublicApiInDev;
   if (!usePublicApi) {
     return useSnapshotFallback ? readPublicResourceSnapshot(snapshotKey) : null;
   }
 
   const cacheVersion = shouldUsePublicApi()
-    ? await getPublicCacheVersion(forceRefresh).catch(() => null)
+    ? await getPublicCacheVersion(forceRefresh).catch(() => versionState.value)
     : 'dev';
   const url = buildPublicApiUrl(path, {
     params,
@@ -175,49 +225,65 @@ export async function fetchPublicApiJson(path, {
     forceRefresh,
   });
 
-  const cachedPayload = readMemoryCache(url, memoryTtlMs, forceRefresh);
+  const policy = shouldUsePublicApi() ? cachePolicy(path, params) : null;
+  const cacheKey = buildPublicApiUrl(path, { params });
+  const ttlMs = policy ? policy.maxAgeMs : memoryTtlMs;
+  const cachedPayload = readMemoryCache(url, ttlMs, forceRefresh);
   if (cachedPayload) {
     return cachedPayload;
   }
 
-  try {
-    const { response, data } = await fetchJsonWithTimeout(url, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    }, {
-      label,
-      timeoutMs,
-      retries,
-    });
-
-    if (!response.ok) {
-      throw new Error(`${label} failed with ${response.status}`);
+  // The shared request has its own network timeout. Aborting one view only
+  // cancels that view's wait, never another subscriber's fetch or cache write.
+  if (resourceRequests.has(url)) return waitForResource(resourceRequests.get(url), signal);
+  if (forceRefresh) resourceGenerations.set(cacheKey, (resourceGenerations.get(cacheKey) || 0) + 1);
+  const generation = resourceGenerations.get(cacheKey) || 0;
+  const request = (async () => {
+    if (policy && cacheVersion && !forceRefresh) {
+      const saved = await readBrowserPublicCache(cacheKey);
+      if (saved?.cacheVersion === cacheVersion && saved.payload?.success === true
+        && saved.savedAt <= Date.now() && Date.now() - saved.savedAt < ttlMs) {
+        if (generation === (resourceGenerations.get(cacheKey) || 0)) resourceMemoryCache.set(url, { payload: saved.payload, fetchedAt: saved.savedAt });
+        return saved.payload;
+      }
     }
+    try {
+      const { response, data } = await fetchJsonWithTimeout(url, {
+        method: 'GET',
+        ...(forceRefresh ? { cache: 'no-store' } : {}),
+        headers: { 'Content-Type': 'application/json' },
+      }, { label, timeoutMs, retries });
 
-    if (!data?.success) {
-      throw new Error(data?.error || `${label} returned failure`);
-    }
+      if (!response.ok) throw new Error(`${label} failed with ${response.status}`);
+      if (!data?.success) throw new Error(data?.error || `${label} returned failure`);
 
-    if (data?.meta?.cacheVersion) {
-      versionState.value = String(data.meta.cacheVersion);
-      versionState.fetchedAt = Date.now();
-    }
+      // Public data responses must not indefinitely postpone the small version
+      // check. Only an actual version response advances its checkedAt timestamp.
+      const responseVersion = String(data?.meta?.cacheVersion || cacheVersion || '');
+      if (responseVersion && responseVersion !== cacheVersion && versionState.value === cacheVersion) {
+        rememberVersion(responseVersion, versionState.fetchedAt);
+      }
 
-    resourceMemoryCache.set(url, {
-      payload: data,
-      fetchedAt: Date.now(),
-    });
-    writePublicResourceSnapshot(snapshotKey, data);
-    return data;
-  } catch (error) {
-    const snapshot = useSnapshotFallback ? readPublicResourceSnapshot(snapshotKey) : null;
-    if (snapshot) {
-      return snapshot;
+      const complete = response.status !== 202 && !data.partial && !data.stale
+        && data.meta?.availability !== 'building' && data.data && Object.values(data.data).every(value => value !== null)
+        && data.data.meta?.availability !== 'building';
+      const stillCurrent = generation === (resourceGenerations.get(cacheKey) || 0);
+      const memoryKey = buildPublicApiUrl(path, { params, cacheVersion: responseVersion || cacheVersion });
+      if (stillCurrent && (!policy || complete)) resourceMemoryCache.set(memoryKey, { payload: data, fetchedAt: Date.now() });
+      if (stillCurrent && policy && complete && responseVersion) {
+        await writeBrowserPublicCache({ key: cacheKey, cacheVersion: responseVersion, savedAt: Date.now(), payload: data });
+      }
+      if (resourceMemoryCache.size > 96) resourceMemoryCache.delete(resourceMemoryCache.keys().next().value);
+      writePublicResourceSnapshot(snapshotKey, data);
+      return data;
+    } catch (error) {
+      const snapshot = useSnapshotFallback ? readPublicResourceSnapshot(snapshotKey) : null;
+      if (snapshot) return snapshot;
+      throw error;
     }
-    throw error;
-  }
+  })().finally(() => { if (resourceRequests.get(url) === request) resourceRequests.delete(url); });
+  resourceRequests.set(url, request);
+  return waitForResource(request, signal);
 }
 
 export default {
