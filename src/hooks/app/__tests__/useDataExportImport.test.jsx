@@ -153,6 +153,28 @@ describe('useDataExportImport export', () => {
     expect(result.current.pendingImport.data.pools[0].id).toBe('special_fixture');
   });
 
+  it('does not generate an empty preview when an xlsx is only an aggregate analysis sheet', async () => {
+    usePoolStore.setState({ pools: [] });
+    loadAllPoolsForCatalog.mockResolvedValue([{ id: 'special_fixture', name: '测试寻访', type: 'limited' }]);
+    characterCache.getAll.mockReturnValue([{ id: 'chr_fixture', name: '梨诺', type: 'character', rarity: 6 }]);
+    const rows = [['熔火', '信使', '晨星'], [194, 34, 120], [3, 1, 4]];
+    const sheet = '<worksheet><sheetData>' + rows.map((row, index) => `<row r="${index + 1}">` + row.map((value, column) =>
+      `<c r="${String.fromCharCode(65 + column)}${index + 1}" t="inlineStr"><is><t>${value}</t></is></c>`).join('') + '</row>').join('') + '</sheetData></worksheet>';
+    const bytes = zipSync({ 'xl/worksheets/sheet1.xml': strToU8(sheet) });
+    const showToast = vi.fn();
+    const cloudSync = createCloudSync();
+    const { result } = renderHook(() => useDataExportImport({ showToast, cloudSync }));
+    const input = { files: [new File([bytes], '终末地抽卡分析.xlsx')], value: '终末地抽卡分析.xlsx' };
+
+    act(() => result.current.handleImportFile({ target: input }));
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'import.fileParse',
+      message: expect.stringContaining('未能从 Excel 中识别到抽卡记录'),
+    })));
+    expect(result.current.pendingImport).toBeNull();
+    expect(cloudSync.saveHistoryToCloud).not.toHaveBeenCalled();
+  });
+
   it.each(['empty', 'rejected'])('does not generate an import preview when the catalog is %s', async outcome => {
     if (outcome === 'rejected') loadAllPoolsForCatalog.mockRejectedValueOnce(new Error('目录暂时不可用'));
     const showToast = vi.fn();

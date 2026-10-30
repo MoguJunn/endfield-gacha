@@ -92,6 +92,8 @@ npm run perf:report
 
 官方数据获取由独立 CN／INTL 后端承接。浏览器提交 `import-full` 后轮询 `import-status`；后端规范化、过滤非寻访事件、内部暂存并通过 RPC 原子写入。可精确定位的未知记录产生核对提醒，缺少账号／区服／卡池／序号等安全归属的记录跳过。
 
+2026-10-30 国际服维护已部署 `endfield-backend-intl:1.7.0-account-rerun-20261030`。此前缺少游戏 UID 的绑定条目会触发数据库 `invalid_import_account`；现于绑定前返回 `IMPORT_ACCOUNT_ROLE_MISSING`，提示检查所选区服角色，不能以平台登录 UID 代替游戏 UID。此次同时同步重构池“前瞻”后缀匹配，避免正式名称与预告名称产生新池。部署前保留原镜像与文件、确认没有执行中的任务；部署后已核对运行文件校验值和 `/health` 的 `fullImport: true`。该后端更新不代表主站 Excel 解析代码已发布。
+
 公开仓库保留共享导入合同与测试，不提供完整服务包。后端集成须携带相同的 normalizer、保底规则与暂存／增量模块，分别验证地区健康、CORS 和导入行为。重构与赠送规则见 [重构导入](official-rerun-import.md)、[赠送记录](OFFICIAL_TRUST_TOKEN_FIX.md)。
 
 历史编辑与删除使用完整账号作用域、乐观锁和变更审计；旧仅 ID 批量删除遇到跨账号重复 ID 时整笔拒绝。修复或回填前生成最新审阅计划、备份并核对精确影响范围，工具见 [数据待完善项](CLOSEOUT_LEDGER.md)。

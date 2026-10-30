@@ -740,7 +740,7 @@ describe('executeFullImport import mode metadata', () => {
     expect(grantAppToken).not.toHaveBeenCalled();
   });
 
-  it.each([null, '', '   '])('rejects a missing game UID before reading account history: %j', async gameUid => {
+  it.each(['cn', 'intl'].flatMap(source => [null, '', '   '].map(gameUid => [source, gameUid])))('rejects a missing %s game UID before reading account history: %j', async (source, gameUid) => {
     mockSupabaseClient = {
       auth: { admin: { getUserById: vi.fn(async () => ({ data: { user: { id: 'user-1' } }, error: null })) } },
       rpc: vi.fn(async () => ({ data: true, error: null })),
@@ -758,7 +758,7 @@ describe('executeFullImport import mode metadata', () => {
     const { executeFullImport, initSupabaseAdmin } = await import('../../backend/fullImportService.js');
     initSupabaseAdmin('https://example.supabase.co', 'service-role-key');
 
-    await expect(executeFullImport({ token: 'AbCdEfGhIjKlMnOpQrStUvWx', accountIndex: 1, userId: 'user-1',
+    await expect(executeFullImport({ token: 'AbCdEfGhIjKlMnOpQrStUvWx', source, accountIndex: 1, userId: 'user-1',
       updateProgress: vi.fn(), authChainFunctions }))
       .rejects.toMatchObject({ code: 'IMPORT_ACCOUNT_ROLE_MISSING', message: expect.stringContaining('游戏 UID') });
 
