@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { BarChart3, Cloud, ListFilter, RefreshCw, User, Clock3, Users, Gift, BookOpen, ArrowUpRight } from 'lucide-react';
 import { useI18n } from '../../i18n/index.js';
 import { useTheme } from '../../contexts/ThemeContext';
-import { useAppStore, useAuthStore, useHistoryStore, usePoolStore } from '../../stores/index.js';
+import { useAppStore, useAuthStore, usePoolStore } from '../../stores/index.js';
 import { loadPersonalStatistics, loadPublicStatistics as readStats } from '../../services/scheduledStatisticsService.js';
 import { resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
 import { getStatisticsGroup, getStatisticsGroupPools, normalizeStatisticsPool } from '../../../shared/statisticsScopes.js';
@@ -10,6 +10,7 @@ import StatisticsPoolList from './StatisticsPoolList.jsx';
 import ScopedLegacyStatisticsPanel from './ScopedLegacyStatisticsPanel.jsx';
 import PoolObservationCharts from './PoolObservationCharts.jsx';
 import PoolTargetPrediction from './PoolTargetPrediction.jsx';
+import { useSnapshotVersion } from '../../hooks/app/useSnapshotVersion.js';
 import '../home/homeLandingDemo.css';
 import '../ui/experienceFoundation.css';
 import './poolStatisticsWorkspace.css';
@@ -32,7 +33,10 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
   const openAuthModal = useAuthStore((state) => state.openAuthModal);
   const storedPools = usePoolStore((state) => state.pools);
   const currentPoolId = usePoolStore((state) => state.currentPoolId);
-  const historyRevision = useHistoryStore((state) => state.history);
+  const versions = useSnapshotVersion(source === 'local' ? user?.id : '');
+  const catalogVersion = versions?.catalogVersion;
+  const countsVersion = versions?.public?.pool_counts;
+  const personalVersion = versions?.personal?.statistics;
   const overviewMeta = useAppStore((state) => state.globalStats?.meta);
   const fetchGlobalStats = useAppStore((state) => state.fetchGlobalStats);
   const [catalog, setCatalog] = useState({ pools: [], error: false });
@@ -53,22 +57,24 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
     Promise.all([readStats('pools', controller.signal, null, { forceRefresh }), source === 'global' ? readStats('pool_counts', controller.signal, null, { forceRefresh }) : null]).then(([result, counts]) => {
       if (controller.signal.aborted) return;
       const pools = result.data?.pools;
-      setCatalog({ pools: Array.isArray(pools) ? pools : [], error: !Array.isArray(pools) });
+      setCatalog(previous => previous.pools === pools && !previous.error ? previous
+        : { pools: Array.isArray(pools) ? pools : [], error: !Array.isArray(pools) });
       if (source === 'global') setGlobalCounts(counts.data?.counts || {});
     }).catch(() => { if (!controller.signal.aborted) setCatalog((old) => ({ ...old, error: true })); });
     return () => controller.abort();
-  }, [refresh, source, forceRefresh]);
+  }, [refresh, source, forceRefresh, catalogVersion, countsVersion]);
   useEffect(() => {
     if (source !== 'local' || !user?.id) return undefined;
     const controller = new AbortController();
-    loadPersonalStatistics(controller.signal).then((result) => {
+    loadPersonalStatistics(controller.signal, { ownerId: user.id, checkVersion: forceRefresh }).then((result) => {
       if (result.meta?.ownerId !== user.id || result.meta?.truncated) {
         throw new Error('Incomplete or mismatched account history');
       }
-      if (!controller.signal.aborted) setPrivateData({ data: result.data, meta: result.meta, error: false });
+      if (!controller.signal.aborted) setPrivateData(previous => previous.data === result.data && previous.meta === result.meta && !previous.error
+        ? previous : { data: result.data, meta: result.meta, error: false });
     }).catch(() => { if (!controller.signal.aborted) setPrivateData((old) => ({ ...old, error: true })); });
     return () => controller.abort();
-  }, [source, user?.id, refresh, historyRevision]);
+  }, [source, user?.id, refresh, personalVersion, forceRefresh]);
   const pools = useMemo(() => {
     const map = new Map(catalog.pools.map((pool) => [pool.id, pool]));
     if (source === 'local') for (const pool of [...storedPools, ...(privateData.data?.pools || [])]) if (!map.has(pool.id)) map.set(pool.id, pool);
@@ -87,6 +93,8 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
   const poolId = scope.kind === 'pool' ? scope.poolId : '';
   const groupKey = group?.key || '';
   const scopeKey = group ? `group:${groupKey}` : `pool:${poolId}`;
+  const scopeVersion = versions?.public?.[scopeKey];
+  const overviewVersion = versions?.public?.global_summary;
   const selectScope = (nextScope) => {
     setScopeChoice(nextScope);
     if (tab === 'theory' && nextScope.kind === 'group') setTab('observed');
@@ -96,14 +104,15 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
     const controller = new AbortController();
     const requestScope = groupKey ? { kind: 'group', groupKey } : { kind: 'pool', poolId };
     readStats(groupKey ? 'group_statistics' : 'pool_observations', controller.signal, requestScope, { forceRefresh }).then((result) => {
-      if (!controller.signal.aborted) setGlobalData({ scopeKey, data: result.data, error: !result.data, refresh });
+      if (!controller.signal.aborted) setGlobalData(previous => previous.scopeKey === scopeKey && previous.data === result.data && !previous.error
+        ? previous : { scopeKey, data: result.data, error: !result.data });
     }).catch(() => { if (!controller.signal.aborted) setGlobalData({ scopeKey, data: null, error: true, refresh }); });
     return () => controller.abort();
-  }, [source, poolId, groupKey, scopeKey, refresh, forceRefresh]);
+  }, [source, poolId, groupKey, scopeKey, refresh, forceRefresh, scopeVersion]);
   useEffect(() => {
     if (source !== 'global' || tab !== 'overview') return undefined;
     fetchGlobalStats(forceRefresh);
-  }, [source, tab, refresh, fetchGlobalStats, forceRefresh]);
+  }, [source, tab, refresh, fetchGlobalStats, forceRefresh, overviewVersion]);
   const localGroup = privateData.data?.groupScopes?.[selectedAccountKey]?.[groupKey];
   const localStats = group ? localGroup?.observations : personalScope?.[poolId];
   const hasGlobalResponse = globalData.scopeKey === scopeKey;
@@ -112,16 +121,6 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
     : hasGlobalResponse ? globalData.data?.legacy : null;
   const poolPullCounts = Object.fromEntries(Object.entries(personalScope || {}).map(([id, value]) => [id, value.total]));
   const freshness = source === 'global' ? tab === 'overview' ? overviewMeta : hasGlobalResponse ? globalData.data?.meta : null : privateData.meta;
-  useEffect(() => {
-    if (source === 'local' && !user?.id) return undefined;
-    const delay = Math.max(60000, Math.min(3600000, Date.parse(freshness?.nextRefreshAt || '') - Date.now() || 60000));
-    const timer = window.setTimeout(() => {
-      if (document.visibilityState !== 'hidden') setRefresh((value) => value + 1);
-    }, delay);
-    const onVisible = () => { if (document.visibilityState === 'visible') setRefresh((value) => value + 1); };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => { window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible); };
-  }, [source, user?.id, freshness?.nextRefreshAt, refresh]);
   const capabilities = resolvePoolCapabilities(pool);
   const weapon = group ? group.entityType === 'weapon' : capabilities.entityType === 'weapon';
   const canPredict = !group && pool?.up_character && ['limited', 'limited_character', 'weapon', 'limited_weapon'].includes(pool.type);
@@ -167,11 +166,10 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
         </nav>
         {!guest && <div className="ex-freshness" role="status">
           <span><Clock3 size={12} aria-hidden="true" />{t('更新于', 'Updated')} {date(freshness?.updatedAt)}</span>
-          <span>{freshness?.source === 'local-snapshot' ? t('本地计算预览', 'Local snapshot preview') : freshness?.refreshMinutes ? `${t('自动刷新', 'Refresh interval')} · ${freshness.refreshMinutes} ${t('分钟', 'min')}` : t('等待首次计算', 'Awaiting initial calculation')}</span>
-          {freshness?.nextRefreshAt && <span>{t('下次检查', 'Next check')} {date(freshness.nextRefreshAt)}</span>}
+          <span>{freshness?.source === 'local-snapshot' ? t('本地计算预览', 'Local snapshot preview') : t('结果变化时更新', 'Updates when results change')}</span>
           {freshness?.stale && <span>{t('正在等待后台更新，当前展示上次结果', 'Awaiting background update; showing the previous result')}</span>}
         </div>}
-        {tab === 'overview' ? <React.Fragment key={refresh}>{overview(source, privateData.data)}</React.Fragment> : tab === 'theory' ? canPredict ? <PoolTargetPrediction key={poolId} weapon={weapon} targetName={pool.up_character} t={t} /> : <p className="ex-state">{t('该卡池的目标预测规则尚未接入，真实记录图表仍可查看。', 'Target prediction is not available for this banner; recorded statistics remain available.')}</p> : guest ?
+        {tab === 'overview' ? <React.Fragment>{overview(source, privateData.data)}</React.Fragment> : tab === 'theory' ? canPredict ? <PoolTargetPrediction key={poolId} weapon={weapon} targetName={pool.up_character} t={t} /> : <p className="ex-state">{t('该卡池的目标预测规则尚未接入，真实记录图表仍可查看。', 'Target prediction is not available for this banner; recorded statistics remain available.')}</p> : guest ?
           <div className="ex-state"><p>{t('登录后读取你已保存的账号与抽卡记录。', 'Sign in to read your saved accounts and pull history.')}</p><button className="ex-primary" onClick={openAuthModal}>{t('登录', 'Sign in')}</button></div> : error ?
           <div className="ex-state" role="alert"><p>{t('统计读取失败，请稍后重试。', 'Statistics could not be loaded. Please retry.')}</p><button onClick={() => setRefresh((value) => value + 1)}>{t('重试', 'Retry')}</button></div> : !stats ?
           <p className="ex-state" role="status">{source === 'local' && privateData.data && accounts.length === 0 ? t('尚未导入记录。请先从个人卡池分析导入。', 'No saved records. Import history from personal banner analysis first.') : source === 'local' && personalScope && !availablePools.length ? t('此账号暂无有效抽取记录，直接赠送不计入抽取统计。', 'No valid pull records for this account. Direct gifts are excluded from pull statistics.') : freshness?.availability === 'building' ? t('此卡池正在等待后台首次计算，完成后自动显示。', 'This banner is queued for its first calculation. Results will appear automatically.') : t('正在读取统计结果…', 'Loading statistics…')}</p> : <>

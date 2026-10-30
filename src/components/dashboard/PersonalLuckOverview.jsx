@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useI18n } from '../../i18n/index.js';
-import { useAuthStore, useHistoryStore, usePoolStore } from '../../stores/index.js';
+import { useAuthStore, usePoolStore } from '../../stores/index.js';
 import { buildGameAccountKey, isGameAccountSelectionMatch } from '../../utils/gameAccountMetadata.js';
 import { loadPersonalStatistics } from '../../services/scheduledStatisticsService.js';
 import PersonalLuckPanel from './PersonalLuckPanel.jsx';
+import { useSnapshotVersion } from '../../hooks/app/useSnapshotVersion.js';
 
 export default function PersonalLuckOverview({ renderStatistics = null }) {
   const user = useAuthStore(state => state.user);
@@ -16,28 +17,21 @@ function PersonalLuckSession({ ownerId, renderStatistics }) {
   const tt = (zh, en) => isEnglish ? en : zh;
   const currentGameUid = usePoolStore(state => state.currentGameUid);
   const switchGameAccount = usePoolStore(state => state.switchGameAccount);
-  const historyRevision = useHistoryStore(state => state.history);
+  const versions = useSnapshotVersion(ownerId);
+  const statisticsVersion = versions?.personal?.statistics;
   const [response, setResponse] = useState(null), [error, setError] = useState(false);
   const [refresh, setRefresh] = useState(0), [choice, setChoice] = useState(null);
   const [statisticsOpen, setStatisticsOpen] = useState(false);
   useEffect(() => {
     if (!ownerId) return;
     const controller = new AbortController();
-    loadPersonalStatistics(controller.signal).then(result => {
+    loadPersonalStatistics(controller.signal, { ownerId, checkVersion: refresh > 0 }).then(result => {
       if (controller.signal.aborted) return;
       if (result.meta?.ownerId !== ownerId || result.meta?.truncated) throw new Error('Incomplete account statistics');
-      setResponse(result); setError(false);
+      setResponse(previous => previous === result ? previous : result); setError(false);
     }).catch(() => { if (!controller.signal.aborted) setError(true); });
     return () => controller.abort();
-  }, [ownerId, historyRevision, refresh]);
-  useEffect(() => {
-    if (!ownerId) return;
-    const delay = Math.max(60000, Math.min(3600000, Date.parse(response?.meta?.nextRefreshAt || '') - Date.now() || 60000));
-    const timer = window.setTimeout(() => { if (document.visibilityState !== 'hidden') setRefresh(value => value + 1); }, delay);
-    const visible = () => { if (document.visibilityState === 'visible') setRefresh(value => value + 1); };
-    document.addEventListener('visibilitychange', visible);
-    return () => { window.clearTimeout(timer); document.removeEventListener('visibilitychange', visible); };
-  }, [ownerId, response?.meta?.nextRefreshAt, refresh]);
+  }, [ownerId, statisticsVersion, refresh]);
   const snapshot = response?.data;
   const accounts = snapshot?.accounts || [];
   const selected = accounts.find(account => choice?.base === currentGameUid && account.key === choice.value)

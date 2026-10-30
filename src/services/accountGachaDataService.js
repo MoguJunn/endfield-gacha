@@ -2,6 +2,8 @@ import { getSameOriginAuthHeaders } from './authFetchService.js';
 import { fetchJsonWithTimeout } from './supabaseRequest.js';
 import { unpackInheritanceProjection } from '../../shared/simulator/historyCodec.js';
 import { createContributorDemoReadonlyError, isContributorDemoSessionActive } from '../dev/contributorDemoMode.js';
+import { checkSnapshotVersions } from './snapshotChangeService.js';
+import { readPersonalSnapshot } from './personalSnapshotCache.js';
 import {
   getContributorDemoRuntimeAnalysis,
   getContributorDemoRuntimeHistory,
@@ -69,7 +71,18 @@ export async function loadAccountGachaData() {
   };
 }
 
-export async function loadAccountGachaAnalysis({ accountKey = '', viewKey = '', locale = 'zh-CN' } = {}) {
+export async function loadAccountGachaAnalysis({ ownerId = '', checkVersion = false, accountKey = '', viewKey = '', locale = 'zh-CN' } = {}) {
+  if (!ownerId || isContributorDemoSessionActive()) return fetchAccountGachaAnalysis({ accountKey, viewKey, locale });
+  const versions = await checkSnapshotVersions(ownerId, { force: checkVersion });
+  return readPersonalSnapshot({ ownerId, key: JSON.stringify(['analysis', accountKey, viewKey, locale]), version: versions.personal?.analysis,
+    fetcher: async () => {
+      const result = await fetchAccountGachaAnalysis({ accountKey, viewKey, locale });
+      if (['building', 'stale'].includes(result.availability)) void checkSnapshotVersions(ownerId, { force: true }).catch(() => {});
+      return { ...result, meta: { ...result.meta, clientSnapshotVersion: versions.personal?.analysis } };
+    } });
+}
+
+async function fetchAccountGachaAnalysis({ accountKey = '', viewKey = '', locale = 'zh-CN' } = {}) {
   if (isContributorDemoSessionActive()) {
     return getContributorDemoRuntimeAnalysis({ accountKey, viewKey, locale });
   }

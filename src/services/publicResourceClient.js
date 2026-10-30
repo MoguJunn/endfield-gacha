@@ -1,6 +1,7 @@
 import { fetchJsonWithTimeout, fetchWithTimeout } from './supabaseRequest.js';
 import { readStorageValue, writeStorageValue } from '../utils/storageUtils.js';
 import { readBrowserPublicCache, writeBrowserPublicCache } from './browserPublicCache.js';
+import { checkSnapshotVersions, isPublicStatistic, publicSnapshotScope } from './snapshotChangeService.js';
 
 const PUBLIC_CACHE_VERSION_TIMEOUT_MS = 8000;
 const PUBLIC_CACHE_VERSION_MEMORY_TTL = 10 * 60 * 1000;
@@ -8,7 +9,7 @@ const PUBLIC_RESOURCE_MEMORY_TTL = 60 * 1000;
 const PUBLIC_RESOURCE_SNAPSHOT_PREFIX = 'public_resource_snapshot_v1:';
 const VERSION_STORAGE_KEY = 'endfield-public-version-v1';
 const CATALOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-const STATISTICS_MAX_AGE_MS = 5 * 60 * 1000;
+const STATISTICS_MAX_AGE_MS = Infinity;
 
 const IS_LOCAL_DEV = Boolean(import.meta.env?.DEV);
 const ALLOW_EMERGENCY_PUBLIC_SUPABASE_FALLBACK = ['1', 'true', 'yes']
@@ -218,19 +219,26 @@ export async function fetchPublicApiJson(path, {
     return useSnapshotFallback ? readPublicResourceSnapshot(snapshotKey) : null;
   }
 
-  const cacheVersion = shouldUsePublicApi()
+  const type = new URLSearchParams(params || undefined).get('type');
+  const statistic = !IS_LOCAL_DEV && path === '/api/stats' && isPublicStatistic(type);
+  const versioned = statistic || !IS_LOCAL_DEV && path === '/api/stats' && type === 'pools';
+  const versions = versioned ? await checkSnapshotVersions('', { force: forceRefresh }) : null;
+  const scope = type === 'pool_observations' ? { kind: 'pool', poolId: new URLSearchParams(params).get('poolId') }
+    : type === 'group_statistics' ? { kind: 'group', groupKey: new URLSearchParams(params).get('groupKey') } : null;
+  const cacheVersion = versioned ? statistic ? versions?.public?.[publicSnapshotScope(type, scope)] : versions?.catalogVersion : shouldUsePublicApi()
     ? await getPublicCacheVersion(forceRefresh).catch(() => versionState.value)
     : 'dev';
+  const bypassCache = forceRefresh && !versioned;
   const url = buildPublicApiUrl(path, {
     params,
     cacheVersion,
-    forceRefresh,
+    forceRefresh: bypassCache,
   });
 
   const policy = shouldUsePublicApi() ? cachePolicy(path, params) : null;
   const cacheKey = buildPublicApiUrl(path, { params });
   const ttlMs = policy ? policy.maxAgeMs : memoryTtlMs;
-  const cachedPayload = readMemoryCache(url, ttlMs, forceRefresh);
+  const cachedPayload = readMemoryCache(url, ttlMs, bypassCache);
   if (cachedPayload) {
     return cachedPayload;
   }
@@ -238,10 +246,10 @@ export async function fetchPublicApiJson(path, {
   // The shared request has its own network timeout. Aborting one view only
   // cancels that view's wait, never another subscriber's fetch or cache write.
   if (resourceRequests.has(url)) return waitForResource(resourceRequests.get(url), signal);
-  if (forceRefresh) resourceGenerations.set(cacheKey, (resourceGenerations.get(cacheKey) || 0) + 1);
+  if (bypassCache) resourceGenerations.set(cacheKey, (resourceGenerations.get(cacheKey) || 0) + 1);
   const generation = resourceGenerations.get(cacheKey) || 0;
   const request = (async () => {
-    if (policy && cacheVersion && !forceRefresh) {
+    if (policy && cacheVersion && !bypassCache) {
       const saved = await readBrowserPublicCache(cacheKey);
       if (saved?.cacheVersion === cacheVersion && saved.payload?.success === true
         && saved.savedAt <= Date.now() && Date.now() - saved.savedAt < ttlMs) {
@@ -252,7 +260,7 @@ export async function fetchPublicApiJson(path, {
     try {
       const { response, data } = await fetchJsonWithTimeout(url, {
         method: 'GET',
-        ...(forceRefresh ? { cache: 'no-store' } : {}),
+        ...(bypassCache ? { cache: 'no-store' } : {}),
         headers: { 'Content-Type': 'application/json' },
       }, { label, timeoutMs, retries });
 
@@ -261,8 +269,8 @@ export async function fetchPublicApiJson(path, {
 
       // Public data responses must not indefinitely postpone the small version
       // check. Only an actual version response advances its checkedAt timestamp.
-      const responseVersion = String(data?.meta?.cacheVersion || cacheVersion || '');
-      if (responseVersion && responseVersion !== cacheVersion && versionState.value === cacheVersion) {
+      const responseVersion = String(versioned ? cacheVersion || '' : data?.meta?.cacheVersion || cacheVersion || '');
+      if (!statistic && responseVersion && responseVersion !== cacheVersion && versionState.value === cacheVersion) {
         rememberVersion(responseVersion, versionState.fetchedAt);
       }
 

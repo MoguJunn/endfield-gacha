@@ -24,6 +24,7 @@ import { handlePoolObservations } from '../../_lib/poolObservations.js';
 import { handleGroupStatistics } from '../../_lib/groupStatistics.js';
 import { handlePersonalStatistics, handleScheduledStatistics, handleStatisticsPoolCounts, readScheduledStatistic } from '../../_lib/scheduledStatistics.js';
 import { fetchGlobalSummary } from '../../_lib/publicCatalog.js';
+import { handleStatisticsVersions } from '../../_lib/statisticsVersions.js';
 
 // 内存缓存
 const cache = {
@@ -473,6 +474,7 @@ export default async function handler(req, res) {
   if (type === 'personal_statistics') return handlePersonalStatistics(req, res);
   const now = Date.now();
   const supabase = getSupabaseClient();
+  if (type === 'snapshot_versions') return handleStatisticsVersions(req, res, supabase);
   if (type === 'pool_observations') return handlePoolObservations(req, res, supabase);
   if (type === 'group_statistics') return handleGroupStatistics(req, res, supabase);
   if (type === 'pool_counts') return handleStatisticsPoolCounts(req, res, supabase);

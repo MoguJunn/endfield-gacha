@@ -26,6 +26,8 @@ import {
   prepareCloudAnalysisSnapshot,
 } from '../../utils/cloudDataSync.js';
 import personalDataRequestCoordinator from '../../services/personalDataRequestCoordinator.js';
+import { notifySnapshotMutation, checkSnapshotVersions } from '../../services/snapshotChangeService.js';
+import { useSnapshotVersion } from './useSnapshotVersion.js';
 
 let activePersonalRefreshCalls = 0;
 
@@ -96,6 +98,9 @@ export function useCloudSync({ showToast }) {
   const analysisAccountKey = usePersonalAnalysisStore((state) => state.meta?.accountKey || null);
   const analysisScope = usePersonalAnalysisStore((state) => state.scope);
   const accountScopeRequestRef = useRef(null);
+  const versions = useSnapshotVersion(user?.id || '');
+  const remoteAnalysisVersion = versions?.personal?.analysis;
+  const appliedAnalysisVersion = usePersonalAnalysisStore(state => state.meta?.clientSnapshotVersion);
 
   // 只准备快照；请求合并、token 校验和提交由 refreshPersonalData 统一负责。
   const loadCloudData = useCallback(
@@ -116,6 +121,8 @@ export function useCloudSync({ showToast }) {
         ?? '__group_all';
       const analysisViewKey = preferredPoolId || '__group_all';
       const analysisRequestOptions = {
+        ownerId: currentUser.id,
+        checkVersion: options.checkVersion,
         accountKey: preferredGameUid,
         viewKey: analysisViewKey,
         locale: getAppLocale(),
@@ -124,6 +131,7 @@ export function useCloudSync({ showToast }) {
         .catch((error) => {
           if (preferredGameUid && error?.code === 'personal_analysis_account_not_found') {
             return loadAccountGachaAnalysis({
+              ownerId: currentUser.id,
               viewKey: analysisViewKey,
               locale: getAppLocale(),
             });
@@ -196,6 +204,23 @@ export function useCloudSync({ showToast }) {
     const preferredGameUid = options.preferredGameUid ?? usePoolStore.getState().currentGameUid;
     const refreshPublicPools = options.refreshPublicPools
       ?? options.kind !== 'building-poll';
+    if (options.kind === 'mutation') notifySnapshotMutation(currentUser.id);
+    const currentAnalysis = usePersonalAnalysisStore.getState();
+    let versionChecked = false;
+    if (ownerState.hasSnapshot && currentAnalysis.meta?.clientSnapshotVersion) {
+      try {
+        const latest = await checkSnapshotVersions(currentUser.id, { force: options.kind !== 'version-change' });
+        versionChecked = true;
+        if (latest.personal?.analysis === currentAnalysis.meta.clientSnapshotVersion
+          && (preferredGameUid || '') === (currentAnalysis.meta.accountKey || '')
+          && (preferredPoolId || '__group_all') === (currentAnalysis.meta.viewKey || '__group_all')
+          && getAppLocale() === currentAnalysis.meta.locale) {
+          return { ok: true, data: null, error: null, stale: false, applied: false, unchanged: true };
+        }
+      } catch (error) {
+        return { ok: false, data: null, error, stale: false, applied: false };
+      }
+    }
 
     setSyncError(null);
     setPersonalRefreshActivity(true);
@@ -209,6 +234,7 @@ export function useCloudSync({ showToast }) {
           preferredGameUid,
           preferredPoolId,
           refreshPublicPools,
+          checkVersion: !versionChecked && options.kind !== 'version-change',
         }),
         apply: (snapshot) => applyCloudAnalysisToStores(snapshot, {
           setPools,
@@ -237,6 +263,11 @@ export function useCloudSync({ showToast }) {
     switchGameAccount,
     switchPool,
   ]);
+
+  useEffect(() => {
+    if (!user?.id || !remoteAnalysisVersion || !appliedAnalysisVersion || remoteAnalysisVersion === appliedAnalysisVersion) return;
+    void refreshPersonalData(user, { kind: 'version-change', reason: 'analysis_version_changed', refreshPublicPools: false });
+  }, [user, remoteAnalysisVersion, appliedAnalysisVersion, refreshPersonalData]);
 
   useEffect(() => {
     const ownerId = String(user?.id || '').trim();
@@ -322,6 +353,7 @@ export function useCloudSync({ showToast }) {
 
       try {
         await saveAccountGachaData({ pools: [pool] });
+        notifySnapshotMutation(user.id);
         return true;
       } catch (error) {
         setSyncError(error.message);
@@ -337,7 +369,9 @@ export function useCloudSync({ showToast }) {
       if (!user || records.length === 0) return;
 
       try {
-        return await saveAccountGachaData({ history: records });
+        const result = await saveAccountGachaData({ history: records });
+        notifySnapshotMutation(user.id);
+        return result;
       } catch (error) {
         const errorMessage = error.message || '';
         if (errorMessage.includes('policy') || errorMessage.includes('violates row-level security')) {
@@ -364,6 +398,7 @@ export function useCloudSync({ showToast }) {
 
       try {
         await deleteAccountGachaRecords(recordIds);
+        notifySnapshotMutation(user.id);
         return true;
       } catch (error) {
         setSyncError(error.message);
@@ -381,6 +416,7 @@ export function useCloudSync({ showToast }) {
 
       try {
         await deleteAccountGachaPoolHistory(poolId);
+        notifySnapshotMutation(user.id);
         return true;
       } catch (error) {
         setSyncError(error.message);
@@ -398,6 +434,7 @@ export function useCloudSync({ showToast }) {
 
       try {
         await deleteAccountGachaPool(poolId);
+        notifySnapshotMutation(user.id);
         return true;
       } catch (error) {
         setSyncError(error.message);
@@ -414,6 +451,7 @@ export function useCloudSync({ showToast }) {
 
     try {
       await deleteAllAccountGachaData();
+      notifySnapshotMutation(user.id);
       return true;
     } catch (error) {
       setSyncError(error.message);

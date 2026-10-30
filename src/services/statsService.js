@@ -12,6 +12,7 @@ import {
   initializeContributorDemoSandbox,
 } from '../dev/contributorDemoSandboxStore.js';
 import { sanitizePublicResourceUrl } from '../utils/publicResourceUrl.js';
+import { checkSnapshotVersions } from './snapshotChangeService.js';
 
 /**
  * 统计服务
@@ -276,7 +277,8 @@ function isFreshCache(state, ttl) {
   return state.data !== null && Date.now() - state.fetchedAt < ttl;
 }
 
-async function runCachedRequest(state, fetcher, { cacheTtl = 0, forceRefresh = false } = {}) {
+async function runCachedRequest(state, fetcher, { cacheTtl = 0, forceRefresh = false, snapshotVersion = null } = {}) {
+  if (snapshotVersion && state.snapshotVersion === snapshotVersion && state.data !== null) return state.data;
   if (!forceRefresh && cacheTtl > 0 && isFreshCache(state, cacheTtl)) {
     return state.data;
   }
@@ -289,6 +291,7 @@ async function runCachedRequest(state, fetcher, { cacheTtl = 0, forceRefresh = f
     const result = await fetcher();
     state.data = result;
     state.fetchedAt = Date.now();
+    state.snapshotVersion = result && !['stale', 'unavailable', 'empty'].includes(result.meta?.status) ? snapshotVersion : null;
     return result;
   })();
 
@@ -684,6 +687,7 @@ export async function getGlobalSummaryStats(forceRefresh = false) {
     };
   }
   try {
+    const versions = import.meta.env.PROD ? await checkSnapshotVersions('', { force: forceRefresh }) : null;
     return await runCachedRequest(
       globalStatsRequestState,
       async () => {
@@ -722,7 +726,7 @@ export async function getGlobalSummaryStats(forceRefresh = false) {
           source: 'missing-stats-api'
         });
       },
-      { cacheTtl: GLOBAL_STATS_CACHE_TTL, forceRefresh }
+      { cacheTtl: versions ? 0 : GLOBAL_STATS_CACHE_TTL, forceRefresh, snapshotVersion: versions ? JSON.stringify([versions.public?.global_summary, versions.public?.character_catalog]) : null }
     );
   } catch (error) {
     logStatsFailure('获取全服统计', error);
@@ -760,6 +764,7 @@ export async function getCharacterCatalogStats(forceRefresh = false) {
     return buildContributorSandboxCatalog();
   }
   try {
+    const versions = import.meta.env.PROD ? await checkSnapshotVersions('', { force: forceRefresh }) : null;
     return await runCachedRequest(
       characterCatalogRequestState,
       async () => {
@@ -778,7 +783,7 @@ export async function getCharacterCatalogStats(forceRefresh = false) {
         if (persisted) writePersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT, persisted);
         return persisted;
       },
-      { cacheTtl: CHARACTER_CATALOG_CACHE_TTL, forceRefresh }
+      { cacheTtl: versions ? 0 : CHARACTER_CATALOG_CACHE_TTL, forceRefresh, snapshotVersion: versions?.public?.character_catalog }
     );
   } catch (error) {
     logStatsFailure('获取角色图鉴', error);
@@ -799,6 +804,7 @@ export async function getCharacterRankingStats(forceRefresh = false) {
     return buildContributorSandboxRanking();
   }
   try {
+    const versions = import.meta.env.PROD ? await checkSnapshotVersions('', { force: forceRefresh }) : null;
     return await runCachedRequest(
       characterRankingRequestState,
       async () => {
@@ -810,7 +816,7 @@ export async function getCharacterRankingStats(forceRefresh = false) {
 
         return readPersistedSnapshot(STORAGE_KEYS.CHARACTER_RANKING_SNAPSHOT);
       },
-      { cacheTtl: CHARACTER_RANKING_CACHE_TTL, forceRefresh }
+      { cacheTtl: versions ? 0 : CHARACTER_RANKING_CACHE_TTL, forceRefresh, snapshotVersion: versions?.public?.character_ranking }
     );
   } catch (error) {
     logStatsFailure('获取角色排名', error);
@@ -839,7 +845,7 @@ export async function getUserRankingStats(userId) {
     return await runCachedRequest(
       requestState,
       async () => {
-        const { data, meta } = await loadPersonalStatistics();
+        const { data, meta } = await loadPersonalStatistics(undefined, { ownerId: userId });
         if (meta?.ownerId !== userId) throw new Error('Personal statistics owner mismatch');
         return data?.ranking || null;
       }

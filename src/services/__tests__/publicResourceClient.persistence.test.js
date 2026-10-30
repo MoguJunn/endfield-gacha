@@ -1,6 +1,9 @@
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const network = vi.hoisted(() => ({ version: vi.fn(), resource: vi.fn() }));
+const revisions = vi.hoisted(() => ({ pool: 's1' }));
+vi.mock('../snapshotChangeService.js', async original => ({ ...(await original()),
+  checkSnapshotVersions: async () => ({ public: { 'pool:p': revisions.pool } }) }));
 vi.mock('../supabaseRequest.js', () => ({ fetchWithTimeout: network.version, fetchJsonWithTimeout: network.resource }));
 const payload = (name = '目录') => ({ success: true, data: { characters: [{ id: 'c', name }] }, meta: { cacheVersion: 'v1' } });
 const reply = (data = payload(), status = 200) => ({ response: { ok: status < 400, status }, data });
@@ -10,6 +13,7 @@ const catalog = { params: { type: 'characters' } };
 beforeEach(() => {
   vi.resetModules(); vi.stubEnv('DEV', false); vi.stubGlobal('indexedDB', new IDBFactory());
   localStorage.clear(); vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+  revisions.pool = 's1';
   network.version.mockReset().mockResolvedValue({ ok: true, json: async () => ({ cacheVersion: 'v1' }) });
   network.resource.mockReset().mockImplementation(async () => reply());
 });
@@ -36,7 +40,7 @@ describe('browser public data reuse', () => {
     expect((await (await client()).fetchPublicApiJson('/api/stats', catalog)).data.characters[0].name).toBe('新目录');
     expect(network.resource).toHaveBeenCalledTimes(2);
   });
-  it('expires aggregate statistics after five minutes without advancing their computed time', async () => {
+  it('retains aggregate statistics past five minutes and downloads only a changed revision', async () => {
     const data = { success: true, data: { observations: { total: 7 }, meta: { updatedAt: '2026-10-01' } } };
     network.resource.mockResolvedValue(reply(data));
     const options = { params: { type: 'pool_observations', poolId: 'p' } };
@@ -45,6 +49,9 @@ describe('browser public data reuse', () => {
     expect(await (await client()).fetchPublicApiJson('/api/stats', options)).toEqual(data);
     expect(network.resource).toHaveBeenCalledTimes(1);
     Date.now.mockReturnValue(1_800_000_300_001);
+    await (await client()).fetchPublicApiJson('/api/stats', options);
+    expect(network.resource).toHaveBeenCalledTimes(1);
+    revisions.pool = 's2';
     await (await client()).fetchPublicApiJson('/api/stats', options);
     expect(network.resource).toHaveBeenCalledTimes(2);
   });
