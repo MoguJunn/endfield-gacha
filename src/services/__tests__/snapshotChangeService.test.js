@@ -39,6 +39,31 @@ describe('change-driven snapshot subscriptions', () => {
     await act(async () => vi.advanceTimersByTimeAsync(1_000_000));
     expect(network.fetch).toHaveBeenCalledTimes(count);
   });
+  it.each(['', 'owner'])('does not poll while other users keep public statistics pending: owner=%s', async ownerId => {
+    network.fetch.mockResolvedValue({ response: { ok: true }, data: { success: true,
+      data: { ...versions(), publicPending: true, ...(!ownerId ? { personal: null } : {}) } } });
+    const { useSnapshotVersion } = await import('../../hooks/app/useSnapshotVersion.js');
+    renderHook(() => useSnapshotVersion(ownerId));
+    await act(async () => {});
+    await act(async () => vi.advanceTimersByTimeAsync(3_600_000));
+    expect(network.fetch).toHaveBeenCalledTimes(1);
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(network.fetch).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(3_600_000));
+    expect(network.fetch).toHaveBeenCalledTimes(2);
+  });
+  it('does not renew the personal completion-check budget when public snapshots keep changing', async () => {
+    let publication = 0;
+    network.fetch.mockImplementation(async () => ({ response: { ok: true }, data: { success: true,
+      data: { ...versions('s1', true), publicPending: true, public: { global_summary: `g${++publication}` } } } }));
+    const { useSnapshotVersion } = await import('../../hooks/app/useSnapshotVersion.js');
+    renderHook(() => useSnapshotVersion('owner'));
+    await act(async () => {});
+    await act(async () => vi.advanceTimersByTimeAsync(1_000_000));
+    expect(network.fetch).toHaveBeenCalledTimes(6);
+    await act(async () => vi.advanceTimersByTimeAsync(3_600_000));
+    expect(network.fetch).toHaveBeenCalledTimes(6);
+  });
   it('does not let a request finishing after sign-out restore the old owner version', async () => {
     const api = await import('../snapshotChangeService.js');
     let finish;

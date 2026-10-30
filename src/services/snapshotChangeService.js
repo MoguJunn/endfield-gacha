@@ -16,8 +16,11 @@ const stateFor = ownerId => {
 };
 
 function checkPending(ownerId, state) {
-  const pending = state.value?.publicPending || state.value?.personal?.statisticsPending || state.value?.personal?.analysisPending;
-  const signature = pending ? JSON.stringify([state.value?.personal?.statistics, state.value?.personal?.analysis, state.value?.public]) : null;
+  // Community imports can keep public work pending for hours. Only this
+  // owner's pending work may schedule completion checks; unrelated public
+  // publications must not reset the owner's finite check budget.
+  const pending = state.value?.personal?.statisticsPending || state.value?.personal?.analysisPending;
+  const signature = pending ? JSON.stringify([state.value.personal.statistics, state.value.personal.analysis]) : null;
   if (state.pendingSignature !== signature) { state.attempt = 0; state.pendingSignature = signature; }
   if (!pending) { clearTimeout(state.timer); state.timer = null; return; }
   if (state.timer || !subscribers.has(keyFor(ownerId)) || state.attempt >= PENDING_DELAYS.length) return;
