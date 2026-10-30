@@ -3,6 +3,7 @@ import { formatOriginiteEquivalent } from './resourceEconomy.js';
 import { SHARE_BRAND_LINK } from './shareBranding.js';
 import { formatAppNumber, getAppLocale, getMessage, isEnglishLocale } from '../i18n/index.js';
 import { localizeEntityName, localizePoolFeaturedName, localizePoolName } from './gameDataI18n.js';
+import { prepareTimelineSections } from './timelinePresentation.js';
 
 const DASHBOARD_SHARE_FILE_PREFIX = '终末地卡池分析分享卡';
 const DASHBOARD_SHARE_FILE_PREFIX_EN = 'endfield-gacha-share';
@@ -294,7 +295,9 @@ function buildSummaryItems({ stats, poolType, isAllPoolsOverview, locale = getAp
       id: 'win-rate',
       label: english ? 'Target Rate' : '不歪率',
       value: formatRate(stats?.winRate),
-      hint: english ? 'Target 6★ / All 6★' : '目标 6★ / 全部 6★'
+      hint: poolType === 'weapon'
+        ? english ? 'Target 6★ / All 6★' : '目标 6★ / 全部 6★'
+        : english ? 'Excludes forced target guarantees' : '剔除120抽保障出货'
     });
   }
 
@@ -409,7 +412,11 @@ export function buildDashboardSharePayload({
   stats = {},
   includeFreePullsInStats = Boolean(stats?.includeFreePullsInStats),
   analysisPity = null,
-  sections = [],
+  sections: sourceSections = [],
+  pools = [],
+  timelinePresentation = {},
+  timelineDisplayMode = 'waterfall',
+  showFiveStarDrops = true,
   overviewSplitStats = null,
   scopeLabelOverride = null,
   poolNameOverride = null,
@@ -421,6 +428,7 @@ export function buildDashboardSharePayload({
   resourceGroupsOverride = null
 } = {}, locale = getAppLocale()) {
   const english = isEnglishLocale(locale);
+  const sections = prepareTimelineSections(sourceSections, pools, { ...timelinePresentation, locale });
   const derivedScopeLabel = isAllPoolsOverview
     ? (english ? 'All Banner Overview' : '全部卡池总览')
     : isGroupMode
@@ -435,7 +443,9 @@ export function buildDashboardSharePayload({
     ? sections[0]?.period || (english ? 'Always available' : '长期开放')
     : (english ? `${sections.length} banner stages` : `${sections.length} 个卡池阶段`);
   const periodLabel = periodLabelOverride || derivedPeriodLabel;
-  const totalNodes = sections.reduce((sum, section) => sum + (section?.entries?.length || 0), 0);
+  const totalNodes = sections.reduce((sum, section) => sum + (timelineDisplayMode === 'card'
+    ? (section.acquisitions || []).filter(row => showFiveStarDrops || row.rarity >= 6).length
+    : section.entries?.length || 0), 0);
   const summaryGroups = summaryGroupsOverride || (
     isAllPoolsOverview && overviewPoolFilter === 'all'
       ? buildSplitSummaryGroups(overviewSplitStats, locale)
@@ -494,7 +504,10 @@ export function buildDashboardSharePayload({
       locale
     ),
     pitySummary: buildPitySummary({ currentPool, isGroupMode, hasMergedAccountView, analysisPity }, locale),
-    notes: hasMergedAccountView
+    notes: timelineDisplayMode === 'card'
+      ? english ? 'Includes drop results and acquisition times. Account names and UIDs are omitted.'
+        : '包含出货结果与获取时间，不包含账号名和 UID。'
+      : hasMergedAccountView
       ? getMessage('share.dashboard.noteMerged', {}, locale)
       : getMessage('share.dashboard.noteDesensitized', {}, locale)
   };

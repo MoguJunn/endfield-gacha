@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-10-30T13:22:13.482Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/2026103001_clear_opened_pool_preview_labels.sql
+--   4. 生成时间: 2026-10-30T16:59:04.095Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/2026103100_personal_win_rate_guarantee.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -39682,4 +39682,44 @@ END;
 $schedule$;
 COMMIT;
 -- <<< END MIGRATION: active/2026103001_clear_opened_pool_preview_labels.sql
+
+-- >>> BEGIN MIGRATION: active/2026103100_personal_win_rate_guarantee.sql
+BEGIN;
+
+-- Keep existing snapshots available while the worker rebuilds corrected rates.
+UPDATE public.personal_analysis_owner_state
+SET history_revision = history_revision + 1,
+    analysis_schema_version = 6,
+    dirty_since = COALESCE(dirty_since, now()),
+    last_error = NULL,
+    next_attempt_at = NULL
+WHERE analysis_schema_version < 6;
+
+UPDATE public.personal_analysis_scope_state
+SET history_revision = history_revision + 1,
+    analysis_schema_version = 6,
+    dirty_since = COALESCE(dirty_since, now()),
+    last_error = NULL,
+    next_attempt_at = NULL
+WHERE analysis_schema_version < 6;
+
+ALTER TABLE public.personal_analysis_owner_state ALTER COLUMN analysis_schema_version SET DEFAULT 6;
+ALTER TABLE public.personal_analysis_scope_state ALTER COLUMN analysis_schema_version SET DEFAULT 6;
+
+CREATE FUNCTION public.enforce_personal_analysis_schema_v6() RETURNS TRIGGER
+LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN
+  NEW.analysis_schema_version := GREATEST(COALESCE(NEW.analysis_schema_version, 6), 6);
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER enforce_personal_analysis_owner_schema_v6 BEFORE INSERT ON public.personal_analysis_owner_state
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_personal_analysis_schema_v6();
+CREATE TRIGGER enforce_personal_analysis_scope_schema_v6 BEFORE INSERT ON public.personal_analysis_scope_state
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_personal_analysis_schema_v6();
+REVOKE ALL ON FUNCTION public.enforce_personal_analysis_schema_v6() FROM PUBLIC, anon, authenticated;
+
+NOTIFY pgrst, 'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026103100_personal_win_rate_guarantee.sql
 

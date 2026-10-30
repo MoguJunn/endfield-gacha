@@ -4,6 +4,8 @@ import { resolveAliasValue, resolveCharacterAliasMap, resolvePoolAliasMap } from
 import { formatAccountGachaHistoryRows } from '../../src/utils/accountGachaHistoryFormat.js';
 import { buildPersonalAnalysisSnapshots } from '../../src/utils/personalAnalysisSnapshot.js';
 import { loadWorkbenchEntriesForAnalytics } from './dataWorkbenchAnalytics.js';
+import { PERSONAL_ANALYSIS_SCHEMA_VERSION } from '../../shared/personalAnalysisVersion.js';
+export { PERSONAL_ANALYSIS_SCHEMA_VERSION };
 
 const HISTORY_FIELDS = [
   'id',
@@ -68,7 +70,6 @@ const CHARACTER_FIELDS = [
 ].join(', ');
 
 const ERROR_CODE_PATTERN = /[^A-Za-z0-9_.:-]+/g;
-export const PERSONAL_ANALYSIS_SCHEMA_VERSION = 5;
 
 function readEnvironment() {
   return globalThis.process?.env || {};

@@ -5,6 +5,7 @@ import { compareHistoryTimelineAsc, getHistoryTimelineTimestampMs } from './hist
 import { resolvePoolCapabilities } from './poolCapabilities.js';
 import { buildOneTimeTargetGuaranteeState } from './poolScopedHistory.js';
 import { closeWeaponTimelineStage } from './timelinePresentation.js';
+import { buildWinRateGuaranteeKeys, isExcludedFromWinRate } from './winRateEligibility.js';
 import { getAppLocale, isEnglishLocale } from '../i18n/index.js';
 import {
   localizeEntityName,
@@ -12,14 +13,6 @@ import {
   localizePoolFeaturedName,
   localizePoolName,
 } from './gameDataI18n.js';
-
-function normalizePoolType(type) {
-  if (type === 'extra') return 'extra';
-  if (type === 'limited_character') return 'limited';
-  if (type === 'limited_weapon') return 'weapon';
-  if (type === 'beginner') return 'standard';
-  return type || 'standard';
-}
 
 function getPoolSixStarPity(pool) {
   return Number(resolvePoolCapabilities(pool).rules.sixStarPity || 80);
@@ -85,10 +78,6 @@ function isGuaranteedHistoryPull(item) {
     item?.isGuaranteed === true ||
     item?.is_guaranteed === true
   );
-}
-
-function shouldExcludeFromWinRate(item, poolType) {
-  return normalizePoolType(poolType) === 'limited' && isGuaranteedHistoryPull(item);
 }
 
 function roundScaleMax(value, minimum) {
@@ -399,12 +388,12 @@ function buildWeaponBatchMap(history, locale) {
   return byRecord;
 }
 
-function calculateTimelineMetrics(history = [], { poolType = 'standard', crossPoolPityMap = null } = {}) {
+function calculateTimelineMetrics(history = [], { poolType = 'standard', pool, winRateGuaranteeKeys, crossPoolPityMap = null } = {}) {
   const validPulls = history.filter((item) => !isGiftHistoryPull(item) && !isFreeHistoryPull(item));
   const sixStars = validPulls.filter((item) => Number(item?.rarity) >= 6);
   const fiveStars = validPulls.filter((item) => Number(item?.rarity) === 5);
   const upSixStars = sixStars.filter((item) => item?.isStandard !== true);
-  const winRateSixStars = sixStars.filter((item) => !shouldExcludeFromWinRate(item, poolType));
+  const winRateSixStars = sixStars.filter((item) => !isExcludedFromWinRate(item, pool, winRateGuaranteeKeys));
   const winRateUpSixStars = winRateSixStars.filter((item) => item?.isStandard !== true);
   const isLimitedPool = poolType === 'limited';
   const isExtraPool = poolType === 'extra';
@@ -881,6 +870,7 @@ function buildStageEntries({
 function buildTimelineSection({
   pool,
   history,
+  winRateGuaranteeKeys = buildWinRateGuaranteeKeys({ history, pools: [pool] }),
   currentPityOverride,
   currentPity5Override,
   currentTargetPullsOverride,
@@ -899,6 +889,8 @@ function buildTimelineSection({
     : new Set();
   const metrics = calculateTimelineMetrics(history, {
     poolType: normalizedType,
+    pool,
+    winRateGuaranteeKeys,
     crossPoolPityMap,
   });
   const timing = getPoolTimingMeta(pool, new Date(), locale);
@@ -1022,6 +1014,7 @@ export function buildOverviewTimelineSections({
   resolveCharacter = resolveTimelineCharacterFromCache,
 }) {
   const historyByPoolId = new Map();
+  const winRateGuaranteeKeys = buildWinRateGuaranteeKeys({ history, pools });
 
   history.forEach((item) => {
     const poolId = getHistoryPoolId(item);
@@ -1048,6 +1041,7 @@ export function buildOverviewTimelineSections({
           selectorGroupType: normalizePoolGroupType(pool),
         },
         history: poolHistory,
+        winRateGuaranteeKeys,
         currentPityOverride: disablePityState ? null : analysisPityByPoolId?.get(pool.id)?.displayPity6,
         currentPity5Override: disablePityState ? null : analysisPityByPoolId?.get(pool.id)?.displayPity5,
         currentTargetPullsOverride: analysisPityByPoolId?.get(pool.id)?.maxPity6,

@@ -1,11 +1,16 @@
 import React from 'react';
-import MobileHomeHubView from './MobileHomeHubView.jsx';
+import HomeWorkspace from '../../components/home/DesktopHomeDemo.jsx';
+import './mobileHome.css';
 
 /**
- * 兼容旧首页入口，统一代理到新的移动端首页实现。
+ * 与桌面共享日程和功能模块，使用移动端纵向布局。
  */
 function MobileHomeView() {
-  return <MobileHomeHubView />;
+  return (
+    <div className="mobile-home-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain">
+      <HomeWorkspace mobile />
+    </div>
+  );
 }
 
 export default MobileHomeView;

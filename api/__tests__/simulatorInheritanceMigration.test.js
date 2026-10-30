@@ -27,8 +27,19 @@ describe('simulator inheritance v2 snapshot migration', () => {
 
   it('matches the active worker schema to the later trusted-statistics migration', () => {
     const sql = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations/2026101400_exclude_manual_statistics.sql'), 'utf8');
-    expect(PERSONAL_ANALYSIS_SCHEMA_VERSION).toBe(5);
+    expect(PERSONAL_ANALYSIS_SCHEMA_VERSION).toBeGreaterThanOrEqual(5);
     expect(sql.match(/analysis_schema_version SET DEFAULT 5/g)).toHaveLength(2);
     expect(sql).toContain('enforce_personal_analysis_schema_v5');
+  });
+  it('queues corrected guarantee rates at the active schema without deleting snapshots or leases', () => {
+    const migrationName = '2026103100_personal_win_rate_guarantee.sql';
+    const sql = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations', migrationName), 'utf8');
+    expect(PERSONAL_ANALYSIS_SCHEMA_VERSION).toBe(6);
+    expect(sql.match(/analysis_schema_version SET DEFAULT 6/g)).toHaveLength(2);
+    expect(sql.match(/WHERE analysis_schema_version < 6/g)).toHaveLength(2);
+    expect(sql).not.toMatch(/(?:DELETE FROM|UPDATE) public\.personal_analysis_snapshots/i);
+    expect(sql).not.toMatch(/lease_(?:id|expires_at)\s*=/i);
+    const baseline = fs.readFileSync(path.join(process.cwd(), 'supabase/baseline/000_complete_schema.sql'), 'utf8');
+    expect(baseline).toContain(`-- >>> BEGIN MIGRATION: active/${migrationName}`);
   });
 });

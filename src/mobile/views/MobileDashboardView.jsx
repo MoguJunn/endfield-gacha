@@ -24,6 +24,7 @@ import { ConfirmDialog, Toast } from '../../components/ui';
 import { calculateCurrentProbability } from '../../utils';
 import { buildOverviewPoolAnalysisPityMap, getPoolAnalysisPityState } from '../../utils/poolAnalysisPity';
 import { buildDashboardTimelineSections } from '../../utils/dashboardTimelineSections';
+import { prepareTimelineSections } from '../../utils/timelinePresentation.js';
 import { buildDashboardOverviewSplitStats } from '../../utils/dashboardOverviewSplitStats';
 import {
   buildDashboardShareCardFileName,
@@ -178,6 +179,7 @@ function MobileDashboardView() {
   });
   const resolvedShareTheme = React.useMemo(() => resolveShareThemeMode(shareThemeMode, isDark), [isDark, shareThemeMode]);
   const [showTimelineFiveStarDrops, setShowTimelineFiveStarDrops] = React.useState(true);
+  const [timelinePresentation, setTimelinePresentation] = React.useState({ order: 'desc', selectedIds: null });
   const loadedRawHistoryCount = useHistoryStore((state) => (
     Array.isArray(state.history) ? state.history.length : 0
   ));
@@ -454,20 +456,28 @@ function MobileDashboardView() {
     stats,
     analysisPity,
     sections: timelineSections,
+    pools: selectedPools,
+    timelinePresentation,
+    timelineDisplayMode: charViewMode,
     overviewSplitStats,
     includeFreePullsInStats,
     showFiveStarDrops: showTimelineFiveStarDrops
-  }, locale), [analysisPity, currentPool, hasMergedAccountView, includeFreePullsInStats, isAllPoolsOverview, isGroupMode, locale, normalizedPoolType, overviewSplitStats, showTimelineFiveStarDrops, stats, timelineSections]);
+  }, locale), [analysisPity, currentPool, hasMergedAccountView, includeFreePullsInStats, isAllPoolsOverview, isGroupMode, locale, normalizedPoolType, overviewSplitStats, showTimelineFiveStarDrops, stats, timelineSections, selectedPools, timelinePresentation, charViewMode]);
+  const shareTimelineSections = React.useMemo(() => prepareTimelineSections(timelineSections, selectedPools,
+    { ...timelinePresentation, locale }), [timelineSections, selectedPools, timelinePresentation, locale]);
   const hasDashboardShareData = (Number(stats?.total) || 0) > 0 || timelineSections.length > 0;
   const clipboardImageWarmKey = React.useMemo(() => (
     hasDashboardShareData
       ? JSON.stringify({
           locale,
           theme: resolvedShareTheme,
-          payload: dashboardSharePayload
+          payload: dashboardSharePayload,
+          sections: shareTimelineSections,
+          displayMode: charViewMode,
+          showFiveStarDrops: showTimelineFiveStarDrops,
         })
       : null
-  ), [dashboardSharePayload, hasDashboardShareData, locale, resolvedShareTheme]);
+  ), [dashboardSharePayload, shareTimelineSections, charViewMode, showTimelineFiveStarDrops, hasDashboardShareData, locale, resolvedShareTheme]);
   const supportsNativeImageShare = React.useMemo(() => {
     if (typeof window === 'undefined' || typeof File === 'undefined' || typeof navigator?.share !== 'function') {
       return false;
@@ -583,7 +593,10 @@ function MobileDashboardView() {
     const cacheKey = JSON.stringify({
       locale,
       theme: resolvedShareTheme,
-      payload: dashboardSharePayload
+      payload: dashboardSharePayload,
+      sections: shareTimelineSections,
+      displayMode: charViewMode,
+      showFiveStarDrops: showTimelineFiveStarDrops,
     });
     const cacheBucket = 'full';
     const cache = shareImageCacheRef.current[cacheBucket];
@@ -628,7 +641,7 @@ function MobileDashboardView() {
     };
 
     return renderPromise;
-  }, [dashboardSharePayload, locale, resolvedShareTheme, waitForShareCard]);
+  }, [dashboardSharePayload, shareTimelineSections, charViewMode, showTimelineFiveStarDrops, locale, resolvedShareTheme, waitForShareCard]);
 
   const prewarmClipboardShareImage = React.useCallback(() => {
     if (!supportsClipboardImageCopy || !hasDashboardShareData) {
@@ -873,7 +886,8 @@ function MobileDashboardView() {
           <DashboardShareCard
             ref={shareCardRef}
             payload={dashboardSharePayload}
-            sections={timelineSections}
+            sections={shareTimelineSections}
+            displayMode={charViewMode}
             theme={resolvedShareTheme}
             showFiveStarDrops={showTimelineFiveStarDrops}
           />
@@ -1648,6 +1662,7 @@ function MobileDashboardView() {
                 mobile={true}
                 showFiveStarDrops={showTimelineFiveStarDrops}
                 onToggleShowFiveStarDrops={setShowTimelineFiveStarDrops}
+                onPresentationChange={setTimelinePresentation}
               />
             </div>
           )
@@ -1673,6 +1688,7 @@ function MobileDashboardView() {
               mobile={true}
               showFiveStarDrops={showTimelineFiveStarDrops}
               onToggleShowFiveStarDrops={setShowTimelineFiveStarDrops}
+              onPresentationChange={setTimelinePresentation}
             />
           </div>
         ) : (

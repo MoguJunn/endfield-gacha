@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from './authAdmin.js';
 import { resolveAuthenticatedRequestUser } from './siteAuth.js';
 import { resolvePublicCacheVersion } from './publicCache.js';
 import { STATISTICS_GROUPS } from '../../shared/statisticsScopes.js';
+import { PERSONAL_ANALYSIS_SCHEMA_VERSION } from '../../shared/personalAnalysisVersion.js';
 
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 32);
 const snapshotFields = 'scope_key,schema_version,source_revision,computed_at';
@@ -46,10 +47,11 @@ export async function handleStatisticsVersions(req, res, publicDb) {
       ]);
       if (results.some(result => result.error)) throw new Error('Personal versions unavailable');
       const [snapshot, job, analysisOwner, analysisScopes] = results.map(result => result.data);
-      const pending = state => Boolean(state && String(state.history_revision) !== String(state.snapshot_revision));
+      const pending = state => Boolean(state && (String(state.history_revision) !== String(state.snapshot_revision)
+        || Number(state.analysis_schema_version) !== PERSONAL_ANALYSIS_SCHEMA_VERSION));
       owner = { ownerId, statistics: fingerprint([catalogVersion, snapshot]),
         statisticsPending: Boolean(job && String(job.revision) !== String(job.published_revision)),
-        analysis: fingerprint([catalogVersion, analysisOwner, analysisScopes]),
+        analysis: fingerprint([catalogVersion, PERSONAL_ANALYSIS_SCHEMA_VERSION, analysisOwner, analysisScopes]),
         analysisPending: pending(analysisOwner) || (analysisScopes || []).some(pending) };
     }
     return res.json({ success: true, data: { catalogVersion, public: versions, publicPending, personal: owner } });
