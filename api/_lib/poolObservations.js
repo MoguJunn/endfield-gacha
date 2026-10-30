@@ -1,7 +1,7 @@
 import { buildStoredPoolObservations, STORED_OBSERVATION_VERSION } from '../../src/utils/storedPoolObservations.js';
 import { isReservedPoolTypeId } from '../../shared/poolIdValidation.js';
 import { resolvePoolCapabilities } from '../../src/utils/poolCapabilities.js';
-import { readScheduledStatistic } from './scheduledStatistics.js';
+import { PUBLIC_STATISTICS_CACHE_CONTROL, readScheduledStatistic } from './scheduledStatistics.js';
 
 const PAGE_SIZE = 1000;
 const HISTORY_FIELDS = 'id,record_id,user_id,game_uid,server_scope,server_id,region,pool_id,pool_version,character_id,character_name,rarity,timestamp,seq_id,is_new,is_free,is_info_book,special_type';
@@ -61,9 +61,11 @@ export async function handlePoolObservations(req, res, supabase) {
     if (error) throw error;
     if (!visible?.some((pool) => (pool.pool_id || pool.id) === poolId)) return res.status(404).json({ success: false, error: '未找到该卡池' });
     const { payload, meta } = await readScheduledStatistic(supabase, `pool:${poolId}`);
+    if (payload) res.setHeader('Cache-Control', PUBLIC_STATISTICS_CACHE_CONTROL);
     return res.status(payload ? 200 : 202).json({ success: true, cached: true,
       data: payload ? { ...payload, meta: { ...payload.meta, ...meta } } : { poolId, observations: null, meta } });
   } catch (error) {
+    res.setHeader('Cache-Control', 'no-store');
     return res.status(error.status || 503).json({ success: false,
       error: error.status === 404 ? '未找到该卡池' : '分池统计暂未计算完成，请稍后重试',
       code: 'pool_observations_unavailable' });

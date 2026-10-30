@@ -50,7 +50,7 @@ export async function getPublicCacheVersion(forceRefresh = false) {
       headers: {
         'Content-Type': 'application/json',
       },
-      cache: 'no-store',
+      cache: forceRefresh ? 'no-store' : 'default',
     }, {
       label: 'public cache version',
       timeoutMs: PUBLIC_CACHE_VERSION_TIMEOUT_MS,

@@ -4,6 +4,11 @@ import { getSupabaseAdminClient } from './authAdmin.js';
 import { resolveAuthenticatedRequestUser } from './siteAuth.js';
 import { projectStatisticsPoolLabels } from '../../shared/statisticsPoolLabels.js';
 
+// Background snapshots update at 15–60 minute intervals. A short browser cache
+// avoids repeat CDN requests; shared caching keeps public reads out of Functions.
+// Pending/error responses and authenticated owner snapshots remain no-store.
+export const PUBLIC_STATISTICS_CACHE_CONTROL = 'public, max-age=60, s-maxage=300, stale-while-revalidate=60';
+
 // Explicit local preview only. Production always reads the persistent DB snapshot.
 async function localSnapshots() {
   const file = process.env.NODE_ENV !== 'production' && process.env.STATISTICS_LOCAL_SNAPSHOT_FILE;
@@ -59,8 +64,11 @@ export async function readStatisticsPoolCounts(db) {
 export async function handleStatisticsPoolCounts(_req, res, db) {
   res.setHeader('Cache-Control', 'no-store');
   try {
-    return res.json({ success: true, data: { counts: await readStatisticsPoolCounts(db) } });
+    const counts = await readStatisticsPoolCounts(db);
+    res.setHeader('Cache-Control', PUBLIC_STATISTICS_CACHE_CONTROL);
+    return res.json({ success: true, data: { counts } });
   } catch {
+    res.setHeader('Cache-Control', 'no-store');
     return res.status(503).json({ success: false, error: '卡池汇总尚未准备完成' });
   }
 }
@@ -70,9 +78,11 @@ export async function handleScheduledStatistics(_req, res, db, scope, transform 
   try {
     const { payload, meta } = await readScheduledStatistic(db, scope);
     const key = { global_summary: 'globalSummary', character_ranking: 'characterRanking', character_catalog: 'characterCatalog' }[scope];
+    if (payload && key) res.setHeader('Cache-Control', PUBLIC_STATISTICS_CACHE_CONTROL);
     return res.status(payload ? 200 : 202).json({ success: true, cached: true, partial: !payload,
       data: { [key]: payload ? { ...transform(payload), meta: { ...payload.meta, ...meta } } : null }, meta });
   } catch {
+    res.setHeader('Cache-Control', 'no-store');
     return res.status(503).json({ success: false, error: '定时统计服务暂不可用' });
   }
 }

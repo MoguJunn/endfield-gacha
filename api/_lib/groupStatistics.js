@@ -1,5 +1,5 @@
 import { getStatisticsGroup, getStatisticsGroupPools, statisticsMemberSignature } from '../../shared/statisticsScopes.js';
-import { readScheduledStatistic } from './scheduledStatistics.js';
+import { PUBLIC_STATISTICS_CACHE_CONTROL, readScheduledStatistic } from './scheduledStatistics.js';
 
 export async function handleGroupStatistics(req, res, db) {
   res.setHeader('Cache-Control', 'no-store');
@@ -15,8 +15,10 @@ export async function handleGroupStatistics(req, res, db) {
       return res.status(202).json({ success: true, cached: true, data: { groupKey, observations: null,
         meta: { availability: 'building', updatedAt: null, nextRefreshAt: meta.nextRefreshAt } } });
     }
+    res.setHeader('Cache-Control', PUBLIC_STATISTICS_CACHE_CONTROL);
     return res.json({ success: true, cached: true, data: { ...payload, meta: { ...payload.meta, ...meta } } });
   } catch {
+    res.setHeader('Cache-Control', 'no-store');
     return res.status(503).json({ success: false, error: '合池统计暂不可用' });
   }
 }
