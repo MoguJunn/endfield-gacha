@@ -57,7 +57,8 @@ function LuckDialog({ type, stats, assessment, analysis, weapon, tt, number, onC
       <div><dt>{tt('试行分档', 'Rating thresholds')}</dt><dd>{tt('六星占 40%，UP 占 60%；各项按“实际减预期，除以预期加 4 的平方根”计算。', 'Six-stars weigh 40%, UP 60%. Each term is (actual − expected) / √(expected + 4).')}
         {` S ≥ ${GRADE_THRESHOLDS.S} · A+ ≥ ${GRADE_THRESHOLDS['A+']} · A ≥ ${GRADE_THRESHOLDS.A} · C ≤ ${GRADE_THRESHOLDS.C}`}
         <p>{tt('这是体验分档，不是概率或玩家排名。样本较少或包含推定进度时标为暂定评价。', 'These are feedback tiers, not probabilities or player ranks. Small samples and inferred progress receive provisional ratings.')}</p></dd></div>
-      <div><dt>{tt('最近三个版本', 'Latest three versions')}</dt><dd>{tt('按网站版本开始时间归属，当前版本和前两个版本汇总后重新评分，与此前三个版本比较。空版本保留，跨版本不重置保底。', 'Pulls follow the site version dates. The current and previous two versions are combined and compared with the preceding three. Empty versions stay; pity continues across boundaries.')}</dd></div>
+      <div><dt>{tt('最近三个版本', 'Latest three versions')}</dt><dd>{tt('按网站版本时间归属；更新当天提前开放的当期卡池归入新版本。当前版本和前两个版本汇总后重新评分，与此前三个版本比较。空版本保留，跨版本不重置保底。', 'Pulls follow the site version dates. New banners that open early on release day belong to the new version. The current and previous two versions are combined and compared with the preceding three. Empty versions stay; pity continues across boundaries.')}
+        <p>{tt('走势图显示实际抽数（不含免费抽和赠送）；无法还原进度的记录仍计入抽数，但不参与评分，评分抽数另行标注。', 'The chart shows recorded pulls excluding free pulls and gifts. Records with unknown progress still count as pulls; the rated subset is shown separately.')}</p></dd></div>
     </dl> : type === 'pity' || type === 'multi' ? <dl>
       {(type === 'pity' ? [[tt('六星硬保底', 'Hard six-star pity'), stats.hard, weapon ? tt('第 4 次申领', '4th claim') : tt('第 80 抽', '80th pull')],
         [tt('首次 UP 保底', 'First-UP guarantee'), stats.guarantee, weapon ? tt('第 8 次申领', '8th claim') : tt('第 120 抽', '120th pull')],
@@ -163,13 +164,14 @@ export default function PersonalLuckPanel({ account }) {
         <div className="pl-trend-comparison"><span>{tt('此前三个版本', 'Previous three')} <b data-grade={previous.grade || 'unrated'}>{previous.grade || '—'}</b></span><ArrowRight size={15} /><span>{tt('最近三个版本', 'Latest three')} <b data-grade={recent.grade || 'unrated'}>{recent.grade || '—'}</b></span></div></div>
         <div className="pl-trend-chart"><header>{tt('每个版本单独评价', 'Each version rated separately')}<small>{tt('浅色底：最近三个版本', 'Shaded: latest three')}</small></header>
           <div ref={chartRef} className="pl-version-scroll" tabIndex={0} role="region" aria-label={tt('版本走势，可左右滚动', 'Version trend, scroll horizontally')}><div style={{ width, minWidth: '100%' }}>
-            <svg viewBox={`0 0 ${width} 132`} role="img" aria-label={periods.map(p => `${p.versionName}: ${p.grade || '—'}, ${number(p.sample)}`).join('; ')}>
+            <svg viewBox={`0 0 ${width} 132`} role="img" aria-label={periods.map(p => `${p.versionName}: ${p.grade || '—'}, ${number(p.observed)} ${unit}, ${tt('参与评分', 'rated')} ${number(p.sample)}`).join('; ')}>
               <defs><linearGradient id={trendId}><stop stopColor="#8aebff" /><stop offset=".5" stopColor="#c6a3ff" /><stop offset="1" stopColor="#ff9dc5" /></linearGradient></defs>
               <rect x={Math.max(0, periods.length - 3) * 112} width={recentPeriods.length * 112} height="132" className="pl-version-shade" />
               <line x1="0" x2={width} y1="85" y2="85" className="pl-baseline" />
               {periods.slice(1).map((p, i) => periods[i].eligible && p.eligible && <line key={p.versionId} x1={56 + i * 112} y1={point(periods[i].score)} x2={168 + i * 112} y2={point(p.score)} className="pl-trend-line" />)}
               {periods.map((p, i) => <g key={p.versionId} data-grade={p.grade || 'unrated'}><circle cx={56 + i * 112} cy={p.eligible ? point(p.score) : 85} r="5" style={p.grade === 'S' ? { fill: `url(#${trendId})` } : undefined} /><text x={56 + i * 112} y={(p.eligible ? point(p.score) : 85) - 14} textAnchor="middle">{p.grade || '—'}</text></g>)}
-            </svg><div className="pl-version-axis">{periods.map((p, i) => <span key={p.versionId} className={i >= periods.length - 3 ? 'pl-recent-version' : ''}><b>{p.versionName}</b><small>{number(p.sample)} {unit}</small>
+            </svg><div className="pl-version-axis">{periods.map((p, i) => <span key={p.versionId} className={i >= periods.length - 3 ? 'pl-recent-version' : ''}><b>{p.versionName}</b><small>{number(p.observed)} {unit}</small>
+              {p.sample !== p.observed && <small>{tt('参与评分', 'Rated')} {number(p.sample)} {unit}</small>}
               {p.provisional && <small>{tt('暂定', 'Provisional')}{p.inferred ? ` · ${tt('含推定', 'inferred')}` : ''}</small>}{!p.eligible && <small>{tt('暂无评分', 'Unrated')}</small>}</span>)}</div>
           </div></div></div></section>
       <div className="pl-achievements">{[[ShieldCheck, tt('保底次数', 'Pity triggers'), 'pity'], [Sparkles, tt('多彩次数', 'Multiple six-stars'), 'multi'], [Zap, tt('最快出金', 'Fastest six-star'), 'best'], [Target, tt('出金不歪率', 'UP win rate'), 'wins']].map(([Icon, title, key]) =>

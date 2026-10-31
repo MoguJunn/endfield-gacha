@@ -6,7 +6,7 @@ import { isOfficialImportNonPullRecord } from '../../shared/officialImportRecord
 import { sanitizePublicCatalogResourceUrl } from '../../shared/publicCatalogDto.js';
 import { storedAccountKey } from './storedPoolObservations.js';
 import { sumLuckWindows } from './personalLuckRating.js';
-import { getStartedLuckVersions, groupLuckUnitsByVersion } from './personalLuckVersions.js';
+import { getStartedLuckVersions, groupLuckUnitsByVersion, PERSONAL_LUCK_CALCULATION_VERSION } from './personalLuckVersions.js';
 
 const text = value => String(value ?? '').trim();
 const seq = row => /^\d+$/.test(text(row.seq_id)) ? BigInt(row.seq_id) : null;
@@ -144,7 +144,8 @@ function analyzeEntity(rows, infos, catalog, entity, entries, versions) {
       prefixComplete = false; streakItems = [];
       uncertainUntil = Math.max(uncertainUntil, time(row.timestamp) ?? Infinity); continue;
     }
-    const unit = { ...blank(), observed: group.length, startAt: row.timestamp, endAt: group.at(-1).timestamp };
+    const unit = { ...blank(), observed: group.length, startAt: row.timestamp, endAt: group.at(-1).timestamp,
+      versionPoolId: info.pool.character_pool_id || info.pool.id };
     units.push(unit);
     const six = group.filter(item => Number(item.rarity) === 6), classifications = six.map(item => classify(item, info, catalog));
     const upCount = classifications.filter(Boolean).length;
@@ -205,11 +206,14 @@ function analyzeEntity(rows, infos, catalog, entity, entries, versions) {
 
 /** Complete, owner-scoped history only; never call this on a paginated UI list. */
 export function buildPersonalLuck({ history, pools, characters, entries = [], versionConfig, fetchedAt }) {
-  const versions = getStartedLuckVersions(versionConfig, fetchedAt), catalog = buildCatalogIndex(characters);
+  const catalog = buildCatalogIndex(characters);
   const infos = new Map(pools.map(pool => [pool.id, poolInfo(pool, catalog)]));
   const normalized = history.map(row => ({ ...row, pool_id: row.poolId ?? row.pool_id, record_id: row.id ?? row.record_id,
     seq_id: row.seqId ?? row.seq_id, batch_id: row.batchId ?? row.batch_id,
     statistics_excluded: row.statisticsExcluded ?? row.statistics_excluded }));
+  const observedPoolIds = normalized.filter(row => time(row.timestamp) != null && time(row.timestamp) <= time(fetchedAt))
+    .map(row => infos.get(row.pool_id)?.pool.character_pool_id || row.pool_id);
+  const versions = getStartedLuckVersions(versionConfig, fetchedAt, observedPoolIds);
   const accounts = [];
   for (const [key, raw] of Map.groupBy(normalized, storedAccountKey)) {
     if (!key) continue;
@@ -220,5 +224,5 @@ export function buildPersonalLuck({ history, pools, characters, entries = [], ve
     accounts.push({ key, character: analyzeEntity(rows, infos, catalog, 'character', accountEntries, versions),
       weapon: analyzeEntity(rows, infos, catalog, 'weapon', accountEntries, versions) });
   }
-  return { version: 1, fetchedAt, accounts };
+  return { version: 1, calculationVersion: PERSONAL_LUCK_CALCULATION_VERSION, fetchedAt, accounts };
 }

@@ -62,5 +62,23 @@ try {
   }
   assert.equal(pages, 3);
   assert.deepEqual(missing, [{ scopeKey: 'owner:zz-empty', revision: 1, hasAccounts: false, needsLuck: true }]);
+  await db.exec(await readFile(new URL('../supabase/migrations/2026103104_personal_luck_release_boundaries.sql', import.meta.url), 'utf8'));
+  const latestLuck = { ...luck, calculationVersion: 2 };
+  const upgrade = (scope, revision = 1) => publish(scope, revision, latestLuck);
+  const upgradedList = (await db.query('SELECT read_personal_luck_backfill_batch() AS jobs')).rows[0].jobs;
+  assert.equal(upgradedList.find(job => job.scopeKey === 'owner:stable').needsLuck, true);
+  await assert.rejects(publish('owner:stable', 2), /Invalid personal luck result/);
+  assert.equal((await upgrade('owner:changed')).rows[0].ok, false);
+  assert.equal((await upgrade('owner:leased')).rows[0].ok, false);
+  assert.equal((await upgrade('owner:stable', 2)).rows[0].ok, true);
+  assert.equal((await upgrade('owner:stable', 3)).rows[0].ok, false);
+  const upgraded = (await db.query(`SELECT s.payload,s.source_revision,s.computed_at::text AS computed_at,
+    j.revision,j.published_revision FROM statistics_snapshots s JOIN statistics_jobs j USING(scope_key)
+    WHERE scope_key='owner:stable'`)).rows[0];
+  assert.deepEqual(upgraded.payload, { summary: { total: 120 }, catalogs: { safe: true }, luck: latestLuck });
+  assert.equal(upgraded.source_revision, 3); assert.equal(upgraded.revision, 3); assert.equal(upgraded.published_revision, 3);
+  assert.match(upgraded.computed_at, /^2020-01-01/);
+  const latestList = (await db.query('SELECT read_personal_luck_backfill_batch() AS jobs')).rows[0].jobs;
+  assert.equal(latestList.find(job => job.scopeKey === 'owner:stable').needsLuck, false);
   console.log('Luck backfill SQL verified: bounded pagination, revision/lease conflict, idempotency, payload/time preservation and ACL');
 } finally { await db.close(); }

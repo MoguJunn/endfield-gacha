@@ -84,6 +84,38 @@ describe('personal luck reconstructed from complete owner history', () => {
 });
 
 describe('luck ratings and versions', () => {
+  it('assigns early release-day character pulls and linked weapon claims to their configured version', () => {
+    const versions = { versions: [
+      { id: 'old', name: '旧版本', starts_at: '2026-08-01T04:00:00Z', pool_ids: ['old-pool'] },
+      { id: 'new', name: '新版本', starts_at: '2026-09-02T04:00:00Z', pool_ids: ['limited'] },
+    ] };
+    const history = [row(1, { timestamp: '2026-09-02T03:33:00Z' }),
+      ...Array.from({ length: 10 }, (_, i) => row(i + 1, { pool_id: 'weapon', batch_id: 'claim', timestamp: '2026-09-02T03:40:00Z' }))];
+    const configuredPools = [pools[0], { ...pools[2], character_pool_id: 'limited' }];
+    for (const fetchedAt of ['2026-09-02T03:50:00Z', '2026-09-03T04:00:00Z']) {
+      const account = analyze(history, { pools: configuredPools, versionConfig: versions, fetchedAt })[0];
+      expect(account.character.timeline.map(p => p.observed)).toEqual([0, 1]);
+      expect(account.weapon.timeline.map(p => p.observed)).toEqual([0, 10]);
+      expect(account.character.timeline[1].sample).toBe(1);
+    }
+    expect(getStartedLuckVersions(versions, '2026-09-02T03:50:00Z')).toHaveLength(1);
+  });
+  it('moves only the matching new banner on release day and preserves the total rating and incomplete records', () => {
+    const versions = getStartedLuckVersions({ versions: [
+      { id: 'old', name: '旧版本', starts_at: '2026-08-01T04:00:00Z' },
+      { id: 'new', name: '新版本', starts_at: '2026-09-02T04:00:00Z', pool_ids: ['new-pool'] },
+    ] }, '2026-09-30T04:00:00Z');
+    const unit = (versionPoolId, startAt, sample = 1) => ({ sample, observed: 1, actual: 0, expected: .008 * sample,
+      upActual: 0, upExpected: .004 * sample, versionPoolId, startAt, endAt: startAt });
+    const units = [unit('new-pool', '2026-09-02T03:33:00Z'), unit('new-pool', '2026-09-02T03:34:00Z', 0),
+      unit('old-pool', '2026-09-02T03:33:00Z'), unit('new-pool', '2026-09-01T03:33:00Z'),
+      unit('old-pool', '2026-09-03T03:33:00Z')];
+    const result = groupLuckUnitsByVersion(units, versions);
+    expect(result.timeline.map(p => p.observed)).toEqual([2, 3]);
+    expect(result.timeline.map(p => p.sample)).toEqual([2, 2]);
+    expect(sumLuckWindows(result.timeline)).toEqual(sumLuckWindows(units));
+    expect(evaluateLuckTimeline(result.timeline, 'character').overall.score).toBe(evaluateLuckWindow(sumLuckWindows(units)).score);
+  });
   it('recognises modest good luck, reserves C for a clearer deficit and keeps uncertainty visible', () => {
     const base = { sample: 5000, expected: 100, upExpected: 50 };
     for (const [actual, upActual, grade] of [[100, 50, 'B'], [100, 54, 'A'], [100, 63, 'A+'], [100, 75, 'S'], [90, 47, 'B'], [80, 40, 'C']])
