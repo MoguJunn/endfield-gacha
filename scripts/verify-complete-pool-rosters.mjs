@@ -17,7 +17,7 @@ function command(executable, args, options = {}) {
 const native = (name, args, options = {}) => command(path.join(nativeBin, `${name}${process.platform === 'win32' ? '.exe' : ''}`), args, { cwd: directory, env: environment, ...options });
 const sql = (input) => nativeBin
   ? native('psql', ['-X', '-q', '-w', '-v', 'ON_ERROR_STOP=1', '-h', '127.0.0.1', '-p', String(port), '-U', 'postgres', '-d', 'postgres'], { input })
-  : command('docker', ['exec', '-i', container, 'psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres'], { input });
+  : command('docker', ['exec', '-i', container, 'psql', '-X', '-q', '-v', 'ON_ERROR_STOP=1', '-h', '127.0.0.1', '-U', 'postgres'], { input });
 try {
   if (nativeBin) {
     if (!path.isAbsolute(nativeBin)) throw new Error('POOL_ROSTER_PG_BIN must be an absolute local bin directory');
@@ -38,7 +38,9 @@ try {
     command('docker', ['run', '-d', '--name', container, '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', process.env.TEST_POSTGRES_IMAGE || 'postgres:17-alpine']);
     started = true;
     for (let i = 0; i < 60; i++) {
-      if (spawnSync('docker', ['exec', container, 'pg_isready', '-U', 'postgres']).status === 0) break;
+      // Initialization briefly starts a socket-only server before restarting.
+      // TCP readiness must match the endpoint used by the SQL checks below.
+      if (spawnSync('docker', ['exec', container, 'pg_isready', '-h', '127.0.0.1', '-U', 'postgres']).status === 0) break;
       if (i === 59) throw new Error('Isolated PostgreSQL did not become ready');
       await new Promise(resolve => setTimeout(resolve, 500));
     }
