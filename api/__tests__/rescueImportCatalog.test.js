@@ -22,4 +22,32 @@ describe('historical banner availability for rescued files', () => {
     ]));
     expect(preview({ ...pool, up_character: '另一角色' }).canCommit).toBe(false);
   });
+
+  it('uses an earlier confirmed UP banner for a non-UP acquisition in a later banner', () => {
+    const debut = { ...pool, id: 'special_debut', roster_status: 'partial', start_time: '2026-01-01T00:00:00Z' };
+    const later = { ...pool, up_character: '后续UP', roster_status: 'partial',
+      six_star_entities: [{ id: entity.id, is_up: false }] };
+    const result = buildWorkbenchPreview({ entries: [entry], scope: { gameUid: '1', serverScope: '1' } },
+      { entries: [], history: [] }, { pools: [debut, later], entities: [entity] });
+    expect(result.issues).toEqual([]);
+    expect(result.canCommit).toBe(true);
+  });
+
+  it('still rejects an acquisition before the earliest confirmed banner opens', () => {
+    const debut = { ...pool, id: 'special_debut', start_time: '2026-02-15T00:00:00Z' };
+    const later = { ...pool, up_character: '后续UP', six_star_entities: [{ id: entity.id, is_up: false }] };
+    const result = buildWorkbenchPreview({ entries: [entry], scope: { gameUid: '1', serverScope: '1' } },
+      { entries: [], history: [] }, { pools: [debut, later], entities: [entity] });
+    expect(result.canCommit).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'entity_not_released' })]));
+  });
+
+  it('keeps the target banner membership check even with earlier debut evidence', () => {
+    const debut = { ...pool, id: 'special_debut', start_time: '2026-01-01T00:00:00Z' };
+    const later = { ...pool, up_character: '后续UP', roster_status: 'complete', rosterEntityIds: [], six_star_entities: [] };
+    const result = buildWorkbenchPreview({ entries: [entry], scope: { gameUid: '1', serverScope: '1' } },
+      { entries: [], history: [] }, { pools: [debut, later], entities: [entity] });
+    expect(result.canCommit).toBe(false);
+    expect(result.issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'entity_not_in_pool' })]));
+  });
 });

@@ -339,13 +339,17 @@ function historicalCatalogIssues(entry, { pools, entities }) {
   const expectedType = resolvePoolCapabilities(pool).entityType;
   if (entity.type !== expectedType) return [issue(entry.entryId, 'entity_pool_type_mismatch', '实体类型与卡池不匹配')];
   const catalogRelease = Date.parse(entity.release_date || entity.pool_config?.introduced_at);
-  // A confirmed UP roster and the banner's opening date are direct historical
-  // evidence of availability, even if a later catalog edit set introduced_at.
-  const ownBannerStart = pool.up_character === entity.name
-    && pool.six_star_entities?.some(row => row.id === entity.id && row.is_up)
-    ? Date.parse(pool.start_time ?? pool.startTime) : NaN;
-  const release = Number.isFinite(ownBannerStart) && Number.isFinite(catalogRelease)
-    ? Math.min(ownBannerStart, catalogRelease) : catalogRelease;
+  // An earlier confirmed UP banner proves availability in later non-UP drops
+  // too; introduced_at can have been filled by a later catalog maintenance.
+  // Target-banner membership is still validated separately below.
+  const confirmedBannerStarts = pools
+    .filter(candidate => candidate.up_character === entity.name
+      && resolvePoolCapabilities(candidate).entityType === entity.type
+      && candidate.six_star_entities?.some(row => row.id === entity.id && row.is_up))
+    .map(candidate => Date.parse(candidate.start_time ?? candidate.startTime))
+    .filter(Number.isFinite);
+  const releases = [...confirmedBannerStarts, catalogRelease].filter(Number.isFinite);
+  const release = releases.length ? Math.min(...releases) : NaN;
   const [, upper] = timeBounds(entry);
   // 未标注 release_date 的实体不能仅凭时间推断，交由名单核对（191 的 roster_status）判定。
   if (Number.isFinite(release) && Number.isFinite(upper) && upper < release) {

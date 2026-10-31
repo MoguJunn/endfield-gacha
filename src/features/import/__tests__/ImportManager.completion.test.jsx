@@ -6,6 +6,7 @@ import ImportManager from '../ImportManager.jsx';
 
 const harness = vi.hoisted(() => ({
   result: null,
+  fetchStatus: 'idle',
   user: { id: 'user-1' },
   refreshPersonalData: vi.fn(),
   loadAccountSecurityState: vi.fn(),
@@ -71,11 +72,14 @@ vi.mock('../../../services/accountIntegrationsService.js', () => ({
 }));
 
 vi.mock('../OfficialAPIImport', () => ({
-  default: function OfficialImportFixture({ onImportComplete }) {
+  default: function OfficialImportFixture({ onImportComplete, onFetchStatusChange }) {
     const [input, setInput] = React.useState('');
     return <>
       <input aria-label="official-token" value={input} onChange={(event) => setInput(event.target.value)} />
-      <button type="button" onClick={() => onImportComplete(harness.result)}>finish-import</button>
+      <button type="button" onClick={() => {
+        onFetchStatusChange(harness.fetchStatus);
+        onImportComplete(harness.result);
+      }}>finish-import</button>
     </>;
   },
 }));
@@ -160,6 +164,7 @@ describe('ImportManager completion behavior', () => {
     vi.clearAllMocks();
     harness.user = { id: 'user-1' };
     harness.result = makeResult();
+    harness.fetchStatus = 'idle';
     harness.refreshPersonalData.mockResolvedValue({
       ok: true,
       data: { pools: [], history: [] },
@@ -293,8 +298,40 @@ describe('ImportManager completion behavior', () => {
     expect(screen.getByText(/请求中途停止/)).toBeInTheDocument();
   });
 
+  it.each(['common.close', '稍后处理', '前往详细记录'])('子流程仍报处理中时，已完成的异常结果可通过%s离开', async action => {
+    harness.fetchStatus = 'processing';
+    harness.result = makeResult({ anomalyRecords: 1, anomalyPoolIds: ['pool-1'], anomalyItems: [{
+      recordId: 'record-1', poolId: 'pool-1', seqId: '4586', itemName: '玉中身',
+      issueCode: 'OFFICIAL_IMPORT_UNKNOWN_ITEM',
+    }] });
+    const onClose = vi.fn();
+    const onImportComplete = vi.fn();
+    render(<ImportManager isOpen onClose={onClose} onImportComplete={onImportComplete} />);
+    fireEvent.click(screen.getByRole('button', { name: 'finish-import' }));
+    expect(await screen.findByText('有 1 条异常记录')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'common.close' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: action }));
+    expect(onClose).toHaveBeenCalledOnce();
+    if (action === '前往详细记录') {
+      expect(onImportComplete).toHaveBeenCalledWith(harness.result);
+      expect(harness.switchPool).toHaveBeenCalledWith('pool-1');
+    }
+  });
+
+  it('子流程仍报获取中且刷新失败时，已保存的结果仍能关闭', async () => {
+    harness.fetchStatus = 'fetching';
+    harness.refreshPersonalData.mockRejectedValue(new Error('network down'));
+    const onClose = vi.fn();
+    render(<ImportManager isOpen onClose={onClose} />);
+    fireEvent.click(screen.getByRole('button', { name: 'finish-import' }));
+    expect(await screen.findByText('记录已保存，但云端刷新失败')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it('云端刷新完成前禁止关闭，避免迟到回调污染下一次弹窗', async () => {
     const cloudRefresh = createDeferred();
+    harness.fetchStatus = 'processing';
     harness.refreshPersonalData.mockReturnValue(cloudRefresh.promise);
     const onClose = vi.fn();
     const onImportComplete = vi.fn();

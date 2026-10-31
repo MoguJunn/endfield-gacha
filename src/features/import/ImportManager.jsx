@@ -236,6 +236,12 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
     && user
     && isOAuthAccountCompletionRequired(accountSecurityState)
   );
+  // Once the parent owns a completed result, a stale child fetch status must
+  // not lock its close actions. Refresh and persistence still block dismissal.
+  const isImportBusy = completionPending
+    || importStatus === ImportStatus.SAVING
+    || (importStatus === ImportStatus.IDLE
+      && ['authenticating', 'fetching', 'processing'].includes(fetchStatus));
 
   useEffect(() => {
     if (user?.id) setImportOwnerId(user.id);
@@ -604,16 +610,12 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
   }, []);
 
   const handleClose = useCallback(() => {
-    if (
-      completionPending
-      || importStatus === ImportStatus.SAVING
-      || ['authenticating', 'fetching', 'processing'].includes(fetchStatus)
-    ) {
+    if (isImportBusy) {
       return;
     }
     handleReset();
     onClose();
-  }, [completionPending, fetchStatus, handleReset, importStatus, onClose]);
+  }, [handleReset, isImportBusy, onClose]);
 
   const handleOpenSettings = useCallback(() => {
     handleClose();
@@ -663,9 +665,6 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
   const primaryImportAnomalyMessage = getImportAnomalyMessage(primaryImportAnomaly, t);
   const primaryImportAnomalyName = getImportAnomalyDisplayName(primaryImportAnomaly, t);
   const importWarnings = getVisibleImportWarnings(importResult, t);
-  const isImportBusy = completionPending
-    || importStatus === ImportStatus.SAVING
-    || ['authenticating', 'fetching', 'processing'].includes(fetchStatus);
 
   if (!isOpen) return null;
 
