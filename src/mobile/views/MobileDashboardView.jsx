@@ -1193,121 +1193,6 @@ function MobileDashboardView() {
         </div>
       )}
 
-      {!isGroupMode && !hasMergedAccountView && (
-        <div className="mobile-ux-card mx-4 mb-4 space-y-3 p-4">
-          <div className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500 dark:text-zinc-500">
-            {t('dashboard.analysis.specialProgress')}
-          </div>
-
-          {(specialProgress?.freeTenMilestones || []).map((milestone) => (
-            <div key={milestone.threshold} className="mobile-ux-card-inset space-y-2 border-l-2 border-cyan-500 p-3">
-              <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="font-bold text-slate-800 dark:text-zinc-200">
-                  {isReconstructionCharacter
-                    ? t('dashboard.analysis.freeTenMilestone', { count: milestone.threshold })
-                    : t('dashboard.analysis.freeTenOnce')}
-                </span>
-                <span className="font-mono text-slate-500 dark:text-zinc-500">
-                  {milestone.received
-                    ? t('dashboard.analysis.claimed')
-                    : `${formatNumber(milestone.progress)} / ${formatNumber(milestone.threshold)}`}
-                </span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                <div
-                  className={`h-full ${milestone.received ? 'bg-green-500' : 'bg-cyan-500'}`}
-                  style={{ width: `${milestone.received ? 100 : Math.min((milestone.progress / milestone.threshold) * 100, 100)}%` }}
-                />
-              </div>
-              <div className="text-[10px] text-slate-500 dark:text-zinc-500">{t('dashboard.analysis.notCountPity')}</div>
-            </div>
-          ))}
-
-          {specialProgress?.targetGuarantee && (
-            <div className="mobile-ux-card-inset space-y-2 border-l-2 border-green-500 p-3">
-              <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="font-bold text-slate-800 dark:text-zinc-200">
-                  {isReconstructionWeapon
-                    ? t('dashboard.analysis.reconstructionWeaponGuarantee80')
-                    : isReconstructionCharacter
-                      ? t('dashboard.analysis.reconstructionCharacterGuarantee120')
-                      : isWeapon
-                        ? t('dashboard.analysis.guaranteedWeapon80')
-                        : t('dashboard.analysis.guaranteedLimited120')}
-                </span>
-                <span className="font-mono text-slate-500 dark:text-zinc-500">
-                  {specialProgress.targetGuarantee.reached
-                    ? t('dashboard.analysis.reached')
-                    : `${formatNumber(specialProgress.targetGuarantee.progress)} / ${formatNumber(specialProgress.targetGuarantee.threshold)}`}
-                </span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                <div
-                  className={`h-full ${specialProgress.targetGuarantee.reached ? 'bg-green-500' : isWeapon ? 'bg-slate-500' : 'bg-cyan-500'}`}
-                  style={{ width: `${specialProgress.targetGuarantee.reached ? 100 : Math.min((specialProgress.targetGuarantee.progress / specialProgress.targetGuarantee.threshold) * 100, 100)}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {currentPoolCapabilities.basePoolType === 'limited' && currentPoolCapabilities.entityType === 'character' && (
-            <div className="mobile-ux-card-inset space-y-2 border-l-2 border-purple-500 p-3">
-              <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="font-bold text-slate-800 dark:text-zinc-200">
-                  {isReconstructionCharacter
-                    ? t('dashboard.analysis.reconstructionCharacterToken240')
-                    : t('dashboard.analysis.potential240')}
-                </span>
-                <span className="font-mono text-slate-500 dark:text-zinc-500">
-                  {formatNumber(rewardPaidTotal % 240)} / 240
-                </span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                <div className="h-full bg-purple-500" style={{ width: `${((rewardPaidTotal % 240) / 240) * 100}%` }} />
-              </div>
-            </div>
-          )}
-
-          {currentPoolCapabilities.infoBookEnabled && (
-            <div className="mobile-ux-card-inset space-y-2 border-l-2 border-cyan-500 p-3">
-              <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="flex items-center gap-1 font-bold text-slate-800 dark:text-zinc-200">
-                  <FileText size={12} /> {t('dashboard.analysis.infoBook60')}
-                </span>
-                <span className="font-mono text-slate-500 dark:text-zinc-500">
-                  {stats.hasInfoBook ? t('dashboard.analysis.reached') : `${Math.min(paidTotal, 60)} / 60`}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {isWeapon && weaponGifts && (
-            <div className="mobile-ux-card-inset space-y-2 border-l-2 border-red-500 p-3">
-              <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="font-bold text-slate-800 dark:text-zinc-200">
-                  {t('dashboard.analysis.nextGift')} · {weaponGifts.nextGiftType === 'limited'
-                    ? t('dashboard.analysis.targetWeaponReward')
-                    : t('dashboard.analysis.arsenalGiftReward')}
-                </span>
-                <span className="font-mono text-slate-500 dark:text-zinc-500">
-                  {isReconstructionWeapon
-                    ? `${formatNumber(rewardPaidTotal / 10)} / ${formatNumber(weaponGifts.nextGift / 10)} ${t('dashboard.unit.claim')}`
-                    : `${formatNumber(rewardPaidTotal)} / ${formatNumber(weaponGifts.nextGift)}`}
-                </span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                <div className="h-full bg-red-500" style={{ width: `${Math.min((rewardPaidTotal / weaponGifts.nextGift) * 100, 100)}%` }} />
-              </div>
-              {isReconstructionWeapon && (
-                <div className="text-[10px] text-slate-500 dark:text-zinc-500">
-                  {t('dashboard.analysis.reconstructionWeaponGiftRule')}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* 核心数据网格 */}
       <div className={`mx-4 mb-4 grid ${normalizedPoolType !== 'standard' ? 'grid-cols-4' : 'grid-cols-3'} gap-2`}>
         {normalizedPoolType !== 'standard' && (
@@ -1450,15 +1335,17 @@ function MobileDashboardView() {
         className="mx-4 mb-4"
       />
 
-      {/* 特殊机制进度（聚合模式下隐藏） */}
-      {!isGroupMode && (
+      {/* 特殊机制进度统一在此折叠展示，聚合或合并账号视图下隐藏 */}
+      {!isGroupMode && !hasMergedAccountView && (
       <MobileChartContainer title={t('dashboard.analysis.specialProgress')} defaultExpanded={false} className="mb-4 mx-4">
         <div className="space-y-3 pt-2">
           {(specialProgress?.freeTenMilestones || []).map((milestone) => (
             <div key={milestone.threshold} className="mobile-ux-soft-card mobile-ux-soft-card--info p-3">
               <div className="flex justify-between items-center mb-1">
                 <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">
-                  {t('dashboard.analysis.freeTenOnce')} · {milestone.threshold}
+                  {isReconstructionCharacter
+                    ? t('dashboard.analysis.freeTenMilestone', { count: milestone.threshold })
+                    : t('dashboard.analysis.freeTenOnce')}
                 </span>
                 <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">
                   {milestone.received
@@ -1484,7 +1371,11 @@ function MobileDashboardView() {
               {/* 120必出限定 */}
               <div className="mobile-ux-soft-card mobile-ux-soft-card--success p-3">
                 <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">{t('dashboard.analysis.guaranteedLimited120')}</span>
+                  <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">
+                    {isReconstructionCharacter
+                      ? t('dashboard.analysis.reconstructionCharacterGuarantee120')
+                      : t('dashboard.analysis.guaranteedLimited120')}
+                  </span>
                   <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">
                     {specialProgress?.targetGuarantee?.reached
                       ? t('dashboard.analysis.reached')
@@ -1502,11 +1393,15 @@ function MobileDashboardView() {
               {/* 240赠送潜能 */}
               <div className="mobile-ux-soft-card p-3">
                 <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">{t('dashboard.analysis.potential240')}</span>
-                  <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">{(specialProgress?.paidTotal ?? paidTotal) % 240} / 240</span>
+                  <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">
+                    {isReconstructionCharacter
+                      ? t('dashboard.analysis.reconstructionCharacterToken240')
+                      : t('dashboard.analysis.potential240')}
+                  </span>
+                  <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">{formatNumber(rewardPaidTotal % 240)} / 240</span>
                 </div>
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                  <div className="h-full bg-purple-500" style={{ width: `${(((specialProgress?.paidTotal ?? paidTotal) % 240) / 240) * 100}%` }} />
+                  <div className="h-full bg-purple-500" style={{ width: `${((rewardPaidTotal % 240) / 240) * 100}%` }} />
                 </div>
               </div>
 
@@ -1536,7 +1431,11 @@ function MobileDashboardView() {
               {/* 80必出限定 */}
               <div className="mobile-ux-soft-card p-3">
                 <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">{t('dashboard.analysis.guaranteedWeapon80')}</span>
+                  <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">
+                    {isReconstructionWeapon
+                      ? t('dashboard.analysis.reconstructionWeaponGuarantee80')
+                      : t('dashboard.analysis.guaranteedWeapon80')}
+                  </span>
                   <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">
                     {specialProgress?.targetGuarantee?.reached
                       ? t('dashboard.analysis.reached')
@@ -1561,12 +1460,16 @@ function MobileDashboardView() {
                         {weaponGifts.nextGiftType === 'limited' ? t('dashboard.analysis.targetWeaponReward') : t('dashboard.analysis.arsenalGiftReward')}
                       </span>
                     </span>
-                    <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">{specialProgress?.paidTotal ?? paidTotal} / {weaponGifts.nextGift}</span>
+                    <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">
+                      {isReconstructionWeapon
+                        ? `${formatNumber(rewardPaidTotal / 10)} / ${formatNumber(weaponGifts.nextGift / 10)} ${t('dashboard.unit.claim')}`
+                        : `${formatNumber(rewardPaidTotal)} / ${formatNumber(weaponGifts.nextGift)}`}
+                    </span>
                   </div>
                   <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
                     <div
                       className={`h-full ${weaponGifts.nextGiftType === 'limited' ? 'rainbow-progress' : 'bg-red-500'}`}
-                      style={{ width: `${Math.min(((specialProgress?.paidTotal ?? paidTotal) / weaponGifts.nextGift) * 100, 100)}%` }}
+                      style={{ width: `${Math.min((rewardPaidTotal / weaponGifts.nextGift) * 100, 100)}%` }}
                     />
                   </div>
                   <div className="mt-1 flex gap-3 text-[11px] text-slate-500 dark:text-zinc-500 font-mono uppercase">
@@ -1574,6 +1477,11 @@ function MobileDashboardView() {
                     <span className="text-red-600 dark:text-red-400 font-medium">{weaponGifts.standardCount} {t('dashboard.analysis.arsenalGiftReward')}</span>
                     <span className="text-cyan-600 dark:text-cyan-400 font-medium">{weaponGifts.limitedCount} {t('dashboard.analysis.targetWeaponReward')}</span>
                   </div>
+                  {isReconstructionWeapon && (
+                    <div className="mt-1 text-[11px] text-slate-500 dark:text-zinc-500">
+                      {t('dashboard.analysis.reconstructionWeaponGiftRule')}
+                    </div>
+                  )}
                 </div>
               )}
             </>
