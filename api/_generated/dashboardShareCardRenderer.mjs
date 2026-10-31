@@ -10,14 +10,14 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// _tmp/import-catalog-account-20261023/src/i18n/messages.en-US.js
+// src/i18n/messages.en-US.js
 var messages_en_US_exports = {};
 __export(messages_en_US_exports, {
   default: () => messages_en_US_default
 });
 var messages3, messages_en_US_default;
 var init_messages_en_US = __esm({
-  "_tmp/import-catalog-account-20261023/src/i18n/messages.en-US.js"() {
+  "src/i18n/messages.en-US.js"() {
     messages3 = {
       "language.name": "English",
       "language.short": "EN",
@@ -2080,17 +2080,17 @@ var init_messages_en_US = __esm({
   }
 });
 
-// _tmp/import-catalog-account-20261023/api/_share/dashboardShareCardRenderer.jsx
+// api/_share/dashboardShareCardRenderer.jsx
 import React3 from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-// _tmp/import-catalog-account-20261023/src/components/dashboard/DashboardShareCard.jsx
+// src/components/dashboard/DashboardShareCard.jsx
 import React2, { forwardRef } from "react";
 
-// _tmp/import-catalog-account-20261023/src/components/share/ShareBrandPanel.jsx
+// src/components/share/ShareBrandPanel.jsx
 import React from "react";
 
-// _tmp/import-catalog-account-20261023/src/utils/shareBranding.js
+// src/utils/shareBranding.js
 var SHARE_BRAND_URL = "ef-gacha.mogujun.icu";
 var SHARE_BRAND_LINK = "https://ef-gacha.mogujun.icu/";
 var SHARE_FONT_SANS = '"Harmony Sans App", "HarmonyOS Sans SC", "HarmonyOS Sans", "PingFang SC", "Microsoft YaHei UI", "Noto Sans SC", "Segoe UI", sans-serif';
@@ -2374,10 +2374,10 @@ function buildShareQrCodeDataUrl(text = SHARE_BRAND_LINK, {
   return dataUrl;
 }
 
-// _tmp/import-catalog-account-20261023/src/i18n/index.js
+// src/i18n/index.js
 import { createContext, createElement, useContext, useEffect, useMemo, useState } from "react";
 
-// _tmp/import-catalog-account-20261023/src/i18n/messages.zh-CN.js
+// src/i18n/messages.zh-CN.js
 var messages = {
   "language.name": "\u4E2D\u6587",
   "language.short": "\u4E2D",
@@ -4389,13 +4389,13 @@ var messages = {
 };
 var messages_zh_CN_default = messages;
 
-// _tmp/import-catalog-account-20261023/src/i18n/messages.js
+// src/i18n/messages.js
 var messages2 = {
   "zh-CN": messages_zh_CN_default
 };
 var messages_default = messages2;
 
-// _tmp/import-catalog-account-20261023/src/utils/storageUtils.js
+// src/utils/storageUtils.js
 var STORAGE_PREFIX = "gacha_";
 var STORAGE_KEYS = {
   THEME_MODE: "theme",
@@ -4489,7 +4489,7 @@ var readStorageValue = (key, defaultValue = null, options = {}) => {
 var writeStorageValue = (key, value, options = {}) => writeStorage(key, String(value), options);
 var removeStorageValue = (key, options = {}) => removeStorage(key, options);
 
-// _tmp/import-catalog-account-20261023/src/i18n/index.js
+// src/i18n/index.js
 var DEFAULT_LOCALE = "zh-CN";
 var SYSTEM_LOCALE_MODE = "system";
 var I18nContext = createContext(null);
@@ -4741,7 +4741,7 @@ function useI18n() {
   return context;
 }
 
-// _tmp/import-catalog-account-20261023/src/components/share/ShareBrandPanel.jsx
+// src/components/share/ShareBrandPanel.jsx
 import { jsx, jsxs } from "react/jsx-runtime";
 function getThemeTokens(theme) {
   if (theme === "dark") {
@@ -4881,7 +4881,7 @@ var ShareBrandPanel = ({
 };
 var ShareBrandPanel_default = ShareBrandPanel;
 
-// _tmp/import-catalog-account-20261023/src/constants/index.js
+// src/constants/index.js
 var LIMITED_POOL_RULES = {
   // 6星保底
   sixStarPity: 80,
@@ -5096,7 +5096,7 @@ var PRESET_POOLS = [
   }))
 ];
 
-// _tmp/import-catalog-account-20261023/shared/extraPoolSubtype.js
+// shared/extraPoolSubtype.js
 var EXTRA_POOL_SUBTYPES = Object.freeze({
   RECONSTRUCTION: "reconstruction",
   RECONSTRUCTION_CLAIM: "reconstruction_claim",
@@ -5108,7 +5108,7 @@ var EXTRA_POOL_RULE_PROFILES = Object.freeze({
   BRILLIANCE_FESTIVAL: "brilliance_festival_v1"
 });
 
-// _tmp/import-catalog-account-20261023/src/utils/poolCapabilities.js
+// src/utils/poolCapabilities.js
 var POOL_RULE_KEYS = {
   LIMITED: "LIMITED_POOL_RULES",
   WEAPON: "WEAPON_POOL_RULES",
@@ -5124,11 +5124,11 @@ var RULES_BY_KEY = {
   [POOL_RULE_KEYS.UNRESOLVED]: UNRESOLVED_POOL_RULES
 };
 
-// _tmp/import-catalog-account-20261023/src/utils/quotaEconomy.js
+// src/utils/quotaEconomy.js
 var FULL_POTENTIAL_COPY_COUNT = 6;
 var MAX_POTENTIAL_LEVEL = FULL_POTENTIAL_COPY_COUNT - 1;
 
-// _tmp/import-catalog-account-20261023/src/utils/resourceEconomy.js
+// src/utils/resourceEconomy.js
 var JADE_ICON_URL = "/resource-icons/item_diamond.webp";
 var ORIGINITE_ICON_URL = "/resource-icons/item_originium_recharge.webp";
 var ARSENAL_ICON_URL = "/resource-icons/item_gachabyproducts_weapongold.webp";
@@ -5161,7 +5161,7 @@ var DEFAULT_SIMULATOR_RESOURCE_SETTINGS = {
   infiniteResources: false
 };
 
-// _tmp/import-catalog-account-20261023/src/utils/timelineVisuals.js
+// src/utils/timelineVisuals.js
 function getTimelineVisualKind(entry) {
   if (entry?.stageKind === "gift") {
     return entry?.highlightStageKind || (Number(entry?.highestRarity) >= 6 ? "up" : Number(entry?.highestRarity) === 5 ? "fiveStar" : "gift");
@@ -5277,7 +5277,7 @@ function getTimelineTextBadgeStyle(entry, rarity, theme = "light") {
   return null;
 }
 
-// _tmp/import-catalog-account-20261023/src/components/dashboard/DashboardShareCard.jsx
+// src/components/dashboard/DashboardShareCard.jsx
 import { jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
 function getThemeTokens2(theme = "light") {
   if (theme === "dark") {
@@ -6404,7 +6404,7 @@ var DashboardShareCard = forwardRef(function DashboardShareCard2({ payload, sect
 });
 var DashboardShareCard_default = DashboardShareCard;
 
-// _tmp/import-catalog-account-20261023/api/_share/dashboardShareCardRenderer.jsx
+// api/_share/dashboardShareCardRenderer.jsx
 import { jsx as jsx3 } from "react/jsx-runtime";
 function renderDashboardShareCardMarkup({
   payload,
