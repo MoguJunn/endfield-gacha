@@ -15,7 +15,7 @@ import { personalAnalysisCoverage, preparePersonalAnalysisData } from '../../src
 import { loadWorkbenchEntriesForAnalytics } from './dataWorkbenchAnalytics.js';
 import { buildPersonalLuck } from '../../src/utils/personalLuck.js';
 
-export async function buildPersonalStatisticsSnapshot(db, userId, { signal } = {}) {
+export async function buildPersonalStatisticsSnapshot(db, userId, { signal, luckOnly = false } = {}) {
   const rows = [];
   const { count, error: countError } = await db.from('history').select('id', { head: true, count: 'exact' }).eq('user_id', userId).abortSignal(signal);
   if (countError || !Number.isInteger(count)) throw new Error('Cannot read complete personal statistics history');
@@ -49,6 +49,7 @@ export async function buildPersonalStatisticsSnapshot(db, userId, { signal } = {
   const originalHistory = history;
   const luck = buildPersonalLuck({ history: originalHistory, pools, characters, entries,
     versionConfig: versionRow.value, fetchedAt: new Date().toISOString() });
+  if (luckOnly) return luck;
   const personal = preparePersonalAnalysisData({ history, entries, pools, characters });
   history = personal.history;
   const accounts = getStoredObservationAccounts(history);

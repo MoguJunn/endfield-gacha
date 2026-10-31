@@ -34,6 +34,19 @@ const row = (id, scope = 'cn', extra = {}) => ({ id, record_id: String(id), user
   timestamp: new Date(1700000000000 + id * 1000).toISOString(), seq_id: id, ...extra });
 
 describe('personal scheduled snapshots', () => {
+  it('calculates identical luck without rebuilding unrelated rankings and collection scopes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-31T00:00:00Z'));
+    try {
+      const rows = [row(1), row(2), row(3, 'intl')];
+      const full = await buildPersonalStatisticsSnapshot(client(rows), 'owner');
+      const db = client(rows);
+      const luck = await buildPersonalStatisticsSnapshot(db, 'owner', { luckOnly: true });
+      expect(luck).toEqual(full.luck);
+      expect(db.rpc).not.toHaveBeenCalledWith('get_user_ranking_stats', expect.anything());
+      expect(luck).not.toHaveProperty('history');
+    } finally { vi.useRealTimers(); }
+  });
   it('builds separate account observations and catalogs from all owner rows, retaining gifts only in ownership', async () => {
     const db = client([row(1), row(2), row(3, 'intl'), row(4, 'intl', { special_type: 'gift' }), row(5, 'cn', { user_id: 'another' })]);
     const data = await buildPersonalStatisticsSnapshot(db, 'owner');

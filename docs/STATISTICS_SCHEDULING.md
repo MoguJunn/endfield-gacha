@@ -56,6 +56,14 @@ PR #43 的 `2026100601_reuse_pool_counts_for_catalog_groups.sql` 已修正目录
 
 手气算法与其他个人统计一起在独立 Node Worker 计算，复用同次读取的完整历史；Vercel 的 `personal_statistics` 只做鉴权和快照读取。发布新算法后应按既有队列串行预热，避免在访问请求中重扫历史，或一次启动多个实例全量重建。全份个人快照可能包含较大图鉴和范围统计，后续精简接口须在数据库读取投影阶段减量，仅在 Vercel 收到完整 JSON 后删字段不能消除数据库传输与反序列化开销。
 
+个人分析 schema 6 与手气评价 `luck.version=1` 属于两条队列。仅升级 `personal_analysis_snapshots` 不会补齐 `statistics_snapshots` 的 owner 手气字段；已经标记 `public-statistics-v6` 且数据未变的旧 owner 快照也不会自动重新领取。`2026103101_backfill_personal_luck.sql` 提供只允许 service role 调用的补算读取与发布函数，配合 `scripts/run-personal-luck-backfill.mjs` 只计算缺失的手气结果。发布在同一事务锁定任务和快照，校验修订、已发布修订和租约；导入或目录变化后拒绝合并旧结果。成功时只加入 `luck` 并同步推进修订以使浏览器缓存失效，其他统计的计算时间与刷新安排保持不变。无历史账号复用已完成空快照，输出空手气账号列表。
+
+补算脚本需在服务器既有 `/run/lock/endfield-analysis-workers.lock` 下运行，保留容器 CPU／内存限制；单进程最多重叠三个独立 owner 的读取，默认10分钟预算或5000项后结束，不创建额外的原始历史文件。候选查询先按元数据截取最多20项，再读取这些快照中的 JSON 标记，返回 `needsLuck`；已完成整页仍推进游标，避免先扫描全部大快照再排序造成超时。运行完成后按缺失手气数量、发布冲突和失败计数核验，变化中的账号仍由正常 Worker 计算。隔离 SQL 验证：临时安装 `@electric-sql/pglite` 到 `.agent-tmp`，然后运行 `node scripts/verify-personal-luck-backfill.mjs`，覆盖有界分页、已完成整页继续扫描、修订变化、活动租约、重复发布、非手气字段和原计算时间保留及函数权限。
+
+构建使用 `node scripts/build-personal-luck-backfill.mjs`，将忽略提交的产物 `.agent-tmp/personal-luck-backfill.mjs` 上传至 `/opt/endfield-statistics/`，按 `scripts/systemd/endfield-personal-luck-backfill.service` 运行一次，不安装重复计算的永久定时器。该服务沿用现有服务器的8010本机数据库网关，其他环境按实际端口修改。单轮到达预算后可再次运行，已完成项会跳过；执行完成须核对全部 owner 快照，不能只以 Worker 正常退出判断完成。
+
+2026-10-31 生产补算已完成：单轮约235秒发布4564项、跳过17项、冲突0、失败0。随后独立分页核对4581份个人快照，缺失手气为0；有账号历史的3057份全部包含手气，其余1524份为空账号快照。抽查3份有历史的结果，手气账号键与原统计账号键一致，人物和武器评价字段可正常读取。个人分析 schema 6 的 owner／scope 待处理和错误均已清零；两个常规定时器保持启用，一次性手气补算服务正常退出。这是当次核验结果，后续导入仍按正常修订队列更新。
+
 ## 浏览器数据复用
 
 参考 [Arknights Toolbox 的数据更新机制](https://github.com/arkntools/arknights-toolbox/blob/master/src/store/hotUpdate.js)，公开数据从“联网失败才读本地快照”改为“有效缓存优先”，避免刷新或切页时反复请求同一份数据。没有直接复制其实现，也不引入 Service Worker；旧版 Service Worker 恢复流程不会清除新 IndexedDB。
