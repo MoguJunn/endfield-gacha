@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { resolveSupabaseSecretKey, resolveSupabaseUrl } from '../api/_lib/supabaseEnv.js';
 import { buildPersonalStatisticsSnapshot } from '../api/_lib/personalStatisticsSnapshot.js';
+import { PERSONAL_LUCK_CALCULATION_VERSION } from '../src/utils/personalLuckVersions.js';
 
 // Run under the existing shared host flock; never bypass the publication check.
 const url = resolveSupabaseUrl(), key = resolveSupabaseSecretKey();
@@ -21,7 +22,8 @@ const processJob = async job => {
     if (!/^owner:[0-9a-f-]{36}$/i.test(job.scopeKey)) throw new Error('Invalid owner scope');
     if (!job.needsLuck) { counts.skipped++; return; }
     // An unchanged empty snapshot already proves there is no account history.
-    const luck = job.hasAccounts === false ? { version: 1, fetchedAt: new Date().toISOString(), accounts: [] }
+    const luck = job.hasAccounts === false ? { version: 1, calculationVersion: PERSONAL_LUCK_CALCULATION_VERSION,
+      fetchedAt: new Date().toISOString(), accounts: [] }
       : await buildPersonalStatisticsSnapshot(db, job.scopeKey.slice(6), {
         signal: AbortSignal.timeout(180000), luckOnly: true,
       });

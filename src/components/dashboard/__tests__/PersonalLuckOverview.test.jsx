@@ -94,4 +94,16 @@ describe('integrated personal luck overview', () => {
     expect(screen.getByRole('region', { name: 'Pull highlights' })).toBeTruthy();
     expect(screen.queryByText('高抽数样本')).toBeNull();
   });
+  it('shows observed version pulls separately from the records eligible for scoring', async () => {
+    const partial = structuredClone(snapshot);
+    Object.assign(partial.luck.accounts[0].character.timeline.at(-1), { observed: 67, sample: 60 });
+    mocks.load.mockResolvedValueOnce(response(partial));
+    mount(); await screen.findByRole('region', { name: '寻访运气' });
+    const version = document.querySelector('.pl-version-axis > span:last-child');
+    expect(version.querySelector('small').textContent).toBe('67 抽');
+    expect(version.textContent).toContain('参与评分 60 抽');
+    expect(screen.getByRole('img', { name: /版本6:.*67 抽, 参与评分 60/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '怎么算的' }));
+    expect(screen.getByRole('dialog').textContent).toContain('无法还原进度的记录仍计入抽数');
+  });
 });
