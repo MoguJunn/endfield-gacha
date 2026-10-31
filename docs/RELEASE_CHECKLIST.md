@@ -2,7 +2,7 @@
 
 这是下一次发布的可复用模板。只勾选本次实际执行的项目，并记录提交、日期和结果；按变更范围选择验证，不继承旧版本的勾选状态。
 
-历史变化见 [v4.6.0](RELEASE_4.6.0.md)、[v4.6.2](RELEASE_4.6.2.md)、[v4.6.3](RELEASE_4.6.3.md)、[v4.6.4](RELEASE_4.6.4.md)。功能状态见 [项目进展](RECENT_DELIVERY_STATUS.md)，认证要求见 [认证专题](AUTH_SECURITY_HARDENING.md)。
+历史变化见 [v4.6.0](RELEASE_4.6.0.md)、[v4.6.2](RELEASE_4.6.2.md)、[v4.6.3](RELEASE_4.6.3.md)、[v4.6.4](RELEASE_4.6.4.md)、[v4.7.0](RELEASE_4.7.0.md)。功能状态见 [项目进展](RECENT_DELIVERY_STATUS.md)，认证要求见 [认证专题](AUTH_SECURITY_HARDENING.md)。
 
 ## 代码与文件范围
 
@@ -34,7 +34,7 @@
 - [ ] 相关 RPC 保持 owner、权限、timeout、原子保存、revision／lease 和作用域边界。
 - [ ] 统计读端启用前，迁移、Worker 和对应计算版本快照已准备好，按 [调度合同](STATISTICS_SCHEDULING.md) 执行。
 - [ ] 个人分析 schema version、投影字段与 Worker 输出一致，按 [Worker 合同](PERSONAL_ANALYSIS_WORKER.md) 核验。
-- [ ] 涉及模拟器继承时核对当前个人分析 schema（目前为 5）、继承合同 2、编码 1／会话 2；覆盖零抽池共享水位、完整历史、免费／情报书使用和存档失败回滚，必要时运行 `test:simulator-v2:sql`／`test:simulator-v2:ui`。
+- [ ] 涉及模拟器继承时核对当前个人分析 schema（目前为 6）、继承合同 2、编码 1／会话 2；覆盖零抽池共享水位、完整历史、免费／情报书使用和存档失败回滚，必要时运行 `test:simulator-v2:sql`／`test:simulator-v2:ui`。
 - [ ] 涉及卡池目录或后台阵容时核对 `pool_characters` 完整关系、零记录池和超过 1,000 条的读取，运行 `test:pool-rosters:sql` 及后台／公开 API 回归；读取失败不得降级为空配置。
 - [ ] 备份并同步个人分析 Vault 的不可变部署 URL，确认真实发布成功而非只有 HTTP 200；核对应急 Workflow 地址。已应用的快照失效迁移不重复执行。
 - [ ] 已执行的手动数据修正不作为新环境初始化或常规发布步骤再次运行。

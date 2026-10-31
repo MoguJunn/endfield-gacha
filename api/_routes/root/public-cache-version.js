@@ -42,6 +42,11 @@ export default async function handler(req, res) {
 
   const supabase = getSupabaseClient();
   const cacheVersion = await resolvePublicCacheVersion(supabase);
+  // This value is public and is requested by every fresh navigation. Keep
+  // explicit refreshes uncached; ordinary checks tolerate a 30-second CDN TTL.
+  if (supabase && !req.query?.ts) {
+    res.setHeader('Cache-Control', 'public, max-age=15, s-maxage=30');
+  }
 
   return res.status(200).json({
     success: true,

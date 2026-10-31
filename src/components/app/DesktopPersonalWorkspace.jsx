@@ -67,7 +67,7 @@ export default function DesktopPersonalWorkspace({ children, user, onRetryPerson
         {!workbench && <header className="dp-workspace-heading">
           <h1>{overview ? tt('个人概览', 'Personal overview') : tt('个人卡池分析', 'Personal banner analysis')}</h1>
           <p>{overview
-            ? tt('查看个人寻访统计、资源与角色图鉴。', 'Your pull statistics, resources and character collection.')
+            ? tt('查看手气走势、抽卡高光与个人统计。', 'Your luck trends, pull highlights and personal statistics.')
             : tt('选择游戏账号与卡池，查看保底进度和寻访记录。', 'Choose an account and banner to view pity progress and pull history.')}</p>
         </header>}
         {overview && !workbench ? user ? (

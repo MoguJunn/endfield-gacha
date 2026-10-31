@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-10-18T12:03:44.974Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/2026101803_index_statistics_pool_pagination.sql
+--   4. 生成时间: 2026-10-31T04:41:37.458Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/2026103102_release_470.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -39604,4 +39604,281 @@ ALTER FUNCTION public.read_statistics_history_count(TEXT[],BIGINT)
 NOTIFY pgrst,'reload schema';
 COMMIT;
 -- <<< END MIGRATION: active/2026101803_index_statistics_pool_pagination.sql
+
+-- >>> BEGIN MIGRATION: active/2026103001_clear_opened_pool_preview_labels.sql
+-- 开池后的“前瞻”只属于展示标记；名称更新不改变卡池身份、别名或历史。
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+SET LOCAL statement_timeout = '60s';
+
+CREATE OR REPLACE FUNCTION public.strip_pool_preview_label(p_name text)
+RETURNS text LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+SET search_path = pg_catalog AS $$
+  SELECT COALESCE(NULLIF(btrim(regexp_replace(p_name,
+    '([[:space:]]*[(（][[:space:]]*前瞻[[:space:]]*[)）][[:space:]]*)+$', '')), ''), p_name)
+$$;
+
+CREATE OR REPLACE FUNCTION public.normalize_opened_pool_preview_label()
+RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN
+  IF NEW.start_time IS NOT NULL AND NEW.start_time <= statement_timestamp() THEN
+    NEW.name := public.strip_pool_preview_label(NEW.name);
+    NEW.name_en := public.strip_pool_preview_label(NEW.name_en);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS normalize_opened_pool_preview_label ON public.pools;
+CREATE TRIGGER normalize_opened_pool_preview_label
+  BEFORE INSERT OR UPDATE OF name, name_en, start_time ON public.pools
+  FOR EACH ROW EXECUTE FUNCTION public.normalize_opened_pool_preview_label();
+
+CREATE OR REPLACE FUNCTION public.clear_opened_pool_preview_labels()
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public SET lock_timeout = '5s' AS $$
+DECLARE
+  changed integer;
+  checked_at timestamptz := clock_timestamp();
+BEGIN
+  UPDATE public.pools
+  SET name = public.strip_pool_preview_label(name),
+      name_en = public.strip_pool_preview_label(name_en),
+      updated_at = checked_at
+  WHERE start_time IS NOT NULL AND start_time <= checked_at
+    AND (name IS DISTINCT FROM public.strip_pool_preview_label(name)
+      OR name_en IS DISTINCT FROM public.strip_pool_preview_label(name_en));
+  GET DIAGNOSTICS changed = ROW_COUNT;
+
+  IF changed > 0 THEN
+    INSERT INTO public.site_config(key, value, label, category, updated_at)
+    VALUES ('public_cache_epoch', jsonb_build_object(
+      'version', extract(epoch FROM checked_at)::text,
+      'scope', 'pools', 'reason', 'opened-pool-preview-labels', 'updatedAt', checked_at)::text,
+      '公共缓存版本', 'system', checked_at)
+    ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at;
+  END IF;
+  RETURN changed;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.normalize_opened_pool_preview_label(), public.clear_opened_pool_preview_labels()
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.clear_opened_pool_preview_labels()
+  TO service_role;
+
+-- 补齐当前已开池；之后每分钟处理时间跨过开池点的条目。
+SELECT public.clear_opened_pool_preview_labels();
+DO $schedule$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    PERFORM cron.schedule('clear-opened-pool-preview-labels', '* * * * *',
+      'SET statement_timeout = ''30s''; SELECT public.clear_opened_pool_preview_labels();');
+  ELSE
+    -- 与现有 baseline 验证保持一致：无 pg_cron 的隔离测试库不创建调度。
+    RAISE NOTICE 'pg_cron unavailable: opened pool preview label scheduler not installed';
+  END IF;
+END;
+$schedule$;
+COMMIT;
+-- <<< END MIGRATION: active/2026103001_clear_opened_pool_preview_labels.sql
+
+-- >>> BEGIN MIGRATION: active/2026103100_personal_win_rate_guarantee.sql
+BEGIN;
+
+-- Keep existing snapshots available while the worker rebuilds corrected rates.
+UPDATE public.personal_analysis_owner_state
+SET history_revision = history_revision + 1,
+    analysis_schema_version = 6,
+    dirty_since = COALESCE(dirty_since, now()),
+    last_error = NULL,
+    next_attempt_at = NULL
+WHERE analysis_schema_version < 6;
+
+UPDATE public.personal_analysis_scope_state
+SET history_revision = history_revision + 1,
+    analysis_schema_version = 6,
+    dirty_since = COALESCE(dirty_since, now()),
+    last_error = NULL,
+    next_attempt_at = NULL
+WHERE analysis_schema_version < 6;
+
+ALTER TABLE public.personal_analysis_owner_state ALTER COLUMN analysis_schema_version SET DEFAULT 6;
+ALTER TABLE public.personal_analysis_scope_state ALTER COLUMN analysis_schema_version SET DEFAULT 6;
+
+CREATE FUNCTION public.enforce_personal_analysis_schema_v6() RETURNS TRIGGER
+LANGUAGE plpgsql SET search_path = pg_catalog, public AS $$
+BEGIN
+  NEW.analysis_schema_version := GREATEST(COALESCE(NEW.analysis_schema_version, 6), 6);
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER enforce_personal_analysis_owner_schema_v6 BEFORE INSERT ON public.personal_analysis_owner_state
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_personal_analysis_schema_v6();
+CREATE TRIGGER enforce_personal_analysis_scope_schema_v6 BEFORE INSERT ON public.personal_analysis_scope_state
+  FOR EACH ROW EXECUTE FUNCTION public.enforce_personal_analysis_schema_v6();
+REVOKE ALL ON FUNCTION public.enforce_personal_analysis_schema_v6() FROM PUBLIC, anon, authenticated;
+
+NOTIFY pgrst, 'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026103100_personal_win_rate_guarantee.sql
+
+-- >>> BEGIN MIGRATION: active/2026103101_backfill_personal_luck.sql
+BEGIN;
+
+-- Existing owner snapshots predate luck v1 while already using statistics v6.
+-- Limit by metadata before inspecting large JSON snapshots. Filtering payloads
+-- before LIMIT causes a full TOAST scan even when asking for one owner.
+CREATE OR REPLACE FUNCTION public.read_personal_luck_backfill_batch(p_after_scope text DEFAULT '', p_limit integer DEFAULT 100)
+RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+  WITH candidates AS MATERIALIZED (
+    SELECT j.scope_key, j.revision
+    FROM public.statistics_jobs j JOIN public.statistics_snapshots s USING (scope_key)
+    WHERE j.scope_key LIKE 'owner:%' AND j.scope_key > COALESCE(p_after_scope, '')
+      AND s.schema_version = 'public-statistics-v6'
+      AND j.revision = j.published_revision AND s.source_revision = j.revision
+      AND (j.lease_until IS NULL OR j.lease_until < now())
+    ORDER BY j.scope_key LIMIT LEAST(20, GREATEST(1, p_limit))
+  )
+  SELECT COALESCE(jsonb_agg(jsonb_build_object('scopeKey', q.scope_key, 'revision', q.revision,
+    'needsLuck', jsonb_typeof(s.payload) = 'object' AND COALESCE(s.payload->'luck'->>'version', '') <> '1',
+    'hasAccounts', CASE WHEN jsonb_typeof(s.payload->'accounts') = 'array'
+      THEN jsonb_array_length(s.payload->'accounts') > 0 ELSE true END) ORDER BY q.scope_key), '[]'::jsonb)
+  FROM candidates q JOIN public.statistics_snapshots s USING (scope_key);
+$$;
+
+CREATE OR REPLACE FUNCTION public.publish_personal_luck_backfill(p_scope text, p_revision bigint, p_luck jsonb)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+DECLARE v_job public.statistics_jobs; v_snapshot public.statistics_snapshots;
+BEGIN
+  IF p_scope IS NULL OR p_scope NOT LIKE 'owner:%'
+    OR p_luck IS NULL OR jsonb_typeof(p_luck) <> 'object'
+    OR p_luck->>'version' IS DISTINCT FROM '1'
+    OR jsonb_typeof(p_luck->'accounts') IS DISTINCT FROM 'array'
+    OR NULLIF(p_luck->>'fetchedAt', '') IS NULL THEN
+    RAISE EXCEPTION 'Invalid personal luck result';
+  END IF;
+  -- Same lock order as normal statistics publication. Any import/catalog edit,
+  -- active lease or concurrent publication prevents merging into older results.
+  SELECT * INTO v_job FROM public.statistics_jobs WHERE scope_key = p_scope FOR UPDATE;
+  IF NOT FOUND OR v_job.revision IS DISTINCT FROM p_revision
+    OR v_job.published_revision IS DISTINCT FROM p_revision
+    OR v_job.lease_until > now() THEN RETURN false; END IF;
+  SELECT * INTO v_snapshot FROM public.statistics_snapshots WHERE scope_key = p_scope FOR UPDATE;
+  IF NOT FOUND OR v_snapshot.schema_version <> 'public-statistics-v6'
+    OR v_snapshot.source_revision IS DISTINCT FROM p_revision
+    OR jsonb_typeof(v_snapshot.payload) IS DISTINCT FROM 'object'
+    OR v_snapshot.payload->'luck'->>'version' = '1' THEN RETURN false; END IF;
+
+  UPDATE public.statistics_snapshots
+  SET payload = jsonb_set(payload, '{luck}', p_luck), source_revision = p_revision + 1
+  WHERE scope_key = p_scope;
+  UPDATE public.statistics_jobs SET revision = p_revision + 1, published_revision = p_revision + 1
+  WHERE scope_key = p_scope;
+  -- Preserve the other metrics' original computed_at/next_refresh_at. Luck has
+  -- its own fetchedAt; the changed source revision invalidates browser caches.
+  RETURN true;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.read_personal_luck_backfill_batch(text, integer),
+  public.publish_personal_luck_backfill(text, bigint, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.read_personal_luck_backfill_batch(text, integer),
+  public.publish_personal_luck_backfill(text, bigint, jsonb) TO service_role;
+NOTIFY pgrst, 'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026103101_backfill_personal_luck.sql
+
+-- >>> BEGIN MIGRATION: active/2026103102_release_470.sql
+-- v4.7.0: synchronize runtime metadata and publish the bilingual release notice.
+-- A stable notice ID makes this migration safe to apply again without duplicates.
+BEGIN;
+
+INSERT INTO public.site_config (key, value, label, category, updated_at)
+VALUES
+  ('site_version', 'v4.7.0', '站点版本', 'general', now()),
+  ('build_info', 'Build 2026.10.31', '构建信息', 'general', now())
+ON CONFLICT (key) DO UPDATE
+SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at;
+
+INSERT INTO public.announcements (
+  id, title, content, title_en, content_en, version, is_active, priority
+)
+VALUES (
+  '47000000-2026-4031-8470-000000000001',
+  'v4.7.0 更新：手机新版首页、手气评价与统计优化',
+  $zh$## 手机首页焕新
+
+手机首页现已接入新版布局，集中展示版本信息、卡池日程、常用入口和社区内容，并优化窄屏浏览与触控操作。
+
+## 个人统计与分享
+
+- 个人概览新增手气评价与抽卡高光，可按账号查看角色、武器的表现。已有记录已完成后台补算，记录精度不足时仍会保留说明。
+- 新增限定与复刻合并 UP 均抽，方便查看跨卡池的整体表现。
+- 修正个人卡池分析、合池分析和时间线的不歪率：120 抽保障出货不再计入自然 UP 命中；不会改变实际出货数量和原始记录。
+- 分享图同步时间线的排序、卡池筛选、卡片／瀑布流模式及五星显示设置，并补充保障、继承保底和武器十连信息。
+
+## 导入与卡池浏览
+
+- 改进第三方 Excel 解析，修复部分分析表导入为空和样式单元格导致的卡顿。
+- 会话过期时自动尝试恢复，并保留待导入内容；官方导入提前检查游戏 UID，给出更清晰的角色缺失提示。
+- 修复桌面与手机卡池分类折叠，优化比例导航；卡池正式开放后自动移除“前瞻”后缀。
+
+## 缓存与刷新
+
+公共目录和公开统计可保存在浏览器中重复使用；个人统计和卡池分析按快照版本更新。减少没有数据变化时的重复请求，公开导入高峰也不会持续触发前台刷新。
+
+如仍看到旧页面，可刷新一次页面后再查看。感谢大家持续反馈问题。$zh$,
+  'v4.7.0: New mobile home, luck ratings and statistics improvements',
+  $en$## A refreshed mobile home
+
+The mobile home now uses the new layout, bringing version information, banner schedules, shortcuts and community content together with improved small-screen and touch support.
+
+## Personal statistics and sharing
+
+- The personal overview now includes luck ratings and pull highlights for characters and weapons by account. Existing records have been processed in the background; limitations remain visible when the history lacks sufficient detail.
+- Added a combined average pulls per UP result across limited and rerun banners.
+- Corrected UP win rates in personal banner analysis, grouped analysis and timelines: the 120-pull guarantee is excluded from natural UP wins. Actual drop counts and original records are preserved.
+- Share images now follow timeline sorting, banner selection, card/waterfall mode and the five-star visibility setting, with additional guarantee, inherited pity and weapon ten-pull details.
+
+## Imports and banner browsing
+
+- Improved third-party Excel parsing, fixing empty imports from some analysis sheets and slow parsing of styled cells.
+- Expired sessions attempt to recover while retaining pending imports. Official imports check game UIDs earlier and explain missing game roles more clearly.
+- Fixed banner category collapsing on desktop and mobile, improved ratio navigation, and automatically remove preview suffixes when banners open.
+
+## Caching and refreshes
+
+Public catalogs and statistics can be reused from browser storage. Personal statistics and banner analysis update when snapshot versions change, reducing repeated requests when data is unchanged and avoiding continuous foreground refreshes during busy public imports.
+
+If an old page remains visible, refresh the page once. Thank you for your feedback.$en$,
+  '4.7.0', true, 100
+)
+ON CONFLICT (id) DO UPDATE SET
+  title = EXCLUDED.title,
+  content = EXCLUDED.content,
+  title_en = EXCLUDED.title_en,
+  content_en = EXCLUDED.content_en,
+  version = EXCLUDED.version,
+  is_active = EXCLUDED.is_active,
+  priority = EXCLUDED.priority,
+  updated_at = now();
+
+INSERT INTO public.site_config (key, value, label, category, updated_at)
+VALUES (
+  'public_cache_epoch',
+  jsonb_build_object(
+    'version', ((extract(epoch FROM clock_timestamp()) * 1000)::bigint)::text,
+    'scope', 'public',
+    'reason', 'release:4.7.0',
+    'updatedAt', now()
+  )::text,
+  '公共缓存版本', 'system', now()
+)
+ON CONFLICT (key) DO UPDATE
+SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at;
+
+NOTIFY pgrst, 'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026103102_release_470.sql
 

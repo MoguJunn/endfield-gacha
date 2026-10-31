@@ -13,9 +13,10 @@ export function getOfficialRerunProfile(record = {}, context = {}) {
   return null;
 }
 
-// The official UI appends poolVersion to poolName; the suffix is never an ID.
+// Occurrence numbers and the catalog's preview label do not identify a new pool.
 export function getRerunBaseName(name) {
-  return String(name || '').trim().replace(/\s*[#＃][1-9]\d*\s*$/u, '').trim();
+  return String(name || '').trim()
+    .replace(/(?:\s*[#＃][1-9]\d*|\s*[（(]\s*前瞻\s*[）)])+\s*$/u, '').trim();
 }
 
 export function resolveRerunPoolIdentity(pool, catalog = []) {

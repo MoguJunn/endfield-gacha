@@ -75,14 +75,14 @@ npm run perf:report
 
 1. 配置 Supabase/PostgreSQL，按 [数据库指南](../supabase/README.md) 执行完整 baseline；不要重复执行已包含的历史迁移。
 2. 在服务端配置 Supabase secret、会话密钥与所需功能变量；浏览器只接收公开变量。
-3. 配置当前个人分析 schema 5 队列，按 [Worker 指南](PERSONAL_ANALYSIS_WORKER.md)核对目标环境的实际调度方式。使用 `pg_cron + pg_net` 时同步 Vault 中不可变 `personal_analysis_worker_url`，确认可以领取并发布匹配版本的任务；不能只验证 HTTP 200，也不能覆盖已有环境的同机调度配置。
+3. 配置当前个人分析 schema 6 队列，按 [Worker 指南](PERSONAL_ANALYSIS_WORKER.md)核对目标环境的实际调度方式。使用 `pg_cron + pg_net` 时同步 Vault 中不可变 `personal_analysis_worker_url`，确认可以领取并发布匹配版本的任务；不能只验证 HTTP 200，也不能覆盖已有环境的同机调度配置。
 4. 按 [统计调度](STATISTICS_SCHEDULING.md) 部署常驻统计 Worker，并完成对应计算版本的公开／个人快照预热。
 5. 构建并部署主站与 API，配置 `vercel.json` 的路由和响应头；数据库必须先于依赖新字段／RPC 的代码。
 6. 核对正式域名、版本、公共页面、认证边界、快照读取与缓存失效。需要的邮件、BOT 和代理逐项配置及验证。
 
 仓库默认使用 GitHub-connected Vercel：推送 `main` 触发生产构建。发布前准备数据库与后台计算，发布后确认部署 Ready 和正式域名指向正确版本，流程见 [发布检查](RELEASE_CHECKLIST.md)。
 
-当前 v4.6.4 已发布，既有自托管环境已应用模拟器迁移并重建快照，生产个人分析调度已同步至新部署，见 [发布记录](RELEASE_4.6.4.md)。其他已有环境升级时核对 `2026100901_simulator_inheritance_v2.sql` 与 `2026101101_complete_pool_roster_reads.sql` 是否缺失；前者递增修订以触发重建，后者新增服务端完整阵容读取，已执行环境不要重跑。运行版本优先读取 `site_config.site_version`，发布时同步 `build_info`、公共缓存和阵容接口缓存，再核对中英文公告及实际页面。
+当前代码版本为 v4.7.0，生产数据库已准备 schema 6 个人分析与手气评价，升级顺序及验证见 [发布记录](RELEASE_4.7.0.md)。其他已有环境核对该记录列出的前向迁移，已执行的失效迁移不要重跑。运行版本优先读取 `site_config.site_version`，发布时同步 `build_info`、公共缓存和阵容接口缓存，再核对中英文公告及实际页面。
 
 管理后台使用同源 `/api/admin`，兼容 URL 由路由表映射；无需部署旧 Supabase 管理 Edge Functions。
 
@@ -91,6 +91,8 @@ npm run perf:report
 第三方文件使用主站鉴权 API 分批保存，不调用下述官方抓取任务。2026-10-17 的文件修复只更新网站代码，没有新增数据库迁移或更换 CN／INTL 导入服务。格式及资料精度见 [第三方迁入](RESCUE_FILE_IMPORT.md)，预览、服务器已保存量与总览快照的区别见 [文件导入恢复](FILE_IMPORT_RELIABILITY.md)。
 
 官方数据获取由独立 CN／INTL 后端承接。浏览器提交 `import-full` 后轮询 `import-status`；后端规范化、过滤非寻访事件、内部暂存并通过 RPC 原子写入。可精确定位的未知记录产生核对提醒，缺少账号／区服／卡池／序号等安全归属的记录跳过。
+
+2026-10-30 国际服维护已部署 `endfield-backend-intl:1.7.0-account-rerun-20261030`。此前缺少游戏 UID 的绑定条目会触发数据库 `invalid_import_account`；现于绑定前返回 `IMPORT_ACCOUNT_ROLE_MISSING`，提示检查所选区服角色，不能以平台登录 UID 代替游戏 UID。此次同时同步重构池“前瞻”后缀匹配，避免正式名称与预告名称产生新池。部署前保留原镜像与文件、确认没有执行中的任务；部署后已核对运行文件校验值和 `/health` 的 `fullImport: true`。该后端更新不代表主站 Excel 解析代码已发布。
 
 公开仓库保留共享导入合同与测试，不提供完整服务包。后端集成须携带相同的 normalizer、保底规则与暂存／增量模块，分别验证地区健康、CORS 和导入行为。重构与赠送规则见 [重构导入](official-rerun-import.md)、[赠送记录](OFFICIAL_TRUST_TOKEN_FIX.md)。
 

@@ -19,7 +19,7 @@ const DeveloperApiDocsPage = lazy(() => import('../../components/docs/DeveloperA
 const SummerLotteryOperatorPage = lazy(() => import('../../components/admin/SummerLotteryOperatorPage'));
 const MobileDrawer = lazy(() => import('../components/MobileDrawer'));
 const AuthModal = lazy(() => import('../../AuthModal'));
-const MobileHomePageView = lazy(() => import('../views/MobileHomePageView'));
+const MobileHomePageView = lazy(() => import('../views/MobileHomeView.jsx'));
 const HomeLandingDemo = import.meta.env.DEV ? lazy(() => import('../../components/home/HomeLandingDemo.jsx')) : null;
 const HomeLandingHeader = import.meta.env.DEV ? lazy(() => import('../../components/home/HomeLandingHeader.jsx')) : null;
 const MobileDashboardView = lazy(() => import('../views/MobileDashboardView'));

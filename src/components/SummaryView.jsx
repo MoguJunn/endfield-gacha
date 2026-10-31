@@ -7,6 +7,7 @@ import ResourceSummaryPanel from './resources/ResourceSummaryPanel';
 import { useThemeDetection, getTooltipStyle, useSummaryViewState } from '../hooks/summary';
 import { getCombinedCharacterAverageDisplay } from '../utils/summaryAverageDisplay.js';
 import PoolStatisticsWorkspace from './summary/PoolStatisticsWorkspace.jsx';
+import PersonalLuckOverview from './dashboard/PersonalLuckOverview.jsx';
 
 function MetricCard({ icon: Icon, label, value, hint, tone = 'text-slate-900 dark:text-white' }) {
   return (
@@ -671,6 +672,10 @@ const SummaryView = React.memo(({ lockedDataSource = null, scheduledSummary, sch
 });
 
 export default function SummaryWorkspace({ lockedDataSource = null }) {
-  return <PoolStatisticsWorkspace lockedDataSource={lockedDataSource} overview={(source, snapshot) => <SummaryView lockedDataSource={source}
+  const statisticsWorkspace = <PoolStatisticsWorkspace lockedDataSource={lockedDataSource} overview={(source, snapshot) => <SummaryView lockedDataSource={source}
     scheduledSummary={source === 'local' ? snapshot?.summary ?? null : undefined} scheduledCatalogs={source === 'local' ? snapshot?.catalogs ?? null : undefined} />} />;
+  if (lockedDataSource === 'local') {
+    return <PersonalLuckOverview renderStatistics={() => statisticsWorkspace} />;
+  }
+  return statisticsWorkspace;
 }

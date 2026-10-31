@@ -4,6 +4,7 @@ import { buildResourceSummaryFromAggregates } from './resourceEconomy.js';
 import { buildQuotaLedgerFromHistory } from './quotaEconomy.js';
 import { resolveCharacterRecordByName } from './characterUtils.js';
 import { resolvePoolCapabilities } from './poolCapabilities.js';
+import { buildWinRateGuaranteeKeys, isExcludedFromWinRate } from './winRateEligibility.js';
 import {
   buildPaidTimelinePityMap,
   buildScopedPaidHistoryTimeline,
@@ -15,14 +16,6 @@ function getBucketFromCapabilities(capabilities) {
   if (capabilities.entityType === 'weapon') return 'weapon';
   if (capabilities.entityType === 'character') return 'character';
   return null;
-}
-
-function isGuaranteedPull(item) {
-  return item?.specialType === 'guaranteed' || item?.special_type === 'guaranteed';
-}
-
-function shouldExcludeFromWinRate(item, capabilities) {
-  return capabilities.basePoolType === 'limited' && isGuaranteedPull(item);
 }
 
 function buildPoolFromHistoryRecord(poolId, record) {
@@ -211,6 +204,12 @@ export function buildDashboardOverviewSplitStats({
     if (!pullsByPool[poolId]) pullsByPool[poolId] = [];
     pullsByPool[poolId].push(item);
   });
+  const winRateGuaranteeKeys = buildWinRateGuaranteeKeys({
+    history,
+    pools: Object.entries(pullsByPool).map(([poolId, pulls]) => (
+      poolById.get(poolId) || buildPoolFromHistoryRecord(poolId, pulls[0])
+    )),
+  });
 
   // 按池独立处理保底计数，与时间线视图一致
   for (const [poolId, pulls] of Object.entries(pullsByPool)) {
@@ -280,7 +279,7 @@ export function buildDashboardOverviewSplitStats({
           bucket._arsenalGainCounts[isTargetSixStar ? 6 : '6_std'] += 1;
         }
 
-        if (!shouldExcludeFromWinRate(item, capabilities)) {
+        if (!isExcludedFromWinRate(item, capabilities, winRateGuaranteeKeys)) {
           bucket._winRateTotalCount += 1;
           if (isTargetSixStar) {
             bucket._winRateTargetCount += 1;

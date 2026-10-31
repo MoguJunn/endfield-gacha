@@ -8,7 +8,7 @@ function client(rows, gaps = []) {
     const state = { head: false, owner: null, start: 0, end: 999 };
     const query = { select: (_fields, options) => { state.head = options?.head; return query; },
       eq: (key, value) => { if (key === 'user_id') state.owner = value; return query; },
-      in: () => query, is: () => query, order: () => query, range: (start, end) => { state.start = start; state.end = end; return query; },
+      in: () => query, is: () => query, order: () => query, single: () => query, range: (start, end) => { state.start = start; state.end = end; return query; },
       then: (resolve, reject) => Promise.resolve({ data: [] }).then(resolve, reject),
       abortSignal: async () => {
         if (table === 'history') {
@@ -22,6 +22,7 @@ function client(rows, gaps = []) {
         }
         if (table === 'pools') return { data: [{ pool_id: 'p', name: 'Test pool', type: 'limited', up_character: 'A' }] };
         if (table === 'characters') return { data: [{ id: 'a', name: 'A', rarity: 6, type: 'character' }] };
+        if (table === 'site_config') return { data: { value: { versions: [{ id: 'v1', name: '首个版本', starts_at: '2023-01-01T00:00:00Z' }] } } };
         throw new Error(`Unexpected table ${table}`);
       } };
     return query;
@@ -33,6 +34,19 @@ const row = (id, scope = 'cn', extra = {}) => ({ id, record_id: String(id), user
   timestamp: new Date(1700000000000 + id * 1000).toISOString(), seq_id: id, ...extra });
 
 describe('personal scheduled snapshots', () => {
+  it('calculates identical luck without rebuilding unrelated rankings and collection scopes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-31T00:00:00Z'));
+    try {
+      const rows = [row(1), row(2), row(3, 'intl')];
+      const full = await buildPersonalStatisticsSnapshot(client(rows), 'owner');
+      const db = client(rows);
+      const luck = await buildPersonalStatisticsSnapshot(db, 'owner', { luckOnly: true });
+      expect(luck).toEqual(full.luck);
+      expect(db.rpc).not.toHaveBeenCalledWith('get_user_ranking_stats', expect.anything());
+      expect(luck).not.toHaveProperty('history');
+    } finally { vi.useRealTimers(); }
+  });
   it('builds separate account observations and catalogs from all owner rows, retaining gifts only in ownership', async () => {
     const db = client([row(1), row(2), row(3, 'intl'), row(4, 'intl', { special_type: 'gift' }), row(5, 'cn', { user_id: 'another' })]);
     const data = await buildPersonalStatisticsSnapshot(db, 'owner');
@@ -51,6 +65,10 @@ describe('personal scheduled snapshots', () => {
       expect(catalogs['en-US'].rows.find((item) => item.id === 'a').acquisitionCount).toBe(2);
     }
     expect(data).not.toHaveProperty('history');
+    expect(data.luck.version).toBe(1);
+    expect(data.luck.accounts).toHaveLength(2);
+    expect(data.luck.accounts.map(account => account.key).sort()).toEqual(data.accounts.map(account => account.key).sort());
+    expect(data.luck.accounts.find(account => account.character.total === 2).character.sample).toBe(2);
     expect(JSON.stringify(data)).not.toContain('another');
     expect(db.rpc).toHaveBeenCalledWith('get_user_ranking_stats', { p_user_id: 'owner' });
   });

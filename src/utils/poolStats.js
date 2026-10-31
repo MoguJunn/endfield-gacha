@@ -7,8 +7,8 @@ import { buildCapabilityAwarePoolResourceSummary, buildPoolResourceSummary } fro
 import { resolvePoolCapabilities } from './poolCapabilities.js';
 import { isStatisticsHistoryRecord, statisticsHistory, statisticsScopeKey } from '../../shared/statisticsEligibility.js';
 import { prepareStatisticsContinuity } from './statisticsContinuity.js';
+import { buildWinRateGuaranteeKeys, isExcludedFromWinRate, isInferredTargetGuarantee } from './winRateEligibility.js';
 import {
-  buildOneTimeTargetGuaranteeState,
   buildPaidTimelinePityMap,
   buildScopedFreeHistoryTimeline,
   buildScopedPaidHistoryTimeline,
@@ -25,14 +25,9 @@ function isFreePull(pull) {
 }
 
 function isGuaranteedPull(pull) {
-  return (
-    pull?.specialType === 'guaranteed' ||
-    pull?.special_type === 'guaranteed' ||
-    pull?.isGuaranteed === true ||
-    pull?.is_guaranteed === true ||
-    pull?.isSpark === true ||
-    pull?.is_spark === true
-  );
+  return pull?.specialType === 'guaranteed' || pull?.special_type === 'guaranteed'
+    || pull?.isGuaranteed === true || pull?.is_guaranteed === true
+    || pull?.isSpark === true || pull?.is_spark === true;
 }
 
 function getHistoryPoolId(item) {
@@ -102,10 +97,6 @@ function isTargetSixStarPull(pull, capabilities) {
   }
 
   return capabilities.targetMode === 'four-target-equal' || !pull.isStandard;
-}
-
-function shouldExcludeFromWinRate(pull, capabilities) {
-  return capabilities?.targetMode === 'single-up' && isGuaranteedPull(pull);
 }
 
 function isLimitedSixStarPull(pull, capabilities, resolveCharacter) {
@@ -211,10 +202,9 @@ export function buildPoolStats({
           })
         : allLimitedHistory.filter((item) => !isGiftPull(item) && isFreePull(item))
       : [];
-  const targetGuaranteeState = buildOneTimeTargetGuaranteeState({
+  const winRateGuaranteeKeys = buildWinRateGuaranteeKeys({
     history: scopedHistorySource.length > 0 ? scopedHistorySource : normalizedCurrentPoolHistory,
     pools: scopePools,
-    pool: currentPool,
   });
   const limitedCrossPoolPityMap =
     usesInheritedPity && scopedPityTimeline.length > 0 ? buildPaidTimelinePityMap(scopedPityTimeline) : null;
@@ -234,7 +224,6 @@ export function buildPoolStats({
 
     return currentPoolCapabilities;
   };
-  const limitedSparkRecordKeys = currentPool?.isGroupMode ? new Set() : targetGuaranteeState.guaranteedRecordKeys;
   const paidPullsList = normalizedCurrentPoolHistory.filter((item) => !isGiftPull(item) && !isFreePull(item));
   const quotaPullsList = normalizedCurrentPoolHistory.filter((item) => !isGiftPull(item));
   const validPullsList = quotaPullsList.filter((item) => includeFreePullsInStats || !isFreePull(item));
@@ -321,8 +310,8 @@ export function buildPoolStats({
   normalizedCurrentPoolHistory.forEach((pull) => {
     if (pull.rarity === 6 && !isGiftPull(pull) && !isFreePull(pull)) {
       const pullCapabilities = getPullCapabilities(pull);
-      const recordKey = getHistoryRecordKey(pull);
-      if (shouldExcludeFromWinRate(pull, pullCapabilities) || (recordKey && limitedSparkRecordKeys.has(recordKey))) {
+      if ((pullCapabilities.targetMode === 'single-up' && isGuaranteedPull(pull))
+        || isExcludedFromWinRate(pull, pullCapabilities, winRateGuaranteeKeys)) {
         return;
       }
       if (isTargetSixStarPull(pull, pullCapabilities)) {
@@ -402,8 +391,7 @@ export function buildPoolStats({
     }
     if (pull.rarity === 6) {
       const isUp = isTargetSixStarPull(pull, pullCapabilities);
-      const recordKey = getHistoryRecordKey(pull);
-      const isSpark = recordKey ? limitedSparkRecordKeys.has(recordKey) : false;
+      const isSpark = !currentPool?.isGroupMode && isInferredTargetGuarantee(pull, winRateGuaranteeKeys);
       const isActuallyLimited = isLimitedSixStarPull(pull, pullCapabilities, resolveCharacter);
 
       const inheritedSixStarCount = usesInheritedPity

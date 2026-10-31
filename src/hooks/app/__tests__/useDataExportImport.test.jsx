@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { strToU8, zipSync } from 'fflate';
 
 import { useDataExportImport } from '../useDataExportImport.js';
 import { loadAccountGachaData, loadAllAccountGachaHistoryForAccounts } from '../../../services/accountGachaDataService.js';
 import { loadWorkbenchEntriesForExport, importWorkbenchEntries } from '../../../services/workbenchTransferService.js';
 import { importRescueSupplements } from '../../../services/rescueImportService.js';
+import { loadAllPoolsForCatalog } from '../../../services/poolReadService.js';
+import { characterCache } from '../../../utils/characterUtils.js';
 import {
   useAuthStore,
   useHistoryStore,
@@ -22,6 +25,10 @@ import {
 vi.mock('../../../services/accountGachaDataService.js', () => ({
   loadAccountGachaData: vi.fn(),
   loadAllAccountGachaHistoryForAccounts: vi.fn(),
+}));
+vi.mock('../../../services/poolReadService.js', async (importOriginal) => ({
+  ...await importOriginal(),
+  loadAllPoolsForCatalog: vi.fn(),
 }));
 vi.mock('../../../services/dataWorkbenchService.js', () => ({ loadWorkbenchContext: vi.fn() }));
 vi.mock('../../../services/rescueImportService.js', () => ({ importRescueSupplements: vi.fn().mockResolvedValue({ saved: 1 }) }));
@@ -75,6 +82,8 @@ function createCloudSync() {
 describe('useDataExportImport export', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    loadAllPoolsForCatalog.mockResolvedValue([]);
+    characterCache.getAll.mockReturnValue([]);
     loadAccountGachaData.mockResolvedValue({ history: [], meta: { ownerId: 'user-1', truncated: false } });
     window.localStorage.clear();
     window.sessionStorage.clear();
@@ -99,6 +108,99 @@ describe('useDataExportImport export', () => {
       currentGameUid: 'game-1::server:1',
     });
     usePersonalAnalysisStore.setState(createPersonalAnalysisInitialState());
+  });
+
+  it.each([{ personalPools: [] }, { personalPools: [{ id: 'special_existing', name: '已有卡池', type: 'limited' }] }])(
+    'uses the full catalog for LCX file validation when personal pools are $personalPools', async ({ personalPools }) => {
+      const beginner = { id: 'beginner', name: '启程寻访', type: 'standard' };
+      loadAllPoolsForCatalog.mockResolvedValue([beginner]);
+      characterCache.getAll.mockReturnValue([{ id: 'chr_qiuli', name: '秋栗', type: 'character', rarity: 4 }]);
+      usePoolStore.setState({ pools: personalPools });
+      const showToast = vi.fn();
+      const cloudSync = createCloudSync();
+      const { result } = renderHook(() => useDataExportImport({ showToast, cloudSync }));
+      const content = { code: 0, data: { uid: '12345', nickName: '样例', server: 'bilibili', serverId: '1',
+        exportTs: '1792514648000', total: 1, list: [{ seqId: '1', gachaTs: '1769053079000', rarity: 4,
+          poolName: '启程寻访', isFree: false, charId: '23', charName: '秋栗' }] } };
+      const input = { files: [new File([JSON.stringify(content)], '1.txt', { type: 'text/plain' })], value: '1.txt' };
+
+      act(() => result.current.handleImportFile({ target: input }));
+      await waitFor(() => expect(result.current.pendingImport?.data.history).toHaveLength(1));
+
+      expect(result.current.pendingImport.data.history[0]).toMatchObject({ poolId: 'beginner', serverScope: 'bilibili', character_id: 'chr_qiuli' });
+      expect(loadAllPoolsForCatalog).toHaveBeenCalledTimes(1);
+      expect(usePoolStore.getState().pools).toBe(personalPools);
+      expect(cloudSync.saveHistoryToCloud).not.toHaveBeenCalled();
+      expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ source: 'import.filePreview' }));
+      expect(input.value).toBe('');
+    }
+  );
+
+  it('loads the catalog before parsing a helper Excel file with no personal pool entry', async () => {
+    usePoolStore.setState({ pools: [] });
+    loadAllPoolsForCatalog.mockResolvedValue([{ id: 'special_fixture', name: '测试寻访', type: 'limited', up_character: '黎风' }]);
+    characterCache.getAll.mockReturnValue([{ id: 'chr_fixture', name: '黎风', type: 'character', rarity: 6 }]);
+    const rows = [ ['UID', '12345'], ['卡池ID', '卡池名称', '获得内容', '抽取序列ID', '星级', '角色/武器ID', '记录类型', '间隔抽数', '抽卡时间'],
+      ['special_fixture', '测试寻访', '黎风', '1', '6', 'chr_fixture', '角色', '40', '46311.5'] ];
+    const sheet = '<worksheet><sheetData>' + rows.map((row, index) => `<row r="${index + 1}">` + row.map((value, column) =>
+      `<c r="${String.fromCharCode(65 + column)}${index + 1}" t="inlineStr"><is><t>${value}</t></is></c>`).join('') + '</row>').join('') + '</sheetData></worksheet>';
+    const bytes = zipSync({ 'xl/worksheets/sheet1.xml': strToU8(sheet) });
+    const { result } = renderHook(() => useDataExportImport({ showToast: vi.fn(), cloudSync: createCloudSync() }));
+    const input = { files: [new File([bytes], 'summary.xlsx')], value: 'summary.xlsx' };
+    act(() => result.current.handleImportFile({ target: input }));
+    await waitFor(() => expect(result.current.pendingImport?.data.workbenchEntries.length).toBeGreaterThan(0));
+    expect(loadAllPoolsForCatalog).toHaveBeenCalledTimes(1);
+    expect(result.current.pendingImport.data.pools[0].id).toBe('special_fixture');
+  });
+
+  it('does not generate an empty preview when an xlsx is only an aggregate analysis sheet', async () => {
+    usePoolStore.setState({ pools: [] });
+    loadAllPoolsForCatalog.mockResolvedValue([{ id: 'special_fixture', name: '测试寻访', type: 'limited' }]);
+    characterCache.getAll.mockReturnValue([{ id: 'chr_fixture', name: '梨诺', type: 'character', rarity: 6 }]);
+    const rows = [['熔火', '信使', '晨星'], [194, 34, 120], [3, 1, 4]];
+    const sheet = '<worksheet><sheetData>' + rows.map((row, index) => `<row r="${index + 1}">` + row.map((value, column) =>
+      `<c r="${String.fromCharCode(65 + column)}${index + 1}" t="inlineStr"><is><t>${value}</t></is></c>`).join('') + '</row>').join('') + '</sheetData></worksheet>';
+    const bytes = zipSync({ 'xl/worksheets/sheet1.xml': strToU8(sheet) });
+    const showToast = vi.fn();
+    const cloudSync = createCloudSync();
+    const { result } = renderHook(() => useDataExportImport({ showToast, cloudSync }));
+    const input = { files: [new File([bytes], '终末地抽卡分析.xlsx')], value: '终末地抽卡分析.xlsx' };
+
+    act(() => result.current.handleImportFile({ target: input }));
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'import.fileParse',
+      message: expect.stringContaining('未能从 Excel 中识别到抽卡记录'),
+    })));
+    expect(result.current.pendingImport).toBeNull();
+    expect(cloudSync.saveHistoryToCloud).not.toHaveBeenCalled();
+  });
+
+  it.each(['empty', 'rejected'])('does not generate an import preview when the catalog is %s', async outcome => {
+    if (outcome === 'rejected') loadAllPoolsForCatalog.mockRejectedValueOnce(new Error('目录暂时不可用'));
+    const showToast = vi.fn();
+    const cloudSync = createCloudSync();
+    const { result } = renderHook(() => useDataExportImport({ showToast, cloudSync }));
+    const content = { code: 0, data: { uid: '12345', serverId: '1', total: 0, list: [] } };
+    const input = { files: [new File([JSON.stringify(content)], '1.txt')], value: '1.txt' };
+    act(() => result.current.handleImportFile({ target: input }));
+    await waitFor(() => expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ source: 'import.fileParse', message: expect.stringContaining('目录') })));
+    expect(result.current.pendingImport).toBeNull();
+    expect(cloudSync.saveHistoryToCloud).not.toHaveBeenCalled();
+    expect(input.value).toBe('');
+  });
+
+  it('retains the pending file preview and options across session expiry and recovery', () => {
+    useAuthStore.setState({ user: { id: 'user-1' } });
+    const cloudSync = createCloudSync();
+    const { result } = renderHook(() => useDataExportImport({ showToast: vi.fn(), cloudSync }));
+    const pending = { fileName: 'history.json', willSyncToCloud: true,
+      data: { pools: [], history: [{ id: 'preview-1', gameUid: 'game-1' }] } };
+    act(() => { result.current.setPendingImport(pending); });
+    act(() => { useAuthStore.setState({ user: null }); });
+    expect(result.current.pendingImport).toBe(pending);
+    act(() => { useAuthStore.setState({ user: { id: 'user-1' } }); });
+    expect(result.current.pendingImport).toBe(pending);
+    expect(cloudSync.saveHistoryToCloud).not.toHaveBeenCalled();
   });
 
   it('loads paged analysis history on click without exporting or replacing the partial store', async () => {

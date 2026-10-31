@@ -2134,6 +2134,11 @@ export async function executeFullImport({
     }
 
     const account = accounts[accountIndex];
+    if (!String(account?.gameUid ?? '').trim()) {
+      throw Object.assign(new Error(
+        '官方账号列表未返回所选账号的游戏 UID，无法执行官方导入。请确认已在所选区服创建角色，刷新账号列表后重试；也可使用文件导入。'
+      ), { code: 'IMPORT_ACCOUNT_ROLE_MISSING' });
+    }
     let accountServerContext = await resolveImportAccountServerContext(supabase, userId, account, source);
 
     // 4. 执行认证链 - u8token

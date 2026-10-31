@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 import {
   usePersonalAnalysisStore,
@@ -6,8 +6,6 @@ import {
 } from '../../stores/index.js';
 import { useI18n } from '../../i18n/index.js';
 import { getPersonalDataErrorPresentation } from '../../utils/personalDataError.js';
-
-const AUTO_RETRY_DELAYS_SECONDS = Object.freeze([3, 5, 10, 20, 30]);
 
 function PersonalDataStatusPanel({
   kind,
@@ -63,88 +61,20 @@ function PersonalDataStatusPanel({
 export default function PersonalDataBoundary({ user, onRetry, children }) {
   const { isEnglish } = useI18n();
   const ownerId = usePersonalDataStore((state) => state.ownerId);
-  const ownerGeneration = usePersonalDataStore((state) => state.ownerGeneration);
   const phase = usePersonalDataStore((state) => state.phase);
   const hasSnapshot = usePersonalDataStore((state) => state.hasSnapshot);
   const refreshing = usePersonalDataStore((state) => state.refreshing);
-  const activeRequest = usePersonalDataStore((state) => state.activeRequest);
   const error = usePersonalDataStore((state) => state.error);
-  const analysisRetry = usePersonalDataStore((state) => state.analysisRetry);
-  const ensureAnalysisRetrySchedule = usePersonalDataStore(
-    (state) => state.ensureAnalysisRetrySchedule
-  );
-  const markAnalysisRetryFired = usePersonalDataStore(
-    (state) => state.markAnalysisRetryFired
-  );
-  const resetAnalysisRetry = usePersonalDataStore((state) => state.resetAnalysisRetry);
   const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
-  const analysisMeta = usePersonalAnalysisStore((state) => state.meta);
   const matchesOwner = Boolean(user?.id && ownerId === user.id);
   const errorPresentation = getPersonalDataErrorPresentation(error, { isEnglish });
   const isAnalysisStale = hasSnapshot && analysisAvailability === 'stale' && !error;
   const retryMode = !hasSnapshot && phase === 'building'
     ? 'building'
     : isAnalysisStale ? 'stale' : null;
-  const retryRevision = analysisMeta?.scopeRevision
-    || analysisMeta?.revision
-    || analysisMeta?.ownerSnapshotRevision
-    || 'pending';
-  const retryKey = retryMode
-    ? JSON.stringify([ownerId, ownerGeneration, retryMode, retryRevision])
-    : '';
-  const autoRetryAttempt = analysisRetry.key === retryKey
-    ? analysisRetry.attempt
-    : 0;
-  const automaticRetriesExhausted = autoRetryAttempt >= AUTO_RETRY_DELAYS_SECONDS.length;
-
   const retryManually = () => {
-    resetAnalysisRetry(retryKey);
     void onRetry?.({ automatic: false, phase: retryMode });
   };
-
-  useEffect(() => {
-    if (
-      !matchesOwner
-      || !retryMode
-      || activeRequest
-      || automaticRetriesExhausted
-      || typeof onRetry !== 'function'
-    ) {
-      return undefined;
-    }
-
-    const configuredDelay = Number(analysisMeta?.retryAfterSeconds);
-    const retryAfterSeconds = Math.max(
-      AUTO_RETRY_DELAYS_SECONDS[autoRetryAttempt],
-      Number.isFinite(configuredDelay) ? Math.max(2, configuredDelay) : 0
-    );
-    const schedule = ensureAnalysisRetrySchedule(
-      retryKey,
-      retryAfterSeconds * 1000
-    );
-    const remainingDelayMs = Math.max(
-      0,
-      Number(schedule?.nextRetryAt || Date.now()) - Date.now()
-    );
-    const timerId = window.setTimeout(() => {
-      if (!markAnalysisRetryFired(retryKey)) return;
-      void onRetry({ automatic: true, phase: retryMode });
-    }, remainingDelayMs);
-
-    return () => window.clearTimeout(timerId);
-  }, [
-    activeRequest,
-    analysisMeta?.retryAfterSeconds,
-    analysisRetry.nextRetryAt,
-    autoRetryAttempt,
-    automaticRetriesExhausted,
-    ensureAnalysisRetrySchedule,
-    markAnalysisRetryFired,
-    matchesOwner,
-    onRetry,
-    retryKey,
-    retryMode,
-  ]);
 
   if (!user?.id) {
     return children;
@@ -165,16 +95,12 @@ export default function PersonalDataBoundary({ user, onRetry, children }) {
     return (
       <PersonalDataStatusPanel
         kind="building"
-        message={automaticRetriesExhausted
-          ? (isEnglish
-            ? 'Your statistics are still queued. You can retry later without keeping this page open.'
-            : '统计快照仍在后台排队，无需停留在本页面，可稍后手动重试。')
-          : (isEnglish
-            ? 'Your statistics are being prepared. This page will retry with a gradual delay…'
-            : '正在生成你的统计快照，本页面将逐步延长重试间隔…')}
-        onRetry={automaticRetriesExhausted ? retryManually : null}
+        message={isEnglish
+          ? 'Your statistics are being prepared. Updated results will appear when a new version is available.'
+          : '统计快照正在后台准备，新结果完成后更新显示；也可稍后重新检查。'}
+        onRetry={retryManually}
         retryLabel={isEnglish ? 'Retry now' : '立即重试'}
-        allowRetryWhileLoading={automaticRetriesExhausted}
+        allowRetryWhileLoading
       />
     );
   }
@@ -214,13 +140,9 @@ export default function PersonalDataBoundary({ user, onRetry, children }) {
                   ? 'Refresh failed. The last successful analysis remains visible.'
                   : '刷新失败，继续显示上次成功读取的分析。')
                 : isAnalysisStale
-                  ? (automaticRetriesExhausted
-                    ? (isEnglish
-                      ? 'The previous result remains visible while the update waits in the background.'
-                      : '更新仍在后台排队，当前继续显示上次结果。')
-                    : (isEnglish
-                      ? 'Statistics are updating. Showing the previous result.'
-                      : '统计正在更新，当前显示上次结果'))
+                  ? (isEnglish
+                    ? 'Statistics are updating. Showing the previous result.'
+                    : '统计正在更新，当前显示上次结果')
                   : (isEnglish ? 'Refreshing in the background…' : '正在后台刷新，当前分析仍可使用…')}
             </span>
             {error && <span>{errorPresentation.message}</span>}
@@ -233,7 +155,7 @@ export default function PersonalDataBoundary({ user, onRetry, children }) {
               </span>
             )}
           </span>
-          {(error || (isAnalysisStale && automaticRetriesExhausted))
+          {(error || isAnalysisStale)
             && typeof onRetry === 'function' && (
             <button
               type="button"

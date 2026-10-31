@@ -50,7 +50,7 @@ function readEntityType(capabilities) {
  * 目录索引沿用 storedPoolObservations 的识别规则：名称必须唯一命中，
  * 且记录存在原始 id 时绝不回退名称匹配。
  */
-function buildCatalogIndex(catalog = []) {
+export function buildCatalogIndex(catalog = []) {
   const itemsById = new Map();
   const idsByNameRarity = new Map();
 

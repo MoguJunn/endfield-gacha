@@ -10,11 +10,17 @@
 
 关联保存在 `pools.character_pool_id`，引用限定角色池的 `pool_id`。未手动选择时，保存使用当时的自动识别结果；保存后关联固定，重新切换“自动识别”可按当前开始时间重新识别。改为常驻武器池或其他类型时清空关联。角色池时间调整后，需再次点击填入并保存，武器池不会被后台悄悄改写。
 
+卡池到达 `start_time` 后自动移除名称末尾的 `（前瞻）` 或 `(前瞻)`。数据库每分钟检查一次，实际改名时递增公共缓存版本；已开池的新增或编辑也会立即规范名称。未开池、开始时间未知和名称中间的“前瞻”不处理，卡池 ID、别名、阵容及历史记录保持原有归属。浏览器显示仍受 API/CDN 缓存时效影响。
+
 ## 数据库部署与既有日期修正
 
 `supabase/migrations/2026100701_weapon_character_pool_schedule.sql` 新增关联字段、引用与类型校验，并原位扩展现行 `admin_upsert_pool_with_aliases` 的字段保存；认证、别名、阵容及事务边界继续由原 RPC 负责。既有限定武器池应核对并回填可唯一识别的关联，保留原截止日期。部署前备份并核对关联候选，部署后通过后台重新预览需要修正的日期；估算日期在官方公布后应重新填入。
 
 新环境使用已包含迁移的生成 baseline；既有环境执行新增迁移一次，不能重复套用完整 baseline。SQL 验证入口 `supabase/tests/weapon-character-pool-schedule.sql` 使用回滚事务，覆盖重复应用、RPC 保存读取、拒绝非限定角色关联、清空关联及匿名调用拒绝。
+
+2026-10-30 已将「丹青渡」截止改为北京时间 2026-11-25 06:00，下一版本开启改为同日 12:00；烟火邀星河与幽寒申领在维护开始时结束。专项脚本 [20261030_correct_version_7_schedule.sql](../supabase/manual/data-backfill/20261030_correct_version_7_schedule.sql) 校验目标版本、卡池身份和原日期，只修改两个池及版本边界，保留其他未来武器池日期。生产执行前已备份并在回滚事务验证，执行后已核对 `bootstrap`、`pools` 与 `version_calendar`；公共缓存版本同步更新，首次读取仍可能命中旧 CDN 缓存。
+
+开池去后缀使用 `2026103001_clear_opened_pool_preview_labels.sql`，生产已启用具名任务 `clear-opened-pool-preview-labels`（每分钟）。新环境需提供 `pg_cron` 才能启用时间触发；无该扩展的隔离测试库只创建函数和保存时规范规则。验证入口 `node scripts/verify-pool-preview-labels.mjs` 使用临时本机 PostgreSQL，覆盖补齐、跨过开池时间、重复执行、写入规范、权限与缓存更新。
 
 ## 独立版本日历
 

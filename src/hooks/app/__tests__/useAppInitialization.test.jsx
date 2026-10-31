@@ -120,4 +120,21 @@ describe('useAppInitialization auth event coordination', () => {
     expect(mocks.applySignedOut).not.toHaveBeenCalled();
     expect(useAuthStore.getState().user?.id).toBe('user-1');
   });
+
+  it('uses the valid site identity when native verification is temporarily unavailable', async () => {
+    mocks.getValidatedSupabaseSession.mockRejectedValue(new Error('503'));
+    renderHook(() => useAppInitialization({ refreshPersonalData: vi.fn(), loadPublicPools: vi.fn() }));
+    await waitFor(() => expect(mocks.applyAuthenticatedSession).toHaveBeenCalledOnce());
+    expect(mocks.applyAuthenticatedSession.mock.calls[0][0]).toEqual({ id: 'user-1' });
+    expect(mocks.applySignedOut).not.toHaveBeenCalled();
+  });
+
+  it('resolves a compatibility sign-in event through its site session', async () => {
+    renderHook(() => useAppInitialization({ refreshPersonalData: vi.fn(), loadPublicPools: vi.fn() }));
+    await waitFor(() => expect(mocks.applyAuthenticatedSession).toHaveBeenCalledOnce());
+    mocks.getValidatedSupabaseSession.mockResolvedValue(null);
+    await act(async () => { mocks.authCallback('SIGNED_IN', { user: { id: 'user-1' } }); });
+    await waitFor(() => expect(mocks.applySiteSession).toHaveBeenCalledOnce());
+    expect(mocks.applySignedOut).not.toHaveBeenCalled();
+  });
 });

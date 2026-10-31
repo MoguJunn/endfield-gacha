@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Eye, EyeOff, Layers, ShieldCheck } from 'lucide-react';
 import { buildDashboardTimelineSections, countDashboardTimelineNodes } from '../../utils/dashboardTimelineSections.js';
 import { isEnglishLocale, useI18n } from '../../i18n/index.js';
@@ -775,11 +775,15 @@ const PoolTimelinePanel = ({
   mobile = false,
   showFiveStarDrops = true,
   onToggleShowFiveStarDrops = null,
+  onPresentationChange = null,
   displayMode = 'waterfall',
 }) => {
   const { t, locale } = useI18n();
   const [order, setOrder] = useState('desc');
   const [selectedIds, setSelectedIds] = useState(null);
+  useEffect(() => {
+    onPresentationChange?.({ order, selectedIds });
+  }, [onPresentationChange, order, selectedIds]);
   const english = isEnglishLocale(locale);
   const sourceSections = useMemo(() => {
     if (Array.isArray(precomputedSections)) {

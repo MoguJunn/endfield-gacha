@@ -609,7 +609,11 @@ function getSectionTypeLabel(type, tt) {
   return tt('dashboard.shareCard.sectionType.limited', 'Limited Character Banner');
 }
 
-function getStamp(entry, sectionType, tt) {
+function getStamp(entry, sectionType, tt, isEnglish) {
+  if (entry.unknownInheritedPity) return null;
+  if (entry.guaranteePulls) {
+    return { label: isEnglish ? 'Guaranteed' : '保底', color: '#b45309', bg: '#fef3c7' };
+  }
   if (entry.stageKind === 'gift') {
     return { label: tt('dashboard.shareCard.stamp.free', 'FREE'), color: '#34d399', bg: '#ecfdf5' };
   }
@@ -857,13 +861,17 @@ function renderShareSummary(entry, summary, theme = 'light') {
   });
 }
 
-function TimelineEntry({ entry, section, tokens, tt, showFiveStarDrops = true }) {
-  const scaleBase = Math.max(Number(section.scaleMax) || 1, 1);
+function TimelineEntry({ entry, section, tokens, tt, theme, showFiveStarDrops = true }) {
+  const { isEnglish } = useI18n();
+  const text = (zh, en) => isEnglish ? en : zh;
+  const scaleBase = Math.max(Number(entry.targetPulls || section.scaleMax) || 1, 1);
   const widthPercent = entry.stageKind === 'gift'
     ? 100
     : Math.max(12, Math.min(100, ((entry.pulls || 0) / scaleBase) * 100));
-  const fillColor = getTimelineBarColor(section.type, entry);
-  const stamp = getStamp(entry, section.type, tt);
+  const fillColor = entry.guaranteePulls ? 'linear-gradient(90deg, #fbbf24, #f59e0b, #d97706)' : getTimelineBarColor(section.type, entry);
+  const stamp = getStamp(entry, section.type, tt, isEnglish);
+  const inheritedPulls = Number(entry.inheritedPulls) || 0;
+  const stageLabel = entry.guaranteePulls ? text(`${entry.guaranteePulls} 抽保底出货`, `${entry.guaranteePulls}-pull guarantee`) : entry.stageLabel;
   const leadBadge = entry.leadBadge || entry.dropBadges?.[0] || { label: '?', rarity: 0 };
   const visibleBadges = getVisibleDropBadges(entry, showFiveStarDrops);
   const resultSummary = getVisibleResultSummary(entry, showFiveStarDrops);
@@ -890,8 +898,8 @@ function TimelineEntry({ entry, section, tokens, tt, showFiveStarDrops = true })
 
       <div style={styles.entryBody}>
         <div style={styles.stageTop}>
-          <div style={{ ...styles.stageChip, borderColor: tokens.border, background: tokens.chipBackground, color: tokens.textMuted }}>{entry.stageLabel}</div>
-          <div style={{ ...styles.resultText, color: tokens.textPrimary }}>{renderShareSummary(entry, resultSummary, 'light')}</div>
+          <div style={{ ...styles.stageChip, borderColor: tokens.border, background: tokens.chipBackground, color: tokens.textMuted }}>{stageLabel}</div>
+          <div style={{ ...styles.resultText, color: tokens.textPrimary }}>{renderShareSummary(entry, resultSummary, theme)}</div>
         </div>
 
         <div style={styles.barRow}>
@@ -904,9 +912,11 @@ function TimelineEntry({ entry, section, tokens, tt, showFiveStarDrops = true })
               }}
             >
               <div style={styles.barFillPattern} />
+              {inheritedPulls > 0 ? <div style={{ position: 'absolute', bottom: 2, left: 0, height: 6,
+                width: `${Math.min(100, inheritedPulls / entry.pulls * 100)}%`, background: '#818cf8' }} /> : null}
             </div>
             <div style={{ ...styles.barValue, color: tokens.textPrimary }}>
-              {entry.pulls}
+              {entry.unknownInheritedPity ? text('继承未知', 'Unknown') : entry.pulls}
               <span style={{ marginLeft: '4px', fontSize: '12px', fontWeight: 700 }}>{tt('dashboard.shareCard.pullUnit', 'pulls')}</span>
             </div>
           </div>
@@ -924,6 +934,24 @@ function TimelineEntry({ entry, section, tokens, tt, showFiveStarDrops = true })
             </div>
           )}
         </div>
+
+        {entry.unknownInheritedPity ? <p style={{ marginTop: 8, fontSize: 12, color: tokens.textMuted }}>{text(
+          `本段记录包含本池 ${entry.localPulls} 抽，继承间隔无法核实，不参与保底间隔统计。`,
+          `This banner has ${entry.localPulls} stored pulls in this segment; the inherited interval cannot be verified.`)}</p> : null}
+        {inheritedPulls > 0 ? <p style={{ marginTop: 8, fontSize: 12, color: tokens.textSecondary }}>{text(
+          `上池垫抽 ${inheritedPulls} 抽 + 本池 ${entry.localPulls} 抽`,
+          `Previous banner: ${inheritedPulls} pulls + This banner: ${entry.localPulls} pulls`)}</p> : null}
+        {entry.weaponBatch ? <div style={{ marginTop: 10, padding: 8, border: `1px solid ${tokens.border}`, fontSize: 12 }}>
+          <div>{entry.weaponBatch.isCompleteTenPull ? text('本次十连', 'This 10-pull')
+            : text(`该批已知 ${entry.weaponBatch.size} 抽`, `Known batch: ${entry.weaponBatch.size} pulls`)}
+            {' · '}6★ ×{entry.weaponBatch.sixStarCount}{showFiveStarDrops ? ` · 5★ ×${entry.weaponBatch.fiveStarCount}` : ''}</div>
+          {entry.weaponBatch.isCompleteTenPull ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(10, 1fr)', gap: 4, marginTop: 6 }}>
+            {entry.weaponBatch.slots.map((slot, index) => <span key={index} style={{ textAlign: 'center', padding: 4,
+              border: `1px solid ${tokens.border}`, background: slot.rarity >= 6 ? '#fbbf24' : tokens.panelMutedBackground,
+              color: slot.rarity >= 6 ? '#451a03' : tokens.textMuted }}>
+              {!showFiveStarDrops && slot.rarity === 5 ? '·' : `${slot.rarity}★`}</span>)}
+          </div> : null}
+        </div> : null}
 
         {visibleBadges.length > 0 && (
           <div style={styles.badgeList}>
@@ -953,7 +981,48 @@ function TimelineEntry({ entry, section, tokens, tt, showFiveStarDrops = true })
   );
 }
 
-function TimelineSection({ section, tokens, tt, showFiveStarDrops = true }) {
+function ShareAcquisitions({ section, tokens, showFiveStarDrops }) {
+  const { locale, isEnglish } = useI18n();
+  const text = (zh, en) => isEnglish ? en : zh;
+  const rows = section.acquisitions?.filter(row => showFiveStarDrops || row.rarity >= 6);
+  return <div style={{ marginTop: 16 }}>
+    {!rows ? <p style={{ color: tokens.textMuted }}>{text('逐条出货详情尚未更新。', 'Drop details are not available yet.')}</p>
+      : !rows.length ? <p style={{ color: tokens.textMuted }}>{text('暂无符合筛选的高星结果。', 'No matching high-rarity drops.')}</p>
+      : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
+        {rows.map((row, index) => {
+          const special = row.drawMethod === 'gift' ? text('额外赠送', 'Gift')
+            : row.drawMethod === 'free' ? text('免费十连', 'Free ten-pull')
+              : row.drawMethod === 'info_book' ? text('情报书', 'Intel ticket') : null;
+          const timestamp = row.timestamp ? new Date(row.timestamp) : null;
+          const date = timestamp && Number.isFinite(timestamp.getTime())
+            ? timestamp.toLocaleString(locale, { year: 'numeric', month: '2-digit', day: '2-digit',
+              hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+            : text('时间未知', 'Time unknown');
+          return <article key={row.id || index} style={{ position: 'relative', overflow: 'hidden', padding: 14,
+            border: `1px solid ${tokens.border}`, background: tokens.panelMutedBackground }}>
+            <span style={{ position: 'absolute', inset: '0 auto 0 0', width: 4, background: getTimelineBarColor(section.type, row) }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              {row.avatarUrl ? <img src={row.avatarUrl} alt="" style={{ width: 48, height: 48, objectFit: 'cover' }} /> : null}
+              <div style={{ minWidth: 0 }}><strong style={{ fontSize: 16, overflowWrap: 'anywhere' }}>{row.name}</strong>
+                <div style={{ marginTop: 4, color: tokens.textMuted, fontSize: 12 }}>{row.rarity}★{special ? ` · ${special}`
+                  : row.stageKind === 'up' ? ' · UP' : row.stageKind === 'offLimited' ? text(' · 歪其他限定', ' · Other limited')
+                    : row.stageKind === 'offStandard' ? text(' · 常驻', ' · Standard') : ''}</div></div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 11 }}>
+              <div><div style={{ color: tokens.textMuted }}>{text('本次出货间隔', 'Drop interval')}</div>
+                <strong style={{ display: 'block', marginTop: 5 }}>{special || (row.intervalPulls == null ? text('未知', 'Unknown') : text(`${row.intervalPulls} 抽`, `${row.intervalPulls} pulls`))}</strong></div>
+              <div><div style={{ color: tokens.textMuted }}>{text('本池已存位置', 'Saved position')}</div>
+                <strong style={{ display: 'block', marginTop: 5 }}>{row.pullIndex == null ? '—' : text(`第 ${row.pullIndex} 抽`, `Pull #${row.pullIndex}`)}</strong></div>
+            </div>
+            <time style={{ display: 'block', marginTop: 12, paddingTop: 8, borderTop: `1px solid ${tokens.border}`, fontSize: 11, color: tokens.textMuted }}>{date}</time>
+          </article>;
+        })}
+      </div>}
+    {section.type === 'weapon' ? <p style={{ marginTop: 12, fontSize: 11, color: tokens.textMuted }}>{text('位置按已存武器结果计数；十连内序号不等同于申领次数。额外赠送不计入抽数。', 'Positions count saved weapon results; order within a ten-pull is not claim cost. Gifts do not count as pulls.')}</p> : null}
+  </div>;
+}
+
+function TimelineSection({ section, tokens, tt, theme, displayMode, showFiveStarDrops = true }) {
   const tone = getSectionTone(section.type);
   const secondaryLabel = section.type === 'standard'
     ? tt('dashboard.shareCard.averageFive', 'Average 5★')
@@ -1026,16 +1095,18 @@ function TimelineSection({ section, tokens, tt, showFiveStarDrops = true }) {
           </div>
         </div>
 
-        {section.entries.map((entry) => (
-          <TimelineEntry key={entry.id} entry={entry} section={section} tokens={tokens} tt={tt} showFiveStarDrops={showFiveStarDrops} />
-        ))}
+        {displayMode === 'card' ? <ShareAcquisitions section={section} tokens={tokens} showFiveStarDrops={showFiveStarDrops} />
+          : (section.entries || []).map((entry) => (
+            <TimelineEntry key={entry.id} entry={entry} section={section} tokens={tokens} tt={tt} theme={theme} showFiveStarDrops={showFiveStarDrops} />
+          ))}
       </div>
     </div>
   );
 }
 
-const DashboardShareCard = forwardRef(function DashboardShareCard({ payload, sections = [], theme = 'light', showFiveStarDrops = true }, ref) {
-  const { t } = useI18n();
+const DashboardShareCard = forwardRef(function DashboardShareCard({ payload, sections = [], theme = 'light', displayMode = 'waterfall', showFiveStarDrops = true }, ref) {
+  const { t, isEnglish } = useI18n();
+  const cardMode = displayMode === 'card';
   const tt = (key, fallback, params = {}) => t(key, params, fallback);
   const tokens = getThemeTokens(theme);
   const accentColor = getSectionTone(payload?.poolType).accent;
@@ -1129,9 +1200,9 @@ const DashboardShareCard = forwardRef(function DashboardShareCard({ payload, sec
       <div style={styles.timelineWrap}>
         <div style={styles.timelineHeader}>
           <div>
-            <div style={{ ...styles.sectionTitle, color: tokens.textMuted }}>{tt('dashboard.shareCard.timelineTitle', 'Timeline View')}</div>
+            <div style={{ ...styles.sectionTitle, color: tokens.textMuted }}>{cardMode ? isEnglish ? 'Drops by banner' : '各池出货明细' : tt('dashboard.shareCard.timelineTitle', 'Timeline View')}</div>
             <div style={{ marginTop: '6px', fontSize: '14px', color: tokens.textSecondary, fontWeight: 600 }}>
-              {tt('dashboard.shareCard.timelineSubtitle', 'A complete stage-by-stage recap of the current timeline view.')}
+              {cardMode ? isEnglish ? 'Individual drops, saved pull positions and local acquisition times.' : '逐条出货结果、本池已存位置与本地获取时间。' : tt('dashboard.shareCard.timelineSubtitle', 'A complete stage-by-stage recap of the current timeline view.')}
             </div>
           </div>
           <div style={styles.counts}>
@@ -1145,7 +1216,7 @@ const DashboardShareCard = forwardRef(function DashboardShareCard({ payload, sec
         </div>
 
         {sections.map((section) => (
-          <TimelineSection key={section.id} section={section} tokens={tokens} tt={tt} showFiveStarDrops={showFiveStarDrops} />
+          <TimelineSection key={section.id} section={section} tokens={tokens} tt={tt} theme={theme} displayMode={displayMode} showFiveStarDrops={showFiveStarDrops} />
         ))}
       </div>
 

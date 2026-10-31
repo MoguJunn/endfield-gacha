@@ -46,11 +46,12 @@ vi.mock('../../../components/pool/PoolGroupCardRail.jsx', () => ({
         <section key={subgroup.groupId}>
           <button
             type="button"
+            aria-expanded={subgroup.isExpanded}
             onClick={() => onToggleSubgroup(subgroup.groupId, subgroup.isExpanded)}
           >
             {`切换${subgroup.label}`}
           </button>
-          {subgroup.isExpanded ? subgroup.pools.map((pool) => (
+          {subgroup.pools.map((pool) => (
             <button
               key={pool.id}
               type="button"
@@ -59,7 +60,7 @@ vi.mock('../../../components/pool/PoolGroupCardRail.jsx', () => ({
             >
               {pool.name}
             </button>
-          )) : null}
+          ))}
         </section>
       ))}
     </div>
@@ -165,6 +166,7 @@ describe('SimulatorToolbar extra pool subgroups', () => {
     renderToolbar();
 
     fireEvent.click(screen.getByRole('button', { name: '切换重构寻访 / 申领' }));
+    expect(screen.getByRole('button', { name: '切换重构寻访 / 申领' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('button', { name: '重构寻访·伊冯 [模拟]' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '切换特殊寻访' }));

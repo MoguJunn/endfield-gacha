@@ -20,15 +20,16 @@ const extraGroup = {
 };
 
 describe('mobile pool rail parent expansion', () => {
-  it('forces a manually collapsed extra parent open for its selected concrete pool', () => {
-    expect(resolvePoolGroupExpanded(extraGroup, 'extra-reconstruction-phase-1', false)).toBe(true);
+  it('respects manual collapse', () => {
+    expect(resolvePoolGroupExpanded(extraGroup, false)).toBe(false);
   });
 
-  it('forces a manually collapsed extra parent open for its selected subgroup', () => {
-    expect(resolvePoolGroupExpanded(extraGroup, 'group:extra:special', false)).toBe(true);
+  it('expands groups by default', () => {
+    expect(resolvePoolGroupExpanded(extraGroup)).toBe(true);
   });
 
-  it('preserves manual collapse when selection is outside the group', () => {
-    expect(resolvePoolGroupExpanded(extraGroup, 'limited-pool', false)).toBe(false);
+  it('temporarily expands during search without changing the manual state', () => {
+    expect(resolvePoolGroupExpanded({ ...extraGroup, disableCollapse: true }, false)).toBe(true);
+    expect(resolvePoolGroupExpanded(extraGroup, false)).toBe(false);
   });
 });

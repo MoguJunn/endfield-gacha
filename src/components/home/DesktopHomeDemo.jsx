@@ -48,7 +48,7 @@ import './desktopHomeDemo.css';
 const HomeLandingDialogs = lazy(() => import('./HomeLandingDialogs.jsx'));
 const DonationThanksCard = lazy(() => import('../donations/DonationThanksCard.jsx'));
 const EMPTY = [];
-const PANELS = new Set(['guide', 'mechanics', 'schedule', 'tools', 'support', 'lottery', 'donations']);
+const PANELS = new Set(['bulletin', 'guide', 'mechanics', 'schedule', 'tools', 'support', 'lottery', 'donations']);
 
 function Clock({ target, openEnded, version = false }) {
   const { isEnglish } = useI18n();
@@ -132,7 +132,7 @@ function Avatar({ name }) {
   );
 }
 
-export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages, onUseClassicHome }) {
+export default function DesktopHomeDemo({ mobile = false, unreadCount = 0, onOpenMessages, onUseClassicHome }) {
   const { t, locale, isEnglish } = useI18n();
   const tt = (zh, en) => (isEnglish ? en : zh);
   const location = useLocation();
@@ -160,13 +160,14 @@ export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages, onUse
     return () => window.clearInterval(timer);
   }, []);
   useEffect(() => {
+    if (mobile) return undefined;
     const observer = new ResizeObserver(([entry]) => {
       // 1366×768 fits the whole home. Tabs are reserved for smaller windows.
       setCompact(entry.contentRect.height < 626 || entry.contentRect.width < 1180);
     });
     observer.observe(container.current);
     return () => observer.disconnect();
-  }, []);
+  }, [mobile]);
   const version = useMemo(
     () => resolveHomeVersionPlan({ timelineConfig: timeline, legacyTargetAt: legacyTarget, locale, now }),
     [timeline, legacyTarget, locale, now]
@@ -207,12 +208,23 @@ export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages, onUse
   const openPanel = (id) => {
     const query = new URLSearchParams(location.search);
     query.set('panel', id);
-    navigate({ pathname: '/', search: query.toString() }, { replace: true });
+    navigate({ pathname: mobile ? '/m' : '/', search: query.toString() }, { replace: true });
   };
   const closePanel = () => {
     const query = new URLSearchParams(location.search);
     query.delete('panel');
-    navigate({ pathname: '/', search: query.toString() }, { replace: true });
+    query.delete('notice-category');
+    query.delete('notice-id');
+    navigate({ pathname: mobile ? '/m' : '/', search: query.toString() }, { replace: true });
+  };
+  const openMessages = (category, noticeId) => {
+    if (!mobile) return onOpenMessages?.(category, noticeId);
+    const query = new URLSearchParams(location.search);
+    query.set('panel', 'bulletin');
+    query.set('notice-category', category === 'game' ? 'updates' : 'site');
+    if (noticeId) query.set('notice-id', noticeId);
+    else query.delete('notice-id');
+    navigate({ pathname: '/m', search: query.toString() }, { replace: true });
   };
   const moveRotation = (direction) => {
     const rail = rotationContainer.current?.querySelector('.pool-card-rail-scrollbar');
@@ -225,8 +237,8 @@ export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages, onUse
   return (
     <div
       ref={container}
-      className={`dh-home ${compact ? 'dh-home--compact' : ''}`}
-      data-testid="desktop-home-demo"
+      className={`dh-home ${compact ? 'dh-home--compact' : ''} ${mobile ? 'dh-home--mobile' : ''}`}
+      data-testid={mobile ? 'mobile-home' : 'desktop-home-demo'}
       data-workspace={compact ? workspace : 'all'}
     >
       {compact ? (
@@ -255,7 +267,7 @@ export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages, onUse
             <button
               className="dh-primary"
               type="button"
-              onClick={() => (user ? navigate('/dashboard') : openAuthModal())}
+              onClick={() => (user ? navigate(mobile ? '/m/details' : '/dashboard') : openAuthModal())}
             >
               {user ? tt('我的分析', 'My analysis') : tt('登录 / 导入', 'Sign in / import')}
               <ArrowRight size={18} />
@@ -265,7 +277,7 @@ export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages, onUse
                 <BookOpen size={18} />
                 <span><strong>{tt('指南', 'Guide')}</strong><small>{tt('从导入到备份', 'From import to backup')}</small></span>
               </button>
-              <Link to="/simulator">
+              <Link to={mobile ? '/m/simulator' : '/simulator'}>
                 <Gamepad2 size={18} />
                 <span><strong>{tt('模拟器', 'Simulator')}</strong><small>{tt('试试下一次寻访', 'Try your next pull')}</small></span>
               </Link>
@@ -278,9 +290,9 @@ export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages, onUse
                 <span><strong>{tt('友链', 'Links')}</strong><small>{tt('地图、规划与实用工具', 'Maps, planners and tools')}</small></span>
               </button>
             </div>
-            <button type="button" className="dh-exit" onClick={onUseClassicHome}>
+            {onUseClassicHome ? <button type="button" className="dh-exit" onClick={onUseClassicHome}>
               {tt('切换至经典主页', 'Switch to classic home')}
-            </button>
+            </button> : null}
           </nav>
         </div>
       </div>
@@ -405,7 +417,7 @@ export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages, onUse
             target={versionTarget}
             name={versionName}
             onSchedule={() => openPanel('schedule')}
-            onAnnouncements={() => onOpenMessages('game')}
+            onAnnouncements={() => openMessages('game')}
           />
         </div>
         </section>
@@ -424,7 +436,7 @@ export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages, onUse
           type="button"
           className="dh-message-entry"
           onClick={() =>
-            important ? onOpenMessages('site', getDesktopMessageId(important)) : onOpenMessages('system')
+            important ? openMessages('site', getDesktopMessageId(important)) : openMessages('system')
           }
         >
           <Bell size={16} />
@@ -474,6 +486,8 @@ export default function DesktopHomeDemo({ unreadCount = 0, onOpenMessages, onUse
             key={panel}
             panel={panel}
             onClose={closePanel}
+            category={new URLSearchParams(location.search).get('notice-category')}
+            noticeId={new URLSearchParams(location.search).get('notice-id')}
             siteNotices={site}
             officialNotices={game}
             schedule={schedule}

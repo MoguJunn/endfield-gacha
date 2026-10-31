@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { LIMITED_POOL_RULES, WEAPON_POOL_RULES } from '../../constants/index.js';
-import { targetProbabilityDistribution } from '../../utils/targetProbabilityDistribution.js';
+import { cachedTargetProbabilityDistribution } from '../../utils/cachedTargetProbabilityDistribution.js';
 
 const percent = (value) => `${(value * 100).toFixed(1)}%`;
 const axis = { fontSize: 11, fill: 'var(--ex-muted)' };
@@ -15,7 +15,7 @@ export default function PoolTargetPrediction({ weapon, targetName, t }) {
   const unit = weapon ? t('次申领', 'claims') : t('抽', 'pulls');
   const maxPity = weapon ? 3 : 79;
   const maxProgress = weapon ? 7 : 119;
-  const result = useMemo(() => targetProbabilityDistribution({ rules: weapon ? WEAPON_POOL_RULES : LIMITED_POOL_RULES,
+  const result = useMemo(() => cachedTargetProbabilityDistribution({ rules: weapon ? WEAPON_POOL_RULES : LIMITED_POOL_RULES,
     unit: weapon ? 'claim' : 'pull', currentPity: pity, guaranteeProgress: progress, guaranteeUsed: used, horizon }), [weapon, pity, progress, used, horizon]);
   const numberValue = (event, maximum, minimum = 0) => Math.max(minimum, Math.min(maximum, Math.trunc(Number(event.target.value))));
   return <section className="ex-theory">

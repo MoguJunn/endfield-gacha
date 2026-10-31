@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PersonalDataBoundary from '../PersonalDataBoundary.jsx';
 import usePersonalAnalysisStore, {
@@ -105,7 +105,7 @@ describe('PersonalDataBoundary', () => {
     expect(screen.queryByText('server detail must not be rendered directly')).toBeNull();
   });
 
-  it('building 阶段使用递增退避且达到上限后停止自动重试', () => {
+  it('building 阶段不再定时下载分析，仅保留手动检查', () => {
     vi.useFakeTimers();
     const onRetry = vi.fn();
     usePersonalDataStore.setState({
@@ -131,24 +131,13 @@ describe('PersonalDataBoundary', () => {
     expect(screen.queryByText('0 抽 暂无卡池数据')).toBeNull();
     expect(screen.getByTestId('personal-data-building')).toBeTruthy();
 
-    act(() => vi.advanceTimersByTime(2_999));
-    expect(onRetry).not.toHaveBeenCalled();
-    act(() => vi.advanceTimersByTime(1));
-    expect(onRetry).toHaveBeenNthCalledWith(1, { automatic: true, phase: 'building' });
-
-    act(() => vi.advanceTimersByTime(5_000));
-    act(() => vi.advanceTimersByTime(10_000));
-    act(() => vi.advanceTimersByTime(20_000));
-    act(() => vi.advanceTimersByTime(30_000));
-    expect(onRetry).toHaveBeenCalledTimes(5);
-    expect(screen.getByText('统计快照仍在后台排队，无需停留在本页面，可稍后手动重试。')).toBeTruthy();
-    expect(screen.getByRole('button', { name: '立即重试' })).toBeTruthy();
-
     act(() => vi.advanceTimersByTime(600_000));
-    expect(onRetry).toHaveBeenCalledTimes(5);
+    expect(onRetry).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '立即重试' }));
+    expect(onRetry).toHaveBeenCalledExactlyOnceWith({ automatic: false, phase: 'building' });
   });
 
-  it('组件重挂载后沿用全局重试截止时间而不是从头计时', () => {
+  it('组件重挂载也不会重新开始定时下载', () => {
     vi.useFakeTimers();
     const onRetry = vi.fn();
     usePersonalDataStore.setState({
@@ -181,7 +170,7 @@ describe('PersonalDataBoundary', () => {
     act(() => vi.advanceTimersByTime(19_999));
     expect(onRetry).not.toHaveBeenCalled();
     act(() => vi.advanceTimersByTime(1));
-    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onRetry).not.toHaveBeenCalled();
   });
 
   it('analysis stale 且无错误时显示非阻断提示', () => {

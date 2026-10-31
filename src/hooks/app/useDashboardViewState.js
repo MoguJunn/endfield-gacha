@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useAuthStore, usePersonalAnalysisStore, usePoolStore } from '../../stores';
 import { getCurrentUpPoolInfo, getPoolActivityTiming } from '../../utils/poolTimeUtils';
-import { getCharacterAvatarUrl } from '../../utils/characterUtils';
+import { characterCache, getCharacterAvatarUrl } from '../../utils/characterUtils';
+import { buildMergedUpAverage } from '../../utils/mergedUpAverage.js';
 import { buildCharacterStats } from '../../utils/dashboardCharacterStats';
 import { buildDashboardResourceSummary } from '../../utils/dashboardResourceSummary.js';
 import { getPoolFeaturedLead } from '../../utils/poolFeaturedResolver.js';
@@ -78,6 +79,7 @@ export function useDashboardViewState() {
   const currentPoolId = usePoolStore((state) => state.currentPoolId);
   const currentGameUid = usePoolStore((state) => state.currentGameUid);
   const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
+  const analysisOwnerId = usePersonalAnalysisStore((state) => state.ownerId);
   const analysisOwnerAccounts = usePersonalAnalysisStore((state) => state.owner?.accounts);
   const analysisScope = usePersonalAnalysisStore((state) => state.scope);
   const [charViewMode, setCharViewMode] = useState('waterfall');
@@ -256,6 +258,14 @@ export function useDashboardViewState() {
       null
     : null;
 
+  const mergedUpAverage = useMemo(() => {
+    if (user) {
+      return analysisOwnerId === user.id && isAnalysisScopeCurrent && ['ready', 'stale', 'empty'].includes(analysisAvailability)
+        ? analysisScope?.dashboard?.mergedUpAverage ?? null : null;
+    }
+    return buildMergedUpAverage({ history: annotatedAccountHistoryArray, pools: poolsArray, characters: characterCache.getAll() });
+  }, [user, analysisOwnerId, analysisAvailability, isAnalysisScopeCurrent, analysisScope, annotatedAccountHistoryArray, poolsArray]);
+
   const totalCharacterCount = useMemo(() => {
     return characterStats.reduce((sum, char) => sum + char.count, 0);
   }, [characterStats]);
@@ -416,6 +426,7 @@ export function useDashboardViewState() {
     snapshotSplitOverviewStats,
     snapshotOverviewCharacterStats,
     snapshotTimelineSections,
+    mergedUpAverage,
   };
 }
 

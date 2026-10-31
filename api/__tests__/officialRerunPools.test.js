@@ -26,6 +26,21 @@ describe('official rerun identity across occurrences', () => {
     expect(result.name).toBe('绚丽异彩');
   });
 
+  it.each([
+    ['祖泉的新流', '祖泉的新流（前瞻）', characterProfile],
+    ['祖泉的新流＃2', '祖泉的新流(前瞻)', characterProfile],
+    ['细枝申领#1', '细枝申领（前瞻）', 'reconstruction_weapon_v1'],
+  ])('reuses the preview catalog entry for %s', (name, previewName, profile) => {
+    const preview = { ...existing, pool_id: 'preview-entry', name: previewName,
+      extra_rule_profile: profile, extra_subtype: profile === characterProfile ? 'reconstruction' : 'reconstruction_claim' };
+    const resolved = resolveRerunPoolIdentity({ pool_id: 'incoming-official', name, extra_rule_profile: profile }, [preview]);
+    expect(resolved.pool_id).toBe('preview-entry');
+    expect(resolved.name).not.toContain('前瞻');
+    expect(resolved.extra_series_key).toBe(preview.extra_series_key);
+    expect(() => resolveRerunPoolIdentity({ pool_id: 'incoming-official', name, extra_rule_profile: profile },
+      [preview, { ...preview, pool_id: 'another-entry', name: resolved.name }])).toThrow('多个同名');
+  });
+
   it('does not merge weapon and character pools or choose an ambiguous catalog', () => {
     const weapon = resolveRerunPoolIdentity({ pool_id: 'weapon-rerun', name: existing.name,
       extra_rule_profile: 'reconstruction_weapon_v1' }, [existing]);

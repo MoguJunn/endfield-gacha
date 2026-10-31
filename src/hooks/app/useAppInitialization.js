@@ -7,7 +7,7 @@ import appLogger from '../../utils/appLogger.js';
 import { getValidatedSupabaseSession } from '../../services/authFetchService.js';
 import { getCurrentSiteSession } from '../../services/siteSessionService.js';
 import { updateAccountLastSeen } from '../../services/accountLastSeenService.js';
-import { subscribeAuthSessionSync } from '../../services/authSessionEvents.js';
+import { useSessionRecovery } from './useSessionRecovery.js';
 import {
   isContributorDemoModeEnabled,
   isContributorDemoSessionActive,
@@ -42,6 +42,13 @@ export function useAppInitialization({ refreshPersonalData, loadPublicPools }) {
   } = useAuthenticatedSessionSync({
     refreshPersonalData,
     onUpdateLastSeen: updateLastSeen,
+  });
+
+  useSessionRecovery({
+    applyAuthenticatedSession,
+    applySiteSession,
+    applySignedOut,
+    siteSessionUserRef,
   });
 
   // 主初始化逻辑
@@ -81,13 +88,18 @@ export function useAppInitialization({ refreshPersonalData, loadPublicPools }) {
         const characterCachePromise = characterCache.load().catch(() => null);
 
         // 获取当前会话；Supabase 本地缓存必须先经过 Auth 服务验证。
-        const [session, siteSession] = await Promise.all([
+        const [nativeResult, siteResult] = await Promise.allSettled([
           getValidatedSupabaseSession(),
-          getCurrentSiteSession({ syncSupabase: false }).catch(() => null),
+          getCurrentSiteSession({ syncSupabase: false }),
         ]);
+        const session = nativeResult.status === 'fulfilled' ? nativeResult.value : null;
+        const siteSession = siteResult.status === 'fulfilled' ? siteResult.value : null;
         const effectiveUser = siteSession?.authenticated && siteSession.user
           ? siteSession.user
           : (session?.user ?? null);
+        if (!effectiveUser && [nativeResult, siteResult].some(result => result.status === 'rejected')) {
+          throw new Error('暂时无法验证登录状态，请稍后重试');
+        }
         const canLoadPrivateCloudData = canUsePrivateCloudDataFromSiteSession(siteSession, effectiveUser);
 
         if (siteSession?.authenticated && siteSession.user) {
@@ -147,23 +159,6 @@ export function useAppInitialization({ refreshPersonalData, loadPublicPools }) {
       };
     }
 
-    const unsubscribeAuthSessionSync = subscribeAuthSessionSync((event) => {
-      queueMicrotask(async () => {
-        if (event?.detail?.alreadyApplied === true) {
-          return;
-        }
-        const siteSession = await getCurrentSiteSession({ syncSupabase: false }).catch(() => null);
-        if (!isMounted || !siteSession?.authenticated || !siteSession.user) {
-          return;
-        }
-        siteSessionUserRef.current = siteSession.user;
-        await applySiteSession(siteSession, {
-          source: 'auth_session_sync',
-          isMountedRef,
-        });
-      });
-    });
-
     const unsubscribeAuthStore = useAuthStore.subscribe((state, previousState) => {
       if (previousState?.user && !state.user) {
         applySignedOut({ source: 'auth_store', event: 'SIGNED_OUT' });
@@ -205,9 +200,22 @@ export function useAppInitialization({ refreshPersonalData, loadPublicPools }) {
             session?.user?.id
             && personalDataState.ownerId === session.user.id
           );
-          const verifiedSession = isSameOwnerSessionEvent
-            ? session
-            : await getValidatedSupabaseSession();
+          let verifiedSession;
+          try {
+            verifiedSession = isSameOwnerSessionEvent ? session : await getValidatedSupabaseSession();
+            if (!verifiedSession?.user) {
+              const siteSession = await getCurrentSiteSession({ syncSupabase: false });
+              if (!isMounted) return;
+              if (siteSession?.authenticated && siteSession.user) {
+                siteSessionUserRef.current = siteSession.user;
+                await applySiteSession(siteSession, { source: 'supabase_auth_change', isMountedRef });
+                return;
+              }
+            }
+          } catch {
+            appLogger.warn('[useAppInitialization] 暂时无法验证认证事件，保留当前状态');
+            return;
+          }
 
           if (verifiedSession?.user) {
             siteSessionUserRef.current = null;
@@ -229,7 +237,6 @@ export function useAppInitialization({ refreshPersonalData, loadPublicPools }) {
 
       return () => {
         isMounted = false;
-        unsubscribeAuthSessionSync();
         unsubscribeAuthStore();
         subscription.unsubscribe();
       };
@@ -237,7 +244,6 @@ export function useAppInitialization({ refreshPersonalData, loadPublicPools }) {
 
     return () => {
       isMounted = false;
-      unsubscribeAuthSessionSync();
       unsubscribeAuthStore();
     };
   }, [applyAuthenticatedSession, applySignedOut, applySiteSession, loadPublicPools, setAuthResolved]);

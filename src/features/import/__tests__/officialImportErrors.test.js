@@ -16,4 +16,11 @@ describe('official import failure classification', () => {
     expect(normalizeImportError(new AuthChainError('expired', 'import-status', { code: 'AUTH_SESSION_INVALID' }), t))
       .toBe('import.error.authFailed:expired');
   });
+
+  it.each([
+    new AuthChainError('missing access token', 'import-full'),
+    new AuthChainError('登录已失效', 'auth', { code: 'missing_access_token' }),
+  ])('shows a readable reauthentication message for missing credentials', (error) => {
+    expect(normalizeImportError(error, t)).toBe('import.error.sessionExpired:');
+  });
 });

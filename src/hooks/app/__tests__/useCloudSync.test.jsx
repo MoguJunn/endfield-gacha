@@ -19,6 +19,8 @@ import {
 } from '../../../stores/index.js';
 import { createPersonalDataInitialState } from '../../../stores/usePersonalDataStore.js';
 import { createPersonalAnalysisInitialState } from '../../../stores/usePersonalAnalysisStore.js';
+import * as snapshotChanges from '../../../services/snapshotChangeService.js';
+import { getAppLocale } from '../../../i18n/index.js';
 
 vi.mock('../../../services/bootstrapService.js', () => ({
   getBootstrapVisiblePools: vi.fn().mockResolvedValue([]),
@@ -66,6 +68,25 @@ describe('useCloudSync.loadCloudData', () => {
       meta: { ownerId: 'user-1', accountKey: 'account-current' },
       warnings: [],
     });
+  });
+
+  it('同版本同账号同视图的检查不下载分析，也不替换当前页面快照', async () => {
+    useAuthStore.setState({ user: { id: 'user-1' } });
+    usePersonalDataStore.setState({ ...createPersonalDataInitialState(), ownerId: 'user-1', phase: 'ready', hasSnapshot: true });
+    usePoolStore.setState({ currentPoolId: 'p', currentGameUid: 'account-current' });
+    usePersonalAnalysisStore.setState({ ...createPersonalAnalysisInitialState(), ownerId: 'user-1', availability: 'ready',
+      scope: { dashboard: { views: { p: {} } } },
+      meta: { clientSnapshotVersion: 'a1', ownerId: 'user-1', accountKey: 'account-current', viewKey: 'p', locale: getAppLocale() } });
+    const check = vi.spyOn(snapshotChanges, 'checkSnapshotVersions').mockResolvedValue({ personal: { analysis: 'a1' } });
+    const scope = usePersonalAnalysisStore.getState().scope;
+    const { result, unmount } = renderHook(() => useCloudSync({ showToast: vi.fn() }));
+    let response;
+    await act(async () => { response = await result.current.refreshPersonalData({ id: 'user-1' }, { kind: 'explicit' }); });
+    expect(response).toMatchObject({ ok: true, unchanged: true, applied: false });
+    expect(loadAccountGachaAnalysis).not.toHaveBeenCalled();
+    expect(usePersonalAnalysisStore.getState().scope).toBe(scope);
+    expect(usePersonalDataStore.getState().refreshing).toBe(false);
+    unmount(); check.mockRestore();
   });
 
   it('初始化读取 analysis 并合并 poolManifest，不调用旧 records 读取', async () => {

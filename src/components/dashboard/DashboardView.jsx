@@ -27,6 +27,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import PoolAnalysisCard from './PoolAnalysisCard';
 import PoolTimelinePanel from './PoolTimelinePanel';
 import AveragePullStatsPanel from './AveragePullStatsPanel';
+import MergedUpAveragePanel from './MergedUpAveragePanel.jsx';
 import DashboardShareCard from './DashboardShareCard';
 import ShareActionStatus from '../share/ShareActionStatus';
 import ResourceSummaryPanel from '../resources/ResourceSummaryPanel';
@@ -34,6 +35,7 @@ import { buildCharacterStats } from '../../utils/dashboardCharacterStats';
 import { buildPoolSelectorGroups } from '../../utils/poolSelectorDisplay';
 import { buildOverviewPoolAnalysisPityMap, getPoolAnalysisPityState } from '../../utils/poolAnalysisPity';
 import { buildDashboardTimelineSections } from '../../utils/dashboardTimelineSections';
+import { prepareTimelineSections } from '../../utils/timelinePresentation.js';
 import { buildDashboardOverviewSplitStats } from '../../utils/dashboardOverviewSplitStats';
 import {
   buildDashboardShareCardFileName,
@@ -314,6 +316,7 @@ const DashboardView = ({ showToast }) => {
     resourceSummaryVariant,
     isAnalysisBacked,
     snapshotSplitOverviewStats,
+    mergedUpAverage,
     snapshotOverviewCharacterStats,
     snapshotTimelineSections,
   } = useDashboardViewState();
@@ -610,6 +613,7 @@ const DashboardView = ({ showToast }) => {
     snapshotTimelineSections,
     selectedPools,
   ]);
+  const [timelinePresentation, setTimelinePresentation] = React.useState({ order: 'desc', selectedIds: null });
   const splitOverviewStats = React.useMemo(() => {
     if (!isAllPoolsOverview) {
       return null;
@@ -761,6 +765,8 @@ const DashboardView = ({ showToast }) => {
         stats: {},
         analysisPity: null,
         sections: customShareTimelineSections,
+        pools: customShareSelectedPools,
+        timelineDisplayMode: charViewMode,
         overviewSplitStats: customShareSplitStats,
         includeFreePullsInStats,
         scopeLabelOverride: t('dashboard.share.custom.scope'),
@@ -777,6 +783,7 @@ const DashboardView = ({ showToast }) => {
     customShareSelectedPools,
     customShareSplitStats,
     customShareTimelineSections,
+    charViewMode,
     hasMergedAccountView,
     includeFreePullsInStats,
     isEnglish,
@@ -797,6 +804,9 @@ const DashboardView = ({ showToast }) => {
           stats,
           analysisPity,
           sections: timelineSections,
+          pools: selectedPools,
+          timelinePresentation,
+          timelineDisplayMode: charViewMode,
           overviewSplitStats: splitOverviewStats,
           includeFreePullsInStats,
           showFiveStarDrops: showTimelineFiveStarDrops,
@@ -817,13 +827,20 @@ const DashboardView = ({ showToast }) => {
       splitOverviewStats,
       stats,
       timelineSections,
+      selectedPools,
+      timelinePresentation,
+      charViewMode,
     ]
   );
   const hasDashboardShareData = (Number(stats?.total) || 0) > 0 || timelineSections.length > 0;
   const hasCustomShareData = customShareSelectedPools.length > 0 && customShareTimelineSections.length > 0;
   const isCustomShareMode = shareMode === 'custom' && hasCustomShareData;
   const activeSharePayload = isCustomShareMode ? customSharePayload : dashboardSharePayload;
-  const activeTimelineSections = isCustomShareMode ? customShareTimelineSections : timelineSections;
+  const activeTimelineSections = React.useMemo(() => prepareTimelineSections(
+    isCustomShareMode ? customShareTimelineSections : timelineSections,
+    isCustomShareMode ? customShareSelectedPools : selectedPools,
+    { ...(isCustomShareMode ? {} : timelinePresentation), locale }
+  ), [isCustomShareMode, customShareTimelineSections, timelineSections, customShareSelectedPools, selectedPools, timelinePresentation, locale]);
   const hasActiveShareData = isCustomShareMode ? hasCustomShareData : hasDashboardShareData;
   const clipboardImageWarmKey = React.useMemo(
     () =>
@@ -832,9 +849,12 @@ const DashboardView = ({ showToast }) => {
             locale,
             theme: resolvedShareTheme,
             payload: activeSharePayload,
+            sections: activeTimelineSections,
+            displayMode: charViewMode,
+            showFiveStarDrops: showTimelineFiveStarDrops,
           })
         : null,
-    [activeSharePayload, hasActiveShareData, locale, resolvedShareTheme]
+    [activeSharePayload, activeTimelineSections, charViewMode, showTimelineFiveStarDrops, hasActiveShareData, locale, resolvedShareTheme]
   );
   const canOpenShareMenu = hasDashboardShareData || customShareCandidatePools.length > 0;
   const supportsNativeImageShare = React.useMemo(() => {
@@ -961,6 +981,9 @@ const DashboardView = ({ showToast }) => {
       locale,
       theme: resolvedShareTheme,
       payload: activeSharePayload,
+      sections: activeTimelineSections,
+      displayMode: charViewMode,
+      showFiveStarDrops: showTimelineFiveStarDrops,
     });
     const cacheBucket = 'full';
     const cache = shareImageCacheRef.current[cacheBucket];
@@ -1005,7 +1028,7 @@ const DashboardView = ({ showToast }) => {
     };
 
     return renderPromise;
-  }, [activeSharePayload, locale, resolvedShareTheme, waitForShareCard]);
+  }, [activeSharePayload, activeTimelineSections, charViewMode, showTimelineFiveStarDrops, locale, resolvedShareTheme, waitForShareCard]);
 
   const prewarmClipboardShareImage = React.useCallback(() => {
     if (!supportsClipboardImageCopy || !hasActiveShareData || !activeSharePayload) {
@@ -1345,6 +1368,7 @@ const DashboardView = ({ showToast }) => {
             ref={shareCardRef}
             payload={activeSharePayload}
             sections={activeTimelineSections}
+            displayMode={charViewMode}
             theme={resolvedShareTheme}
             showFiveStarDrops={showTimelineFiveStarDrops}
           />
@@ -1568,6 +1592,7 @@ const DashboardView = ({ showToast }) => {
                   </h3>
                   <span className="h-px flex-1 bg-zinc-100 dark:bg-zinc-800" />
                 </div>
+                <MergedUpAveragePanel data={mergedUpAverage} pools={selectedPools} includeFree={includeFreePullsInStats} />
                 <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
                   <AveragePullStatsPanel
                     stats={splitOverviewStats.character}
@@ -2154,6 +2179,7 @@ const DashboardView = ({ showToast }) => {
                 embedded={true}
                 showFiveStarDrops={showTimelineFiveStarDrops}
                 onToggleShowFiveStarDrops={setShowTimelineFiveStarDrops}
+                onPresentationChange={setTimelinePresentation}
               />
             )}
           </div>

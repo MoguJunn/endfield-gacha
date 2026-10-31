@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Layers, Lock, Star, Swords, User } from 'lucide-react';
 import {
   getPoolFeaturedLabel,
+  getCollapsedPoolPreviewPools,
   getPoolTimingMeta,
   getSelectorVisiblePools,
   shouldShowPoolFeaturedSummary,
@@ -10,6 +11,7 @@ import { useI18n } from '../../i18n/index.js';
 import { getCharacterAvatarUrl } from '../../utils/characterUtils.js';
 import { useHorizontalWheelScroll } from '../../hooks/useHorizontalWheelScroll.js';
 import { isPoolSelectorGroupCollapsed } from './poolGroupCardRailState.js';
+import PoolTypeNavigation from './PoolTypeNavigation.jsx';
 import './poolGroupCardRail.css';
 
 const TYPE_CONFIG = {
@@ -21,7 +23,7 @@ const TYPE_CONFIG = {
   weapon_standard: { icon: Swords, color: 'text-zinc-500 dark:text-zinc-400', bg: 'bg-zinc-100 dark:bg-zinc-800' },
 };
 
-function GroupLabel({ groupType, label, collapsed, onToggle, t }) {
+function GroupLabel({ groupType, label, collapsed, onToggle, disabled = false, t }) {
   const accentClass =
     groupType === 'limited'
       ? 'bg-orange-500 text-orange-600 dark:text-orange-400'
@@ -39,7 +41,8 @@ function GroupLabel({ groupType, label, collapsed, onToggle, t }) {
     <button
       type="button"
       onClick={onToggle}
-      className="pool-rail-group-label flex-shrink-0 flex flex-col items-center justify-end h-full pb-3 group opacity-70 hover:opacity-100 transition-opacity duration-200"
+      disabled={disabled}
+      className="pool-rail-group-label flex-shrink-0 flex flex-col items-center justify-end gap-2 h-full pb-3 group opacity-70 hover:opacity-100 transition-opacity duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yellow-500"
       aria-expanded={!collapsed}
       title={collapsed ? t('pool.card.groupToggleExpand', { label }) : t('pool.card.groupToggleCollapse', { label })}
     >
@@ -59,6 +62,11 @@ function GroupLabel({ groupType, label, collapsed, onToggle, t }) {
           style={{ writingMode: 'horizontal-tb' }}
         />
       </div>
+      {collapsed && (
+        <span role="status" className="whitespace-nowrap border border-zinc-200 bg-zinc-50 px-1.5 py-1 text-[10px] leading-none text-slate-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+          {t('pool.card.typeCollapsed')}
+        </span>
+      )}
     </button>
   );
 }
@@ -426,6 +434,11 @@ const PoolGroupCardRail = ({
   const [collapsedGroupTypes, setCollapsedGroupTypes] = useState(() => new Set());
   const [tick, setTick] = useState(0);
   const railRef = useHorizontalWheelScroll();
+  const scrollRef = useRef(null);
+  const setScrollRef = useCallback((element) => {
+    scrollRef.current = element;
+    railRef(orientation === 'horizontal' ? element : null);
+  }, [orientation, railRef]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -482,9 +495,12 @@ const PoolGroupCardRail = ({
   }
 
   return (
-    <div className={`pool-card-rail relative border-t border-zinc-100 dark:border-zinc-800 pt-4 ${className}`} data-orientation={orientation}>
+    <div className={`pool-card-rail relative ${className}`} data-orientation={orientation}>
+      {orientation === 'horizontal' && (
+        <PoolTypeNavigation groups={effectiveGroups} scrollRef={scrollRef} />
+      )}
       <div
-        ref={orientation === 'horizontal' ? railRef : undefined}
+        ref={setScrollRef}
         className="pool-card-rail-scrollbar flex flex-nowrap items-end gap-2 overflow-x-scroll overflow-y-hidden pb-2 -mx-1 px-1"
       >
         {leadingOverview && showGroupOverviewCards ? (
@@ -505,22 +521,14 @@ const PoolGroupCardRail = ({
           const allowCollapse =
             versionFoldEnabled || (!hasSubgroups && collapsibleTypes.includes(group.type) && !group.disableCollapse);
           const expanded = expandedGroups.has(group.type);
-          const hasSelectedPool = group.pools.some((pool) => pool.id === currentSelectionId);
-          const hasSelectedSubgroup = group.subgroups?.some((subgroup) => subgroup.groupId === currentSelectionId);
+          const selectedSubgroup = group.subgroups?.find((subgroup) => subgroup.groupId === currentSelectionId);
           const isGroupCollapsed = isPoolSelectorGroupCollapsed({
             group,
             collapsedGroupTypes,
-            hasSelectedSubgroup,
           });
           const collapsedPreviewPools = isGroupCollapsed
-            ? group.pools.filter((pool) => pool.selectorTiming?.isActive)
+            ? getCollapsedPoolPreviewPools(group, currentSelectionId, referenceDate)
             : [];
-          if (isGroupCollapsed && hasSelectedPool && currentSelectionId !== group.groupId) {
-            const selectedPool = group.pools.find((pool) => pool.id === currentSelectionId);
-            if (selectedPool && !collapsedPreviewPools.some((pool) => pool.id === selectedPool.id)) {
-              collapsedPreviewPools.push(selectedPool);
-            }
-          }
           const { visiblePools, hiddenPools, autoExpanded } = versionFoldEnabled
             ? {
                 visiblePools: group.versionFold.directPools,
@@ -540,13 +548,6 @@ const PoolGroupCardRail = ({
                   autoExpanded: false,
                 };
           const showExpanded = expanded || autoExpanded;
-          const selectDefaultPoolInGroup = () => {
-            const activePool = group.pools.find((pool) => pool.selectorTiming?.isActive);
-            const fallbackPool = activePool || group.pools[0];
-            if (fallbackPool?.id) {
-              onSelectPool?.(fallbackPool.id);
-            }
-          };
           const toggleGroupCollapse = () => {
             setCollapsedGroupTypes((current) => {
               const next = new Set(current);
@@ -560,27 +561,33 @@ const PoolGroupCardRail = ({
           };
 
           return (
-            <div key={group.type} className="pool-rail-group flex flex-nowrap items-end gap-2">
+            <div key={group.type} data-pool-type={group.type} className="pool-rail-group flex flex-nowrap items-end gap-2">
               <GroupLabel
                 groupType={group.type}
                 label={group.label}
                 collapsed={isGroupCollapsed}
+                disabled={group.disableCollapse}
                 t={t}
-                onToggle={() => {
-                  if (!showGroupOverviewCards && !hasSelectedPool) {
-                    selectDefaultPoolInGroup();
-                    return;
-                  }
-                  toggleGroupCollapse();
-                }}
+                onToggle={toggleGroupCollapse}
               />
 
-              {showGroupOverviewCards ? (
+              {showGroupOverviewCards && (!isGroupCollapsed || currentSelectionId === group.groupId) ? (
                 <GroupCard
                   group={group}
                   isSelected={currentSelectionId === group.groupId}
                   interactive={typeof onSelectGroup === 'function'}
                   onClick={() => onSelectGroup?.(group.type)}
+                  locale={locale}
+                  t={t}
+                />
+              ) : null}
+
+              {showGroupOverviewCards && isGroupCollapsed && selectedSubgroup ? (
+                <GroupCard
+                  group={{ ...selectedSubgroup, type: 'extra', pools: selectedSubgroup.allPools }}
+                  isSelected
+                  interactive={typeof onSelectGroup === 'function'}
+                  onClick={() => onSelectGroup?.(`extra:${selectedSubgroup.subtype}`)}
                   locale={locale}
                   t={t}
                 />
@@ -594,11 +601,12 @@ const PoolGroupCardRail = ({
                       groupType="extra"
                       label={subgroup.label}
                       collapsed={!subgroup.isExpanded}
+                      disabled={subgroup.disableCollapse}
                       t={t}
                       onToggle={() => onToggleSubgroup?.(subgroup.groupId, subgroup.isExpanded)}
                     />
 
-                    {showGroupOverviewCards ? (
+                    {showGroupOverviewCards && (subgroup.isExpanded || currentSelectionId === subgroup.groupId) ? (
                       <GroupCard
                         group={{
                           ...subgroup,
@@ -613,17 +621,16 @@ const PoolGroupCardRail = ({
                       />
                     ) : null}
 
-                    {subgroup.isExpanded &&
-                      subgroup.pools.map((pool) => (
-                        <PoolCard
-                          key={pool.id}
-                          pool={{ ...pool, selectorGroupType: 'extra' }}
-                          isSelected={currentSelectionId === pool.id}
-                          onClick={() => onSelectPool?.(pool.id)}
-                          locale={locale}
-                          t={t}
-                        />
-                      ))}
+                    {subgroup.pools.map((pool) => (
+                      <PoolCard
+                        key={pool.id}
+                        pool={{ ...pool, selectorGroupType: 'extra' }}
+                        isSelected={currentSelectionId === pool.id}
+                        onClick={() => onSelectPool?.(pool.id)}
+                        locale={locale}
+                        t={t}
+                      />
+                    ))}
                   </div>
                 ))}
 

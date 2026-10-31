@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ImportManager from '../ImportManager.jsx';
@@ -71,11 +71,13 @@ vi.mock('../../../services/accountIntegrationsService.js', () => ({
 }));
 
 vi.mock('../OfficialAPIImport', () => ({
-  default: ({ onImportComplete }) => (
-    <button type="button" onClick={() => onImportComplete(harness.result)}>
-      finish-import
-    </button>
-  ),
+  default: function OfficialImportFixture({ onImportComplete }) {
+    const [input, setInput] = React.useState('');
+    return <>
+      <input aria-label="official-token" value={input} onChange={(event) => setInput(event.target.value)} />
+      <button type="button" onClick={() => onImportComplete(harness.result)}>finish-import</button>
+    </>;
+  },
 }));
 
 vi.mock('../importShared.js', () => ({
@@ -179,6 +181,26 @@ describe('ImportManager completion behavior', () => {
     expect(harness.loadAccountSecurityState).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'common.close' }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('会话失效时保留子流程，同一账号重新登录后继续使用原输入', async () => {
+    const view = render(<ImportManager isOpen onClose={vi.fn()} />);
+    fireEvent.change(screen.getByRole('textbox', { name: 'official-token' }), { target: { value: 'memory-only-token' } });
+    harness.user = null;
+    await act(async () => { view.rerender(<ImportManager isOpen onClose={vi.fn()} />); });
+    expect(screen.getByText('import.needLogin')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'official-token' })).not.toBeInTheDocument();
+    harness.user = { id: 'user-1' };
+    await act(async () => { view.rerender(<ImportManager isOpen onClose={vi.fn()} />); });
+    expect(screen.getByRole('textbox', { name: 'official-token' })).toHaveValue('memory-only-token');
+  });
+
+  it('切换到另一个站内账号时清空前一个账号的官方导入输入', async () => {
+    const view = render(<ImportManager isOpen onClose={vi.fn()} />);
+    fireEvent.change(screen.getByRole('textbox', { name: 'official-token' }), { target: { value: 'previous-owner-token' } });
+    harness.user = { id: 'user-2' };
+    await act(async () => { view.rerender(<ImportManager isOpen onClose={vi.fn()} />); });
+    expect(screen.getByRole('textbox', { name: 'official-token' })).toHaveValue('');
   });
 
   it('正常导入完成后自动结束，并且完成与关闭回调各调用一次', async () => {

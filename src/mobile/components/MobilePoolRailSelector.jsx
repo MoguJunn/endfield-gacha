@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, Layers, Search, SlidersHorizontal, Star, Swords, Upload, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { isPoolGroupId, parsePoolGroupId } from '../../stores/usePoolStore';
@@ -9,6 +9,7 @@ import { getMobilePathForTab } from '../../constants/appRoutes';
 import { useI18n } from '../../i18n/index.js';
 import {
   getPoolGroupId,
+  getCollapsedPoolPreviewPools,
   getPoolSelectorFeaturedCharacters,
   getPoolTypeLabel,
   shouldShowPoolFeaturedSummary,
@@ -20,6 +21,7 @@ import { localizeEntityName, localizePoolName } from '../../utils/gameDataI18n.j
 import { usePoolScopeSelectorState } from '../../hooks/app/usePoolScopeSelectorState.js';
 import { resolvePoolGroupExpanded } from './mobilePoolRailSelectorState.js';
 import { useImportMethodSelection } from '../../hooks/app/useImportMethodSelection.js';
+import PoolTypeNavigation from '../../components/pool/PoolTypeNavigation.jsx';
 
 const WorkbenchFileImport = lazy(() => import('../../features/data-workbench/WorkbenchFileImport.jsx'));
 
@@ -84,6 +86,8 @@ export default function MobilePoolRailSelector() {
   const [expandedGroups, setExpandedGroups] = useState({});
   const [expandedOldPoolGroups, setExpandedOldPoolGroups] = useState({});
   const poolMenuRef = React.useRef(null);
+  const menuScrollRef = React.useRef(null);
+  const selectionToRevealRef = React.useRef(null);
   const {
     user,
     pools,
@@ -175,6 +179,26 @@ export default function MobilePoolRailSelector() {
     };
   }, [showPoolMenu]);
 
+  useLayoutEffect(() => {
+    const group = selectionToRevealRef.current;
+    selectionToRevealRef.current = null;
+    const selection = group?.querySelector('[aria-current="true"]');
+    const menu = menuScrollRef.current;
+    if (!selection || !menu) return;
+
+    // Keep the retained option inside the dropdown without scrolling the page.
+    const optionBounds = selection.getBoundingClientRect();
+    const menuBounds = menu.getBoundingClientRect();
+    if (optionBounds.bottom > menuBounds.bottom) {
+      menu.scrollTop += optionBounds.bottom - menuBounds.bottom + 8;
+    } else {
+      const navigationHeight = menu.querySelector('[data-pool-type-navigation]')?.offsetHeight || 0;
+      if (optionBounds.top < menuBounds.top + navigationHeight) {
+        menu.scrollTop -= menuBounds.top + navigationHeight - optionBounds.top + 8;
+      }
+    }
+  });
+
   const selectedConfig =
     selectedPool && !selectedPool.isGroupMode
       ? getPoolTypeConfig(selectedPool)
@@ -218,6 +242,7 @@ export default function MobilePoolRailSelector() {
       <button
         key={id}
         type="button"
+        aria-current={active ? 'true' : undefined}
         onClick={() => handleSelectItem({ id, kind: 'group', groupType })}
         className={cx(
           'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors',
@@ -259,6 +284,7 @@ export default function MobilePoolRailSelector() {
       <button
         key={pool.id}
         type="button"
+        aria-current={active ? 'true' : undefined}
         onClick={() => handleSelectItem({ id: pool.id, kind: 'pool' })}
         className={cx(
           'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors',
@@ -419,12 +445,12 @@ export default function MobilePoolRailSelector() {
           {searchQuery ? t('pool.selector.noMatches') : t('pool.selector.noBanners')}
         </div>
       ) : (
-        <div className="relative mt-0.5" ref={poolMenuRef}>
+        <div className="mobile-pool-selector relative mt-0.5" data-open={showPoolMenu} ref={poolMenuRef}>
           <button
             type="button"
             onClick={() => setShowPoolMenu((value) => !value)}
             className={cx(
-              'mobile-ux-card flex w-full items-center justify-between gap-3 px-3 py-3 text-left transition-colors',
+              'mobile-pool-selector__trigger mobile-ux-card flex w-full items-center justify-between gap-3 px-3 py-3 text-left transition-colors',
               showPoolMenu ? 'border-endfield-yellow/40 bg-endfield-yellow/10' : 'hover:border-zinc-300'
             )}
           >
@@ -478,7 +504,8 @@ export default function MobilePoolRailSelector() {
           </button>
 
           {showPoolMenu ? (
-            <div className="mobile-ux-dropdown absolute left-0 right-0 top-[calc(100%+0.5rem)] z-30 max-h-[min(60vh,28rem)] overflow-y-auto p-2">
+            <div ref={menuScrollRef} className="mobile-pool-selector__menu mobile-ux-dropdown absolute left-0 right-0 top-[calc(100%-1px)] z-30 max-h-[min(60vh,28rem)] overflow-y-auto border border-zinc-200 bg-white p-2 dark:border-zinc-800 dark:bg-zinc-950">
+              <PoolTypeNavigation groups={groupedPools} scrollRef={menuScrollRef} orientation="vertical" />
               <div className="space-y-2">
                 {showOverviewOptions ? (
                   <button
@@ -525,7 +552,7 @@ export default function MobilePoolRailSelector() {
 
                 {groupedPools.map((group) => {
                   const groupId = getPoolGroupId(group.type);
-                  const groupExpanded = resolvePoolGroupExpanded(group, currentPoolId, expandedGroups[group.type]);
+                  const groupExpanded = resolvePoolGroupExpanded(group, expandedGroups[group.type]);
                   const hasSubgroups = Array.isArray(group.subgroups);
                   const versionFoldEnabled =
                     !hasSubgroups && group.versionFold?.enabled === true && !group.disableCollapse;
@@ -534,14 +561,25 @@ export default function MobilePoolRailSelector() {
                   const selectedOldPool = foldedPools.some((pool) => pool.id === currentPoolId);
                   const oldPoolsExpanded = selectedOldPool || expandedOldPoolGroups[group.type] === true;
                   const displayedPools = oldPoolsExpanded ? [...directPools, ...foldedPools] : directPools;
+                  const selectedSubgroup = group.subgroups?.find((subgroup) => subgroup.groupId === currentPoolId);
+                  const collapsedPools = getCollapsedPoolPreviewPools(group, currentPoolId);
+                  const showCollapsedSelection = collapsedPools.length > 0 ||
+                    (showOverviewOptions && (currentPoolId === groupId || selectedSubgroup));
                   const headerConfig = getGroupHeaderConfig(group.type);
                   const HeaderIcon = headerConfig.icon;
 
                   return (
-                    <div key={group.type} className="mobile-ux-card-inset overflow-hidden">
+                    <div key={group.type} data-pool-type={group.type} className="mobile-ux-card-inset overflow-hidden">
                       <button
                         type="button"
-                        onClick={() => (group.disableCollapse ? undefined : toggleGroup(group.type))}
+                        onClick={(event) => {
+                          if (group.disableCollapse) return;
+                          if (groupExpanded) selectionToRevealRef.current = event.currentTarget.parentElement;
+                          toggleGroup(group.type);
+                        }}
+                        disabled={group.disableCollapse}
+                        aria-expanded={groupExpanded}
+                        title={t(groupExpanded ? 'pool.card.groupToggleCollapse' : 'pool.card.groupToggleExpand', { label: group.label })}
                         className="flex w-full items-center justify-between gap-3 bg-zinc-50/80 px-3 py-2.5 text-left dark:bg-zinc-900/40"
                       >
                         <div className="flex min-w-0 items-center gap-2">
@@ -550,6 +588,11 @@ export default function MobilePoolRailSelector() {
                             <div className="truncate text-[11px] font-bold uppercase tracking-[0.14em] text-slate-700 dark:text-zinc-200">
                               {group.label}
                             </div>
+                            {!groupExpanded && (
+                              <div role="status" className="mt-1 text-[10px] text-slate-500 dark:text-zinc-400">
+                                {t('pool.card.typeCollapsed')}
+                              </div>
+                            )}
                             <div className="mt-0.5 text-[10px] font-mono text-slate-500 dark:text-zinc-500">
                               {t('pool.card.groupStats', {
                                 pools: formatNumber(group.pools.length),
@@ -569,7 +612,33 @@ export default function MobilePoolRailSelector() {
                         ) : null}
                       </button>
 
-                      {groupExpanded ? (
+                      {!groupExpanded ? (
+                        showCollapsedSelection ? (
+                          <div className="space-y-1 p-2">
+                            {showOverviewOptions && currentPoolId === groupId
+                              ? renderGroupOverviewOption({
+                                  id: groupId,
+                                  groupType: group.type,
+                                  label: group.label,
+                                  poolCount: group.pools.length,
+                                  pulls: group.totalPulls,
+                                  icon: HeaderIcon,
+                                })
+                              : null}
+                            {showOverviewOptions && selectedSubgroup
+                              ? renderGroupOverviewOption({
+                                  id: selectedSubgroup.groupId,
+                                  groupType: `extra:${selectedSubgroup.subtype}`,
+                                  label: selectedSubgroup.label,
+                                  poolCount: selectedSubgroup.poolCount,
+                                  pulls: selectedSubgroup.totalPulls,
+                                  icon: Star,
+                                })
+                              : null}
+                            {collapsedPools.map(renderPoolOption)}
+                          </div>
+                        ) : null
+                      ) : (
                         <div className="space-y-1 border-t border-zinc-200/80 p-2 dark:border-zinc-800">
                           {showOverviewOptions && (group.pools.length > 1 || group.type === 'extra')
                             ? renderGroupOverviewOption({
@@ -590,11 +659,14 @@ export default function MobilePoolRailSelector() {
                               >
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    subgroup.disableCollapse
-                                      ? undefined
-                                      : toggleSubgroup(subgroup.groupId, subgroup.isExpanded)
-                                  }
+                                  disabled={subgroup.disableCollapse}
+                                  aria-expanded={subgroup.isExpanded}
+                                  title={t(subgroup.isExpanded ? 'pool.card.groupToggleCollapse' : 'pool.card.groupToggleExpand', { label: subgroup.label })}
+                                  onClick={(event) => {
+                                    if (subgroup.disableCollapse) return;
+                                    if (subgroup.isExpanded) selectionToRevealRef.current = event.currentTarget.parentElement;
+                                    toggleSubgroup(subgroup.groupId, subgroup.isExpanded);
+                                  }}
                                   className="flex w-full items-center justify-between gap-3 bg-cyan-50/60 px-3 py-2.5 text-left dark:bg-cyan-950/15"
                                 >
                                   <div className="flex min-w-0 items-center gap-2">
@@ -603,6 +675,11 @@ export default function MobilePoolRailSelector() {
                                       <div className="truncate text-[11px] font-bold uppercase tracking-[0.12em] text-cyan-800 dark:text-cyan-200">
                                         {subgroup.label}
                                       </div>
+                                      {!subgroup.isExpanded && (
+                                        <div role="status" className="mt-1 text-[10px] text-slate-500 dark:text-zinc-400">
+                                          {t('pool.card.typeCollapsed')}
+                                        </div>
+                                      )}
                                       <div className="mt-0.5 text-[10px] font-mono text-slate-500 dark:text-zinc-500">
                                         {t('pool.card.groupStats', {
                                           pools: formatNumber(subgroup.poolCount),
@@ -622,9 +699,9 @@ export default function MobilePoolRailSelector() {
                                   ) : null}
                                 </button>
 
-                                {subgroup.isExpanded ? (
+                                {subgroup.isExpanded || subgroup.pools.length > 0 || (showOverviewOptions && currentPoolId === subgroup.groupId) ? (
                                   <div className="space-y-1 border-t border-zinc-200/80 p-2 dark:border-zinc-800">
-                                    {showOverviewOptions
+                                    {showOverviewOptions && (subgroup.isExpanded || currentPoolId === subgroup.groupId)
                                       ? renderGroupOverviewOption({
                                           id: subgroup.groupId,
                                           groupType: `extra:${subgroup.subtype}`,
@@ -667,7 +744,7 @@ export default function MobilePoolRailSelector() {
                             </>
                           )}
                         </div>
-                      ) : null}
+                      )}
                     </div>
                   );
                 })}

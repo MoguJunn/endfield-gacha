@@ -940,6 +940,14 @@ var init_messages_en_US = __esm({
       "pool.group.other": "Other",
       "pool.card.groupToggleExpand": "Expand {label}",
       "pool.card.groupToggleCollapse": "Collapse {label}",
+      "pool.card.typeCollapsed": "Category collapsed",
+      "pool.navigation.label": "Banner type navigation",
+      "pool.navigation.jump": "Jump to {label}",
+      "pool.navigation.progress": "Banner list scroll progress",
+      "pool.navigation.hint": "Tap a type to jump",
+      "pool.navigation.swipe": "Swipe down for more",
+      "pool.navigation.wheel": "Scroll down for more",
+      "pool.navigation.end": "End of list",
       "pool.card.allGroupTitle": "All {label} Banners",
       "pool.card.groupStats": "{pools} banners \xB7 {pulls} pulls",
       "pool.card.currentUp": "Current UP",
@@ -1177,6 +1185,7 @@ var init_messages_en_US = __esm({
       "import.error.serverConnection": "Server connection error: {message}",
       "import.error.riskControl": "Rate limit triggered. Try again later.",
       "import.error.authFailed": "Authentication failed: {message}",
+      "import.error.sessionExpired": "Your sign-in or verification has expired. Sign in or verify again to continue importing. Your current input and pending preview have been kept.",
       "import.error.emptyToken": "Enter the token first.",
       "import.error.tokenLength": "Invalid token length: expected 24 characters, got {length}.",
       "import.error.tokenFormat": "Invalid token format: unsupported characters detected.",
@@ -1581,6 +1590,26 @@ var init_messages_en_US = __esm({
       "dashboard.analysis.reconstructionWeaponGiftRule": "The series grants a Supplemental Arsenal Box on claim 10, the featured UP 6\u2605 weapon on claim 18, then alternates every 8 claims.",
       "dashboard.analysis.firstSelector300": "First selector gift (300)",
       "dashboard.average.title": "Average Drop Cost",
+      "dashboard.mergedUp.title": "Limited / Rerun UP Average",
+      "dashboard.mergedUp.scope": "Combined banner scope",
+      "dashboard.mergedUp.limited": "Limited",
+      "dashboard.mergedUp.reconstruction": "Rerun",
+      "dashboard.mergedUp.accountScope": "Current game account \xB7 Independent scope selected below",
+      "dashboard.mergedUp.character": "Operator UP Average",
+      "dashboard.mergedUp.weapon": "Weapon UP Average",
+      "dashboard.mergedUp.unit": "pulls / UP",
+      "dashboard.mergedUp.counts": "Known records: {pulls} pulls \xB7 {count} featured UP drops",
+      "dashboard.mergedUp.pools": "View {count} included banners",
+      "dashboard.mergedUp.chooseScope": "Select at least one scope.",
+      "dashboard.mergedUp.pending": "Statistics are updating. Please check again shortly.",
+      "dashboard.mergedUp.incomplete": "This scope includes supplements or summaries. Complete pull counts and all UP identities are not confirmed, so the average is unavailable.",
+      "dashboard.mergedUp.unknown": "The identity or period-specific UP target of {count} six-star drop(s) is unconfirmed. The average is unavailable.",
+      "dashboard.mergedUp.empty": "No pull records in the selected scope.",
+      "dashboard.mergedUp.noUp": "No featured UP drops in this scope yet. The average is unavailable.",
+      "dashboard.mergedUp.method": "Calculation",
+      "dashboard.mergedUp.withFree": "Free pulls included",
+      "dashboard.mergedUp.withoutFree": "Free pulls excluded",
+      "dashboard.mergedUp.note": "Total eligible pulls divided by featured UP drops in their respective periods, including pulls after the last drop. Banner averages are not averaged together. Free pulls follow the toggle above; gifts and exchanges are excluded. Info-book pulls still count as pulls. Reruns cover reconstruction recruitment and claims, excluding special recruitment. Each drop is checked against its own period's target. This metric is not a pity interval or a prediction.",
       "dashboard.average.avg5": "Avg 5\u2605",
       "dashboard.average.allSix": "All 6\u2605",
       "dashboard.average.targetSix": "Target 6\u2605",
@@ -3222,6 +3251,14 @@ var messages = {
   "pool.group.other": "\u5176\u4ED6",
   "pool.card.groupToggleExpand": "\u5C55\u5F00{label}",
   "pool.card.groupToggleCollapse": "\u6298\u53E0{label}",
+  "pool.card.typeCollapsed": "\u7C7B\u578B\u5DF2\u6298\u53E0",
+  "pool.navigation.label": "\u5361\u6C60\u7C7B\u578B\u5BFC\u822A",
+  "pool.navigation.jump": "\u8DF3\u8F6C\u81F3{label}",
+  "pool.navigation.progress": "\u5361\u6C60\u5217\u8868\u6D4F\u89C8\u8FDB\u5EA6",
+  "pool.navigation.hint": "\u70B9\u51FB\u7C7B\u578B\u5FEB\u901F\u8DF3\u8F6C",
+  "pool.navigation.swipe": "\u5411\u4E0B\u6ED1\u52A8\u67E5\u770B\u66F4\u591A",
+  "pool.navigation.wheel": "\u6EDA\u8F6E\u5411\u4E0B\u6D4F\u89C8\u66F4\u591A",
+  "pool.navigation.end": "\u5DF2\u5230\u5217\u8868\u672B\u5C3E",
   "pool.card.allGroupTitle": "\u5168\u90E8{label}\u6C60",
   "pool.card.groupStats": "{pools} \u6C60 \xB7 {pulls} \u62BD",
   "pool.card.currentUp": "\u5F53\u524DUP",
@@ -3459,6 +3496,7 @@ var messages = {
   "import.error.serverConnection": "\u670D\u52A1\u5668\u8FDE\u63A5\u5F02\u5E38: {message}",
   "import.error.riskControl": "\u89E6\u53D1\u9891\u7387\u9650\u5236\uFF0C\u8BF7\u7A0D\u5019\u518D\u8BD5\u3002",
   "import.error.authFailed": "\u8BA4\u8BC1\u5931\u8D25: {message}",
+  "import.error.sessionExpired": "\u767B\u5F55\u6216\u9A8C\u8BC1\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55\uFF0F\u9A8C\u8BC1\u540E\u7EE7\u7EED\u5BFC\u5165\u3002\u5F53\u524D\u8F93\u5165\u548C\u5F85\u786E\u8BA4\u5185\u5BB9\u5DF2\u4FDD\u7559\u3002",
   "import.error.emptyToken": "\u8BF7\u8F93\u5165Token",
   "import.error.tokenLength": "Token\u957F\u5EA6\u9519\u8BEF\uFF1A\u671F\u671B24\u4F4D\uFF0C\u5B9E\u9645{length}\u4F4D",
   "import.error.tokenFormat": "Token\u683C\u5F0F\u9519\u8BEF\uFF1A\u5305\u542B\u4E0D\u652F\u6301\u7684\u5B57\u7B26",
@@ -3863,6 +3901,26 @@ var messages = {
   "dashboard.analysis.reconstructionWeaponGiftRule": "\u7CFB\u5217\u7B2C10\u6B21\u7533\u9886\u83B7\u8865\u5145\u6B66\u5E93\u7BB1\uFF0C\u7B2C18\u6B21\u83B7\u672C\u671F UP \u516D\u661F\u6B66\u5668\uFF0C\u4E4B\u540E\u6BCF8\u6B21\u7533\u9886\u4EA4\u66FF\u5956\u52B1\u3002",
   "dashboard.analysis.firstSelector300": "\u9996\u6B21\u8D60\u9001\u81EA\u9009 (300\u62BD)",
   "dashboard.average.title": "\u5E73\u5747\u51FA\u8D27",
+  "dashboard.mergedUp.title": "\u9650\u5B9A / \u590D\u523B UP \u5747\u62BD",
+  "dashboard.mergedUp.scope": "\u5408\u5E76\u7EDF\u8BA1\u8303\u56F4",
+  "dashboard.mergedUp.limited": "\u9650\u5B9A",
+  "dashboard.mergedUp.reconstruction": "\u590D\u523B",
+  "dashboard.mergedUp.accountScope": "\u5F53\u524D\u6E38\u620F\u8D26\u53F7 \xB7 \u72EC\u7ACB\u7EDF\u8BA1\u4E0B\u65B9\u6240\u9009\u8303\u56F4",
+  "dashboard.mergedUp.character": "\u89D2\u8272 UP \u5747\u62BD",
+  "dashboard.mergedUp.weapon": "\u6B66\u5668 UP \u5747\u62BD",
+  "dashboard.mergedUp.unit": "\u62BD / UP",
+  "dashboard.mergedUp.counts": "\u5DF2\u77E5\u660E\u7EC6 {pulls} \u62BD \xB7 \u83B7\u5F97\u5F53\u671F UP {count} \u6B21",
+  "dashboard.mergedUp.pools": "\u67E5\u770B\u8BA1\u5165\u7684 {count} \u4E2A\u5361\u6C60",
+  "dashboard.mergedUp.chooseScope": "\u8BF7\u9009\u62E9\u81F3\u5C11\u4E00\u4E2A\u8303\u56F4\u3002",
+  "dashboard.mergedUp.pending": "\u7EDF\u8BA1\u6B63\u5728\u66F4\u65B0\uFF0C\u8BF7\u7A0D\u540E\u67E5\u770B\u3002",
+  "dashboard.mergedUp.incomplete": "\u8303\u56F4\u5185\u542B\u8865\u5F55\u6216\u6C47\u603B\uFF0C\u5C1A\u4E0D\u80FD\u786E\u8BA4\u5B8C\u6574\u62BD\u6570\u4E0E\u5168\u90E8 UP \u5F52\u5C5E\uFF0C\u6682\u4E0D\u8BA1\u7B97\u5747\u503C\u3002",
+  "dashboard.mergedUp.unknown": "\u6709 {count} \u4E2A\u516D\u661F\u7684\u8EAB\u4EFD\u6216\u5F53\u671F UP \u76EE\u5F55\u65E0\u6CD5\u786E\u8BA4\uFF0C\u6682\u4E0D\u8BA1\u7B97\u5747\u503C\u3002",
+  "dashboard.mergedUp.empty": "\u6240\u9009\u8303\u56F4\u6682\u65E0\u5BFB\u8BBF\u660E\u7EC6\u3002",
+  "dashboard.mergedUp.noUp": "\u6240\u9009\u8303\u56F4\u5C1A\u672A\u83B7\u5F97\u5F53\u671F UP\uFF0C\u6682\u4E0D\u8BA1\u7B97\u5747\u503C\u3002",
+  "dashboard.mergedUp.method": "\u8BA1\u7B97\u53E3\u5F84",
+  "dashboard.mergedUp.withFree": "\u8BA1\u5165\u514D\u8D39\u62BD",
+  "dashboard.mergedUp.withoutFree": "\u4E0D\u8BA1\u514D\u8D39\u62BD",
+  "dashboard.mergedUp.note": "\u8303\u56F4\u5185\u6709\u6548\u62BD\u6570\u603B\u548C \xF7 \u5BF9\u5E94\u671F\u6B21 UP \u83B7\u5F97\u6570\uFF0C\u5305\u542B\u672B\u5C3E\u672A\u51FA\u8D27\u62BD\u6570\uFF0C\u4E0D\u5E73\u5747\u5404\u6C60\u5747\u503C\u3002\u514D\u8D39\u62BD\u9075\u5FAA\u4E0A\u65B9\u5F00\u5173\uFF1B\u8D60\u9001\u4E0E\u5151\u6362\u4E0D\u8BA1\u5165\u3002\u60C5\u62A5\u4E66\u5BFB\u8BBF\u4ECD\u5C5E\u4E8E\u62BD\u6570\u3002\u590D\u523B\u5305\u62EC\u91CD\u6784\u5BFB\u8BBF\u4E0E\u91CD\u6784\u7533\u9886\uFF0C\u4E0D\u542B\u7279\u6B8A\u5BFB\u8BBF\u3002\u6BCF\u6761\u8BB0\u5F55\u4EC5\u6309\u6240\u5C5E\u671F\u6B21\u5224\u65AD UP\uFF0C\u4E0D\u5408\u5E76\u5404\u671F\u76EE\u6807\u540D\u5355\uFF1B\u672C\u6307\u6807\u4E0D\u662F\u4FDD\u5E95\u95F4\u9694\uFF0C\u4E5F\u4E0D\u9884\u6D4B\u540E\u7EED\u51FA\u8D27\u3002",
   "dashboard.average.avg5": "5\u2605 \u5E73\u5747",
   "dashboard.average.allSix": "\u5168\u90E8 6\u2605",
   "dashboard.average.targetSix": "\u76EE\u6807 6\u2605",
@@ -5811,7 +5869,11 @@ function getSectionTypeLabel(type, tt) {
   }
   return tt("dashboard.shareCard.sectionType.limited", "Limited Character Banner");
 }
-function getStamp(entry, sectionType, tt) {
+function getStamp(entry, sectionType, tt, isEnglish) {
+  if (entry.unknownInheritedPity) return null;
+  if (entry.guaranteePulls) {
+    return { label: isEnglish ? "Guaranteed" : "\u4FDD\u5E95", color: "#b45309", bg: "#fef3c7" };
+  }
   if (entry.stageKind === "gift") {
     return { label: tt("dashboard.shareCard.stamp.free", "FREE"), color: "#34d399", bg: "#ecfdf5" };
   }
@@ -5993,11 +6055,15 @@ function renderShareSummary(entry, summary, theme = "light") {
     );
   });
 }
-function TimelineEntry({ entry, section, tokens, tt, showFiveStarDrops = true }) {
-  const scaleBase = Math.max(Number(section.scaleMax) || 1, 1);
+function TimelineEntry({ entry, section, tokens, tt, theme, showFiveStarDrops = true }) {
+  const { isEnglish } = useI18n();
+  const text = (zh, en) => isEnglish ? en : zh;
+  const scaleBase = Math.max(Number(entry.targetPulls || section.scaleMax) || 1, 1);
   const widthPercent = entry.stageKind === "gift" ? 100 : Math.max(12, Math.min(100, (entry.pulls || 0) / scaleBase * 100));
-  const fillColor = getTimelineBarColor(section.type, entry);
-  const stamp = getStamp(entry, section.type, tt);
+  const fillColor = entry.guaranteePulls ? "linear-gradient(90deg, #fbbf24, #f59e0b, #d97706)" : getTimelineBarColor(section.type, entry);
+  const stamp = getStamp(entry, section.type, tt, isEnglish);
+  const inheritedPulls = Number(entry.inheritedPulls) || 0;
+  const stageLabel = entry.guaranteePulls ? text(`${entry.guaranteePulls} \u62BD\u4FDD\u5E95\u51FA\u8D27`, `${entry.guaranteePulls}-pull guarantee`) : entry.stageLabel;
   const leadBadge = entry.leadBadge || entry.dropBadges?.[0] || { label: "?", rarity: 0 };
   const visibleBadges = getVisibleDropBadges(entry, showFiveStarDrops);
   const resultSummary = getVisibleResultSummary(entry, showFiveStarDrops);
@@ -6018,12 +6084,12 @@ function TimelineEntry({ entry, section, tokens, tt, showFiveStarDrops = true })
     ] }),
     /* @__PURE__ */ jsxs2("div", { style: styles.entryBody, children: [
       /* @__PURE__ */ jsxs2("div", { style: styles.stageTop, children: [
-        /* @__PURE__ */ jsx2("div", { style: { ...styles.stageChip, borderColor: tokens.border, background: tokens.chipBackground, color: tokens.textMuted }, children: entry.stageLabel }),
-        /* @__PURE__ */ jsx2("div", { style: { ...styles.resultText, color: tokens.textPrimary }, children: renderShareSummary(entry, resultSummary, "light") })
+        /* @__PURE__ */ jsx2("div", { style: { ...styles.stageChip, borderColor: tokens.border, background: tokens.chipBackground, color: tokens.textMuted }, children: stageLabel }),
+        /* @__PURE__ */ jsx2("div", { style: { ...styles.resultText, color: tokens.textPrimary }, children: renderShareSummary(entry, resultSummary, theme) })
       ] }),
       /* @__PURE__ */ jsxs2("div", { style: styles.barRow, children: [
         /* @__PURE__ */ jsxs2("div", { style: { ...styles.barTrack, borderColor: tokens.border, background: tokens.barTrack }, children: [
-          /* @__PURE__ */ jsx2(
+          /* @__PURE__ */ jsxs2(
             "div",
             {
               style: {
@@ -6031,11 +6097,21 @@ function TimelineEntry({ entry, section, tokens, tt, showFiveStarDrops = true })
                 width: `${widthPercent}%`,
                 background: fillColor
               },
-              children: /* @__PURE__ */ jsx2("div", { style: styles.barFillPattern })
+              children: [
+                /* @__PURE__ */ jsx2("div", { style: styles.barFillPattern }),
+                inheritedPulls > 0 ? /* @__PURE__ */ jsx2("div", { style: {
+                  position: "absolute",
+                  bottom: 2,
+                  left: 0,
+                  height: 6,
+                  width: `${Math.min(100, inheritedPulls / entry.pulls * 100)}%`,
+                  background: "#818cf8"
+                } }) : null
+              ]
             }
           ),
           /* @__PURE__ */ jsxs2("div", { style: { ...styles.barValue, color: tokens.textPrimary }, children: [
-            entry.pulls,
+            entry.unknownInheritedPity ? text("\u7EE7\u627F\u672A\u77E5", "Unknown") : entry.pulls,
             /* @__PURE__ */ jsx2("span", { style: { marginLeft: "4px", fontSize: "12px", fontWeight: 700 }, children: tt("dashboard.shareCard.pullUnit", "pulls") })
           ] })
         ] }),
@@ -6052,6 +6128,30 @@ function TimelineEntry({ entry, section, tokens, tt, showFiveStarDrops = true })
           }
         )
       ] }),
+      entry.unknownInheritedPity ? /* @__PURE__ */ jsx2("p", { style: { marginTop: 8, fontSize: 12, color: tokens.textMuted }, children: text(
+        `\u672C\u6BB5\u8BB0\u5F55\u5305\u542B\u672C\u6C60 ${entry.localPulls} \u62BD\uFF0C\u7EE7\u627F\u95F4\u9694\u65E0\u6CD5\u6838\u5B9E\uFF0C\u4E0D\u53C2\u4E0E\u4FDD\u5E95\u95F4\u9694\u7EDF\u8BA1\u3002`,
+        `This banner has ${entry.localPulls} stored pulls in this segment; the inherited interval cannot be verified.`
+      ) }) : null,
+      inheritedPulls > 0 ? /* @__PURE__ */ jsx2("p", { style: { marginTop: 8, fontSize: 12, color: tokens.textSecondary }, children: text(
+        `\u4E0A\u6C60\u57AB\u62BD ${inheritedPulls} \u62BD + \u672C\u6C60 ${entry.localPulls} \u62BD`,
+        `Previous banner: ${inheritedPulls} pulls + This banner: ${entry.localPulls} pulls`
+      ) }) : null,
+      entry.weaponBatch ? /* @__PURE__ */ jsxs2("div", { style: { marginTop: 10, padding: 8, border: `1px solid ${tokens.border}`, fontSize: 12 }, children: [
+        /* @__PURE__ */ jsxs2("div", { children: [
+          entry.weaponBatch.isCompleteTenPull ? text("\u672C\u6B21\u5341\u8FDE", "This 10-pull") : text(`\u8BE5\u6279\u5DF2\u77E5 ${entry.weaponBatch.size} \u62BD`, `Known batch: ${entry.weaponBatch.size} pulls`),
+          " \xB7 ",
+          "6\u2605 \xD7",
+          entry.weaponBatch.sixStarCount,
+          showFiveStarDrops ? ` \xB7 5\u2605 \xD7${entry.weaponBatch.fiveStarCount}` : ""
+        ] }),
+        entry.weaponBatch.isCompleteTenPull ? /* @__PURE__ */ jsx2("div", { style: { display: "grid", gridTemplateColumns: "repeat(10, 1fr)", gap: 4, marginTop: 6 }, children: entry.weaponBatch.slots.map((slot, index) => /* @__PURE__ */ jsx2("span", { style: {
+          textAlign: "center",
+          padding: 4,
+          border: `1px solid ${tokens.border}`,
+          background: slot.rarity >= 6 ? "#fbbf24" : tokens.panelMutedBackground,
+          color: slot.rarity >= 6 ? "#451a03" : tokens.textMuted
+        }, children: !showFiveStarDrops && slot.rarity === 5 ? "\xB7" : `${slot.rarity}\u2605` }, index)) }) : null
+      ] }) : null,
       visibleBadges.length > 0 && /* @__PURE__ */ jsx2("div", { style: styles.badgeList, children: visibleBadges.map((badge) => /* @__PURE__ */ jsxs2("div", { style: { ...styles.dropBadge, borderColor: tokens.border, background: tokens.panelMutedBackground }, children: [
         /* @__PURE__ */ jsx2("div", { style: { ...styles.dropThumb, background: tokens.iconBackground, color: tokens.textPrimary, overflow: "hidden" }, children: badge.avatarUrl ? /* @__PURE__ */ jsx2(
           "img",
@@ -6072,7 +6172,59 @@ function TimelineEntry({ entry, section, tokens, tt, showFiveStarDrops = true })
     ] })
   ] });
 }
-function TimelineSection({ section, tokens, tt, showFiveStarDrops = true }) {
+function ShareAcquisitions({ section, tokens, showFiveStarDrops }) {
+  const { locale, isEnglish } = useI18n();
+  const text = (zh, en) => isEnglish ? en : zh;
+  const rows = section.acquisitions?.filter((row) => showFiveStarDrops || row.rarity >= 6);
+  return /* @__PURE__ */ jsxs2("div", { style: { marginTop: 16 }, children: [
+    !rows ? /* @__PURE__ */ jsx2("p", { style: { color: tokens.textMuted }, children: text("\u9010\u6761\u51FA\u8D27\u8BE6\u60C5\u5C1A\u672A\u66F4\u65B0\u3002", "Drop details are not available yet.") }) : !rows.length ? /* @__PURE__ */ jsx2("p", { style: { color: tokens.textMuted }, children: text("\u6682\u65E0\u7B26\u5408\u7B5B\u9009\u7684\u9AD8\u661F\u7ED3\u679C\u3002", "No matching high-rarity drops.") }) : /* @__PURE__ */ jsx2("div", { style: { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }, children: rows.map((row, index) => {
+      const special = row.drawMethod === "gift" ? text("\u989D\u5916\u8D60\u9001", "Gift") : row.drawMethod === "free" ? text("\u514D\u8D39\u5341\u8FDE", "Free ten-pull") : row.drawMethod === "info_book" ? text("\u60C5\u62A5\u4E66", "Intel ticket") : null;
+      const timestamp = row.timestamp ? new Date(row.timestamp) : null;
+      const date = timestamp && Number.isFinite(timestamp.getTime()) ? timestamp.toLocaleString(locale, {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false
+      }) : text("\u65F6\u95F4\u672A\u77E5", "Time unknown");
+      return /* @__PURE__ */ jsxs2("article", { style: {
+        position: "relative",
+        overflow: "hidden",
+        padding: 14,
+        border: `1px solid ${tokens.border}`,
+        background: tokens.panelMutedBackground
+      }, children: [
+        /* @__PURE__ */ jsx2("span", { style: { position: "absolute", inset: "0 auto 0 0", width: 4, background: getTimelineBarColor(section.type, row) } }),
+        /* @__PURE__ */ jsxs2("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }, children: [
+          row.avatarUrl ? /* @__PURE__ */ jsx2("img", { src: row.avatarUrl, alt: "", style: { width: 48, height: 48, objectFit: "cover" } }) : null,
+          /* @__PURE__ */ jsxs2("div", { style: { minWidth: 0 }, children: [
+            /* @__PURE__ */ jsx2("strong", { style: { fontSize: 16, overflowWrap: "anywhere" }, children: row.name }),
+            /* @__PURE__ */ jsxs2("div", { style: { marginTop: 4, color: tokens.textMuted, fontSize: 12 }, children: [
+              row.rarity,
+              "\u2605",
+              special ? ` \xB7 ${special}` : row.stageKind === "up" ? " \xB7 UP" : row.stageKind === "offLimited" ? text(" \xB7 \u6B6A\u5176\u4ED6\u9650\u5B9A", " \xB7 Other limited") : row.stageKind === "offStandard" ? text(" \xB7 \u5E38\u9A7B", " \xB7 Standard") : ""
+            ] })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxs2("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 11 }, children: [
+          /* @__PURE__ */ jsxs2("div", { children: [
+            /* @__PURE__ */ jsx2("div", { style: { color: tokens.textMuted }, children: text("\u672C\u6B21\u51FA\u8D27\u95F4\u9694", "Drop interval") }),
+            /* @__PURE__ */ jsx2("strong", { style: { display: "block", marginTop: 5 }, children: special || (row.intervalPulls == null ? text("\u672A\u77E5", "Unknown") : text(`${row.intervalPulls} \u62BD`, `${row.intervalPulls} pulls`)) })
+          ] }),
+          /* @__PURE__ */ jsxs2("div", { children: [
+            /* @__PURE__ */ jsx2("div", { style: { color: tokens.textMuted }, children: text("\u672C\u6C60\u5DF2\u5B58\u4F4D\u7F6E", "Saved position") }),
+            /* @__PURE__ */ jsx2("strong", { style: { display: "block", marginTop: 5 }, children: row.pullIndex == null ? "\u2014" : text(`\u7B2C ${row.pullIndex} \u62BD`, `Pull #${row.pullIndex}`) })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsx2("time", { style: { display: "block", marginTop: 12, paddingTop: 8, borderTop: `1px solid ${tokens.border}`, fontSize: 11, color: tokens.textMuted }, children: date })
+      ] }, row.id || index);
+    }) }),
+    section.type === "weapon" ? /* @__PURE__ */ jsx2("p", { style: { marginTop: 12, fontSize: 11, color: tokens.textMuted }, children: text("\u4F4D\u7F6E\u6309\u5DF2\u5B58\u6B66\u5668\u7ED3\u679C\u8BA1\u6570\uFF1B\u5341\u8FDE\u5185\u5E8F\u53F7\u4E0D\u7B49\u540C\u4E8E\u7533\u9886\u6B21\u6570\u3002\u989D\u5916\u8D60\u9001\u4E0D\u8BA1\u5165\u62BD\u6570\u3002", "Positions count saved weapon results; order within a ten-pull is not claim cost. Gifts do not count as pulls.") }) : null
+  ] });
+}
+function TimelineSection({ section, tokens, tt, theme, displayMode, showFiveStarDrops = true }) {
   const tone = getSectionTone(section.type);
   const secondaryLabel = section.type === "standard" ? tt("dashboard.shareCard.averageFive", "Average 5\u2605") : tt("dashboard.shareCard.averageUp", "Average UP");
   const secondaryValue = section.type === "standard" ? formatAverage(section.avgFiveStarPulls, tt) : formatAverage(section.avgUpPulls, tt);
@@ -6137,12 +6289,13 @@ function TimelineSection({ section, tokens, tt, showFiveStarDrops = true }) {
           ] })
         ] })
       ] }),
-      section.entries.map((entry) => /* @__PURE__ */ jsx2(TimelineEntry, { entry, section, tokens, tt, showFiveStarDrops }, entry.id))
+      displayMode === "card" ? /* @__PURE__ */ jsx2(ShareAcquisitions, { section, tokens, showFiveStarDrops }) : (section.entries || []).map((entry) => /* @__PURE__ */ jsx2(TimelineEntry, { entry, section, tokens, tt, theme, showFiveStarDrops }, entry.id))
     ] })
   ] });
 }
-var DashboardShareCard = forwardRef(function DashboardShareCard2({ payload, sections = [], theme = "light", showFiveStarDrops = true }, ref) {
-  const { t } = useI18n();
+var DashboardShareCard = forwardRef(function DashboardShareCard2({ payload, sections = [], theme = "light", displayMode = "waterfall", showFiveStarDrops = true }, ref) {
+  const { t, isEnglish } = useI18n();
+  const cardMode = displayMode === "card";
   const tt = (key, fallback, params = {}) => t(key, params, fallback);
   const tokens = getThemeTokens2(theme);
   const accentColor = getSectionTone(payload?.poolType).accent;
@@ -6233,15 +6386,15 @@ var DashboardShareCard = forwardRef(function DashboardShareCard2({ payload, sect
     /* @__PURE__ */ jsxs2("div", { style: styles.timelineWrap, children: [
       /* @__PURE__ */ jsxs2("div", { style: styles.timelineHeader, children: [
         /* @__PURE__ */ jsxs2("div", { children: [
-          /* @__PURE__ */ jsx2("div", { style: { ...styles.sectionTitle, color: tokens.textMuted }, children: tt("dashboard.shareCard.timelineTitle", "Timeline View") }),
-          /* @__PURE__ */ jsx2("div", { style: { marginTop: "6px", fontSize: "14px", color: tokens.textSecondary, fontWeight: 600 }, children: tt("dashboard.shareCard.timelineSubtitle", "A complete stage-by-stage recap of the current timeline view.") })
+          /* @__PURE__ */ jsx2("div", { style: { ...styles.sectionTitle, color: tokens.textMuted }, children: cardMode ? isEnglish ? "Drops by banner" : "\u5404\u6C60\u51FA\u8D27\u660E\u7EC6" : tt("dashboard.shareCard.timelineTitle", "Timeline View") }),
+          /* @__PURE__ */ jsx2("div", { style: { marginTop: "6px", fontSize: "14px", color: tokens.textSecondary, fontWeight: 600 }, children: cardMode ? isEnglish ? "Individual drops, saved pull positions and local acquisition times." : "\u9010\u6761\u51FA\u8D27\u7ED3\u679C\u3001\u672C\u6C60\u5DF2\u5B58\u4F4D\u7F6E\u4E0E\u672C\u5730\u83B7\u53D6\u65F6\u95F4\u3002" : tt("dashboard.shareCard.timelineSubtitle", "A complete stage-by-stage recap of the current timeline view.") })
         ] }),
         /* @__PURE__ */ jsxs2("div", { style: styles.counts, children: [
           /* @__PURE__ */ jsx2("div", { style: { ...styles.countBox, borderColor: tokens.border, background: tokens.panelBackground, color: tokens.textSecondary }, children: tt("dashboard.shareCard.stagePools", "{count} stages", { count: payload?.totalSections || 0 }) }),
           /* @__PURE__ */ jsx2("div", { style: { ...styles.countBox, borderColor: tokens.border, background: tokens.panelBackground, color: tokens.textSecondary }, children: tt("dashboard.shareCard.timelineNodes", "{count} nodes", { count: payload?.totalNodes || 0 }) })
         ] })
       ] }),
-      sections.map((section) => /* @__PURE__ */ jsx2(TimelineSection, { section, tokens, tt, showFiveStarDrops }, section.id))
+      sections.map((section) => /* @__PURE__ */ jsx2(TimelineSection, { section, tokens, tt, theme, displayMode, showFiveStarDrops }, section.id))
     ] }),
     /* @__PURE__ */ jsx2("div", { style: { ...styles.footer, borderTopColor: tokens.border, color: tokens.footerText }, children: /* @__PURE__ */ jsxs2("div", { style: styles.footerTextWrap, children: [
       /* @__PURE__ */ jsx2("span", { children: payload?.notes || tt("share.dashboard.noteDesensitized", "Desensitized share card. No account, UID, timestamp, or raw pull details included.") }),

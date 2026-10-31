@@ -126,7 +126,7 @@ function DataWorkbenchContent({ onOpenFileImport, questionnaireReadDelayMs = 150
       onOpenFileImport();
     } else setSource('file');
   };
-  const refresh = () => refreshPersonalData(user, { kind: 'explicit', reason: 'data_workbench_saved' });
+  const refresh = () => refreshPersonalData(user, { kind: 'mutation', reason: 'data_workbench_saved' });
   const confirmLeave = () =>
     !dirty ||
     window.confirm('尚有待提交草稿或未保存修改。当前变化会按原账号和区服保留 24 小时。确定切换或离开吗？');

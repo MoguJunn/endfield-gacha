@@ -171,15 +171,27 @@ function columnIndexFromRef(ref) {
 
 function parseSheetRows(xml, sharedStrings) {
   const rows = [];
-  const rowRegex = /<row\b[^>]*>([\s\S]*?)<\/row>/g;
+  // Self-closing rows and cells are common in styled workbooks. Matching them
+  // with a greedy "open tag then find close tag" pattern makes every empty cell
+  // scan the rest of the sheet, which turns large formatted sheets quadratic.
+  const rowRegex = /<row\b[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g;
   let rowMatch;
 
   while ((rowMatch = rowRegex.exec(xml))) {
+    const rowXml = rowMatch[1];
+    if (!rowXml) {
+      continue;
+    }
+
     const row = [];
-    const cellRegex = /<c\b([^>]*)>([\s\S]*?)<\/c>/g;
+    const cellRegex = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
     let cellMatch;
 
-    while ((cellMatch = cellRegex.exec(rowMatch[1]))) {
+    while ((cellMatch = cellRegex.exec(rowXml))) {
+      if (cellMatch[2] === undefined) {
+        continue;
+      }
+
       const attrs = parseXmlAttributes(cellMatch[1]);
       const columnIndex = columnIndexFromRef(attrs.r);
       const cellXml = cellMatch[2];
@@ -274,9 +286,14 @@ function getRowValue(rowObject, ...keys) {
   return '';
 }
 
+const BHAOO_POOL_HEADERS = new Set(['卡池 ID', '卡池ID', 'poolId']);
+const BHAOO_ITEM_HEADERS = new Set(['名称', 'name', 'itemName']);
+
 function parseBhaooSheetRows(rows, category, account) {
   const [headerRow = [], ...dataRows] = rows;
   const headers = headerRow.map(normalizeText);
+  const recognized = headers.some(header => BHAOO_POOL_HEADERS.has(header))
+    && headers.some(header => BHAOO_ITEM_HEADERS.has(header));
   const pools = new Map();
   const history = [];
 
@@ -327,7 +344,7 @@ function parseBhaooSheetRows(rows, category, account) {
     });
   });
 
-  return { pools: Array.from(pools.values()), history };
+  return { pools: Array.from(pools.values()), history, recognized };
 }
 
 async function parseBhaooXlsxContent(content, options = {}) {
@@ -370,6 +387,7 @@ async function parseBhaooXlsxContent(content, options = {}) {
   const account = parseBhaooXlsxFileName(fileName);
   const poolMap = new Map();
   const history = [];
+  let recognizedSheetCount = 0;
 
   workbookSheets.forEach((sheet, index) => {
     const sheetName = normalizeText(sheet.name).toLowerCase();
@@ -382,9 +400,16 @@ async function parseBhaooXlsxContent(content, options = {}) {
     }
 
     const parsed = parseBhaooSheetRows(parseSheetRows(xml, sharedStrings), category, account);
+    if (parsed.recognized) {
+      recognizedSheetCount += 1;
+    }
     parsed.pools.forEach(pool => poolMap.set(pool.id, pool));
     history.push(...parsed.history);
   });
+
+  if (recognizedSheetCount === 0) {
+    throw new Error('未能从 Excel 中识别到抽卡记录。请导出原始记录；只有汇总数字的分析表可在工作台手动补录。');
+  }
 
   return {
     formatId: 'bhaoo_endfield_gacha_xlsx',
