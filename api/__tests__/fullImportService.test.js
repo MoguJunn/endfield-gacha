@@ -1383,8 +1383,16 @@ describe('executeFullImport import mode metadata', () => {
     ]));
   });
 
-  it('preserves existing international EU/NA server when bindings omit sub-server', async () => {
+  it.each([
+    { label: 'existing international EU/NA server', source: 'intl', binding: { channelName: 'Gryphline' }, existing: ['3'], requestServer: '3', storageServer: '3' },
+    { label: 'Bilibili channel ID over mixed legacy scopes', source: 'cn', binding: { serverId: '1', channelMasterId: '2' }, existing: ['1', 'bilibili'], requestServer: '1', storageServer: 'bilibili' },
+    { label: 'numeric Bilibili channel ID', source: 'cn', binding: { serverId: '1', channelMasterId: 2 }, existing: [], requestServer: '1', storageServer: 'bilibili' },
+    { label: 'Bilibili channel name', source: 'cn', binding: { serverId: '1', channelName: '哔哩哔哩 B服' }, existing: [], requestServer: '1', storageServer: 'bilibili' },
+    { label: 'explicit Bilibili server alias', source: 'cn', binding: { server_id: 'cn-b' }, existing: ['1'], requestServer: '1', storageServer: 'bilibili' },
+    { label: 'official binding over another channel with the same UID', source: 'cn', binding: { serverId: '1', channelMasterId: '1', isOfficial: true }, existing: ['bilibili'], requestServer: '1', storageServer: '1' },
+  ].flatMap(testCase => ['full', 'incremental'].map(importMode => ({ ...testCase, importMode }))))('preserves $label in $importMode fetch, staging and commit', async ({ source, binding, existing, requestServer, storageServer, importMode }) => {
     const operations = [];
+    const historyQueries = [];
     const insertedPoolIds = new Set();
     let savedHistoryRows = [];
     const rpc = createCredentialAwareRpc(async () => ({
@@ -1444,10 +1452,16 @@ describe('executeFullImport import mode metadata', () => {
         if (tableName === 'history') {
           return {
             select() {
-              return createHistoryRangeQuery(async () => ({
-                data: [{ server_id: '3' }],
-                error: null,
-              }));
+              const query = createHistoryRangeQuery(async () => {
+                const serverFilter = query.eq.mock.calls.find(([column]) => column === 'server_id')?.[1];
+                return {
+                  data: existing.filter(server => !serverFilter || server === serverFilter)
+                    .map(server_id => ({ server_id, pool_id: 'special_1_2_1', seq_id: '999', pool_version: 7 })),
+                  error: null,
+                };
+              });
+              historyQueries.push(query);
+              return query;
             },
             async upsert(rows) {
               savedHistoryRows = rows;
@@ -1488,6 +1502,10 @@ describe('executeFullImport import mode metadata', () => {
           };
         }
 
+        if (tableName === 'history_anomalies') {
+          return { select: () => createHistoryRangeQuery(async () => ({ data: [], error: null })) };
+        }
+
         throw new Error(`Unexpected table access: ${tableName}`);
       },
     };
@@ -1508,7 +1526,7 @@ describe('executeFullImport import mode metadata', () => {
             uid: 'hg-uid',
             gameUid: '20000001',
             nickName: 'EU/NA账号',
-            channelName: 'Gryphline',
+            ...binding,
           }],
         },
       })),
@@ -1548,25 +1566,32 @@ describe('executeFullImport import mode metadata', () => {
       userId: '00000000-0000-0000-0000-000000000001',
       updateProgress: vi.fn(),
       authChainFunctions,
-      source: 'intl',
-      importMode: 'full',
+      source,
+      importMode,
     });
 
     expect(result.success).toBe(true);
     expect(authChainFunctions.fetchAllRecordsConcurrent).toHaveBeenCalledWith(
       'u8-token',
-      '3',
+      requestServer,
       '20000001',
       'EU/NA账号',
       {
-        importMode: 'full',
-        existingRecordKeys: null,
+        importMode,
+        existingRecordKeys: importMode === 'full' ? null : expect.any(Set),
       }
     );
+    if (importMode === 'incremental') {
+      const keys = authChainFunctions.fetchAllRecordsConcurrent.mock.calls[0][4].existingRecordKeys;
+      const requestKey = `20000001:server:${requestServer}:special_1_2_1:999`;
+      expect(keys.size).toBe(existing.includes(storageServer) ? 1 : 0);
+      expect(keys.has(requestKey)).toBe(existing.includes(storageServer));
+      if (keys.size) expect(keys.poolVersions.get(requestKey)).toBe(7);
+    }
     expect(result.data.account).toMatchObject({
       gameUid: '20000001',
-      serverId: '3',
-      region: 'intl',
+      serverId: storageServer,
+      region: source,
     });
     expect(result.data).toMatchObject({
       savedRecords: 1,
@@ -1575,20 +1600,24 @@ describe('executeFullImport import mode metadata', () => {
     expect(savedHistoryRows).toEqual([]);
     expect(rpc).toHaveBeenCalledWith(
       'commit_official_import_records',
-      expect.objectContaining({ p_user_id: '00000000-0000-0000-0000-000000000001' })
+      expect.objectContaining({
+        p_user_id: '00000000-0000-0000-0000-000000000001',
+        p_history: [expect.objectContaining({ server_id: storageServer, region: source })],
+      })
     );
+    expect(historyQueries.some(query => query.eq.mock.calls.some(([column, value]) => column === 'server_id' && value === storageServer))).toBe(true);
     const stagedPayload = officialImportStagingMocks.stageOfficialImportTask.mock.calls[0][0];
     expect(stagedPayload.account).toEqual({
       gameUid: '20000001',
-      serverId: '3',
-      region: 'intl',
+      serverId: storageServer,
+      region: source,
     });
     expect(stagedPayload.stagedRecords[0]).toMatchObject({
       historyRecord: {
         game_uid: '20000001',
         nick_name: 'EU/NA账号',
-        server_id: '3',
-        region: 'intl',
+        server_id: storageServer,
+        region: source,
       },
     });
   });

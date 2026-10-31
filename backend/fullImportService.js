@@ -119,6 +119,7 @@ function normalizeImportServerIdForSource(serverId, source = 'cn') {
   }
 
   if (source === 'cn') {
+    if (['bilibili', 'bili', 'cn-b'].includes(normalized.toLowerCase())) return 'bilibili';
     return normalized === '1' ? normalized : '';
   }
 
@@ -126,6 +127,15 @@ function normalizeImportServerIdForSource(serverId, source = 'cn') {
 }
 
 function inferImportServerIdFromSignals(account = {}, source = 'cn') {
+  // 官方接口的 server_id=1 同时服务官服与 B 服，绑定渠道才决定历史记录的归属。
+  if (source === 'cn') {
+    const channelId = normalizeString(account.channelMasterId || account.channel_master_id, 80);
+    const channelSignal = [account.serverId, account.server_id, account.serverScope, account.server_scope,
+      account.serverTag, account.server_tag, account.serverLabel, account.server_label,
+      account.channelName, account.channel_name].join(' ').toLowerCase();
+    if (channelId === '2' || /b服|bilibili|\bbili\b|\bcn-b\b/.test(channelSignal)) return 'bilibili';
+    if (channelId === '1' || account.isOfficial === true) return '1';
+  }
   const signal = [
     account.serverTag,
     account.server_tag,
@@ -159,7 +169,7 @@ function normalizeImportRegion(serverId, account = {}, source = 'cn') {
     return 'intl';
   }
 
-  if (serverId === '1') {
+  if (serverId === '1' || serverId === 'bilibili') {
     return 'cn';
   }
 
@@ -174,14 +184,11 @@ function normalizeImportRegion(serverId, account = {}, source = 'cn') {
 function pickExistingServerIdFromRows(rows, source = 'cn') {
   const counts = new Map();
   (Array.isArray(rows) ? rows : []).forEach((row) => {
-    const serverId = normalizeString(row?.server_id || row?.serverId, 80);
+    const serverId = normalizeImportServerIdForSource(row?.server_id || row?.serverId, source);
     if (!serverId) {
       return;
     }
     if (source === 'intl' && serverId === '1') {
-      return;
-    }
-    if (source === 'cn' && serverId !== '1') {
       return;
     }
     counts.set(serverId, (counts.get(serverId) || 0) + 1);
@@ -230,7 +237,7 @@ async function resolveImportAccountServerContext(supabase, userId, account = {},
   return {
     serverId,
     region,
-    requestServerId: serverId || (source === 'intl' ? '2' : '1'),
+    requestServerId: source === 'cn' ? '1' : (serverId || '2'),
   };
 }
 
@@ -279,13 +286,26 @@ function withResolvedRequestServerContext(context = {}, serverId, account = {}, 
   if (!normalizedServerId) {
     return context;
   }
+  const storageServerId = source === 'cn' ? (context.serverId || normalizedServerId) : normalizedServerId;
 
   return {
     ...context,
-    serverId: normalizedServerId,
-    region: normalizeImportRegion(normalizedServerId, account, source),
-    requestServerId: normalizedServerId,
+    serverId: storageServerId,
+    region: normalizeImportRegion(storageServerId, account, source),
+    requestServerId: source === 'cn' ? '1' : normalizedServerId,
   };
+}
+
+function getRequestScopedRecordKeys(existingKeys, gameUid, context) {
+  if (!(existingKeys instanceof Set) || context.serverId === context.requestServerId) return existingKeys;
+  // 只转换已按存储渠道查出的键，供官方分页提前停止使用；写入去重仍使用原渠道键。
+  const prefix = `${gameUid}:server:${context.serverId}:`;
+  const requestPrefix = `${gameUid}:server:${context.requestServerId}:`;
+  const entries = [...existingKeys].filter(key => key.startsWith(prefix))
+    .map(key => [requestPrefix + key.slice(prefix.length), existingKeys.poolVersions?.get(key) ?? null]);
+  const keys = new Set(entries.map(([key]) => key));
+  keys.poolVersions = new Map(entries);
+  return keys;
 }
 
 function normalizeResolvedCharacterIdForStorage(rawCharacterId, resolvedCharacterId) {
@@ -2190,7 +2210,8 @@ export async function executeFullImport({
       recordsRequestServerId,
       {
         importMode: normalizedImportMode,
-        existingRecordKeys: needsCompleteNonPullRepairScan ? null : existingSeqIds
+        existingRecordKeys: needsCompleteNonPullRepairScan ? null
+          : getRequestScopedRecordKeys(existingSeqIds, account.gameUid, accountServerContext)
       }
     );
 
