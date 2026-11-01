@@ -20,6 +20,29 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('browser public data reuse', () => {
+  it.each([
+    ['/api/announcements', { cutoffIso: '2026-10-25T12:00:00.000Z', limit: '10' },
+      { success: true, data: { siteAnnouncements: [], recentGameAnnouncements: [], latestGameAnnouncements: [],
+        versionBriefingAnnouncements: [], gameAnnouncementDigest: null } }],
+    ['/api/automation-feed', { job: 'official-announcements' }, { success: true, records: [{ source_id: 'test' }] }],
+  ])('reuses complete public announcements after reload for five minutes: %s', async (path, params, data) => {
+    network.resource.mockResolvedValue(reply(data));
+    await (await client()).fetchPublicApiJson(path, { params });
+    vi.resetModules();
+    expect(await (await client()).fetchPublicApiJson(path, { params })).toEqual(data);
+    expect(network.resource).toHaveBeenCalledOnce();
+    Date.now.mockReturnValue(1_800_000_300_001);
+    await (await client()).fetchPublicApiJson(path, { params });
+    expect(network.resource).toHaveBeenCalledTimes(2);
+  });
+  it('does not retain an incomplete announcement feed as fresh public data', async () => {
+    network.resource.mockResolvedValue(reply({ success: true, records: [], stale: true }));
+    const options = { params: { job: 'official-announcements' } };
+    await (await client()).fetchPublicApiJson('/api/automation-feed', options);
+    vi.resetModules();
+    await (await client()).fetchPublicApiJson('/api/automation-feed', options);
+    expect(network.resource).toHaveBeenCalledTimes(2);
+  });
   it('restores catalogs after a reload without any network request', async () => {
     const first = await (await client()).fetchPublicApiJson('/api/stats', catalog);
     vi.resetModules();

@@ -3,6 +3,8 @@ import { readStorageValue, writeStorageValue } from '../utils/storageUtils.js';
 import { DEFAULT_MAINTENANCE_NOTICE, normalizeMaintenanceNotice } from '../../shared/siteMaintenance.js';
 
 const SNAPSHOT_KEY = 'site_maintenance_notice_v1';
+const NORMAL_CHECK_INTERVAL_MS = 5 * 60_000;
+const MAINTENANCE_CHECK_INTERVAL_MS = 60_000;
 const readSnapshot = () => {
   try {
     const value = readStorageValue(SNAPSHOT_KEY, null, { raw: true });
@@ -23,7 +25,9 @@ const useMaintenanceStore = create((set, get) => ({
     set({ notice, hasSnapshot: true });
   },
   refresh: async () => {
-    if (Date.now() - checkedAt < 60000) return;
+    const interval = get().notice.enabled || !get().hasSnapshot
+      ? MAINTENANCE_CHECK_INTERVAL_MS : NORMAL_CHECK_INTERVAL_MS;
+    if (checkedAt && Date.now() - checkedAt < interval) return;
     if (inFlight) return inFlight;
     checkedAt = Date.now();
     inFlight = (async () => {

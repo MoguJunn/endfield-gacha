@@ -10,6 +10,7 @@ const PUBLIC_RESOURCE_SNAPSHOT_PREFIX = 'public_resource_snapshot_v1:';
 const VERSION_STORAGE_KEY = 'endfield-public-version-v1';
 const CATALOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const STATISTICS_MAX_AGE_MS = Infinity;
+const ANNOUNCEMENTS_MAX_AGE_MS = 5 * 60 * 1000;
 
 const IS_LOCAL_DEV = Boolean(import.meta.env?.DEV);
 const ALLOW_EMERGENCY_PUBLIC_SUPABASE_FALLBACK = ['1', 'true', 'yes']
@@ -29,6 +30,10 @@ function cachePolicy(path, params) {
   // An explicit allowlist keeps session, owner, admin and import data out of disk.
   if (path === '/api/bootstrap') return { maxAgeMs: CATALOG_MAX_AGE_MS };
   if (path === '/api/pool-rosters') return { maxAgeMs: CATALOG_MAX_AGE_MS };
+  if (path === '/api/announcements') return { maxAgeMs: ANNOUNCEMENTS_MAX_AGE_MS };
+  if (path === '/api/automation-feed' && new URLSearchParams(params || undefined).get('job') === 'official-announcements') {
+    return { maxAgeMs: ANNOUNCEMENTS_MAX_AGE_MS };
+  }
   if (path !== '/api/stats') return null;
   const type = new URLSearchParams(params || undefined).get('type');
   if (['characters', 'pools', 'pool_catalog'].includes(type)) return { maxAgeMs: CATALOG_MAX_AGE_MS };
@@ -36,6 +41,16 @@ function cachePolicy(path, params) {
     return { maxAgeMs: STATISTICS_MAX_AGE_MS };
   }
   return null;
+}
+
+function hasCompletePublicPayload(path, payload) {
+  if (path === '/api/automation-feed') return Array.isArray(payload.records);
+  if (path === '/api/announcements') {
+    return ['siteAnnouncements', 'recentGameAnnouncements', 'latestGameAnnouncements', 'versionBriefingAnnouncements']
+      .every(key => Array.isArray(payload.data?.[key]));
+  }
+  return payload.data && Object.values(payload.data).every(value => value !== null)
+    && payload.data.meta?.availability !== 'building';
 }
 
 function rememberVersion(value, checkedAt = Date.now()) {
@@ -275,8 +290,7 @@ export async function fetchPublicApiJson(path, {
       }
 
       const complete = response.status !== 202 && !data.partial && !data.stale
-        && data.meta?.availability !== 'building' && data.data && Object.values(data.data).every(value => value !== null)
-        && data.data.meta?.availability !== 'building';
+        && data.meta?.availability !== 'building' && hasCompletePublicPayload(path, data);
       const stillCurrent = generation === (resourceGenerations.get(cacheKey) || 0);
       const memoryKey = buildPublicApiUrl(path, { params, cacheVersion: responseVersion || cacheVersion });
       if (stillCurrent && (!policy || complete)) resourceMemoryCache.set(memoryKey, { payload: data, fetchedAt: Date.now() });

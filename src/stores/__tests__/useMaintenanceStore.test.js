@@ -33,4 +33,22 @@ describe('maintenance browser state', () => {
     const { default: remounted } = await import('../useMaintenanceStore.js');
     expect(remounted.getState().notice.enabled).toBe(false);
   });
+  it('checks normal service every five minutes and resumes minute checks during maintenance', async () => {
+    let now = 100000;
+    vi.mocked(Date.now).mockImplementation(() => now);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true,
+      json: async () => ({ success: true, data: { enabled: false }, meta: { source: 'database' } }) }));
+    const { default: store } = await import('../useMaintenanceStore.js');
+    await store.getState().refresh();
+    now += 4 * 60_000;
+    await store.getState().refresh();
+    expect(fetch).toHaveBeenCalledOnce();
+    now += 60_000;
+    await store.getState().refresh();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    store.getState().applyNotice({ enabled: true });
+    now += 60_000;
+    await store.getState().refresh();
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
 });

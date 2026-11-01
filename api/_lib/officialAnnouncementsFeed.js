@@ -23,6 +23,7 @@ const cache = {
   fetchedAt: 0,
 };
 const CACHE_TTL_MS = 5 * 60 * 1000;
+let inFlight = null;
 
 function buildOfficialArticleUrl(cid) {
   return `https://endfield.hypergryph.com/news/${cid}`;
@@ -373,12 +374,17 @@ export async function handleOfficialAnnouncementsFeed(req, res) {
   }
 
   try {
-    const records = await buildCombinedAnnouncementRecords(DEFAULT_PAGE_SIZE, {
+    // A cold burst must share the dozens of upstream article requests and HTML
+    // processing, rather than start a separate collection for every visitor.
+    inFlight ??= buildCombinedAnnouncementRecords(DEFAULT_PAGE_SIZE, {
       allowLlm: false,
       allowHeuristicSummary: false,
-    });
-    cache.records = records;
-    cache.fetchedAt = now;
+    }).then((records) => {
+      cache.records = records;
+      cache.fetchedAt = Date.now();
+      return records;
+    }).finally(() => { inFlight = null; });
+    const records = await inFlight;
 
     return res.status(200).json({
       success: true,

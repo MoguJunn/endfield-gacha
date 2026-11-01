@@ -18,7 +18,7 @@ import {
   reconcileOfficialPoolIds,
 } from '../../../backend/lib/officialIdReconciliation.js';
 import { getPoolIdCandidate, isReservedPoolTypeId } from '../../../shared/poolIdValidation.js';
-import { loadPersonalAnalysisModel, PERSONAL_ANALYSIS_SCHEMA_VERSION } from '../../_lib/personalAnalysisWorker.js';
+import { PERSONAL_ANALYSIS_SCHEMA_VERSION } from '../../../shared/personalAnalysisVersion.js';
 import { serverLogger } from '../../_lib/serverLogger.js';
 import { validateWorkbenchPoolOperations } from '../../../shared/workbenchPoolAvailability.js';
 import { projectPersonalAnalysisPoolLabels } from '../../../shared/statisticsPoolLabels.js';
@@ -118,11 +118,15 @@ async function getTransientPersonalAnalysisModel(dbClient, userId) {
     return { model: await existingRequest, cacheHit: true };
   }
 
-  const request = loadPersonalAnalysisModel(dbClient, userId, {
-    historyPageSize: PAGE_SIZE,
-    historyPageConcurrency: 2,
-    maxHistoryPages: MAX_PAGES,
-  });
+  // Normal production reads use saved snapshots. Load the analysis engine only
+  // when the existing explicit transient/local calculation path is selected.
+  const request = import('../../_lib/personalAnalysisWorker.js').then(({ loadPersonalAnalysisModel }) => (
+    loadPersonalAnalysisModel(dbClient, userId, {
+      historyPageSize: PAGE_SIZE,
+      historyPageConcurrency: 2,
+      maxHistoryPages: MAX_PAGES,
+    })
+  ));
   transientAnalysisInFlight.set(userId, request);
   try {
     const model = await request;

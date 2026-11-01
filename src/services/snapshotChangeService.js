@@ -9,9 +9,10 @@ let removeEvents;
 export const SNAPSHOT_MUTATION_EVENT = 'endfield:snapshot-mutation';
 const keyFor = ownerId => ownerId || '';
 const PENDING_DELAYS = [3000, 10000, 30000, 90000, 180000];
+export const SNAPSHOT_EVENT_MIN_INTERVAL_MS = 30_000;
 const stateFor = ownerId => {
   const key = keyFor(ownerId);
-  if (!states.has(key)) states.set(key, { value: null, promise: null });
+  if (!states.has(key)) states.set(key, { value: null, promise: null, checkedAt: 0 });
   return states.get(key);
 };
 
@@ -36,17 +37,20 @@ export function getKnownSnapshotVersions(ownerId = '') {
   return stateFor(ownerId).value;
 }
 
-export async function checkSnapshotVersions(ownerId = '', { force = false } = {}) {
+export async function checkSnapshotVersions(ownerId = '', { force = false, minIntervalMs = 0 } = {}) {
   if (isContributorDemoModeEnabled()) return null;
   const state = stateFor(ownerId);
   if (state.promise) return state.promise;
   if (!force && state.value) return state.value;
+  if (state.value && Date.now() - state.checkedAt < minIntervalMs) return state.value;
   const request = (async () => {
     const { headers } = ownerId
       ? await getSameOriginAuthHeaders({ Accept: 'application/json' }, { syncSiteSession: false, useSiteSessionCache: true, allowSiteSessionToken: false })
       : { headers: { Accept: 'application/json' } };
-    const { response, data } = await fetchJsonWithTimeout(`/api/stats?type=snapshot_versions${ownerId ? '&personal=1' : ''}`, {
-      headers, credentials: 'same-origin', cache: 'no-store',
+    const explicitPublicRefresh = !ownerId && force && !minIntervalMs;
+    const query = ownerId ? '&personal=1' : explicitPublicRefresh ? `&ts=${Date.now()}` : '';
+    const { response, data } = await fetchJsonWithTimeout(`/api/stats?type=snapshot_versions${query}`, {
+      headers, credentials: 'same-origin', cache: ownerId || explicitPublicRefresh ? 'no-store' : 'default',
     }, { label: 'snapshot versions', retries: 0, timeoutMs: 15000 });
     if (!response.ok || !data?.success || !data.data?.public || (ownerId && data.data.personal?.ownerId !== ownerId)) {
       throw new Error('Snapshot versions unavailable');
@@ -54,6 +58,7 @@ export async function checkSnapshotVersions(ownerId = '', { force = false } = {}
     if (states.get(keyFor(ownerId)) !== state) throw new Error('Snapshot owner changed');
     const previous = JSON.stringify(state.value);
     state.value = data.data;
+    state.checkedAt = Date.now();
     if (previous !== JSON.stringify(state.value)) {
       for (const callback of subscribers.get(keyFor(ownerId)) || []) callback(state.value);
     }
@@ -63,6 +68,7 @@ export async function checkSnapshotVersions(ownerId = '', { force = false } = {}
       const publicValue = { ...state.value, personal: null };
       const changed = JSON.stringify(publicState.value) !== JSON.stringify(publicValue);
       publicState.value = publicValue;
+      publicState.checkedAt = state.checkedAt;
       if (changed) for (const callback of subscribers.get('') || []) callback(publicValue);
     }
     return state.value;
@@ -86,14 +92,16 @@ export function subscribeSnapshotChanges(ownerId, callback) {
   if (!subscribers.has(key)) subscribers.set(key, new Set());
   subscribers.get(key).add(callback);
   if (!removeEvents && typeof window !== 'undefined') {
-    const check = () => {
+    const check = (event, minIntervalMs = event?.type === 'online' ? 0 : SNAPSHOT_EVENT_MIN_INTERVAL_MS) => {
       if (document.visibilityState === 'hidden') return;
       const owners = [...subscribers.keys()].filter(Boolean);
-      for (const target of owners.length ? owners : ['']) void checkSnapshotVersions(target, { force: true }).catch(() => {});
+      for (const target of owners.length ? owners : ['']) {
+        void checkSnapshotVersions(target, { force: true, minIntervalMs }).catch(() => {});
+      }
     };
     const mutation = event => {
       if (event.type === 'storage' && event.key !== 'endfield-snapshot-change') return;
-      check();
+      check(event, 0);
     };
     window.addEventListener('focus', check);
     window.addEventListener('online', check);

@@ -1,8 +1,31 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+const network = vi.hoisted(() => ({ fetch: vi.fn() }));
+vi.mock('../../../services/publicResourceClient', () => ({ fetchPublicApiJson: network.fetch }));
 
 import { __internal as notificationBadgeInternals } from '../useNotificationBadges.js';
 
 describe('useNotificationBadges announcement normalization', () => {
+  it('shares announcement URLs within an hour while keeping the precise display cutoff', async () => {
+    network.fetch.mockResolvedValue({ success: true, data: {} });
+    await notificationBadgeInternals.loadAnnouncementsFromApi({ cutoffIso: '2026-10-25T12:01:02.345Z' });
+    await notificationBadgeInternals.loadAnnouncementsFromApi({ cutoffIso: '2026-10-25T12:59:59.999Z' });
+    const calls = network.fetch.mock.calls.slice(-2);
+    expect(calls[0][1].params).toEqual(calls[1][1].params);
+    expect(calls[0][1].params.cutoffIso).toBe('2026-10-25T12:00:00.000Z');
+    const records = notificationBadgeInternals.buildGameAnnouncementDisplaySet({
+      recentRecords: [{ source_id: 'test', published_at: '2026-10-25T12:00:30Z' }],
+      cutoffIso: '2026-10-25T12:01:02.345Z',
+    });
+    expect(records[0].is_recent_history_fallback).toBe(true);
+  });
+  it('loads the official feed through the shared public cache without automatic retries', async () => {
+    network.fetch.mockResolvedValue({ success: true, records: [] });
+    expect(await notificationBadgeInternals.loadOfficialAnnouncementsFeed()).toEqual([]);
+    expect(network.fetch).toHaveBeenLastCalledWith('/api/automation-feed', expect.objectContaining({
+      params: { job: 'official-announcements' }, retries: 0, memoryTtlMs: 300000,
+    }));
+  });
   it('removes the legacy local placeholder announcement before rendering site notices', () => {
     const records = notificationBadgeInternals.normalizeSiteAnnouncementRecords([
       {

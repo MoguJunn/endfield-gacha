@@ -13,6 +13,7 @@ const GAME_ANNOUNCEMENT_HISTORY_FALLBACK_LIMIT = 5;
 const GAME_ANNOUNCEMENT_SOURCE_GROUPS = Object.freeze(['game', 'official']);
 const LEGACY_PLACEHOLDER_ANNOUNCEMENT_IDS = new Set(['1']);
 const LEGACY_PLACEHOLDER_ANNOUNCEMENT_TITLES = new Set(['欢迎使用抽卡分析器']);
+const ANNOUNCEMENT_QUERY_BUCKET_MS = 60 * 60 * 1000;
 
 function getRecentGameAnnouncementCutoffIso(now = Date.now()) {
   return new Date(now - GAME_ANNOUNCEMENT_VISIBLE_DAYS * 24 * 60 * 60 * 1000).toISOString();
@@ -185,12 +186,13 @@ async function loadAnnouncementsFromApi({
 } = {}) {
   const response = await fetchPublicApiJson('/api/announcements', {
     params: {
-      cutoffIso,
+      // Share an hourly URL; the display still uses the exact seven-day cutoff.
+      cutoffIso: new Date(Math.floor(Date.parse(cutoffIso) / ANNOUNCEMENT_QUERY_BUCKET_MS) * ANNOUNCEMENT_QUERY_BUCKET_MS).toISOString(),
       limit: String(limit * GAME_ANNOUNCEMENT_SOURCE_GROUPS.length),
     },
     label: 'load announcements api',
     timeoutMs: 15000,
-    retries: 1,
+    retries: 0,
     usePublicApiInDev: true,
   });
 
@@ -200,17 +202,14 @@ async function loadAnnouncementsFromApi({
 async function loadOfficialAnnouncementsFeed({
   cutoffIso = getRecentGameAnnouncementCutoffIso(),
 } = {}) {
-  const resp = await fetchWithTimeout('/api/automation-feed?job=official-announcements', undefined, {
+  const payload = await fetchPublicApiJson('/api/automation-feed', {
+    params: { job: 'official-announcements' },
     label: 'load official announcements feed',
     timeoutMs: 20000,
-    retries: 1,
+    retries: 0,
+    memoryTtlMs: 5 * 60 * 1000,
+    usePublicApiInDev: true,
   });
-
-  if (!resp.ok) {
-    throw new Error(`official announcements feed returned ${resp.status}`);
-  }
-
-  const payload = await resp.json();
   if (payload?.success !== true || !Array.isArray(payload?.records)) {
     throw new Error(payload?.error || 'invalid official announcements feed payload');
   }
@@ -372,6 +371,8 @@ export default useNotificationBadges;
 export const __internal = {
   buildGameAnnouncementDisplaySet,
   isLegacyPlaceholderAnnouncement,
+  loadAnnouncementsFromApi,
   loadAnnouncementsFromLocal,
+  loadOfficialAnnouncementsFeed,
   normalizeSiteAnnouncementRecords,
 };

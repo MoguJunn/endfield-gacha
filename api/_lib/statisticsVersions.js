@@ -7,6 +7,47 @@ import { PERSONAL_ANALYSIS_SCHEMA_VERSION } from '../../shared/personalAnalysisV
 
 const fingerprint = value => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 32);
 const snapshotFields = 'scope_key,schema_version,source_revision,computed_at';
+const PUBLIC_VERSION_TTL_MS = 30_000;
+const publicVersionsCache = { value: null, fetchedAt: 0, promise: null };
+
+// This cache contains only public catalog/snapshot metadata. Owner revisions
+// are always authenticated and queried separately for the current request.
+async function readPublicVersions(db, force) {
+  if (!force && publicVersionsCache.value && Date.now() - publicVersionsCache.fetchedAt < PUBLIC_VERSION_TTL_MS) {
+    return publicVersionsCache.value;
+  }
+  if (publicVersionsCache.promise) return publicVersionsCache.promise;
+  const request = (async () => {
+    const [catalogVersion, visible] = await Promise.all([
+      resolvePublicCacheVersion(db), db.rpc('get_app_visible_pools'),
+    ]);
+    if (visible.error || !Array.isArray(visible.data)) throw new Error('Catalog unavailable');
+    const scopes = ['global_summary', 'character_ranking', 'character_catalog',
+      ...visible.data.map(pool => `pool:${pool.pool_id || pool.id}`), ...STATISTICS_GROUPS.map(group => `group:${group.key}`)];
+    const [snapshots, jobs] = await Promise.all([
+      db.from('statistics_snapshots').select(snapshotFields).in('scope_key', scopes).order('scope_key'),
+      db.from('statistics_jobs').select('scope_key,revision,published_revision').in('scope_key', scopes),
+    ]);
+    if (snapshots.error || jobs.error) throw new Error('Public versions unavailable');
+    const rows = snapshots.data || [];
+    const rowsByScope = new Map(rows.map(row => [row.scope_key, row]));
+    const versions = Object.fromEntries(scopes.map(scope => [scope, fingerprint([catalogVersion, rowsByScope.get(scope) || null])]));
+    versions.pool_counts = fingerprint([catalogVersion, rows.filter(row => row.scope_key.startsWith('pool:'))]);
+    const value = { catalogVersion, public: versions,
+      publicPending: (jobs.data || []).some(job => String(job.revision) !== String(job.published_revision)) };
+    publicVersionsCache.value = value;
+    publicVersionsCache.fetchedAt = Date.now();
+    return value;
+  })().finally(() => { publicVersionsCache.promise = null; });
+  publicVersionsCache.promise = request;
+  return request;
+}
+
+export function resetPublicStatisticsVersionsCache() {
+  publicVersionsCache.value = null;
+  publicVersionsCache.fetchedAt = 0;
+  publicVersionsCache.promise = null;
+}
 
 // No history or JSON payloads cross the database connection for a version check.
 export async function handleStatisticsVersions(req, res, publicDb) {
@@ -22,21 +63,8 @@ export async function handleStatisticsVersions(req, res, publicDb) {
     res.setHeader('Cache-Control', 'private, no-store');
   }
   try {
-    const [catalogVersion, visible] = await Promise.all([
-      resolvePublicCacheVersion(db), db.rpc('get_app_visible_pools'),
-    ]);
-    if (visible.error || !Array.isArray(visible.data)) throw new Error('Catalog unavailable');
-    const scopes = ['global_summary', 'character_ranking', 'character_catalog',
-      ...visible.data.map(pool => `pool:${pool.pool_id || pool.id}`), ...STATISTICS_GROUPS.map(group => `group:${group.key}`)];
-    const [snapshots, jobs] = await Promise.all([
-      db.from('statistics_snapshots').select(snapshotFields).in('scope_key', scopes).order('scope_key'),
-      db.from('statistics_jobs').select('scope_key,revision,published_revision').in('scope_key', scopes),
-    ]);
-    if (snapshots.error || jobs.error) throw new Error('Public versions unavailable');
-    const rows = snapshots.data || [];
-    const publicPending = (jobs.data || []).some(job => String(job.revision) !== String(job.published_revision));
-    const versions = Object.fromEntries(scopes.map(scope => [scope, fingerprint([catalogVersion, rows?.find(row => row.scope_key === scope) || null])]));
-    versions.pool_counts = fingerprint([catalogVersion, rows.filter(row => row.scope_key.startsWith('pool:'))]);
+    const publicVersions = await readPublicVersions(db, Boolean(req.query.ts));
+    const { catalogVersion } = publicVersions;
     let owner = null;
     if (ownerId) {
       const results = await Promise.all([
@@ -54,7 +82,10 @@ export async function handleStatisticsVersions(req, res, publicDb) {
         analysis: fingerprint([catalogVersion, PERSONAL_ANALYSIS_SCHEMA_VERSION, analysisOwner, analysisScopes]),
         analysisPending: pending(analysisOwner) || (analysisScopes || []).some(pending) };
     }
-    return res.json({ success: true, data: { catalogVersion, public: versions, publicPending, personal: owner } });
+    if (!personal && !req.query.ts) {
+      res.setHeader('Cache-Control', 'public, max-age=15, s-maxage=30');
+    }
+    return res.json({ success: true, data: { ...publicVersions, personal: owner } });
   } catch {
     return res.status(503).json({ success: false, error: '统计版本暂不可用' });
   }

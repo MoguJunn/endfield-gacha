@@ -65,6 +65,25 @@ describe('session recovery', () => {
     expect(refreshPersonalData).not.toHaveBeenCalled();
   });
 
+  it('does not poll signed-out visitors, but still recovers through a cross-tab login event', async () => {
+    useAuthStore.setState({ user: null });
+    usePersonalDataStore.setState(createPersonalDataInitialState());
+    mountRecovery();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_600_000); });
+    expect(getCurrentSiteSession).not.toHaveBeenCalled();
+    await act(async () => { emitAuthSessionSync({ source: 'other_tab_login' }); });
+    expect(getCurrentSiteSession).toHaveBeenCalledOnce();
+    expect(useAuthStore.getState().user?.id).toBe('user-1');
+  });
+
+  it('stops periodic checks after signing out even when a recovered site session was present', async () => {
+    mountRecovery();
+    await focus();
+    act(() => { useAuthStore.setState({ user: null }); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_600_000); });
+    expect(getCurrentSiteSession).toHaveBeenCalledOnce();
+  });
+
   it('corrects stale logged-in state when neither credential can recover', async () => {
     getCurrentSiteSession.mockResolvedValue({ authenticated: false });
     mountRecovery();

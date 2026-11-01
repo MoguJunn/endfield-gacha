@@ -13,6 +13,36 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('change-driven snapshot subscriptions', () => {
+  it('coalesces remounts and foreground events for 30 seconds while mutations still check immediately', async () => {
+    const { useSnapshotVersion } = await import('../../hooks/app/useSnapshotVersion.js');
+    const api = await import('../snapshotChangeService.js');
+    renderHook(() => useSnapshotVersion('owner'));
+    await act(async () => {});
+    renderHook(() => useSnapshotVersion('owner'));
+    renderHook(() => useSnapshotVersion(''));
+    await act(async () => {
+      for (let index = 0; index < 20; index++) {
+        window.dispatchEvent(new Event('focus'));
+        document.dispatchEvent(new Event('visibilitychange'));
+      }
+    });
+    expect(network.fetch).toHaveBeenCalledOnce();
+    await act(async () => api.notifySnapshotMutation('owner'));
+    expect(network.fetch).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(network.fetch).toHaveBeenCalledTimes(3);
+  });
+  it('uses shared caching only for ordinary public checks and bypasses it for explicit refreshes', async () => {
+    network.fetch.mockResolvedValue({ response: { ok: true }, data: { success: true, data: { ...versions(), personal: null } } });
+    const api = await import('../snapshotChangeService.js');
+    await api.checkSnapshotVersions();
+    expect(network.fetch.mock.calls[0][0]).toBe('/api/stats?type=snapshot_versions');
+    expect(network.fetch.mock.calls[0][1].cache).toBe('default');
+    await api.checkSnapshotVersions('', { force: true });
+    expect(network.fetch.mock.calls[1][0]).toMatch(/&ts=\d+$/);
+    expect(network.fetch.mock.calls[1][1].cache).toBe('no-store');
+  });
   it('does no periodic checks for unchanged completed data and only notifies actual changes', async () => {
     const { useSnapshotVersion } = await import('../../hooks/app/useSnapshotVersion.js');
     const { result } = renderHook(() => useSnapshotVersion('owner'));

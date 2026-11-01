@@ -69,7 +69,12 @@ export function useSessionRecovery({
       if (event?.detail?.alreadyApplied !== true) void recheck('auth_session_sync', true);
     });
     const interval = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void recheck('session_interval');
+      // Signed-out visitors have no active session to revoke. Focus and the
+      // cross-tab auth event still recover a newly created session immediately.
+      if (document.visibilityState === 'visible'
+        && useAuthStore.getState().user) {
+        void recheck('session_interval');
+      }
     }, RECHECK_INTERVAL_MS);
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
