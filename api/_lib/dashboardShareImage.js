@@ -54,6 +54,10 @@ function getSafeErrorInfo(error) {
 }
 
 async function launchPlaywrightBrowser() {
+  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) {
+    const { chromium } = await import('playwright-core');
+    return chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH });
+  }
   if (isServerlessChromiumRuntime()) {
     const [
       { chromium: playwrightChromium },
