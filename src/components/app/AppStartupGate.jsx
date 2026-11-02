@@ -1,9 +1,11 @@
-import React, { useCallback, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useState } from 'react';
 import SiteGateCaptcha from '../captcha/SiteGateCaptcha.jsx';
 import SiteMaintenanceBanner from '../layout/SiteMaintenanceBanner.jsx';
 import { STORAGE_KEYS, writeNumberStorageValue } from '../../utils/storageUtils.js';
 import { hasTrustedGateSession } from '../../utils/startupGateSession.js';
 import { useI18n } from '../../i18n/index.js';
+
+const SiteAnnouncementPopup = lazy(() => import('../announcements/SiteAnnouncementPopup.jsx'));
 
 /**
  * The site gate is a real mount boundary: application effects do not run until
@@ -25,7 +27,12 @@ export default function AppStartupGate({ children, isMobile = false }) {
   }, []);
 
   if (verified) {
-    return children;
+    return (
+      <>
+        {children}
+        <Suspense fallback={null}><SiteAnnouncementPopup /></Suspense>
+      </>
+    );
   }
 
   return (

@@ -38,6 +38,9 @@ const ANNOUNCEMENT_COLUMNS = [
 
 const cacheByKey = new Map();
 const inFlightByKey = new Map();
+const SITE_NOTICE_TTL = 15 * 1000;
+let siteNoticeCache = null;
+let siteNoticeRequest = null;
 
 function getSupabaseClient() {
   const supabaseUrl = resolveSupabaseUrl();
@@ -276,6 +279,33 @@ async function getFreshPayload(supabase, query, cacheKey, previousPayload) {
   return promise;
 }
 
+async function sendSiteNotices(res) {
+  // A stable, short-lived public resource lets foreground clients discover
+  // notices without loading the official game feed or bypassing CDN caches.
+  res.setHeader('Cache-Control', 'public, max-age=15, s-maxage=15, must-revalidate');
+  if (siteNoticeCache && Date.now() - siteNoticeCache.fetchedAt < SITE_NOTICE_TTL) {
+    return res.status(200).json({ success: true, data: { siteAnnouncements: siteNoticeCache.records } });
+  }
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(503).json({ success: false, error: 'Announcements unavailable' });
+  }
+  try {
+    if (!siteNoticeRequest) {
+      siteNoticeRequest = fetchSiteAnnouncements(supabase).then(records => {
+        siteNoticeCache = { records, fetchedAt: Date.now() };
+        return records;
+      }).finally(() => { siteNoticeRequest = null; });
+    }
+    const records = await siteNoticeRequest;
+    return res.status(200).json({ success: true, data: { siteAnnouncements: records } });
+  } catch {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(503).json({ success: false, error: 'Announcements unavailable' });
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', PUBLIC_CACHE_CONTROL);
 
@@ -294,6 +324,10 @@ export default async function handler(req, res) {
       success: false,
       error: 'Method not allowed'
     });
+  }
+
+  if (new URL(req.url || '', 'https://example.com').searchParams.get('scope') === 'site') {
+    return sendSiteNotices(res);
   }
 
   const query = parseQuery(req);
