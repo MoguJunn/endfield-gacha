@@ -52,7 +52,7 @@ import {
 import MobileAuthRequiredView from '../components/MobileAuthRequiredView.jsx';
 import AccountServerLabelNotice from '../../components/app/AccountServerLabelNotice.jsx';
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from '../../utils/storageUtils.js';
-import { localizeDashboardChartItems } from '../../utils/dashboardChartLabels.js';
+import { buildDashboardSixStarBreakdown, localizeDashboardChartItems } from '../../utils/dashboardChartLabels.js';
 import { normalizeShareThemeMode, resolveShareThemeMode } from '../../utils/shareThemeMode.js';
 import { useHistoryPageStore, useHistoryStore, usePoolStore } from '../../stores';
 import {
@@ -520,6 +520,9 @@ function MobileDashboardView() {
   }, [shareThemeMode]);
   const pullUnitLabel = isEnglish ? 'PULLS' : t('dashboard.unit.pull');
   const standardSixLabel = isEnglish ? 'Standard 6★' : '常驻6★';
+  const sixStarBreakdown = !isGroupMode && normalizedPoolType !== 'standard'
+    ? buildDashboardSixStarBreakdown({ stats, characterStats, isEnglish })
+    : null;
   const extraSixLabel = isEnglish ? 'Extra 6★' : '附加6★';
   const shareImageActionLabel = isActionRunning('share') ? t('dashboard.share.trigger.sharing') : t('dashboard.share.systemImage');
   const downloadImageActionLabel = isActionRunning('download') ? t('dashboard.share.trigger.downloading') : t('dashboard.share.downloadImage');
@@ -532,7 +535,9 @@ function MobileDashboardView() {
   const resourceSummaryTitle = isGroupMode
     ? t('dashboard.resources.groupTitle', { name: localizedCurrentPoolName || '' })
     : t('dashboard.resources.title');
-  const primarySixStarLabel = isAllPoolsOverview
+  const primarySixStarLabel = sixStarBreakdown
+    ? (isEnglish ? 'UP 6★' : '当期UP6★')
+    : isAllPoolsOverview
     ? t('dashboard.overview.targetSixStar')
     : isWeapon
       ? t('dashboard.overview.upWeapon')
@@ -1194,24 +1199,29 @@ function MobileDashboardView() {
       )}
 
       {/* 核心数据网格 */}
-      <div className={`mx-4 mb-4 grid ${normalizedPoolType !== 'standard' ? 'grid-cols-4' : 'grid-cols-3'} gap-2`}>
+      <div role="group" aria-label={isEnglish ? 'Banner pull counts' : '卡池抽卡数量'} className={`mx-4 mb-4 grid ${sixStarBreakdown ? (sixStarBreakdown.categories.length === 2 ? 'grid-cols-6' : 'grid-cols-3') : normalizedPoolType !== 'standard' ? 'grid-cols-4' : 'grid-cols-3'} gap-2`}>
         {normalizedPoolType !== 'standard' && (
-          <div className="mobile-ux-card-inset py-3 text-center">
+          <div className={`mobile-ux-card-inset py-3 text-center ${sixStarBreakdown?.categories.length === 2 ? 'col-span-2' : ''}`}>
             <div className="text-[11px] text-slate-600 dark:text-zinc-400 uppercase font-bold tracking-tight mb-1">{primarySixStarLabel}</div>
             <div className={`text-xl font-bold font-mono ${isLimited ? 'rainbow-text' : isExtra ? 'text-cyan-600 dark:text-cyan-400' : 'text-zinc-700 dark:text-slate-700 dark:text-zinc-300'}`}>
               {stats.counts[6]}
             </div>
           </div>
         )}
-        <div className="mobile-ux-card-inset py-3 text-center">
+        {sixStarBreakdown ? sixStarBreakdown.categories.map((category) => (
+          <div key={category.kind} className={`mobile-ux-card-inset py-3 text-center ${sixStarBreakdown.categories.length === 2 ? 'col-span-2' : ''}`}>
+            <div className="text-[11px] text-slate-600 dark:text-zinc-400 font-bold tracking-tight mb-1">{category.name}</div>
+            <div className={`text-xl font-bold font-mono ${category.kind === 'off-limited-six' ? 'text-orange-600 dark:text-orange-400' : category.kind === 'off-standard-six' ? 'text-red-600 dark:text-red-400' : 'text-zinc-500'}`}>{category.value}</div>
+          </div>
+        )) : <div className="mobile-ux-card-inset py-3 text-center">
           <div className="text-[11px] text-slate-600 dark:text-zinc-400 uppercase font-bold tracking-tight mb-1">{secondarySixStarLabel}</div>
           <div className="text-xl font-bold font-mono text-red-600 dark:text-red-400">{stats.counts['6_std']}</div>
-        </div>
-        <div className="mobile-ux-card-inset py-3 text-center">
+        </div>}
+        <div className={`mobile-ux-card-inset py-3 text-center ${sixStarBreakdown?.categories.length === 2 ? 'col-span-3' : ''}`}>
           <div className="text-[11px] text-slate-600 dark:text-zinc-400 uppercase font-bold tracking-tight mb-1">5★</div>
           <div className="text-xl font-bold font-mono text-amber-600 dark:text-amber-400">{stats.counts[5]}</div>
         </div>
-        <div className="mobile-ux-card-inset py-3 text-center">
+        <div className={`mobile-ux-card-inset py-3 text-center ${sixStarBreakdown?.categories.length === 2 ? 'col-span-3' : ''}`}>
           <div className="text-[11px] text-slate-600 dark:text-zinc-400 uppercase font-bold tracking-tight mb-1">4★</div>
           <div className="text-xl font-bold font-mono text-purple-600 dark:text-purple-400">{stats.counts[4]}</div>
         </div>
@@ -1231,7 +1241,7 @@ function MobileDashboardView() {
                   <PieChart>
                     <RainbowGradientDefs />
                       <Pie
-                        data={localizeChartData(stats.chartData, primarySixStarLabel, secondarySixStarLabel)}
+                        data={localizeChartData(sixStarBreakdown?.chartData || stats.chartData, primarySixStarLabel, secondarySixStarLabel)}
                         cx="50%"
                         cy="45%"
                         innerRadius={32}
@@ -1242,7 +1252,7 @@ function MobileDashboardView() {
                         labelLine={false}
                         label={renderPiePercentLabel(isDark)}
                       >
-                      {localizeChartData(stats.chartData, primarySixStarLabel, secondarySixStarLabel).map((entry, index) => (
+                      {localizeChartData(sixStarBreakdown?.chartData || stats.chartData, primarySixStarLabel, secondarySixStarLabel).map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
                       ))}
                     </Pie>

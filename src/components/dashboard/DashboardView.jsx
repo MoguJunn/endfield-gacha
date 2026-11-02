@@ -58,7 +58,7 @@ import { useI18n } from '../../i18n/index.js';
 import { localizeEntityName, localizePoolFeaturedName, localizePoolName } from '../../utils/gameDataI18n.js';
 import appLogger from '../../utils/appLogger.js';
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from '../../utils/storageUtils.js';
-import { localizeDashboardChartItems } from '../../utils/dashboardChartLabels.js';
+import { buildDashboardSixStarBreakdown, localizeDashboardChartItems } from '../../utils/dashboardChartLabels.js';
 import { normalizeShareThemeMode, resolveShareThemeMode } from '../../utils/shareThemeMode.js';
 import { useHistoryPageStore, useHistoryStore } from '../../stores/index.js';
 import { resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
@@ -352,6 +352,9 @@ const DashboardView = ({ showToast }) => {
   const characterPoolLabel = isEnglish ? 'Character Banner' : '角色池';
   const weaponPoolLabel = isEnglish ? 'Weapon Banner' : '武器池';
   const standardSixLabel = isEnglish ? 'Standard 6★' : '常驻6★';
+  const sixStarBreakdown = !isGroupMode && normalizedPoolType !== 'standard'
+    ? buildDashboardSixStarBreakdown({ stats, characterStats, isEnglish })
+    : null;
   const crossBannerSummary = isEnglish ? 'Cross-banner summary' : '跨卡池汇总';
   const offrateShort = isEnglish ? 'Off-rate' : '歪';
   const localizedCurrentPoolName = React.useMemo(
@@ -365,7 +368,9 @@ const DashboardView = ({ showToast }) => {
     : isEnglish
       ? 'Current Banner Total Pulls'
       : '当前卡池总投入';
-  const primarySixStarLabel = isAllPoolsOverview
+  const primarySixStarLabel = sixStarBreakdown
+    ? (isEnglish ? 'UP 6★' : '当期UP6★')
+    : isAllPoolsOverview
     ? t('dashboard.overview.targetSixStar')
     : isWeapon
       ? t('dashboard.overview.upWeapon')
@@ -1312,7 +1317,7 @@ const DashboardView = ({ showToast }) => {
           key: 'current',
           title: null,
           total: stats.total,
-          chartData: localizeChartData(stats.chartData, primarySixStarLabel, secondarySixStarLabel),
+          chartData: localizeChartData(sixStarBreakdown?.chartData || stats.chartData, primarySixStarLabel, secondarySixStarLabel),
           hasPityHistory: stats.pityStats.history.length > 0,
           distribution: stats.pityStats.distribution,
           variant: getDistributionVariant(normalizedPoolType),
@@ -1658,7 +1663,9 @@ const DashboardView = ({ showToast }) => {
 
                 {/* 核心数据网格 */}
                 <div
-                  className={`grid grid-cols-2 ${normalizedPoolType !== 'standard' ? 'xl:grid-cols-4' : 'xl:grid-cols-3'} gap-4`}
+                  role="group"
+                  aria-label={isEnglish ? 'Banner pull counts' : '卡池抽卡数量'}
+                  className={`grid grid-cols-2 ${sixStarBreakdown ? (sixStarBreakdown.categories.length > 2 ? 'xl:grid-cols-3' : 'xl:grid-cols-5') : normalizedPoolType !== 'standard' ? 'xl:grid-cols-4' : 'xl:grid-cols-3'} gap-4`}
                 >
                   {normalizedPoolType !== 'standard' && (
                     <StatBox
@@ -1694,7 +1701,18 @@ const DashboardView = ({ showToast }) => {
                       isAnimated={isLimited && !isAllPoolsOverview}
                     />
                   )}
-                  <StatBox
+                  {sixStarBreakdown ? sixStarBreakdown.categories.map((category) => (
+                    <StatBox
+                      key={category.kind}
+                      title={category.name}
+                      value={category.value}
+                      subValue={category.kind === 'off-unknown-six'
+                        ? (isEnglish ? 'Item metadata unavailable' : '暂无角色或武器归属信息')
+                        : (isEnglish ? 'Not this banner’s UP' : '非当期UP')}
+                      colorClass={category.kind === 'off-limited-six' ? 'text-orange-600 dark:text-orange-400' : category.kind === 'off-standard-six' ? 'text-red-600 dark:text-red-400' : 'text-zinc-500'}
+                      icon={Star}
+                    />
+                  )) : <StatBox
                     title={secondarySixStarLabel}
                     value={stats.counts['6_std']}
                     subValue={
@@ -1708,7 +1726,7 @@ const DashboardView = ({ showToast }) => {
                     }
                     colorClass="text-red-600 dark:text-red-400"
                     icon={Star}
-                  />
+                  />}
                   <StatBox
                     title={t('dashboard.overview.fiveStarTotal')}
                     value={stats.counts[5]}

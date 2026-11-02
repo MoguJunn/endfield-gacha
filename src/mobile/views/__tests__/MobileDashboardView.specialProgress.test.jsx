@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { I18nProvider } from '../../../i18n/index.js';
 import { buildDashboardSpecialProgress, getDashboardPoolViewMeta } from '../../../hooks/app/useDashboardViewState.js';
 import { EXTRA_RULE_PROFILES } from '../../../utils/poolCapabilities.js';
+import { characterCache } from '../../../utils/characterUtils.js';
 
 const mocks = vi.hoisted(() => ({ view: null }));
 vi.mock('../../../hooks', () => ({
@@ -66,9 +67,28 @@ function expandProgress() {
 }
 
 beforeEach(() => { mocks.view = createView(); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); characterCache.applyCharacters([]); });
 
 describe('mobile special mechanism progress', () => {
+  it('separates other limited six-stars from standard six-stars in a snapshot-backed banner', async () => {
+    characterCache.applyCharacters([
+      { id: 'other-limited', name: '往期限定', rarity: 6, type: 'character', is_limited: true },
+      { id: 'standard-six', name: '常驻角色', rarity: 6, type: 'character', is_limited: false },
+    ]);
+    mocks.view = createView(undefined, { counts: { 6: 1, '6_std': 3, 5: 4, 4: 42 } });
+    mocks.view.characterStats = [
+      { name: '往期限定', rarity: 6, isStandard: true, count: 2 },
+      { name: '常驻角色', rarity: 6, isStandard: true, count: 1 },
+    ];
+    await renderPage();
+    const counts = within(screen.getByRole('group', { name: '卡池抽卡数量' }));
+    expect(counts.getByText('当期UP6★').parentElement.textContent).toContain('1');
+    expect(counts.getByText('歪限定6★').parentElement.textContent).toContain('2');
+    expect(counts.getByText('歪常驻6★').parentElement.textContent).toContain('1');
+    expect(counts.queryByText('常驻6★')).toBeNull();
+    expect(counts.queryByText('未分类非UP6★')).toBeNull();
+  });
+
   it('renders one panel after average pulls and removes its contents when collapsed', async () => {
     const page = await renderPage();
     expect(screen.getAllByText('特殊机制进度')).toHaveLength(1);
