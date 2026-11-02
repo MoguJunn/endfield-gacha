@@ -12,6 +12,8 @@ node scripts/build-standalone.mjs .agent-tmp/standalone-release
 
 输出包含分块API、网页、分享字体和playwright-core，不包含环境文件。打包保留字面量动态导入，首次请求只加载对应API。脚本会复制已经生成的分享渲染模块；构建主站前应运行既有prebuild步骤。
 
+自托管构建设置 `VITE_VERCEL_OBSERVABILITY=false`，关闭仅由Vercel提供的访问统计与测速脚本，避免脚本地址落到SPA页面并产生语法错误。该变量未设置时保留既有Vercel部署行为。
+
 运行容器使用 `scripts/standalone.Dockerfile`。Node进程以普通用户运行，默认只监听 `127.0.0.1:3180`；通过现有OpenResty在HTTPS下反向代理。部署时设置只读根文件系统、只读发布目录、`/tmp`临时卷、CPU和内存限制、日志轮转及重启策略。分享图按 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 使用系统Chromium。没有配置该变量时，Vercel和本地原有选择逻辑保留。
 
 生产配置放在服务器 `/etc/endfield/web.env`，权限0600，通过Docker的env-file注入，不复制到构建目录。复用现有数据库与会话签名密钥；本地开发OAuth回调不能直接用在公网。浏览器可见的Supabase地址和验证码站点键来自正式配置；服务端可以通过本机数据库网关连接。不要使用临时计算回退，保持 `PERSONAL_ANALYSIS_TRANSIENT_FALLBACK=false`。

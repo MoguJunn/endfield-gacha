@@ -71,8 +71,8 @@ async function bootstrapApp() {
           </ErrorBoundary>
         </BrowserRouter>
       </I18nProvider>
-      {!isContributorDemoModeEnabled() && <Analytics />}
-      {!isContributorDemoModeEnabled() && <SpeedInsights />}
+      {!isContributorDemoModeEnabled() && import.meta.env.VITE_VERCEL_OBSERVABILITY !== 'false' && <Analytics />}
+      {!isContributorDemoModeEnabled() && import.meta.env.VITE_VERCEL_OBSERVABILITY !== 'false' && <SpeedInsights />}
     </StrictMode>,
   );
   markAppMounted();
