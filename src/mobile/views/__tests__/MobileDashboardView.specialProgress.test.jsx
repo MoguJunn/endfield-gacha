@@ -89,6 +89,14 @@ describe('mobile special mechanism progress', () => {
     expect(counts.queryByText('未分类非UP6★')).toBeNull();
   });
 
+  it('does not show off-banner categories in a four-target equal-rate banner', async () => {
+    mocks.view = createView({ id: 'joint_1_2_2', name: '辉光庆典', type: 'extra' });
+    await renderPage();
+    const counts = within(screen.getByRole('group', { name: '卡池抽卡数量' }));
+    expect(counts.queryByText('歪限定6★')).toBeNull();
+    expect(counts.queryByText('歪常驻6★')).toBeNull();
+  });
+
   it('renders one panel after average pulls and removes its contents when collapsed', async () => {
     const page = await renderPage();
     expect(screen.getAllByText('特殊机制进度')).toHaveLength(1);

@@ -352,7 +352,7 @@ const DashboardView = ({ showToast }) => {
   const characterPoolLabel = isEnglish ? 'Character Banner' : '角色池';
   const weaponPoolLabel = isEnglish ? 'Weapon Banner' : '武器池';
   const standardSixLabel = isEnglish ? 'Standard 6★' : '常驻6★';
-  const sixStarBreakdown = !isGroupMode && normalizedPoolType !== 'standard'
+  const sixStarBreakdown = !isGroupMode && resolvePoolCapabilities(currentPool).targetMode === 'single-up'
     ? buildDashboardSixStarBreakdown({ stats, characterStats, isEnglish })
     : null;
   const crossBannerSummary = isEnglish ? 'Cross-banner summary' : '跨卡池汇总';

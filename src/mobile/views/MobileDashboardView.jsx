@@ -520,7 +520,7 @@ function MobileDashboardView() {
   }, [shareThemeMode]);
   const pullUnitLabel = isEnglish ? 'PULLS' : t('dashboard.unit.pull');
   const standardSixLabel = isEnglish ? 'Standard 6★' : '常驻6★';
-  const sixStarBreakdown = !isGroupMode && normalizedPoolType !== 'standard'
+  const sixStarBreakdown = !isGroupMode && currentPoolCapabilities.targetMode === 'single-up'
     ? buildDashboardSixStarBreakdown({ stats, characterStats, isEnglish })
     : null;
   const extraSixLabel = isEnglish ? 'Extra 6★' : '附加6★';
