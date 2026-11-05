@@ -66,4 +66,12 @@ describe('standalone HTTP adapter', () => {
     expect(await response.text()).not.toContain('secret');
     expect(response.headers.get('cache-control')).toBe('no-store');
   });
+  it('serves OCR ES modules as JavaScript so browser module imports are allowed', async () => {
+    await mkdir(path.join(root, 'dist/ocr/xhh'), { recursive: true });
+    await writeFile(path.join(root, 'dist/ocr/xhh/paddleocr.mjs'), 'export const ready = true');
+    const response = await fetch(origin + '/ocr/xhh/paddleocr.mjs');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('text/javascript; charset=utf-8');
+    expect(await response.text()).toContain('export const ready');
+  });
 });
