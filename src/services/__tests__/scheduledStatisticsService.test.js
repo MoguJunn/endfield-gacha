@@ -32,7 +32,7 @@ beforeEach(() => {
   vi.stubEnv('DEV', true);
   vi.stubGlobal('fetch', vi.fn());
 });
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('scheduled statistics data source', () => {
   it('keeps sandbox public pool and group reads local and excludes gifts from results', async () => {
@@ -77,6 +77,15 @@ describe('scheduled statistics data source', () => {
     expect(url).toContain('/api/stats?type=group_statistics&groupKey=extra%3Areconstruction');
     expect(options.signal).toBeInstanceOf(AbortSignal);
     await loadPersonalStatistics(controller.signal);
-    expect(fetch).toHaveBeenLastCalledWith('/api/stats?type=personal_statistics', expect.objectContaining({ credentials: 'same-origin', signal: controller.signal }));
+    expect(fetch).toHaveBeenLastCalledWith('/api/stats?type=personal_statistics', expect.objectContaining({ credentials: 'same-origin', signal: expect.any(AbortSignal) }));
+  });
+  it('ends a stalled personal read so refresh can report failure and be retried', async () => {
+    vi.stubEnv('DEV', false); state.demo = false; vi.useFakeTimers();
+    fetch.mockImplementation((_url, { signal }) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })));
+    const pending = loadPersonalStatistics();
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
+    await vi.advanceTimersByTimeAsync(25000); await rejected;
+    fetch.mockResolvedValue({ ok: true, json: async () => ({ success: true, data: {} }) });
+    await expect(loadPersonalStatistics()).resolves.toMatchObject({ success: true });
   });
 });

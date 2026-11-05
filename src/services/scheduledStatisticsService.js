@@ -25,8 +25,18 @@ export async function loadPersonalStatistics(signal, { ownerId = '', checkVersio
   const versions = ownerId ? await checkSnapshotVersions(ownerId, { force: checkVersion || forceRefresh }) : null;
   return waitForPersonalSnapshot(readPersonalSnapshot({ ownerId, key: 'statistics', version: versions?.personal?.statistics, forceRefresh, fetcher: async () => {
     const { headers } = await getSameOriginAuthHeaders({ Accept: 'application/json' }, { syncSiteSession: false, useSiteSessionCache: true, allowSiteSessionToken: false });
-    const response = await fetch('/api/stats?type=personal_statistics', { signal: ownerId ? undefined : signal, headers, credentials: 'same-origin', ...(forceRefresh ? { cache: 'no-store' } : {}) });
-    const result = await response.json();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(new DOMException('Personal statistics timed out', 'TimeoutError')), 25000);
+    const abort = () => controller.abort(signal.reason);
+    if (!ownerId) {
+      if (signal?.aborted) abort();
+      else signal?.addEventListener('abort', abort, { once: true });
+    }
+    let response, result;
+    try {
+      response = await fetch('/api/stats?type=personal_statistics', { signal: controller.signal, headers, credentials: 'same-origin', ...(forceRefresh ? { cache: 'no-store' } : {}) });
+      result = await response.json();
+    } finally { clearTimeout(timeout); signal?.removeEventListener('abort', abort); }
     if (!response.ok || result.success === false) throw new Error('Personal statistics unavailable');
     return result;
   } }), signal);
