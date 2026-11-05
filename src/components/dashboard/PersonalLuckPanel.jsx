@@ -107,7 +107,7 @@ function Highlights({ stats, weapon, tt, number, date, english }) {
     </>}</div></section>;
 }
 
-export default function PersonalLuckPanel({ account }) {
+export default function PersonalLuckPanel({ account, toolbar = null }) {
   const { isEnglish, locale } = useI18n(), { isDark } = useTheme();
   const tt = (zh, en) => isEnglish ? en : zh;
   const number = value => value == null ? '—' : Number(value).toLocaleString(locale);
@@ -132,7 +132,10 @@ export default function PersonalLuckPanel({ account }) {
   const point = score => 85 - Math.max(-2, Math.min(4, score)) * 15;
   const detail = isEnglish ? assessment.eligible ? EN_LABELS[assessment.grade] : 'There are no usable records in this range.' : assessment.detail;
   return <div className={`personal-luck ${isDark ? 'pl-dark' : 'pl-light'} ${motion ? '' : 'pl-motion-off'}`}>
-    <p className="pl-summary-caption">{weapon ? tt('武器', 'Weapons') : tt('角色', 'Operators')} · {tt('限定与复刻 · 全部时间', 'Limited and rerun · all time')}</p>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <p className="pl-summary-caption">{weapon ? tt('武器', 'Weapons') : tt('角色', 'Operators')} · {tt('限定与复刻 · 全部时间', 'Limited and rerun · all time')}</p>
+      {toolbar}
+    </div>
     <div className="pl-summary-strip">{[[Layers, tt('一共抽了', 'Total pulls'), stats.total], [Star, tt('抽到六星', 'Six-stars'), stats.six],
       [Target, tt('抽到当期 UP', 'Featured UP'), stats.up], [BarChart3, tt('平均多少抽出六星', 'Pulls per six-star'), stats.six ? (stats.total / stats.six).toFixed(1) : null]]
       .map(([Icon, title, value]) => <div key={title}>{React.createElement(Icon, { size: 36 })}<span>{title}</span><strong>{number(value)}</strong></div>)}</div>

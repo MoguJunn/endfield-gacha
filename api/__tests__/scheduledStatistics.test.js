@@ -218,11 +218,24 @@ describe('scheduled statistics', () => {
     expect(await readScheduledStatistic(db, 'global_summary')).toMatchObject({ payload: { total: 10 }, meta: { stale: true, updatedAt: '2020-01-01T00:00:00Z' } });
   });
   it('rejects invisible pool requests before reading the snapshot', async () => {
-    const db = { rpc: vi.fn().mockResolvedValue({ data: [] }) };
+    const db = { rpc: vi.fn().mockResolvedValue({ data: [] }),
+      from: vi.fn(() => ({ select: () => ({ eq: async () => ({ data: [{ pool_id: 'still_hidden' }] }) }) })) };
     const response = res();
     await handlePoolObservations({ query: { poolId: 'private_pool' } }, response, db);
     expect(response.status).toHaveBeenCalledWith(404);
     expect(db.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads the official snapshot for a promoted preview alias without allowing hidden targets', async () => {
+    const official = 'special_1_6_2';
+    const db = { rpc: vi.fn(async name => ({ data: name === 'get_app_visible_pools' ? [{ pool_id: official }]
+      : { schema_version: STATISTICS_SNAPSHOT_VERSION, payload: { poolId: official, observations: { total: 120 } }, computed_at: '2026-11-05' } })),
+      from: vi.fn(() => ({ select: () => ({ eq: async () => ({ data: [{ pool_id: official }, { pool_id: official }] }) }) })) };
+    const response = res();
+    await handlePoolObservations({ query: { poolId: 'special_manual_minghe' } }, response, db);
+    expect(response.status).toHaveBeenCalledWith(200);
+    expect(db.rpc).toHaveBeenCalledWith('read_statistics_snapshot', { p_scope: `pool:${official}` });
+    expect(response.json.mock.calls[0][0].data).toMatchObject({ poolId: official, observations: { total: 120 } });
   });
   it('rejects unauthenticated private access and ignores a caller supplied owner ID', async () => {
     const db = { rpc: vi.fn().mockResolvedValue({ data: null }) };

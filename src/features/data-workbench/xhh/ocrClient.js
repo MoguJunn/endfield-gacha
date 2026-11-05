@@ -19,7 +19,12 @@ export function createOcrClient({ workerFactory = () => new Worker(new URL('./oc
     worker.onmessage = ({ data }) => {
       if (data.type === 'progress') onProgress?.(data);
       if (data.type === 'result' || data.type === 'initialized') { finish(); resolve(data.result || { initialized: true }); }
-      if (data.type === 'error') { finish(); worker?.terminate(); worker = null; reject(new Error(data.message)); }
+      if (data.type === 'error') {
+        finish(); worker?.terminate(); worker = null;
+        const message = /(?:dynamically imported module|module script|importing a module)/i.test(data.message || '')
+          ? '截图识别引擎未能加载。请刷新页面后重试；首次使用需要下载识别资源，请保持网络连接。' : data.message;
+        reject(new Error(message));
+      }
     };
     worker.onerror = event => { finish(); worker?.terminate(); worker = null; reject(new Error(event.message || 'OCR 工作线程加载失败')); };
     worker.postMessage({ type, file, resourceBase });

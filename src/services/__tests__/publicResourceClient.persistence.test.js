@@ -89,6 +89,18 @@ describe('browser public data reuse', () => {
     expect(await (await client()).fetchPublicApiJson('/api/stats', catalog)).toEqual(refreshed);
     expect(network.resource).toHaveBeenCalledTimes(2);
   });
+  it('explicitly rereads a pool snapshot at an unchanged revision without creating timestamp cache keys', async () => {
+    const options = { params: { type: 'pool_observations', poolId: 'p' } };
+    const data = total => ({ success: true, data: { observations: { total }, meta: {} } });
+    network.resource.mockResolvedValueOnce(reply(data(7))).mockResolvedValueOnce(reply(data(8)));
+    const api = await client();
+    await api.fetchPublicApiJson('/api/stats', options);
+    const result = await api.fetchPublicApiJson('/api/stats', { ...options, forceRefresh: true });
+    expect(result.data.observations.total).toBe(8);
+    expect(network.resource).toHaveBeenLastCalledWith('/api/stats?type=pool_observations&poolId=p&v=s1', expect.objectContaining({ cache: 'no-store' }), expect.any(Object));
+    expect(await api.fetchPublicApiJson('/api/stats', options)).toBe(result);
+    expect(network.resource).toHaveBeenCalledTimes(2);
+  });
   it('never writes private responses into the public browser database', async () => {
     await (await client()).fetchPublicApiJson('/api/stats', { params: { type: 'personal_statistics' } });
     vi.resetModules();

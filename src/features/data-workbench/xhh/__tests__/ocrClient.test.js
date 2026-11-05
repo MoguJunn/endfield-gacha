@@ -38,4 +38,15 @@ describe('真实 OCR Worker 客户端合同', () => {
     await expect(pending).rejects.toThrow('本地模型资源缺失');
     expect(worker.terminate).toHaveBeenCalledOnce();
   });
+  it('引擎加载失败时提供中文重试提示，下一次使用新线程', async () => {
+    const workers = [fakeWorker(), fakeWorker()];
+    const factory = vi.fn().mockReturnValueOnce(workers[0]).mockReturnValueOnce(workers[1]);
+    const client = createOcrClient({ workerFactory: factory });
+    const pending = client.initialize();
+    workers[0].onmessage({ data: { type: 'error', message: 'error loading dynamically imported module: /ocr/xhh/paddleocr.mjs' } });
+    await expect(pending).rejects.toThrow('截图识别引擎未能加载');
+    const retry = client.initialize(); workers[1].onmessage({ data: { type: 'initialized' } });
+    expect(await retry).toEqual({ initialized: true });
+    expect(factory).toHaveBeenCalledTimes(2); client.dispose();
+  });
 });

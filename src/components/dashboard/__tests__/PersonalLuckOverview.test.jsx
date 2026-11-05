@@ -57,7 +57,8 @@ describe('integrated personal luck overview', () => {
   });
   it('switches accounts and entities without carrying old highlights or grades', async () => {
     mount(); await screen.findByRole('region', { name: '寻访运气' });
-    fireEvent.change(screen.getByRole('combobox', { name: '游戏账号' }), { target: { value: secondKey } });
+    fireEvent.click(screen.getByRole('combobox', { name: '游戏账号' }));
+    fireEvent.click(screen.getByRole('option', { name: /账号二/ }));
     await waitFor(() => expect(document.querySelector('.pl-summary-strip strong').textContent).toBe('0'));
     expect(screen.queryByRole('button', { name: '一发双彩' })).toBeNull();
     expect(screen.getByText('暂时没有可展示的高光。')).toBeTruthy();
@@ -105,5 +106,23 @@ describe('integrated personal luck overview', () => {
     expect(screen.getByRole('img', { name: /版本6:.*67 抽, 参与评分 60/ })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '怎么算的' }));
     expect(screen.getByRole('dialog').textContent).toContain('无法还原进度的记录仍计入抽数');
+  });
+
+  it('refreshes the saved result with visible progress and lets a failed refresh retry', async () => {
+    mount(); await screen.findByRole('region', { name: '寻访运气' });
+    let finish;
+    mocks.load.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: '获取最新结果' }));
+    expect(screen.getByRole('button', { name: '正在获取…' }).disabled).toBe(true);
+    await waitFor(() => expect(mocks.load).toHaveBeenLastCalledWith(expect.any(AbortSignal), expect.objectContaining({ forceRefresh: true })));
+    await act(async () => finish(response(snapshot)));
+    expect(await screen.findByText('已获取最新结果。')).toBeTruthy();
+    mocks.load.mockRejectedValueOnce(new Error('offline'));
+    fireEvent.click(screen.getByRole('button', { name: '获取最新结果' }));
+    await screen.findByRole('alert');
+    expect(screen.getByRole('button', { name: '获取最新结果' }).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '获取最新结果' }));
+    await screen.findByText('已获取最新结果。');
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

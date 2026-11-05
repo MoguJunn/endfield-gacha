@@ -66,8 +66,10 @@ describe('real statistics workspace', () => {
     render(<PoolStatisticsWorkspace lockedDataSource="local" />);
     await waitFor(() => expect(screen.getByTestId('observation-total').textContent).toBe('3'));
     const select = screen.getByLabelText('游戏账号');
-    expect(select.options.length).toBe(3);
-    fireEvent.change(select, { target: { value: select.options[2].value } });
+    fireEvent.click(select);
+    const options = screen.getAllByRole('option');
+    expect(options.length).toBe(3);
+    fireEvent.click(options[2]);
     expect(screen.getByTestId('observation-total').textContent).toBe('1');
     expect(screen.queryByLabelText('首次定义')).toBeNull();
     expect(screen.getByText('首次均指同一对象在本期卡池内首次获得。')).toBeTruthy();
@@ -161,7 +163,8 @@ describe('real statistics workspace', () => {
     expect(screen.getByTestId('chart-source').textContent).toBe('limited:3');
     expect(screen.getByTestId('legacy-regularTotal').textContent).toBe('100');
     const select = screen.getByLabelText('游戏账号');
-    fireEvent.change(select, { target: { value: select.options[2].value } });
+    fireEvent.click(select);
+    fireEvent.click(screen.getAllByRole('option')[2]);
     expect(screen.getByTestId('legacy-regularTotal').textContent).toBe('102');
     expect(screen.getByRole('button', { name: '全部限定角色' }).getAttribute('aria-pressed')).toBe('true');
     expect(state.load).toHaveBeenCalledTimes(1);
@@ -189,6 +192,39 @@ describe('real statistics workspace', () => {
     expect(screen.getByRole('button', { name: '全部重构申领' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '合成分组' })).toBeNull();
     expect(container.querySelector('[data-pool-id="__group_limited"]')).toBeNull();
+  });
+
+  it('shows an already computed pool even when the optional count summary fails', async () => {
+    const observations = buildStoredPoolObservations({ history: [record(1, 'uid')], poolId: 'p' });
+    fetch.mockImplementation(async url => {
+      const type = new URL(url, 'https://example.test').searchParams.get('type');
+      if (type === 'pool_counts') throw new Error('count unavailable');
+      return response(type === 'pool_observations' ? { observations, meta: {} } : { pools: [{ id: 'p', name: '明河池', type: 'limited' }] });
+    });
+    render(<PoolStatisticsWorkspace lockedDataSource="global" />);
+    expect((await screen.findByTestId('observation-total')).textContent).toBe('1');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('retries a failed detail request with progress and keeps the selected pool', async () => {
+    const observations = buildStoredPoolObservations({ history: [record(1, 'uid')], poolId: 'p' });
+    let reject = true, finish;
+    fetch.mockImplementation(async url => {
+      const type = new URL(url, 'https://example.test').searchParams.get('type');
+      if (type === 'pool_observations') {
+        if (reject) throw new Error('unavailable');
+        return new Promise(resolve => { finish = () => resolve(response({ observations, meta: {} })); });
+      }
+      return response(type === 'pool_counts' ? { counts: {} } : { pools: [{ id: 'p', name: '明河池', type: 'limited' }] });
+    });
+    render(<PoolStatisticsWorkspace lockedDataSource="global" />);
+    await screen.findByRole('alert'); reject = false;
+    fireEvent.click(screen.getByRole('button', { name: '重试', exact: true }));
+    expect(screen.getByRole('button', { name: '正在获取…' }).disabled).toBe(true);
+    await waitFor(() => expect(finish).toBeTypeOf('function'));
+    await act(async () => finish());
+    expect((await screen.findByTestId('observation-total')).textContent).toBe('1');
+    expect(screen.getByText('已获取最新结果。')).toBeTruthy();
   });
 
   it.each([false, true])('renders English group controls with theme dark=%s on mobile', async (dark) => {

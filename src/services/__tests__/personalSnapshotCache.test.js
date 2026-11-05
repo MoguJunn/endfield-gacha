@@ -42,4 +42,12 @@ describe('private versioned snapshot reuse', () => {
     controller.abort(); finish(result()); await cancelled;
     expect(await source).toEqual(result());
   });
+  it('an explicit refresh reads again at the same revision and replaces the stored result', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(result('owner', 10)).mockResolvedValueOnce(result('owner', 20));
+    await readPersonalSnapshot(options(fetcher));
+    const fresh = await readPersonalSnapshot({ ...options(fetcher), forceRefresh: true });
+    expect(fresh.data.count).toBe(20);
+    expect(await readPersonalSnapshot(options(fetcher))).toBe(fresh);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
 });

@@ -50,7 +50,7 @@ export async function readPoolObservationAggregate(supabase, poolId, { maxRows =
 }
 
 export async function handlePoolObservations(req, res, supabase) {
-  const poolId = String(req.query.poolId || '').trim();
+  let poolId = String(req.query.poolId || '').trim();
   res.setHeader('Cache-Control', 'no-store');
   if (!/^[\w-]{1,160}$/u.test(poolId) || isReservedPoolTypeId(poolId)) {
     return res.status(400).json({ success: false, error: 'Invalid poolId' });
@@ -59,7 +59,16 @@ export async function handlePoolObservations(req, res, supabase) {
   try {
     const { data: visible, error } = await supabase.rpc('get_app_visible_pools');
     if (error) throw error;
-    if (!visible?.some((pool) => (pool.pool_id || pool.id) === poolId)) return res.status(404).json({ success: false, error: '未找到该卡池' });
+    const visibleIds = new Set((visible || []).map(pool => pool.pool_id || pool.id));
+    if (!visibleIds.has(poolId)) {
+      // Published preview IDs remain valid aliases after official promotion.
+      // Resolve only to a visible public pool; ambiguous aliases stay invalid.
+      const { data: aliases, error: aliasError } = await supabase.from('pool_id_aliases').select('pool_id').eq('alias_id', poolId);
+      if (aliasError) throw aliasError;
+      const targets = [...new Set((aliases || []).map(alias => alias.pool_id).filter(id => visibleIds.has(id)))];
+      if (targets.length !== 1) return res.status(404).json({ success: false, error: '未找到该卡池' });
+      [poolId] = targets;
+    }
     const { payload, meta } = await readScheduledStatistic(supabase, `pool:${poolId}`);
     if (payload) res.setHeader('Cache-Control', PUBLIC_STATISTICS_CACHE_CONTROL);
     return res.status(payload ? 200 : 202).json({ success: true, cached: true,

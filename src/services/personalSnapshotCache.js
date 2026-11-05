@@ -26,14 +26,14 @@ export function clearPersonalSnapshotCache() {
   } catch { /* optional storage */ }
 }
 
-export async function readPersonalSnapshot({ ownerId, key, version, fetcher }) {
+export async function readPersonalSnapshot({ ownerId, key, version, fetcher, forceRefresh = false }) {
   if (!ownerId || !version) return fetcher();
   const storageKey = `${PREFIX}${JSON.stringify([ownerId, key])}`;
   const saved = memory.get(storageKey);
-  if (saved?.version === version) return saved.value;
+  if (!forceRefresh && saved?.version === version) return saved.value;
   try {
     const stored = JSON.parse(sessionStorage.getItem(storageKey));
-    if (stored?.version === version && stored.ownerId === ownerId && stored.value?.meta?.ownerId === ownerId) {
+    if (!forceRefresh && stored?.version === version && stored.ownerId === ownerId && stored.value?.meta?.ownerId === ownerId) {
       memory.set(storageKey, stored); return stored.value;
     }
   } catch { /* optional storage */ }

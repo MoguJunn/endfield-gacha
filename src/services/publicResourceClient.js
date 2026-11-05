@@ -243,11 +243,11 @@ export async function fetchPublicApiJson(path, {
   const cacheVersion = versioned ? statistic ? versions?.public?.[publicSnapshotScope(type, scope)] : versions?.catalogVersion : shouldUsePublicApi()
     ? await getPublicCacheVersion(forceRefresh).catch(() => versionState.value)
     : 'dev';
-  const bypassCache = forceRefresh && !versioned;
+  const bypassCache = forceRefresh;
   const url = buildPublicApiUrl(path, {
     params,
     cacheVersion,
-    forceRefresh: bypassCache,
+    forceRefresh: bypassCache && !versioned,
   });
 
   const policy = shouldUsePublicApi() ? cachePolicy(path, params) : null;

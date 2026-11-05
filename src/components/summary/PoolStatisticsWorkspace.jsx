@@ -11,6 +11,8 @@ import ScopedLegacyStatisticsPanel from './ScopedLegacyStatisticsPanel.jsx';
 import PoolObservationCharts from './PoolObservationCharts.jsx';
 import PoolTargetPrediction from './PoolTargetPrediction.jsx';
 import { useSnapshotVersion } from '../../hooks/app/useSnapshotVersion.js';
+import { mergePoolCollections } from '../../services/poolReadService.js';
+import GameAccountPicker from '../pool/GameAccountPicker.jsx';
 import '../home/homeLandingDemo.css';
 import '../ui/experienceFoundation.css';
 import './poolStatisticsWorkspace.css';
@@ -46,6 +48,8 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
   const [tab, setTab] = useState('observed');
   const [refresh, setRefresh] = useState(0);
   const [forcedRefresh, setForcedRefresh] = useState(-1);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshMessage, setRefreshMessage] = useState('');
   const forceRefresh = forcedRefresh === refresh;
   const [privateResponse, setPrivateData] = useState(EMPTY_PRIVATE_DATA);
   const [globalData, setGlobalData] = useState({ scopeKey: null, data: null, error: false });
@@ -54,31 +58,35 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
   const privateData = privateResponse;
   useEffect(() => {
     const controller = new AbortController();
-    Promise.all([readStats('pools', controller.signal, null, { forceRefresh }), source === 'global' ? readStats('pool_counts', controller.signal, null, { forceRefresh }) : null]).then(([result, counts]) => {
+    Promise.all([readStats('pools', controller.signal, null, { forceRefresh }), source === 'global' ? readStats('pool_counts', controller.signal, null, { forceRefresh }).catch(() => null) : null]).then(([result, counts]) => {
       if (controller.signal.aborted) return;
       const pools = result.data?.pools;
       setCatalog(previous => previous.pools === pools && !previous.error ? previous
         : { pools: Array.isArray(pools) ? pools : [], error: !Array.isArray(pools) });
-      if (source === 'global') setGlobalCounts(counts.data?.counts || {});
-    }).catch(() => { if (!controller.signal.aborted) setCatalog((old) => ({ ...old, error: true })); });
+      if (source === 'global' && counts?.data?.counts) setGlobalCounts(counts.data.counts);
+      if (!pools?.length) setRefreshing(false);
+    }).catch(() => { if (!controller.signal.aborted) { setCatalog((old) => ({ ...old, error: true })); setRefreshing(false); } });
     return () => controller.abort();
   }, [refresh, source, forceRefresh, catalogVersion, countsVersion]);
   useEffect(() => {
     if (source !== 'local' || !user?.id) return undefined;
     const controller = new AbortController();
-    loadPersonalStatistics(controller.signal, { ownerId: user.id, checkVersion: forceRefresh }).then((result) => {
+    loadPersonalStatistics(controller.signal, { ownerId: user.id, checkVersion: forceRefresh, forceRefresh }).then((result) => {
       if (result.meta?.ownerId !== user.id || result.meta?.truncated) {
         throw new Error('Incomplete or mismatched account history');
       }
-      if (!controller.signal.aborted) setPrivateData(previous => previous.data === result.data && previous.meta === result.meta && !previous.error
-        ? previous : { data: result.data, meta: result.meta, error: false });
-    }).catch(() => { if (!controller.signal.aborted) setPrivateData((old) => ({ ...old, error: true })); });
+      if (!controller.signal.aborted) {
+        setPrivateData(previous => previous.data === result.data && previous.meta === result.meta && !previous.error
+          ? previous : { data: result.data, meta: result.meta, error: false });
+        if (forceRefresh) setRefreshMessage(result.meta?.stale || !result.data ? 'pending' : 'ready');
+      }
+    }).catch(() => { if (!controller.signal.aborted) { setPrivateData((old) => ({ ...old, error: true })); setRefreshMessage('failed'); } })
+      .finally(() => { if (!controller.signal.aborted) setRefreshing(false); });
     return () => controller.abort();
   }, [source, user?.id, refresh, personalVersion, forceRefresh]);
   const pools = useMemo(() => {
-    const map = new Map(catalog.pools.map((pool) => [pool.id, pool]));
-    if (source === 'local') for (const pool of [...storedPools, ...(privateData.data?.pools || [])]) if (!map.has(pool.id)) map.set(pool.id, pool);
-    return [...map.values()].map(normalizeStatisticsPool).filter((pool) => !/^(?:__)?group_/.test(String(pool.id)));
+    return mergePoolCollections(catalog.pools, source === 'local' ? [...storedPools, ...(privateData.data?.pools || [])] : [])
+      .map(normalizeStatisticsPool).filter((pool) => !/^(?:__)?group_/.test(String(pool.id)));
   }, [catalog.pools, storedPools, source, privateData.data?.pools]);
   const accounts = privateData.data?.accounts || [];
   const selectedAccountKey = accounts.some((account) => account.key === accountKey) ? accountKey : '';
@@ -96,6 +104,7 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
   const scopeVersion = versions?.public?.[scopeKey];
   const overviewVersion = versions?.public?.global_summary;
   const selectScope = (nextScope) => {
+    setRefreshing(false); setRefreshMessage('');
     setScopeChoice(nextScope);
     if (tab === 'theory' && nextScope.kind === 'group') setTab('observed');
   };
@@ -104,9 +113,13 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
     const controller = new AbortController();
     const requestScope = groupKey ? { kind: 'group', groupKey } : { kind: 'pool', poolId };
     readStats(groupKey ? 'group_statistics' : 'pool_observations', controller.signal, requestScope, { forceRefresh }).then((result) => {
-      if (!controller.signal.aborted) setGlobalData(previous => previous.scopeKey === scopeKey && previous.data === result.data && !previous.error
-        ? previous : { scopeKey, data: result.data, error: !result.data });
-    }).catch(() => { if (!controller.signal.aborted) setGlobalData({ scopeKey, data: null, error: true, refresh }); });
+      if (!controller.signal.aborted) {
+        setGlobalData(previous => previous.scopeKey === scopeKey && previous.data === result.data && !previous.error
+          ? previous : { scopeKey, data: result.data, error: !result.data });
+        if (forceRefresh) setRefreshMessage(result.data?.meta?.stale || !result.data?.observations ? 'pending' : 'ready');
+      }
+    }).catch(() => { if (!controller.signal.aborted) { setGlobalData({ scopeKey, data: null, error: true, refresh }); setRefreshMessage('failed'); } })
+      .finally(() => { if (!controller.signal.aborted) setRefreshing(false); });
     return () => controller.abort();
   }, [source, poolId, groupKey, scopeKey, refresh, forceRefresh, scopeVersion]);
   useEffect(() => {
@@ -132,6 +145,7 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
   const memberPools = group ? getStatisticsGroupPools(pools, group.key) : pool ? [pool] : [];
   const members = group ? stats?.members || [] : pool ? [{ id: pool.id, name: pool.name, nameEn: pool.name_en, total: stats?.total }] : [];
   const guest = source === 'local' && !user;
+  const refreshResults = () => { setRefreshing(true); setRefreshMessage(''); setForcedRefresh(refresh + 1); setRefresh(value => value + 1); };
   return <div className="experience-ui hl-theme ex-integrated" data-theme={isDark ? 'dark' : 'light'} data-variant={mobile ? 'mobile' : 'desktop'} data-source={source}>
     <p className="ex-sidebar-hint" role="note" aria-label={t('统计范围说明', 'Statistics eligibility')}>
       {source === 'local' ? t('我的数据包含手动修改和已保存的补录；缺少完整明细时，只展示已知结果，无法核实的间隔与出率保持未知。',
@@ -148,12 +162,16 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
             {sourceLocked ? <p className="ex-source-label">{source === 'global' ? t('全服真实记录', 'Community records') : t('我的真实记录', 'My records')}</p> : <div className="ex-sidebar-options">
               <button aria-pressed={source === 'global'} onClick={() => onSourceChange('global')}>{t('全服数据', 'Community')}</button><button aria-pressed={source === 'local'} onClick={() => onSourceChange('local')}>{t('我的数据', 'My records')}</button></div>}
           </section>
-          <section className="ex-sidebar-section"><label className="ex-field">{t('游戏账号', 'Game account')}<select aria-label={t('游戏账号', 'Game account')} disabled={source === 'global' || guest} value={selectedAccountKey} onChange={(e) => { setAccountKey(e.target.value); if (scopeChoice?.kind !== 'group') setScopeChoice(null); }}>
-            <option value="">{source === 'global' ? t('全部贡献账号（匿名聚合）', 'All contributing accounts') : t('我的全部游戏账号', 'All my game accounts')}</option>
-            {source === 'local' && accounts.map((account) => <option key={account.key} value={account.key}>{account.name} · {account.gameUid} · {account.serverScope}</option>)}
-          </select></label></section>
+          <section className="ex-sidebar-section space-y-2" aria-label={t('账号与结果更新', 'Account and result updates')}>
+            <GameAccountPicker accounts={source === 'local' ? accounts : []} value={selectedAccountKey} locale={locale} disabled={source === 'global' || guest}
+              allLabel={source === 'global' ? t('全部贡献账号（匿名聚合）', 'All contributing accounts') : t('我的全部游戏账号', 'All my game accounts')}
+              onChange={value => { setAccountKey(value); if (scopeChoice?.kind !== 'group') setScopeChoice(null); }} />
+            <button type="button" className="ex-refresh" disabled={refreshing || guest} aria-busy={refreshing} onClick={refreshResults}>
+              <RefreshCw className={refreshing ? 'animate-spin' : ''} size={14} />{refreshing ? t('正在获取…', 'Refreshing…') : t('获取最新结果', 'Get latest results')}</button>
+            {refreshMessage && <p role="status" className="ex-sidebar-hint">{refreshMessage === 'failed' ? t('获取失败，请重试。', 'Refresh failed. Please retry.') : refreshMessage === 'pending'
+              ? t('已获取当前结果，后台仍在更新。', 'Current results loaded; the background update is pending.') : t('已获取最新结果。', 'Latest results loaded.')}</p>}
+          </section>
           <p className="ex-sidebar-hint">{t('首次均指同一对象在本期卡池内首次获得。', 'First acquisition always means the first copy of an item within this banner period.')}</p>
-          <button className="ex-refresh" onClick={() => { setForcedRefresh(refresh + 1); setRefresh((value) => value + 1); }}><RefreshCw key={refresh} className={refresh ? 'ex-refresh-feedback' : ''} size={14} />{t('获取最新结果', 'Get latest results')}</button>
           <StatisticsPoolList pools={pools} counts={source === 'local' ? poolPullCounts : { ...globalCounts, ...(stats && !group ? { [poolId]: stats.total } : {}) }}
             scope={scope} onSelect={selectScope} locale={locale} t={t} />
         </div>
@@ -171,7 +189,7 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
         </div>}
         {tab === 'overview' ? <React.Fragment>{overview(source, privateData.data)}</React.Fragment> : tab === 'theory' ? canPredict ? <PoolTargetPrediction key={poolId} weapon={weapon} targetName={pool.up_character} t={t} /> : <p className="ex-state">{t('该卡池的目标预测规则尚未接入，真实记录图表仍可查看。', 'Target prediction is not available for this banner; recorded statistics remain available.')}</p> : guest ?
           <div className="ex-state"><p>{t('登录后读取你已保存的账号与抽卡记录。', 'Sign in to read your saved accounts and pull history.')}</p><button className="ex-primary" onClick={openAuthModal}>{t('登录', 'Sign in')}</button></div> : error ?
-          <div className="ex-state" role="alert"><p>{t('统计读取失败，请稍后重试。', 'Statistics could not be loaded. Please retry.')}</p><button onClick={() => setRefresh((value) => value + 1)}>{t('重试', 'Retry')}</button></div> : !stats ?
+          <div className="ex-state" role="alert"><p>{t('统计读取失败，请稍后重试。', 'Statistics could not be loaded. Please retry.')}</p><button disabled={refreshing} onClick={refreshResults}>{t('重试', 'Retry')}</button></div> : !stats ?
           <p className="ex-state" role="status">{source === 'local' && privateData.data && accounts.length === 0 ? t('尚未导入记录。请先从个人卡池分析导入。', 'No saved records. Import history from personal banner analysis first.') : source === 'local' && personalScope && !availablePools.length ? t('此账号暂无有效抽取记录，直接赠送不计入抽取统计。', 'No valid pull records for this account. Direct gifts are excluded from pull statistics.') : freshness?.availability === 'building' ? t('此卡池正在等待后台首次计算，完成后自动显示。', 'This banner is queued for its first calculation. Results will appear automatically.') : t('正在读取统计结果…', 'Loading statistics…')}</p> : <>
             <section key={`summary:${scopeKey}:${selectedAccountKey}`} className="ex-banner-summary" aria-label={t('本期样本概览', 'Banner sample overview')}>
               <div className="ex-banner-title"><div><span className="ex-report-eyebrow">{group ? t('当前观测分组', 'SELECTED GROUP') : t('当前观测卡池', 'SELECTED BANNER')}</span><h2>{scopeName}</h2></div><span className="ex-period-tag"><ArrowUpRight size={14} aria-hidden="true" />{group ? t('各期分别计算后汇总', 'Calculated per banner, then combined') : t('本期卡池内首次', 'First copy in this banner')}</span></div>

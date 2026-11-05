@@ -26,7 +26,7 @@ export default function DesktopPersonalWorkspace({ children, user, onRetryPerson
     writeBooleanStorageValue(SIDEBAR_COLLAPSED_KEY, next);
   };
   const sections = [
-    { id: 'overview', label: tt('个人概览', 'Personal overview'), icon: LayoutDashboard },
+    { id: 'overview', label: tt('个人概览／手气走势', 'Overview / luck trends'), icon: LayoutDashboard },
     { id: 'banners', label: tt('卡池分析', 'Banner analysis'), icon: BarChart3 },
     { id: 'workbench', label: tt('导入／修改', 'Import / edit'), icon: PenLine },
   ];
@@ -57,7 +57,7 @@ export default function DesktopPersonalWorkspace({ children, user, onRetryPerson
                 aria-label={id === 'workbench' ? `${label} · ${tt('测试版', 'BETA')}` : label}
                 title={id === 'workbench' ? `${label} · ${tt('测试版', 'BETA')}` : label}
               >
-                {React.createElement(icon, { size: 16 })}<span className="inline-flex items-center gap-2">{label}{id === 'workbench' && <WorkbenchBetaBadge />}</span>
+                {React.createElement(icon, { size: 16 })}<span className="inline-flex items-center gap-2">{label}{id === 'overview' && <span className="bg-endfield-yellow px-1.5 py-0.5 text-[10px] font-black text-black">NEW!</span>}{id === 'workbench' && <WorkbenchBetaBadge />}</span>
               </Link>
             ))}
           </nav>

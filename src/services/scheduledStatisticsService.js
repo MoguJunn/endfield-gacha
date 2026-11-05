@@ -16,16 +16,16 @@ export async function loadPublicStatistics(type, signal, scope = null, { forceRe
     label: 'public statistics', usePublicApiInDev: true, memoryTtlMs: import.meta.env.DEV ? 0 : undefined });
 }
 
-export async function loadPersonalStatistics(signal, { ownerId = '', checkVersion = false } = {}) {
+export async function loadPersonalStatistics(signal, { ownerId = '', checkVersion = false, forceRefresh = false } = {}) {
   if (import.meta.env.DEV && isContributorDemoModeEnabled()) {
     if (!isContributorDemoSessionActive()) throw new Error('Sandbox login required');
     const { getContributorDemoPersonalStatistics } = await import('../dev/contributorDemoStatistics.js');
     return getContributorDemoPersonalStatistics();
   }
-  const versions = ownerId ? await checkSnapshotVersions(ownerId, { force: checkVersion }) : null;
-  return waitForPersonalSnapshot(readPersonalSnapshot({ ownerId, key: 'statistics', version: versions?.personal?.statistics, fetcher: async () => {
+  const versions = ownerId ? await checkSnapshotVersions(ownerId, { force: checkVersion || forceRefresh }) : null;
+  return waitForPersonalSnapshot(readPersonalSnapshot({ ownerId, key: 'statistics', version: versions?.personal?.statistics, forceRefresh, fetcher: async () => {
     const { headers } = await getSameOriginAuthHeaders({ Accept: 'application/json' }, { syncSiteSession: false, useSiteSessionCache: true, allowSiteSessionToken: false });
-    const response = await fetch('/api/stats?type=personal_statistics', { signal: ownerId ? undefined : signal, headers, credentials: 'same-origin' });
+    const response = await fetch('/api/stats?type=personal_statistics', { signal: ownerId ? undefined : signal, headers, credentials: 'same-origin', ...(forceRefresh ? { cache: 'no-store' } : {}) });
     const result = await response.json();
     if (!response.ok || result.success === false) throw new Error('Personal statistics unavailable');
     return result;
