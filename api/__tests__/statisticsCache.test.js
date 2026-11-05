@@ -54,6 +54,7 @@ describe('public statistics cache boundaries', () => {
     const group = response(); await handleGroupStatistics({ query: { groupKey: 'limited' } }, group, db);
     expect(group.headers.get('Cache-Control')).toBe('no-store');
     expect(group.status).toHaveBeenCalledWith(202);
+    db.from.mockReturnValue({ select: () => ({ eq: async () => ({ data: [{ pool_id: 'hidden-target' }] }) }) });
     const missing = response(); await handlePoolObservations({ query: { poolId: 'not-visible' } }, missing, db);
     expect(missing.headers.get('Cache-Control')).toBe('no-store');
     expect(missing.status).toHaveBeenCalledWith(404);
