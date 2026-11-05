@@ -1,5 +1,6 @@
 /* eslint-disable no-await-in-loop -- OCR tiles run sequentially to bound model memory and report progress. */
 import { buildTilePlan, dedupeOcrTokens, mapOcrItemsToTokens, normalizeOcrBox } from './tokens.js';
+import { loadOcrWasm, OCR_RESOURCES } from './ocrResources.js';
 
 let enginePromise;
 let imageDataToMat;
@@ -9,7 +10,7 @@ async function cachedModel(url) {
   const cache = globalThis.caches ? await caches.open('workbench-xhh-models-v1').catch(() => null) : null;
   let response = await cache?.match(url);
   if (!response) {
-    response = await fetch(url, { cache: 'force-cache' });
+    response = await fetch(url, { cache: 'force-cache', signal: AbortSignal.timeout(180000) });
     if (!response.ok) throw new Error('截图识别资源暂不可用，请刷新后重试或改用问卷填写。');
     if ((response.headers.get('content-type') || '').includes('text/html')) throw new Error('未能加载截图识别资源，请刷新后重试或改用问卷填写。');
     await cache?.put(url, response.clone()).catch(() => {});
@@ -17,20 +18,29 @@ async function cachedModel(url) {
   return response;
 }
 
-async function initialize(resourceBase) {
+async function initialize() {
   if (!enginePromise) enginePromise = (async () => {
     progress({ message: '加载本地 OCR 引擎与模型；首次加载稍久', current: 0, total: 1 });
-    const sdk = await import(/* @vite-ignore */ `${resourceBase}paddleocr.mjs`);
+    const [sdk, cvModule, ort] = await Promise.all([
+      import(/* @vite-ignore */ OCR_RESOURCES.sdk),
+      import(/* @vite-ignore */ OCR_RESOURCES.opencv),
+      import(/* @vite-ignore */ OCR_RESOURCES.ort),
+    ]);
     const { PaddleOCR } = sdk;
-    imageDataToMat = sdk.imageDataToMat;
+    const cv = cvModule.default instanceof Promise ? await cvModule.default : cvModule.default;
+    imageDataToMat = imageData => cv.matFromArray(imageData.height, imageData.width, cv.CV_8UC4, imageData.data);
+    progress({ message: '正在下载截图识别资源；首次使用请保持页面打开', current: 0, total: 1 });
+    // Finish the network transfer before the SDK starts its fixed 60s session timer.
+    // Passing the cached bytes also avoids a second download during initialization.
+    ort.env.wasm.wasmBinary = await loadOcrWasm();
+    progress({ message: '识别资源已就绪，正在初始化本地模型', current: 0, total: 1 });
     const engine = await PaddleOCR.create({
-      textDetectionModelName: 'PP-OCRv6_tiny_det', textDetectionModelAsset: { url: `${resourceBase}PP-OCRv6_tiny_det_onnx_infer.tar` },
-      textRecognitionModelName: 'PP-OCRv6_small_rec', textRecognitionModelAsset: { url: `${resourceBase}PP-OCRv6_small_rec_onnx_infer.tar` },
-      // Use the SDK's supported fetch hook so CacheStorage returns a Response for the
-      // original same-origin model URL. connect-src 'self' does not permit blob fetches.
+      textDetectionModelName: 'PP-OCRv6_tiny_det',
+      textRecognitionModelName: 'PP-OCRv6_small_rec',
+      // The SDK resolves these names to PaddlePaddle's official model storage.
       fetch: cachedModel,
       textDetectionBatchSize: 1, textRecognitionBatchSize: 6,
-      ortOptions: { backend: 'wasm', wasmPaths: `${resourceBase}wasm/`, numThreads: 1, proxy: false },
+      ortOptions: { backend: 'wasm', wasmPaths: OCR_RESOURCES.wasmBase, numThreads: 1, proxy: false },
     });
     progress({ message: '本地 OCR 模型初始化完成', initialized: true, current: 1, total: 1 });
     return engine;
@@ -40,7 +50,7 @@ async function initialize(resourceBase) {
 
 self.onmessage = async ({ data }) => {
   try {
-    const engine = await initialize(data.resourceBase);
+    const engine = await initialize();
     if (data.type === 'initialize') { self.postMessage({ type: 'initialized' }); return; }
     const image = await createImageBitmap(data.file);
     try {

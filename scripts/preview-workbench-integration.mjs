@@ -113,7 +113,7 @@ const plugin = {
       }
       if (url.pathname.startsWith('/api/')) return json(200, { success: true, data: [], profile: { role: 'user' }, config: {}, unreadCount: 0 });
       // The preview cannot make production API or authentication requests.
-      res.setHeader('Content-Security-Policy', `connect-src 'self' ws://127.0.0.1:${port}; form-action 'none'`);
+      res.setHeader('Content-Security-Policy', `connect-src 'self' ws://127.0.0.1:${port} https://cdn.jsdelivr.net https://paddle-model-ecology.bj.bcebos.com; form-action 'none'`);
       next();
     } });
   },

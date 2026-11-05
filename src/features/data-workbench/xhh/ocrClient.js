@@ -1,5 +1,4 @@
-export function createOcrClient({ workerFactory = () => new Worker(new URL('./ocr.worker.js', import.meta.url), { type: 'module' }),
-  resourceBase = new URL(`${import.meta.env?.BASE_URL || '/'}ocr/xhh/`, globalThis.location?.origin || 'http://localhost').href } = {}) {
+export function createOcrClient({ workerFactory = () => new Worker(new URL('./ocr.worker.js', import.meta.url), { type: 'module' }) } = {}) {
   let worker = null;
   let rejectActive = null;
   let cleanupActive = null;
@@ -27,7 +26,7 @@ export function createOcrClient({ workerFactory = () => new Worker(new URL('./oc
       }
     };
     worker.onerror = event => { finish(); worker?.terminate(); worker = null; reject(new Error(event.message || 'OCR 工作线程加载失败')); };
-    worker.postMessage({ type, file, resourceBase });
+    worker.postMessage({ type, file });
   });
   return { recognize: (file, options) => request('recognize', file, options), initialize: options => request('initialize', null, options), cancel, dispose: cancel };
 }

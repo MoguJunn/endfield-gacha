@@ -1,6 +1,6 @@
 # OCR 资源来源与许可
 
-这些文件均为公开软件或公开模型，不含用户截图。`src/features/data-workbench/xhh/prepareResources.mjs` 可重复生成该目录。
+截图识别使用以下公开软件和公开模型，不含用户截图。模型从 PaddlePaddle 官方存储下载，运行库从官方 npm 发布包经 jsDelivr 分发，网站仅保留许可说明。
 
 - PaddleOCR.js 0.4.2：PaddlePaddle Authors，Apache License 2.0。源项目 <https://github.com/PaddlePaddle/PaddleOCR>。
 - PP-OCRv6 tiny 检测、small 识别模型：PaddlePaddle，Apache License 2.0。源项目 <https://huggingface.co/PaddlePaddle/PP-OCRv6_tiny_det_onnx>、<https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx>。
@@ -9,7 +9,7 @@
 - js-yaml：Vitaly Puzrin，MIT License。源项目 <https://github.com/nodeca/js-yaml>。
 - clipper-lib：Angus Johnson / Javascript port contributors，Boost Software License 1.0。源项目 <https://sourceforge.net/projects/jsclipper/>。
 
-`paddleocr.mjs` 保留 esbuild 提取的依赖许可注释；`APACHE-2.0.txt` 保存 PaddleOCR、模型与 OpenCV 适用的许可证正文。
+CDN 发布包保留各依赖许可信息；`APACHE-2.0.txt` 保存 PaddleOCR、模型与 OpenCV 适用的许可证正文。
 
 ## ONNX Runtime / js-yaml 的 MIT License
 

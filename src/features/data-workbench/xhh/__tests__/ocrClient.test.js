@@ -4,12 +4,12 @@ import { createOcrClient } from '../ocrClient.js';
 function fakeWorker() { return { postMessage: vi.fn(), terminate: vi.fn(), onmessage: null, onerror: null }; }
 
 describe('真实 OCR Worker 客户端合同', () => {
-  it('转发图片、同源资源地址与阶段进度，返回真实 token 结构', async () => {
+  it('转发图片与阶段进度，返回真实 token 结构', async () => {
     const worker = fakeWorker(); const progress = vi.fn();
-    const client = createOcrClient({ workerFactory: () => worker, resourceBase: 'http://localhost/ocr/xhh/' });
+    const client = createOcrClient({ workerFactory: () => worker });
     const file = new Blob(['binary image']);
     const pending = client.recognize(file, { onProgress: progress });
-    expect(worker.postMessage).toHaveBeenCalledWith({ type: 'recognize', file, resourceBase: 'http://localhost/ocr/xhh/' });
+    expect(worker.postMessage).toHaveBeenCalledWith({ type: 'recognize', file });
     worker.onmessage({ data: { type: 'progress', message: '识别分块', current: 1, total: 3 } });
     worker.onmessage({ data: { type: 'result', result: { tokens: [{ text: '68抽' }], diagnostics: { status: 'completed' } } } });
     expect((await pending).tokens[0].text).toBe('68抽');
@@ -43,7 +43,7 @@ describe('真实 OCR Worker 客户端合同', () => {
     const factory = vi.fn().mockReturnValueOnce(workers[0]).mockReturnValueOnce(workers[1]);
     const client = createOcrClient({ workerFactory: factory });
     const pending = client.initialize();
-    workers[0].onmessage({ data: { type: 'error', message: 'error loading dynamically imported module: /ocr/xhh/paddleocr.mjs' } });
+    workers[0].onmessage({ data: { type: 'error', message: 'error loading dynamically imported module: https://cdn.jsdelivr.net/npm/@paddleocr/paddleocr-js@0.4.2/+esm' } });
     await expect(pending).rejects.toThrow('截图识别引擎未能加载');
     const retry = client.initialize(); workers[1].onmessage({ data: { type: 'initialized' } });
     expect(await retry).toEqual({ initialized: true });
