@@ -155,23 +155,15 @@ export function useCloudSync({ showToast }) {
         ? analysis.scope.poolManifest
         : [];
 
-      const knownPoolsMap = new Map();
-      [...analysisPools, ...visiblePools].forEach((pool) => {
-        const poolId = pool?.id || pool?.pool_id;
-        if (poolId) {
-          const existing = knownPoolsMap.get(poolId) || {};
-          knownPoolsMap.set(poolId, {
-            ...existing,
-            ...pool,
-            id: poolId,
-          });
-        }
-      });
+      const normalizePoolId = pool => ({ ...pool, id: pool?.id || pool?.pool_id });
+      const knownPools = mergePoolCollections(
+        visiblePools.map(normalizePoolId), analysisPools.map(normalizePoolId)
+      );
 
       return prepareCloudAnalysisSnapshot({
         kind: 'analysis',
         ownerId: currentUser.id,
-        pools: [...knownPoolsMap.values()],
+        pools: knownPools,
         analysis,
         meta: analysis.meta || null,
         source: analysis.source || 'unknown',

@@ -135,6 +135,9 @@ function inferImportServerIdFromSignals(account = {}, source = 'cn') {
       account.channelName, account.channel_name].join(' ').toLowerCase();
     if (channelId === '2' || /b服|bilibili|\bbili\b|\bcn-b\b/.test(channelSignal)) return 'bilibili';
     if (channelId === '1' || account.isOfficial === true) return '1';
+    // CN names the API gateway, not the account channel. Without binding
+    // evidence, let the explicit storage scope or existing history decide.
+    return normalizeImportServerIdForSource(account.serverScope || account.server_scope, source) || null;
   }
   const signal = [
     account.serverTag,
@@ -221,7 +224,7 @@ async function resolveExistingAccountServerId(supabase, userId, gameUid, source 
   return pickExistingServerIdFromRows(data, source);
 }
 
-async function resolveImportAccountServerContext(supabase, userId, account = {}, source = 'cn') {
+export async function resolveImportAccountServerContext(supabase, userId, account = {}, source = 'cn') {
   const explicitServerId = normalizeImportServerIdForSource(account.serverId || account.server_id, source);
   const inferredServerId = normalizeImportServerIdForSource(inferImportServerIdFromSignals(account, source), source);
   const existingServerId = normalizeImportServerIdForSource(
@@ -229,6 +232,7 @@ async function resolveImportAccountServerContext(supabase, userId, account = {},
     source
   );
   const serverId = inferredServerId
+    || (explicitServerId === 'bilibili' ? explicitServerId : null)
     || existingServerId
     || explicitServerId
     || (source === 'cn' ? '1' : null);

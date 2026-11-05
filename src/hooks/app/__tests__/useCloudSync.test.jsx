@@ -26,10 +26,10 @@ vi.mock('../../../services/bootstrapService.js', () => ({
   getBootstrapVisiblePools: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock('../../../services/poolReadService.js', () => ({
+vi.mock('../../../services/poolReadService.js', async (importOriginal) => ({
+  ...await importOriginal(),
   loadAllPoolsForCatalog: vi.fn(),
   loadVisiblePools: vi.fn(),
-  mergePoolCollections: vi.fn((primary, fallback) => [...primary, ...fallback]),
 }));
 
 vi.mock('../../../services/accountGachaDataService.js', () => ({
@@ -144,6 +144,22 @@ describe('useCloudSync.loadCloudData', () => {
       viewKey: '__group_all',
     }));
     expect(snapshot.analysis.meta.accountKey).toBe('account-default');
+  });
+
+  it('正式目录替换个人分析旧快照中的明河前瞻角色与武器池', async () => {
+    const character = { id: 'special_1_6_2', name: '烟火邀星河', type: 'limited', up_character: '明河', start_time: '2026-11-05T04:00:00Z' };
+    const weapon = { id: 'weaponbox_1_6_2', name: '月映申领', type: 'weapon', up_character: '唤月', start_time: character.start_time };
+    loadVisiblePools.mockResolvedValue([character, weapon]);
+    loadAccountGachaAnalysis.mockResolvedValue({
+      availability: 'ready', meta: { ownerId: 'user-1' },
+      scope: { poolManifest: [
+        { ...character, id: 'special_manual_limited_pool_us8t52_20261105_14pdl0' },
+        { ...weapon, id: 'weaponbox_manual_weapon_pool_1bv5uc_20261105_1nb5dl' },
+      ] },
+    });
+    const { result } = renderHook(() => useCloudSync({ showToast: vi.fn() }));
+    const snapshot = await result.current.loadCloudData({ id: 'user-1' });
+    expect(snapshot.pools.map(pool => pool.id)).toEqual([character.id, weapon.id]);
   });
 
   it('building poll 复用公共卡池并跳过目录网络读取', async () => {

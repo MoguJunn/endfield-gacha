@@ -790,6 +790,20 @@ describe('executeFullImport import mode metadata', () => {
     expect(fetchU8TokenByUid).toHaveBeenCalledWith('bili-login-not-game-uid', 'app-token');
   });
 
+  it.each([
+    [{ serverId: '1' }, [{ server_id: 'bilibili' }], 'bilibili'],
+    [{ serverId: '1', channelMasterId: '2' }, [{ server_id: '1' }], 'bilibili'],
+    [{ serverId: '1', server_scope: 'bilibili' }, [], 'bilibili'],
+    [{ serverId: '1', channelMasterId: '1' }, [{ server_id: 'bilibili' }], '1'],
+    [{ serverId: '1' }, [], '1'],
+  ])('resolves CN channel from binding or persisted scope instead of the API gateway: %j', async (account, rows, expected) => {
+    const query = { eq: () => query, range: async () => ({ data: rows, error: null }) };
+    const client = { from: () => ({ select: () => query }) };
+    const { resolveImportAccountServerContext } = await import('../../backend/fullImportService.js');
+    await expect(resolveImportAccountServerContext(client, 'user-1', { ...account, gameUid: '10002' }, 'cn'))
+      .resolves.toEqual({ serverId: expected, region: 'cn', requestServerId: '1' });
+  });
+
   it('keeps anomaly metadata paired with its record when timestamps reorder the batch', async () => {
     const { buildStagedRecordsWithMetadata } = await import('../../backend/fullImportService.js');
     const result = buildStagedRecordsWithMetadata(

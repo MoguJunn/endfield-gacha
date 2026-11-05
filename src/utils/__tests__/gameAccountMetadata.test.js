@@ -56,6 +56,15 @@ describe('gameAccountMetadata', () => {
     });
   });
 
+  it('preserves a persisted Bilibili scope when an API response contains CN gateway server 1', () => {
+    const metadata = { gameUid: '10000001', server_id: '1', server_scope: 'bilibili', region: 'cn' };
+    expect(normalizeGameAccountServerId(metadata)).toBe('bilibili');
+    expect(normalizeGameAccountMetadata(metadata)).toMatchObject({
+      serverId: 'bilibili', accountKey: '10000001::channel:2', region: 'cn',
+    });
+    expect(buildGameAccountServerTag(metadata)).toBe('B服');
+  });
+
   it('keeps chinese server tags unchanged under zh locales', () => {
     expect(localizeGameAccountServerTag('国际服·亚服', 'zh-CN')).toBe('国际服·亚服');
   });

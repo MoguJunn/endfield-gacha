@@ -13,6 +13,7 @@ import {
 import { sanitizePublicPoolRecord } from '../../shared/publicCatalogDto.js';
 import { APPROVED_PUBLIC_RESOURCE_HOSTS } from '../utils/publicResourceUrl.js';
 import { isReservedPoolTypeId } from '../../shared/poolIdValidation.js';
+import { classifyPoolIdSource, normalizeEntityNameForMatch } from '../utils/canonicalEntityUtils.js';
 
 const PUBLIC_STATS_API_TIMEOUT_MS = 25000;
 const PUBLIC_DATA_CACHE_TTL = 60 * 1000;
@@ -235,7 +236,26 @@ export function mergePoolCollections(primaryPools = [], fallbackPools = []) {
     });
   });
 
-  return Array.from(merged.values()).sort(sortVisiblePoolRecords);
+  const pools = Array.from(merged.values());
+  // Official promotion removes a manual row from the database, while older
+  // browser catalogues and personal manifests can still contain its old ID.
+  // Require an exact target/type/start match and one unambiguous official row.
+  const promotionKey = pool => {
+    const target = normalizeEntityNameForMatch(pool.up_character);
+    const starts = Date.parse(pool.start_time);
+    return target && Number.isFinite(starts)
+      ? JSON.stringify([normalizeRemotePoolType(pool.type), target, starts]) : null;
+  };
+  const officialByKey = new Map();
+  for (const pool of pools) {
+    const key = promotionKey(pool);
+    if (!key || classifyPoolIdSource(pool.id) !== 'official') continue;
+    officialByKey.set(key, [...(officialByKey.get(key) || []), pool]);
+  }
+  return pools.filter(pool => {
+    if (!['manual_placeholder', 'legacy_manual_seed'].includes(classifyPoolIdSource(pool.id))) return true;
+    return officialByKey.get(promotionKey(pool))?.length !== 1;
+  }).sort(sortVisiblePoolRecords);
 }
 
 export async function loadVisiblePools(options = {}) {
