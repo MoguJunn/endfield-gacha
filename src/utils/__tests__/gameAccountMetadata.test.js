@@ -63,6 +63,8 @@ describe('gameAccountMetadata', () => {
       serverId: 'bilibili', accountKey: '10000001::channel:2', region: 'cn',
     });
     expect(buildGameAccountServerTag(metadata)).toBe('B服');
+    expect(normalizeGameAccountServerId({ ...metadata, channelMasterId: '1' })).toBe('1');
+    expect(normalizeGameAccountServerId({ serverId: '3', serverScope: 'bilibili' })).toBe('3');
   });
 
   it('keeps chinese server tags unchanged under zh locales', () => {

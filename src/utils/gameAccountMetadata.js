@@ -70,7 +70,9 @@ export function normalizeGameAccountServerId(metadata = {}) {
     normalizedServerId === 'bilibili'
     || normalizedServerId === 'bili'
     || normalizedServerId === 'cn-b'
-    || ['bilibili', 'bili', 'cn-b'].includes(serverScope?.toLowerCase())
+    || ((!normalizedServerId || normalizedServerId === '1')
+      && channelMasterId !== '1'
+      && ['bilibili', 'bili', 'cn-b'].includes(serverScope?.toLowerCase()))
     || ((normalizedServerId === '1' || !normalizedServerId) && channelMasterId === '2')
     || /b服|bilibili|bili/.test(signal)
   ) {
