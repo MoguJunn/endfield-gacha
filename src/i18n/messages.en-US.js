@@ -1991,6 +1991,7 @@ const messages = {
   "simulator.toast.inheritLoading": "Loading the account inheritance snapshot...",
   "simulator.toast.inheritBuilding": "The account analysis snapshot is being updated. Please try again shortly.",
   "simulator.toast.inheritUnavailable": "This account's inheritance snapshot is not ready yet. Please try again shortly.",
+  "simulator.toast.inheritFailed": "Could not load this account's inheritance result. Try again shortly; your current simulator save is preserved.",
   "simulator.toast.saveFailed": "Simulator storage could not be read or saved. This action did not complete; allow local storage and reload to retry.",
   "simulator.toast.stateConflict": "Another page updated this simulator save. This action was not saved; reload before continuing.",
   "simulator.toast.legacyUnavailable": "The old simulator save version is unsupported. Your original save is preserved; back it up and contact the maintainer.",

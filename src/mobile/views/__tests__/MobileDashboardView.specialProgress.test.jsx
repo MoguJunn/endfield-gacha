@@ -133,7 +133,8 @@ describe('mobile special mechanism progress', () => {
     await renderPage();
     const panel = expandProgress();
     expect(panel.getByText('首轮限定必出 (80抽)')).toBeTruthy();
-    expect(panel.getByText('40 / 200')).toBeTruthy();
+    expect(panel.getByText('40 / 100 抽')).toBeTruthy();
+    expect(panel.getByText('40 / 180 抽')).toBeTruthy();
   });
 
   it('preserves reconstruction character milestones and rewards across the series', async () => {
@@ -141,7 +142,7 @@ describe('mobile special mechanism progress', () => {
       extra_rule_profile: EXTRA_RULE_PROFILES.RECONSTRUCTION_CHARACTER }, { rewardPaidTotal: 280 });
     await renderPage();
     const panel = expandProgress();
-    expect(panel.getByText('40 / 240')).toBeTruthy();
+    expect(panel.getByText('280 / 480 抽')).toBeTruthy();
     expect(panel.getByText('同系列目标角色保障 (120抽)')).toBeTruthy();
     expect(panel.getByText('同系列目标角色信物 (每240抽)')).toBeTruthy();
     for (const threshold of [30, 60, 90]) {
@@ -157,7 +158,8 @@ describe('mobile special mechanism progress', () => {
       extra_rule_profile: EXTRA_RULE_PROFILES.RECONSTRUCTION_WEAPON }, { rewardPaidTotal: 120 });
     await renderPage();
     const panel = expandProgress();
-    expect(panel.getByText('12 / 20 次申领')).toBeTruthy();
+    expect(panel.getByText('12 / 18 次申领')).toBeTruthy();
+    expect(panel.getByText('12 / 26 次申领')).toBeTruthy();
     expect(panel.getByText('同系列目标武器保障 (8次申领 / 80抽)')).toBeTruthy();
     expect(panel.queryByText('首轮限定必出 (80抽)')).toBeNull();
   });

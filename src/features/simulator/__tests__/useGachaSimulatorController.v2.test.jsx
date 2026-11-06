@@ -113,6 +113,20 @@ describe('simulator controller v2', () => {
     expect(result.current.effectivePityObj.pity6).toBe(40);
     expect(result.current.toastMessage).toBe('simulator.toast.inheritBuilding');
   });
+  it.each([
+    ['simulator_inheritance_response_invalid', 'simulator.toast.inheritFailed'],
+    ['simulator_inheritance_load_failed', 'simulator.toast.inheritFailed'],
+    ['simulator_repository_write_failed', 'simulator.toast.saveFailed'],
+  ])('reports inheritance failure %s without replacing the current save', async (code, message) => {
+    if (code === 'simulator_repository_write_failed') mocks.commit.mockRejectedValue(Object.assign(new Error('failed'), { code }));
+    else mocks.inherit.mockRejectedValue(Object.assign(new Error('failed'), { code }));
+    const { result } = renderHook(() => useGachaSimulatorController());
+    await waitFor(() => expect(result.current.canAffordSinglePull).toBe(true));
+    await act(() => result.current.handleInheritRealState());
+    expect(result.current.toastMessage).toBe(message);
+    expect(result.current.effectivePityObj.pity6).toBe(40);
+    if (code !== 'simulator_repository_write_failed') expect(mocks.commit).not.toHaveBeenCalled();
+  });
   it('inherits guest local history through the same projection without calling the authenticated API', async () => {
     mocks.userId = null;
     mocks.history = Array.from({ length: 40 }, (_, i) => ({

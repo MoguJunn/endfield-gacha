@@ -5,6 +5,7 @@ import { getCurrentUpPoolInfo } from '../../utils/poolTimeUtils';
 import { getPoolAnalysisPityState } from '../../utils/poolAnalysisPity';
 import { calculateCurrentProbability } from '../../utils';
 import AveragePullStatsPanel from './AveragePullStatsPanel';
+import PoolGiftProgress from './PoolGiftProgress.jsx';
 import { useI18n } from '../../i18n/index.js';
 import { localizeEntityName, localizePoolFeaturedList, localizePoolFeaturedName, localizePoolName } from '../../utils/gameDataI18n.js';
 import { getPoolFeaturedNames } from '../../utils/poolFeaturedResolver.js';
@@ -186,64 +187,6 @@ function FeaturedRosterSummary({ names = [], fallback = null }) {
     </div>
   );
 }
-
-/**
- * 武器池赠送进度组件
- */
-const WeaponGifts = ({ stats, capabilities, t }) => {
-  const paidTotal = stats.rewardPaidTotal ?? stats.paidTotal ?? stats.total;
-  const firstStandardGift = Number(capabilities.rules?.firstStandardGift || 0);
-  const firstLimitedGift = Number(capabilities.rules?.firstLimitedGift || 0);
-  const alternateInterval = Number(capabilities.rules?.giftAlternateInterval || 0);
-  const isReconstructionWeapon = capabilities.ruleProfile === EXTRA_RULE_PROFILES.RECONSTRUCTION_WEAPON;
-  let nextWeaponGift = paidTotal < firstStandardGift ? firstStandardGift : firstLimitedGift;
-  let nextWeaponGiftType = paidTotal < firstStandardGift ? 'standard' : 'limited';
-
-  if (firstLimitedGift > 0 && paidTotal >= firstLimitedGift && alternateInterval > 0) {
-    const completedIntervals = Math.floor((paidTotal - firstLimitedGift) / alternateInterval);
-    nextWeaponGift = firstLimitedGift + (completedIntervals + 1) * alternateInterval;
-    nextWeaponGiftType = completedIntervals % 2 === 0 ? 'standard' : 'limited';
-  }
-  const currentProgress = isReconstructionWeapon ? paidTotal / 10 : paidTotal;
-  const nextProgress = isReconstructionWeapon ? nextWeaponGift / 10 : nextWeaponGift;
-  const nextGiftLabel = nextWeaponGiftType === 'limited'
-    ? t('dashboard.analysis.targetWeaponReward')
-    : t('dashboard.analysis.arsenalGiftReward');
-
-  return (
-      <div className="bg-zinc-50 dark:bg-zinc-900 p-3 border-l-2 border-red-500 flex flex-col gap-2">
-          <div className="flex justify-between items-center">
-              <span className="text-xs text-slate-700 dark:text-zinc-300 font-bold flex items-center gap-2">
-                  {t('dashboard.analysis.nextGift')}
-                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold text-white ${nextWeaponGiftType === 'limited' ? 'rainbow-bg' : 'bg-red-500'}`}>
-                    {nextGiftLabel}
-                  </span>
-              </span>
-              <span className="text-xs font-mono text-slate-600 dark:text-zinc-400">
-                {currentProgress} / {nextProgress}{isReconstructionWeapon ? ` ${t('dashboard.unit.claim')}` : ''}
-              </span>
-          </div>
-          <div className="h-1.5 bg-zinc-200 dark:bg-zinc-800 w-full overflow-hidden rounded-sm">
-             <div className={`h-full ${nextWeaponGiftType === 'limited' ? 'rainbow-progress' : 'bg-red-500'}`}
-                  style={{ width: `${Math.min((paidTotal / nextWeaponGift) * 100, 100)}%` }}></div>
-          </div>
-          <div className="flex gap-3 text-[11px] text-slate-600 dark:text-zinc-400 font-mono">
-              <span>{t('dashboard.analysis.obtainedSummary')}</span>
-              <span className="text-red-600 dark:text-red-400 font-medium">
-                {stats.gifts?.standardCount || 0} {t('dashboard.analysis.arsenalGiftReward')}
-              </span>
-              <span className="text-blue-600 dark:text-cyan-400 font-medium">
-                {stats.gifts?.limitedCount || 0} {t('dashboard.analysis.targetWeaponReward')}
-              </span>
-          </div>
-          {isReconstructionWeapon && (
-            <div className="text-[10px] text-slate-500 dark:text-zinc-500 font-mono">
-              {t('dashboard.analysis.reconstructionWeaponGiftRule')}
-            </div>
-          )}
-      </div>
-  );
-};
 
 /**
  * 卡池分析卡片 (Dashboard Version)
@@ -493,20 +436,6 @@ const PoolAnalysisCard = ({ currentPool, stats, effectivePity, checkLimitedInFir
                 </div>
              </div>
 
-             <div className="bg-zinc-50 dark:bg-zinc-900 p-3 border-l-2 border-purple-500 flex flex-col gap-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-slate-700 dark:text-zinc-300 font-bold">
-                    {isReconstructionCharacter
-                      ? t('dashboard.analysis.reconstructionCharacterToken240')
-                      : t('dashboard.analysis.potential240')}
-                  </span>
-                  <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">{(specialProgress?.paidTotal ?? paidTotal) % 240} / 240</span>
-                </div>
-                <div className="h-1.5 bg-zinc-200 dark:bg-zinc-800 w-full overflow-hidden rounded-sm">
-                  <div className="h-full bg-purple-500" style={{width: `${(((specialProgress?.paidTotal ?? paidTotal) % 240) / 240) * 100}%`}}></div>
-                </div>
-             </div>
-
              {capabilities.infoBookEnabled && <div className="bg-zinc-50 dark:bg-zinc-900 p-3 border-l-2 border-cyan-500 flex flex-col gap-2">
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-slate-700 dark:text-zinc-300 font-bold flex items-center gap-1"><FileText size={12}/> {t('dashboard.analysis.infoBook60')}</span>
@@ -543,10 +472,10 @@ const PoolAnalysisCard = ({ currentPool, stats, effectivePity, checkLimitedInFir
                 </div>
              </div>
              
-             {/* 武器赠送 */}
-             {currentPool.isLimitedWeapon !== false && <WeaponGifts stats={stats} capabilities={capabilities} t={t} />}
            </>
          )}
+
+         <PoolGiftProgress stats={stats} capabilities={capabilities} isLimitedWeapon={currentPool.isLimitedWeapon !== false} />
 
          {/* 常驻池特殊进度 */}
          {isStandard && (

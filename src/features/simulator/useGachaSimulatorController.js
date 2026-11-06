@@ -177,7 +177,7 @@ export function useGachaSimulatorController() {
     toastTimer.current = setTimeout(() => setShowToast(false), 3000);
   }, []);
   const showFailure = useCallback(
-    (error) => {
+    (error, fallbackKey = 'simulator.toast.saveFailed') => {
       const code = error?.code || error?.message;
       const key =
         code === 'simulator_revision_conflict'
@@ -188,7 +188,9 @@ export function useGachaSimulatorController() {
               ? 'simulator.toast.rulesUnavailable'
               : code === 'simulator_incomplete_roster'
                 ? 'simulator.toast.syncingPool'
-                : 'simulator.toast.saveFailed';
+                : /^simulator_(?:repository_|indexeddb_|invalid_scope|invalid_session)/.test(code || '')
+                  ? 'simulator.toast.saveFailed'
+                  : fallbackKey;
       showToastMessage(t(key));
     },
     [showToastMessage, t]
@@ -577,7 +579,7 @@ export function useGachaSimulatorController() {
       setExpandedTenPulls(new Set());
       showToastMessage(t('simulator.toast.inheritAllSuccess', { name: selected.nickName || selected.gameUid }));
     } catch (error) {
-      if (generation.current === target.token) showFailure(error);
+      if (generation.current === target.token) showFailure(error, 'simulator.toast.inheritFailed');
     } finally {
       if (operation.current === target) operation.current = null;
       if (generation.current === target.token) setIsInheritingRealState(false);

@@ -1942,6 +1942,7 @@ const messages = {
   "simulator.toast.inheritLoading": "正在读取账号继承快照…",
   "simulator.toast.inheritBuilding": "账号分析快照正在更新，请稍后再试",
   "simulator.toast.inheritUnavailable": "当前账号的继承快照尚未准备好，请稍后再试",
+  "simulator.toast.inheritFailed": "未能读取账号继承结果，请稍后重试；现有模拟存档已保留",
   "simulator.toast.saveFailed": "模拟器存档读写失败，本次操作未完成；请确认浏览器允许本地存储后刷新重试",
   "simulator.toast.stateConflict": "另一页面已更新模拟器存档，本次操作未保存；请刷新后继续",
   "simulator.toast.legacyUnavailable": "旧模拟器存档版本无法识别，原存档已保留；请先备份再联系维护者",

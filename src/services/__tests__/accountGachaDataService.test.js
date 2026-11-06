@@ -16,6 +16,7 @@ import {
 import { getSameOriginAuthHeaders } from '../authFetchService.js';
 import { fetchJsonWithTimeout } from '../supabaseRequest.js';
 import { packInheritanceProjection } from '../../../shared/simulator/historyCodec.js';
+import { PERSONAL_ANALYSIS_SCHEMA_VERSION } from '../../../shared/personalAnalysisVersion.js';
 
 vi.mock('../authFetchService.js', () => ({
   getSameOriginAuthHeaders: vi.fn(),
@@ -137,7 +138,7 @@ describe('accountGachaDataService', () => {
       data: {
         success: true,
         availability: 'ready',
-        schemaVersion: 3,
+        schemaVersion: PERSONAL_ANALYSIS_SCHEMA_VERSION,
         simulatorInheritance: packInheritanceProjection(simulatorInheritance),
         meta: { accountKey: 'uid::server:2', scopeRevision: '9', scopeSnapshotRevision: '9' },
       },
@@ -159,16 +160,16 @@ describe('accountGachaDataService', () => {
       const data = {
         success: true,
         availability: 'ready',
-        schemaVersion: 3,
-        simulatorInheritance: {
+        schemaVersion: PERSONAL_ANALYSIS_SCHEMA_VERSION,
+        simulatorInheritance: packInheritanceProjection({
           contractVersion: 2,
           session: { version: 2, scope: 'uid::server:2' },
           histories: {},
           catalogSignature: 'catalog',
-        },
+        }),
         meta: { accountKey: 'uid::server:2', scopeRevision: '9', scopeSnapshotRevision: '9' },
       };
-      if (failure === 'schema') data.schemaVersion = 2;
+      if (failure === 'schema') data.schemaVersion = PERSONAL_ANALYSIS_SCHEMA_VERSION - 1;
       if (failure === 'contract') data.simulatorInheritance.contractVersion = 1;
       if (failure === 'revision') data.meta.scopeSnapshotRevision = '8';
       if (failure === 'account') data.meta.accountKey = 'uid::server:3';

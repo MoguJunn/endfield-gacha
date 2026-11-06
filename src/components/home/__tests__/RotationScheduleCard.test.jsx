@@ -92,9 +92,7 @@ describe('RotationScheduleCard', () => {
 
     expect(screen.getByText('下一次复刻')).toBeTruthy();
     expect(screen.getByText('伊冯')).toBeTruthy();
-    expect(screen.getByText((_content, element) => (
-      element.classList.contains('truncate') && element.textContent.endsWith('版本更新维护前')
-    ))).toBeTruthy();
+    expect(screen.getByText('版本更新维护前', { selector: 'time' })).toBeTruthy();
     expect(screen.getByAltText('伊冯').getAttribute('src')).toBe('/avatars/伊冯.webp');
     expect(screen.getByAltText('伊冯').parentElement.getAttribute('data-home-avatar-kind')).toBe('character');
     expect(screen.getByAltText('伊冯').parentElement.classList.contains('rounded-full')).toBe(true);

@@ -26,6 +26,7 @@ import { useDashboardViewState } from '../../hooks';
 import { useTheme } from '../../contexts/ThemeContext';
 import PoolAnalysisCard from './PoolAnalysisCard';
 import PoolTimelinePanel from './PoolTimelinePanel';
+import { encodeCompactShareJpeg } from '../../utils/shareImageEncoding.js';
 import AveragePullStatsPanel from './AveragePullStatsPanel';
 import MergedUpAveragePanel from './MergedUpAveragePanel.jsx';
 import DashboardShareCard from './DashboardShareCard';
@@ -1160,7 +1161,7 @@ const DashboardView = ({ showToast }) => {
     waitForShareCard,
   ]);
 
-  const handleDownloadShareImage = React.useCallback(async () => {
+  const handleDownloadShareImage = React.useCallback(async (format = 'png') => {
     if (!hasActiveShareData || !activeSharePayload) {
       showToast?.(t('dashboard.share.noData'), 'warning');
       return;
@@ -1179,9 +1180,10 @@ const DashboardView = ({ showToast }) => {
     }
 
     try {
-      const blob = await getActiveShareImageBlob('full');
+      const prepared = await getActiveShareImageBlob('full');
+      const blob = format === 'jpg' ? await encodeCompactShareJpeg(prepared) : prepared;
       updateShareAction('download', t('dashboard.share.progress.saveImage'));
-      const fileName = buildDashboardShareCardFileName(activeSharePayload, locale);
+      const fileName = buildDashboardShareCardFileName(activeSharePayload, locale).replace(/\.png$/i, `.${format}`);
       const downloaded = downloadShareCard(blob, fileName);
       const message = downloaded ? t('dashboard.share.downloadSuccess') : t('dashboard.share.downloadFailure');
       if (downloaded) {
@@ -2091,6 +2093,15 @@ const DashboardView = ({ showToast }) => {
                         >
                           <Download size={14} />
                           <span>{t('dashboard.share.downloadImage')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isShareActionBusy || !hasActiveShareData}
+                          onClick={() => { setShowShareMenu(false); void handleDownloadShareImage('jpg'); }}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                        >
+                          <Download size={14} />
+                          <span>{isEnglish ? 'Download smaller JPG' : '下载小容量 JPG'}</span>
                         </button>
                         {supportsClipboardImageCopy && (
                           <button

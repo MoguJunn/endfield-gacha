@@ -14,6 +14,8 @@ import MobilePoolRailSelector from '../components/MobilePoolRailSelector';
 import MobileChartContainer from '../components/MobileChartContainer.jsx';
 import ResourceSummaryPanel from '../../components/resources/ResourceSummaryPanel';
 import AveragePullStatsPanel from '../../components/dashboard/AveragePullStatsPanel';
+import PoolGiftProgress from '../../components/dashboard/PoolGiftProgress.jsx';
+import { encodeCompactShareJpeg } from '../../utils/shareImageEncoding.js';
 import MergedUpAveragePanel from '../../components/dashboard/MergedUpAveragePanel.jsx';
 import PoolTimelinePanel from '../../components/dashboard/PoolTimelinePanel';
 import DashboardShareCard from '../../components/dashboard/DashboardShareCard';
@@ -217,7 +219,6 @@ function MobileDashboardView() {
     specialProgress,
     includeFreePullsInStats,
     setIncludeFreePullsInStats,
-    weaponGifts,
     currentUpPool,
     getProgressClass,
     dashboardResourceSummary,
@@ -290,7 +291,6 @@ function MobileDashboardView() {
   );
   const displayPity6 = analysisPity.displayPity6;
   const paidTotal = stats.paidTotal ?? stats.total;
-  const rewardPaidTotal = stats.rewardPaidTotal ?? paidTotal;
   const mobileAnalysisTitle = isReconstructionWeapon
     ? t('dashboard.analysis.title.reconstructionWeapon')
     : isReconstructionCharacter
@@ -741,7 +741,7 @@ function MobileDashboardView() {
     }
   }, [beginShareAction, dashboardSharePayload, failShareAction, finishShareAction, getShareImageBlob, hasDashboardShareData, locale, resetShareActionFeedback, showToast, supportsNativeImageShare, t, updateShareAction, waitForShareCard]);
 
-  const handleDownloadShareImage = React.useCallback(async () => {
+  const handleDownloadShareImage = React.useCallback(async (format = 'png') => {
     if (!hasDashboardShareData) {
       showToast(t('dashboard.share.noExportableData'), 'warning');
       return;
@@ -760,9 +760,10 @@ function MobileDashboardView() {
     }
 
     try {
-      const blob = await getShareImageBlob('full');
+      const prepared = await getShareImageBlob('full');
+      const blob = format === 'jpg' ? await encodeCompactShareJpeg(prepared) : prepared;
       updateShareAction('download', t('dashboard.share.progress.saveImage'));
-      const fileName = buildDashboardShareCardFileName(dashboardSharePayload, locale);
+      const fileName = buildDashboardShareCardFileName(dashboardSharePayload, locale).replace(/\.png$/i, `.${format}`);
       const downloaded = downloadShareCard(blob, fileName);
       const message = downloaded ? t('dashboard.share.downloadSuccess') : t('dashboard.share.downloadFailure');
       if (downloaded) {
@@ -1058,6 +1059,15 @@ function MobileDashboardView() {
                 >
                   {isActionRunning('download') ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                   {downloadImageActionLabel}
+                </button>
+                <button
+                  type="button"
+                  disabled={isShareActionBusy}
+                  onClick={() => void handleDownloadShareImage('jpg')}
+                  className="mobile-ux-card-inset flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-slate-900 disabled:cursor-not-allowed disabled:opacity-60 dark:text-zinc-100"
+                >
+                  <Download size={14} />
+                  {isEnglish ? 'Smaller JPG' : '小容量 JPG'}
                 </button>
                 {supportsClipboardImageCopy ? (
                   <button
@@ -1400,21 +1410,6 @@ function MobileDashboardView() {
                 </div>
               </div>
 
-              {/* 240赠送潜能 */}
-              <div className="mobile-ux-soft-card p-3">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">
-                    {isReconstructionCharacter
-                      ? t('dashboard.analysis.reconstructionCharacterToken240')
-                      : t('dashboard.analysis.potential240')}
-                  </span>
-                  <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">{formatNumber(rewardPaidTotal % 240)} / 240</span>
-                </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                  <div className="h-full bg-purple-500" style={{ width: `${((rewardPaidTotal % 240) / 240) * 100}%` }} />
-                </div>
-              </div>
-
               {/* 情报书 */}
               {analysisPity.capabilities.infoBookEnabled && <div className="mobile-ux-soft-card mobile-ux-soft-card--info p-3">
                 <div className="flex justify-between items-center mb-1">
@@ -1460,42 +1455,10 @@ function MobileDashboardView() {
                 </div>
               </div>
 
-              {/* 武器赠送 */}
-              {weaponGifts && (
-                <div className="mobile-ux-soft-card mobile-ux-soft-card--danger p-3">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="flex items-center gap-2 text-xs font-bold uppercase text-slate-700 dark:text-zinc-200">
-                      {t('dashboard.analysis.nextGift')}
-                      <span className={`px-1 py-0.5 text-[11px] font-bold text-slate-900 dark:text-white ${weaponGifts.nextGiftType === 'limited' ? 'rainbow-bg' : 'bg-red-500'}`}>
-                        {weaponGifts.nextGiftType === 'limited' ? t('dashboard.analysis.targetWeaponReward') : t('dashboard.analysis.arsenalGiftReward')}
-                      </span>
-                    </span>
-                    <span className="text-xs font-mono text-slate-500 dark:text-zinc-500">
-                      {isReconstructionWeapon
-                        ? `${formatNumber(rewardPaidTotal / 10)} / ${formatNumber(weaponGifts.nextGift / 10)} ${t('dashboard.unit.claim')}`
-                        : `${formatNumber(rewardPaidTotal)} / ${formatNumber(weaponGifts.nextGift)}`}
-                    </span>
-                  </div>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-                    <div
-                      className={`h-full ${weaponGifts.nextGiftType === 'limited' ? 'rainbow-progress' : 'bg-red-500'}`}
-                      style={{ width: `${Math.min((rewardPaidTotal / weaponGifts.nextGift) * 100, 100)}%` }}
-                    />
-                  </div>
-                  <div className="mt-1 flex gap-3 text-[11px] text-slate-500 dark:text-zinc-500 font-mono uppercase">
-                    <span>{t('dashboard.analysis.obtainedSummary')}</span>
-                    <span className="text-red-600 dark:text-red-400 font-medium">{weaponGifts.standardCount} {t('dashboard.analysis.arsenalGiftReward')}</span>
-                    <span className="text-cyan-600 dark:text-cyan-400 font-medium">{weaponGifts.limitedCount} {t('dashboard.analysis.targetWeaponReward')}</span>
-                  </div>
-                  {isReconstructionWeapon && (
-                    <div className="mt-1 text-[11px] text-slate-500 dark:text-zinc-500">
-                      {t('dashboard.analysis.reconstructionWeaponGiftRule')}
-                    </div>
-                  )}
-                </div>
-              )}
             </>
           )}
+
+          <PoolGiftProgress stats={stats} capabilities={analysisPity.capabilities} isLimitedWeapon={currentPool.isLimitedWeapon !== false} />
 
           {/* 常驻池特殊进度 */}
           {isStandard && (

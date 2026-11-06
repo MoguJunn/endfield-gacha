@@ -205,7 +205,7 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
     } else if (showInPoolState) {
       containerClass = 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400';
     } else if (isPast) {
-      containerClass = 'bg-zinc-100 dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-800/80 text-zinc-400 dark:text-zinc-600 opacity-60';
+      containerClass = 'bg-zinc-100 dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-800/80 text-zinc-500 dark:text-zinc-400';
     }
 
     return (
@@ -298,21 +298,23 @@ const RotationScheduleCard = React.memo(function RotationScheduleCard({ poolSche
             </div>
           </div>
 
-          <div className="w-full h-px bg-zinc-200 dark:bg-zinc-800/50 my-2"></div>
-
-          <div className={`text-[10px] flex justify-between items-center gap-2 ${
-            isCurrent ? 'font-bold text-amber-600 dark:text-endfield-yellow' : 'opacity-70'
-          }`}
-          >
-            <span className="truncate">
-              {formatDateTime(poolStart, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}
-              <span className="mx-1 opacity-50">-</span>
-              {poolEnd
-                ? formatDateTime(poolEnd, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+          <div className="mt-3 grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1.5 border-t border-zinc-200/80 pt-2.5 text-xs leading-4 dark:border-zinc-700/60">
+            <span className="text-[10px] font-normal tracking-wider text-zinc-500 dark:text-zinc-400">{locale === 'en-US' ? 'FROM' : '起'}</span>
+            <time
+              dateTime={pool.startDate}
+              title={formatDateTime(poolStart)}
+              className="text-right font-medium tabular-nums tracking-wide text-slate-700 dark:text-zinc-200"
+            >{formatDateTime(poolStart, { includeYear: true, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })}</time>
+            <span className="text-[10px] font-normal tracking-wider text-zinc-500 dark:text-zinc-400">{locale === 'en-US' ? 'UNTIL' : '止'}</span>
+            <time
+              dateTime={poolEnd?.toISOString()}
+              title={poolEnd ? formatDateTime(poolEnd) : undefined}
+              className="text-right font-normal tabular-nums tracking-wide text-slate-600 dark:text-zinc-300"
+            >{poolEnd
+                ? formatDateTime(poolEnd, { includeYear: true, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
                 : pool.hasDefaultEndLabel
                   ? tt('home.rotation.endLabel.openEnded', 'Before Version Update Maintenance')
-                  : pool.endLabel || tt('home.rotation.endLabel.openEnded', 'Before Version Update Maintenance')}
-            </span>
+                  : pool.endLabel || tt('home.rotation.endLabel.openEnded', 'Before Version Update Maintenance')}</time>
           </div>
         </div>
         {showConnector && <div className="w-6 h-px shrink-0 bg-zinc-200 dark:bg-zinc-800"></div>}

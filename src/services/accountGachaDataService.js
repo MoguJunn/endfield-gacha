@@ -1,6 +1,7 @@
 import { getSameOriginAuthHeaders } from './authFetchService.js';
 import { fetchJsonWithTimeout } from './supabaseRequest.js';
 import { unpackInheritanceProjection } from '../../shared/simulator/historyCodec.js';
+import { PERSONAL_ANALYSIS_SCHEMA_VERSION } from '../../shared/personalAnalysisVersion.js';
 import { createContributorDemoReadonlyError, isContributorDemoSessionActive } from '../dev/contributorDemoMode.js';
 import { checkSnapshotVersions } from './snapshotChangeService.js';
 import { readPersonalSnapshot } from './personalSnapshotCache.js';
@@ -170,7 +171,7 @@ export async function loadSimulatorInheritance({ accountKey = '' } = {}) {
   }
   const projection = data?.simulatorInheritance;
   const readyValid =
-    data?.schemaVersion === 3 &&
+    data?.schemaVersion === PERSONAL_ANALYSIS_SCHEMA_VERSION &&
     projection?.contractVersion === 2 &&
     projection?.historyEncoding === 1 &&
     projection?.histories?.version === 1 &&
