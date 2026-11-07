@@ -1189,7 +1189,7 @@ const messages = {
   "summary.badge.local": "LOCAL",
   "summary.loading.data": "Loading data...",
   "summary.loading.ranking": "Loading ranking...",
-  "summary.notice.globalStale": "Global aggregates are temporarily served from the last successful cache. Retry later if cross-region traffic is slow.",
+  "summary.notice.globalStale": "The overview shows the previous result while its background update is pending. The catalog updates independently.",
   "summary.notice.globalUnavailable": "Global aggregates are temporarily unavailable because the current network or database is responding slowly. Rankings and local stats remain available.",
   "summary.notice.globalOnly": "Global Aggregate Stats",
   "summary.notice.globalOnlyHint": "Switch to \"My Data\" for detailed charts",

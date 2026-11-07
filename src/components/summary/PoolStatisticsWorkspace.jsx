@@ -13,6 +13,7 @@ import PoolTargetPrediction from './PoolTargetPrediction.jsx';
 import { useSnapshotVersion } from '../../hooks/app/useSnapshotVersion.js';
 import { mergePoolCollections } from '../../services/poolReadService.js';
 import GameAccountPicker from '../pool/GameAccountPicker.jsx';
+import StatisticsInfo from './StatisticsInfo.jsx';
 import '../home/homeLandingDemo.css';
 import '../ui/experienceFoundation.css';
 import './poolStatisticsWorkspace.css';
@@ -40,6 +41,7 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
   const countsVersion = versions?.public?.pool_counts;
   const personalVersion = versions?.personal?.statistics;
   const overviewMeta = useAppStore((state) => state.globalStats?.meta);
+  const overviewCatalogMeta = useAppStore((state) => state.globalStats?.characterCatalog?.meta);
   const fetchGlobalStats = useAppStore((state) => state.fetchGlobalStats);
   const [catalog, setCatalog] = useState({ pools: [], error: false });
   const [scopeChoice, setScopeChoice] = useState(null);
@@ -103,13 +105,14 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
   const scopeKey = group ? `group:${groupKey}` : `pool:${poolId}`;
   const scopeVersion = versions?.public?.[scopeKey];
   const overviewVersion = versions?.public?.global_summary;
+  const overviewCatalogVersion = versions?.public?.character_catalog;
   const selectScope = (nextScope) => {
     setRefreshing(false); setRefreshMessage('');
     setScopeChoice(nextScope);
     if (tab === 'theory' && nextScope.kind === 'group') setTab('observed');
   };
   useEffect(() => {
-    if (source !== 'global' || (!poolId && !groupKey)) return undefined;
+    if (source !== 'global' || tab === 'overview' || (!poolId && !groupKey)) return undefined;
     const controller = new AbortController();
     const requestScope = groupKey ? { kind: 'group', groupKey } : { kind: 'pool', poolId };
     readStats(groupKey ? 'group_statistics' : 'pool_observations', controller.signal, requestScope, { forceRefresh }).then((result) => {
@@ -121,11 +124,17 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
     }).catch(() => { if (!controller.signal.aborted) { setGlobalData({ scopeKey, data: null, error: true, refresh }); setRefreshMessage('failed'); } })
       .finally(() => { if (!controller.signal.aborted) setRefreshing(false); });
     return () => controller.abort();
-  }, [source, poolId, groupKey, scopeKey, refresh, forceRefresh, scopeVersion]);
+  }, [source, tab, poolId, groupKey, scopeKey, refresh, forceRefresh, scopeVersion]);
   useEffect(() => {
     if (source !== 'global' || tab !== 'overview') return undefined;
-    fetchGlobalStats(forceRefresh);
-  }, [source, tab, refresh, fetchGlobalStats, forceRefresh, overviewVersion]);
+    let active = true;
+    Promise.resolve(fetchGlobalStats(forceRefresh)).then(result => {
+      if (active && forceRefresh) setRefreshMessage(!result || result.meta?.stale || result.meta?.status !== 'ready'
+        || !result.characterCatalog || result.characterCatalog.meta?.status === 'stale' ? 'pending' : 'ready');
+    }).catch(() => { if (active) setRefreshMessage('failed'); })
+      .finally(() => { if (active) setRefreshing(false); });
+    return () => { active = false; };
+  }, [source, tab, refresh, fetchGlobalStats, forceRefresh, overviewVersion, overviewCatalogVersion]);
   const localGroup = privateData.data?.groupScopes?.[selectedAccountKey]?.[groupKey];
   const localStats = group ? localGroup?.observations : personalScope?.[poolId];
   const hasGlobalResponse = globalData.scopeKey === scopeKey;
@@ -145,14 +154,12 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
   const memberPools = group ? getStatisticsGroupPools(pools, group.key) : pool ? [pool] : [];
   const members = group ? stats?.members || [] : pool ? [{ id: pool.id, name: pool.name, nameEn: pool.name_en, total: stats?.total }] : [];
   const guest = source === 'local' && !user;
+  const eligibilityNote = source === 'local' ? t('我的数据包含手动修改和已保存的补录；缺少完整明细时，只展示已知结果，无法核实的间隔与出率保持未知。',
+    'My data includes manual edits and saved supplements. Incomplete history shows known results; unverifiable intervals and rates remain unknown.')
+    : t('手动添加或修改会使该游戏账号、区服、卡池整池退出全服统计；其他账号和区服不受影响。删除、重新导入或撤回不会恢复全服统计资格。个人分析仍保留这些资料。',
+      'Manual changes exclude the affected game account, server and banner from community statistics. Other accounts and servers are unaffected. Deleting, reimporting or reverting does not restore community eligibility. Personal analysis retains this data.');
   const refreshResults = () => { setRefreshing(true); setRefreshMessage(''); setForcedRefresh(refresh + 1); setRefresh(value => value + 1); };
   return <div className="experience-ui hl-theme ex-integrated" data-theme={isDark ? 'dark' : 'light'} data-variant={mobile ? 'mobile' : 'desktop'} data-source={source}>
-    <p className="ex-sidebar-hint" role="note" aria-label={t('统计范围说明', 'Statistics eligibility')}>
-      {source === 'local' ? t('我的数据包含手动修改和已保存的补录；缺少完整明细时，只展示已知结果，无法核实的间隔与出率保持未知。',
-        'My data includes manual edits and saved supplements. Incomplete history shows known results; unverifiable intervals and rates remain unknown.')
-        : t('手动添加或修改会使该游戏账号、区服、卡池整池退出全服统计；其他账号和区服不受影响。删除、重新导入或撤回不会恢复全服统计资格。个人分析仍保留这些资料。',
-          'Manual changes exclude the affected game account, server and banner from community statistics. Other accounts and servers are unaffected. Deleting, reimporting or reverting does not restore community eligibility. Personal analysis retains this data.')}
-    </p>
     <div className="ex-main ex-workspace-grid">
       <aside className="ex-sidebar" aria-label={t('统计筛选', 'Statistics filters')}>
         <div className="ex-sidebar-heading"><h2><ListFilter size={16} />{t('统计范围', 'Statistics scope')}</h2>
@@ -171,20 +178,20 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
             {refreshMessage && <p role="status" className="ex-sidebar-hint">{refreshMessage === 'failed' ? t('获取失败，请重试。', 'Refresh failed. Please retry.') : refreshMessage === 'pending'
               ? t('已获取当前结果，后台仍在更新。', 'Current results loaded; the background update is pending.') : t('已获取最新结果。', 'Latest results loaded.')}</p>}
           </section>
-          <p className="ex-sidebar-hint">{t('首次均指同一对象在本期卡池内首次获得。', 'First acquisition always means the first copy of an item within this banner period.')}</p>
           <StatisticsPoolList pools={pools} counts={source === 'local' ? poolPullCounts : { ...globalCounts, ...(stats && !group ? { [poolId]: stats.total } : {}) }}
             scope={scope} onSelect={selectScope} locale={locale} t={t} />
         </div>
       </aside>
       <div className="ex-workspace-content">
-        <header className="ex-heading ex-report-heading"><div className="ex-heading-icon"><BarChart3 size={22} /></div><div><span className="ex-report-eyebrow">{t('寻访数据档案', 'RECRUITMENT ARCHIVE')}</span><h1>{t('分卡池详细统计', 'Banner detail statistics')}</h1></div><span className="ex-report-source">{source === 'global' ? <Cloud size={14} /> : <User size={14} />}{source === 'global' ? t('全服数据', 'Community') : t('我的数据', 'My records')}</span></header>
+        <header className="ex-heading ex-report-heading"><div className="ex-heading-icon"><BarChart3 size={22} /></div><div><span className="ex-report-eyebrow">{t('寻访数据档案', 'RECRUITMENT ARCHIVE')}</span><h1>{t('分卡池详细统计', 'Banner detail statistics')}</h1></div><span className="ex-report-source">{source === 'global' ? <Cloud size={14} /> : <User size={14} />}{source === 'global' ? t('全服数据', 'Community') : t('我的数据', 'My records')}<StatisticsInfo label={t('统计范围说明', 'Statistics eligibility')}>{eligibilityNote}</StatisticsInfo></span></header>
         <nav className="ex-tabs" aria-label={t('统计内容', 'Statistics content')}>
           <button aria-pressed={tab === 'observed'} onClick={() => setTab('observed')}>{t('真实记录图表', 'Record statistics')}</button><button aria-pressed={tab === 'theory'} disabled={Boolean(group)} title={group ? t('请选择具体卡池查看理论预测', 'Select a banner for theoretical prediction') : undefined} onClick={() => setTab('theory')}>{t('理论预测', 'Theoretical prediction')}</button>
           {overview && <button aria-pressed={tab === 'overview'} onClick={() => setTab('overview')}>{t('综合概览与图鉴', 'Overview and catalog')}</button>}
         </nav>
         {!guest && <div className="ex-freshness" role="status">
-          <span><Clock3 size={12} aria-hidden="true" />{t('更新于', 'Updated')} {date(freshness?.updatedAt)}</span>
-          <span>{freshness?.source === 'local-snapshot' ? t('本地计算预览', 'Local snapshot preview') : t('结果变化时更新', 'Updates when results change')}</span>
+          <span><Clock3 size={12} aria-hidden="true" />{tab === 'overview' && source === 'global' ? t('概览更新于', 'Overview updated') : t('更新于', 'Updated')} {date(freshness?.updatedAt)}</span>
+          {tab === 'overview' && source === 'global' && <span>{t('图鉴更新于', 'Catalog updated')} {date(overviewCatalogMeta?.updatedAt)}</span>}
+          <StatisticsInfo label={t('更新说明', 'About updates')}>{freshness?.source === 'local-snapshot' ? t('本地计算预览', 'Local snapshot preview') : t('结果变化时更新', 'Updates when results change')}</StatisticsInfo>
           {freshness?.stale && <span>{t('正在等待后台更新，当前展示上次结果', 'Awaiting background update; showing the previous result')}</span>}
         </div>}
         {tab === 'overview' ? <React.Fragment>{overview(source, privateData.data)}</React.Fragment> : tab === 'theory' ? canPredict ? <PoolTargetPrediction key={poolId} weapon={weapon} targetName={pool.up_character} t={t} /> : <p className="ex-state">{t('该卡池的目标预测规则尚未接入，真实记录图表仍可查看。', 'Target prediction is not available for this banner; recorded statistics remain available.')}</p> : guest ?
@@ -195,16 +202,18 @@ function StatisticsSession({ user, source, mobile, sourceLocked, onSourceChange,
               <div className="ex-banner-title"><div><span className="ex-report-eyebrow">{group ? t('当前观测分组', 'SELECTED GROUP') : t('当前观测卡池', 'SELECTED BANNER')}</span><h2>{scopeName}</h2></div><span className="ex-period-tag"><ArrowUpRight size={14} aria-hidden="true" />{group ? t('各期分别计算后汇总', 'Calculated per banner, then combined') : t('本期卡池内首次', 'First copy in this banner')}</span></div>
               <div className="ex-meta ex-stat-metrics"><div className="ex-metric-primary"><span>{t('有效结果数', 'Valid results')}</span><b data-testid="observation-total">{stats.total.toLocaleString(locale)}</b><small>{t('普通 · 免费十连 · 情报书', 'Regular · Free batches · Intel tickets')}</small></div><div><span><Users size={14} aria-hidden="true" />{t('参与账号', 'Contributing accounts')}</span><b>{stats.participatingAccounts.toLocaleString(locale)}</b></div><div><span><Gift size={14} aria-hidden="true" />{t('免费十连结果', 'Free-batch results')}</span><b>{stats.free.toLocaleString(locale)}</b></div><div><span><BookOpen size={14} aria-hidden="true" />{t('情报书结果', 'Intel-ticket results')}</span><b>{stats.infoBook.toLocaleString(locale)}</b></div></div>
             </section>
-            <div className="ex-data-context"><span>{t('记录范围', 'Record range')}：{date(stats.meta.firstRecordAt)} — {date(stats.meta.lastRecordAt)}</span><span>{t('计算时间', 'Calculated')}：{date(updatedAt)}</span></div>
-            <p className="ex-coverage-note">{group ? t('分组按每个账号、每期卡池分别统计首次与后续获得后汇总，同名对象跨期重新计算首次。首次花费从该账号当期第一条已存记录起计算，缺失记录可能使结果偏低。', 'Group first/repeat acquisitions are calculated per account and banner period, then combined. The same item starts a new first acquisition in each period. First cost starts at the stored prefix; missing history may understate costs.') : t('按本期已导入记录统计首次与后续获得；首次花费从该账号本期第一条记录起计算，缺失记录可能使结果偏低。', 'First and repeat acquisitions use imported records in this banner. First cost starts at the account’s first imported result; missing history may understate costs.')}
+            <div className="ex-data-context"><span className="ex-context-tools">{t('统计说明', 'About these statistics')}<StatisticsInfo label={t('统计口径与记录完整性', 'Methodology and record coverage')}>
+            <p>{t('首次均指同一对象在本期卡池内首次获得。', 'First acquisition always means the first copy of an item within this banner period.')}</p>
+            <p>{group ? t('分组按每个账号、每期卡池分别统计首次与后续获得后汇总，同名对象跨期重新计算首次。首次花费从该账号当期第一条已存记录起计算，缺失记录可能使结果偏低。', 'Group first/repeat acquisitions are calculated per account and banner period, then combined. The same item starts a new first acquisition in each period. First cost starts at the stored prefix; missing history may understate costs.') : t('按本期已导入记录统计首次与后续获得；首次花费从该账号本期第一条记录起计算，缺失记录可能使结果偏低。', 'First and repeat acquisitions use imported records in this banner. First cost starts at the account’s first imported result; missing history may understate costs.')}
               {weapon && t(' 武器十连内部顺序不等同于申领成本，理论预测另按整次申领计算。', ' Weapon order within a batch is not claim cost; predictions use whole claims.')}</p>
-            <details className="ex-record-details"><summary>{t('记录完整性与匹配详情', 'Record coverage and matching')}</summary>
-            {stats.meta.matchedByName > 0 && <p className="ex-coverage-note">{t('已按名称与星级精确匹配角色／武器目录并纳入统计', 'Included after exact name and rarity matching against the item catalog')}：{stats.meta.matchedByName}</p>}
-            {stats.meta.unidentifiedRecords > 0 && <p className="ex-coverage-note" data-testid="unidentified-records">{t('对象不明但星级已知', 'Item unknown, rarity known')}：{stats.meta.unidentifiedRecords}（{Object.entries(stats.meta.unidentifiedByRarity).filter(([, count]) => count > 0).map(([rarity, count]) => `${rarity}★ ${count}`).join(' / ')}）。{t('已计入总数、星级分布及抽取间隔，不归入具体对象；同星级对象的受影响间隔列为未知。', 'Included in totals, rarity distribution and result positions. No item is assigned; affected intervals of the same rarity remain unknown.')}</p>}
+            <p>{t('记录范围', 'Record range')}：{date(stats.meta.firstRecordAt)} — {date(stats.meta.lastRecordAt)}</p>
+            <p>{t('计算时间', 'Calculated')}：{date(updatedAt)}</p>
+            {stats.meta.matchedByName > 0 && <p>{t('已按名称与星级精确匹配角色／武器目录并纳入统计', 'Included after exact name and rarity matching against the item catalog')}：{stats.meta.matchedByName}</p>}
+            {stats.meta.unidentifiedRecords > 0 && <p data-testid="unidentified-records">{t('对象不明但星级已知', 'Item unknown, rarity known')}：{stats.meta.unidentifiedRecords}（{Object.entries(stats.meta.unidentifiedByRarity).filter(([, count]) => count > 0).map(([rarity, count]) => `${rarity}★ ${count}`).join(' / ')}）。{t('已计入总数、星级分布及抽取间隔，不归入具体对象；同星级对象的受影响间隔列为未知。', 'Included in totals, rarity distribution and result positions. No item is assigned; affected intervals of the same rarity remain unknown.')}</p>}
             {stats.meta.excludedRecords > 0 && <details className="ex-coverage-note"><summary>{t('无法用于统计的记录', 'Records unavailable for statistics')}：{stats.meta.excludedRecords}</summary>
               {Object.entries(stats.meta.exclusions).filter(([, count]) => count > 0).map(([reason, count]) => <p key={reason}>{({ missingIdentity: t('账号或记录标识缺失', 'Missing account or record identity'), invalidTime: t('时间无效', 'Invalid time'), invalidRarity: t('星级无效', 'Invalid rarity'), duplicate: t('重复记录', 'Duplicate records') })[reason]}：{count}</p>)}
             </details>}
-            </details>
+            </StatisticsInfo></span></div>
             {stats.personalData?.hasCompleteOrder === false ? <p role="note" className="ex-coverage-note">
               {t('已包含补录中的已知结果。缺少完整抽取顺序，首次花费、出率与间隔图表暂不推算；可在个人卡池分析查看高星数量和时间线。',
                 'Known supplemental results are included. Missing pull order prevents reliable first costs, rates and intervals. Personal banner analysis shows the known acquisition counts and timeline.')}

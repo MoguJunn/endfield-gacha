@@ -77,7 +77,11 @@ describe('scoped legacy statistics', () => {
     expect(screen.getByTestId('legacy-regularTotal')).toHaveTextContent('10');
     expect(screen.getByTestId('legacy-sixStarCount')).toHaveTextContent('1');
     expect(screen.getByTestId('legacy-avgSixStarInterval')).toHaveTextContent('—');
-    expect(screen.getByRole('note')).toHaveTextContent('当前池的正常记录仍计入抽数和星级数量');
-    expect(screen.getByRole('note')).toHaveTextContent('资源明细仅包含可核实部分');
+    expect(screen.getByRole('note')).toHaveTextContent('部分历史不完整，仅统计可核实的间隔与资源。');
+    const info = screen.getByRole('button', { name: '常规统计说明' });
+    const panel = document.getElementById(info.getAttribute('popovertarget'));
+    expect(panel).toHaveAttribute('popover', 'auto');
+    expect(panel).toHaveTextContent('当前池的正常记录仍计入抽数和星级数量');
+    expect(panel).toHaveTextContent('资源明细仅包含可核实部分');
   });
 });

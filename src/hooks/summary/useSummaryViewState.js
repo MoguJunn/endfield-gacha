@@ -128,7 +128,7 @@ export function useSummaryViewState({
   }), [tt]);
   const isGlobalSource = dataSource === 'global';
 
-  const { characterRanking, rankingLoading, userRanking, userRankingLoading } = useRankingData(dataSource, user);
+  const { characterRanking, rankingLoading, userRanking, userRankingLoading } = useRankingData(dataSource, user, globalStats?.meta?.fetchedAt);
   const computedLocalStats = useSummaryStats(history, pools, user, isGlobalSource ? null : scheduledSummary);
   const analysisAvailability = usePersonalAnalysisStore((state) => state.availability);
   const analysisSummary = usePersonalAnalysisStore((state) => state.owner?.summary || null);

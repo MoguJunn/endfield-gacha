@@ -1,6 +1,16 @@
 .experience-ui.ex-integrated { min-height: 0; background: transparent; }
 .ex-workspace-grid { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 24px; align-items: start; }
 .ex-workspace-content { min-width: 0; }
+.ex-info { display: inline-flex; vertical-align: middle; flex-shrink: 0; }
+.experience-ui .ex-info-trigger { display: inline-flex; align-items: center; justify-content: center; padding: 4px; border: 0; border-radius: 50%; background: transparent; color: var(--ex-muted); cursor: pointer; }
+.experience-ui .ex-info-trigger:hover, .experience-ui .ex-info-trigger:focus-visible { color: var(--ex-focus); background: var(--ex-subtle); }
+.ex-info-panel { position: fixed; inset: auto; margin: 0; max-height: min(440px, calc(100dvh - 32px)); overflow-y: auto; box-sizing: border-box; padding: 16px; border: 1px solid var(--ex-border); border-radius: 8px; background: var(--ex-surface); color: var(--ex-ink); box-shadow: 0 12px 36px #0003; font-family: var(--font-sans); font-size: 13px; font-weight: 400; line-height: 1.8; text-align: left; letter-spacing: normal; }
+.ex-info-panel > strong { display: block; margin-bottom: 8px; font-size: 13px; }
+.ex-info-panel p + p { margin-top: 8px; }
+.ex-info-panel .ex-record-details { font-size: 12px; margin-bottom: 0; }
+.ex-section-heading h2, .ex-chart-head h3 { display: flex; align-items: center; gap: 7px; }
+.ex-context-tools { display: flex; align-items: center; gap: 8px; }
+.experience-ui .ex-partial-note { margin: 8px 0; color: var(--ex-muted); font-size: 12px; line-height: 1.6; }
 .ex-sidebar { position: sticky; top: 84px; background: var(--ex-surface); border: 1px solid var(--ex-border); border-top: 3px solid var(--ex-ink); border-radius: var(--ex-radius); min-width: 0; }
 .ex-sidebar-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 16px; border-bottom: 1px solid var(--ex-border); }
 .ex-sidebar-heading h2 { display: flex; align-items: center; gap: 8px; font-size: 14px; }

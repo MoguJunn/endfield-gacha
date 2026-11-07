@@ -23,7 +23,9 @@ const useAppStore = create((set, get) => ({
 
     try {
       const data = await getGlobalSummaryStats(forceRefresh);
-      set({ globalStats: data || createEmptyGlobalSummaryStats() });
+      const stats = data || createEmptyGlobalSummaryStats();
+      set({ globalStats: stats });
+      return stats;
     } finally {
       set({ globalStatsLoading: false });
     }

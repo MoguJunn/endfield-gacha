@@ -1140,7 +1140,7 @@ const messages = {
   "summary.badge.local": "本地",
   "summary.loading.data": "正在获取数据...",
   "summary.loading.ranking": "加载排名...",
-  "summary.notice.globalStale": "全服汇总暂时使用上次成功缓存，跨境网络较慢时请稍后重试。",
+  "summary.notice.globalStale": "综合概览暂用上次结果，后台更新尚未完成；图鉴独立更新。",
   "summary.notice.globalUnavailable": "全服汇总暂时不可用，当前网络或数据库响应较慢；排行榜和本地统计仍可继续查看。",
   "summary.notice.globalOnly": "全服统计数据",
   "summary.notice.globalOnlyHint": "详细图表请切换到「我的数据」查看",

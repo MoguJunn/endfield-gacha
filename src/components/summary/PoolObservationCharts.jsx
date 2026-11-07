@@ -8,6 +8,7 @@ import { getPoolFeaturedNames } from '../../utils/poolFeaturedResolver.js';
 import { resolvePoolCapabilities } from '../../utils/poolCapabilities.js';
 import { buildObservationItemOptions, isObservationSeriesSelected } from '../../utils/observationItemDisplay.js';
 import { TargetOverview, AccountCoverage, CostIntervals, DistributionReadout } from './PoolObservationInsights.jsx';
+import StatisticsInfo from './StatisticsInfo.jsx';
 
 const percent = (value) => `${(value * 100).toFixed(1)}%`;
 const axis = { fontSize: 11, fill: 'var(--ex-muted)' };
@@ -24,13 +25,13 @@ function Card({ id, title, subtitle, children, caption, tone = 'neutral', icon =
     return () => observer.disconnect();
   }, []);
   return <section ref={element} className="ex-chart" data-chart={id} data-tone={tone} data-entered={entered} aria-label={title}>
-    <header className="ex-chart-head"><span className="ex-chart-symbol" aria-hidden="true">{React.createElement(icon, { size: 17 })}</span><div><h3>{title}</h3><p>{subtitle}</p></div><span className="ex-chart-number" aria-hidden="true">{id}</span></header>
-    {children}<div className="ex-chart-caption">{caption}</div>
+    <header className="ex-chart-head"><span className="ex-chart-symbol" aria-hidden="true">{React.createElement(icon, { size: 17 })}</span><div><h3>{title}<StatisticsInfo label={title}><p>{subtitle}</p>{typeof caption === 'string' && <p>{caption}</p>}</StatisticsInfo></h3></div><span className="ex-chart-number" aria-hidden="true">{id}</span></header>
+    {children}{typeof caption !== 'string' && <div className="ex-chart-caption">{caption}</div>}
   </section>;
 }
 
 function SectionHeading({ title, description, icon }) {
-  return <div className="ex-section-heading"><span aria-hidden="true">{React.createElement(icon, { size: 18 })}</span><div><h2>{title}</h2><p>{description}</p></div></div>;
+  return <div className="ex-section-heading"><span aria-hidden="true">{React.createElement(icon, { size: 18 })}</span><div><h2>{title}<StatisticsInfo label={title}>{description}</StatisticsInfo></h2></div></div>;
 }
 
 function Bars({ data, rate = false, unit, t }) {
@@ -123,8 +124,7 @@ export default function PoolObservationCharts({ stats, pool = null, english = fa
   const completedCaption = t('首次从本期第一条已导入记录计数，后续从上次获得计数；均值只含已获得样本。', 'First cost starts at the first imported result in this banner; repeats start at the previous copy. Means include acquired samples only.');
   return <div className="ex-observation-report">
     {!grouped && <TargetOverview options={options} item={focus} onSelect={selectFocus} accounts={stats.participatingAccounts} featuredIds={featuredIds} directoryReady={directoryReady} unit={unit} t={t} />}
-    {grouped && <p className="ex-group-explanation">{t('各期分别按账号与具体对象计算首次、后续花费，再按六星身份合并。一个账号可贡献多个对象、多个期次的样本；样本数不等于账号数。', 'First and repeat costs are calculated for each account, banner period and item, then combined by six-star role. One account can contribute multiple samples across items and periods.')}</p>}
-    <div className="ex-report-toolbar"><div><ScanLine size={16} aria-hidden="true" /><span>{t('本期记录分析', 'Banner record analysis')}</span><small>{t('首次与后续获得分开统计', 'First and repeat copies counted separately')}</small></div>
+    <div className="ex-report-toolbar"><div><ScanLine size={16} aria-hidden="true" /><span>{t('本期记录分析', 'Banner record analysis')}</span><StatisticsInfo label={t('首次与后续获得说明', 'About first and repeat acquisitions')}><p>{t('首次与后续获得分开统计', 'First and repeat copies counted separately')}</p>{grouped && <p>{t('各期分别按账号与具体对象计算首次、后续花费，再按六星身份合并。一个账号可贡献多个对象、多个期次的样本；样本数不等于账号数。', 'First and repeat costs are calculated for each account, banner period and item, then combined by six-star role. One account can contribute multiple samples across items and periods.')}</p>}</StatisticsInfo></div>
       {!grouped && <label className="ex-field">{t('图表对象星级', 'Item rarity')}<select aria-label={t('图表对象星级', 'Item rarity')} value={rarity} onChange={(event) => changeRarity(event.target.value)}>
       <option value="all">{t('全部星级', 'All rarities')}</option>{[6, 5, 4].map((value) => <option key={value} value={value}>{value}★</option>)}</select></label>}
     </div>

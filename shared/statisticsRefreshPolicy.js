@@ -8,9 +8,13 @@ export function statisticsRefreshMinutes({ contributors10m = 0, changedRows10m =
 
 export function statisticsRefreshMeta(snapshot, now = Date.now()) {
   if (!snapshot) return { availability: 'building', updatedAt: null, nextRefreshAt: null };
+  // The RPC may return a future retry/lease time as next_refresh_at. Retrying
+  // failed work never makes an old, changed snapshot fresh again.
+  const overdueChanges = Boolean(snapshot.pending_changes)
+    && now > Date.parse(snapshot.computed_at) + (Number(snapshot.refresh_minutes) || 60) * 60000;
   return {
     availability: 'ready', updatedAt: snapshot.computed_at,
     nextRefreshAt: snapshot.next_refresh_at, refreshMinutes: snapshot.refresh_minutes,
-    stale: now > Date.parse(snapshot.next_refresh_at), schemaVersion: snapshot.schema_version,
+    stale: overdueChanges || now > Date.parse(snapshot.next_refresh_at), schemaVersion: snapshot.schema_version,
   };
 }

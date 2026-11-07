@@ -8,11 +8,19 @@ import { handlePoolObservations } from '../_lib/poolObservations.js';
 import { handleGroupStatistics } from '../_lib/groupStatistics.js';
 import { statisticsMemberSignature } from '../../shared/statisticsScopes.js';
 import { runStatisticsWorker } from '../_lib/statisticsWorker.js';
-import { STATISTICS_SNAPSHOT_VERSION, statisticsRefreshMinutes } from '../../shared/statisticsRefreshPolicy.js';
+import { STATISTICS_SNAPSHOT_VERSION, statisticsRefreshMeta, statisticsRefreshMinutes } from '../../shared/statisticsRefreshPolicy.js';
 const res = () => ({ setHeader: vi.fn(), status: vi.fn().mockReturnThis(), json: vi.fn() });
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); });
 
 describe('scheduled statistics', () => {
+  it('keeps overdue changed snapshots stale while a failed job waits for its next retry', () => {
+    const now = Date.parse('2026-11-06T16:40:00Z');
+    const snapshot = { computed_at: '2026-10-17T23:06:16Z', next_refresh_at: '2026-11-06T16:48:00Z',
+      refresh_minutes: 30, pending_changes: true };
+    expect(statisticsRefreshMeta(snapshot, now)).toMatchObject({ stale: true, updatedAt: snapshot.computed_at });
+    expect(statisticsRefreshMeta({ ...snapshot, pending_changes: false }, now).stale).toBe(false);
+    expect(statisticsRefreshMeta({ ...snapshot, computed_at: '2026-11-06T16:30:00Z' }, now).stale).toBe(false);
+  });
   it('does not claim background work while personal analysis is waiting', async () => {
     const db = { rpc: vi.fn() };
     const onProgress = vi.fn();

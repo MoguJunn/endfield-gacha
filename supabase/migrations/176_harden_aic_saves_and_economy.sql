@@ -407,9 +407,9 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.save_game_state(UUID, TEXT, JSONB, INTEGER, BIGINT) FROM anon, authenticated;
-REVOKE ALL ON FUNCTION public.claim_aic_milestone(UUID, INTEGER) FROM anon, authenticated;
-REVOKE ALL ON FUNCTION public.purchase_aic_item(UUID, TEXT, BIGINT, TEXT, JSONB) FROM anon, authenticated;
+REVOKE ALL ON FUNCTION public.save_game_state(UUID, TEXT, JSONB, INTEGER, BIGINT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.claim_aic_milestone(UUID, INTEGER) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.purchase_aic_item(UUID, TEXT, BIGINT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
 
 DO $$
 BEGIN

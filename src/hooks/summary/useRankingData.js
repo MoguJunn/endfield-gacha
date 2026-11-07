@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getCharacterRankingStats, getUserRankingStats } from '../../services/statsService';
+import { useSnapshotVersion } from '../app/useSnapshotVersion.js';
 
 /**
  * 排名数据加载 Hook
@@ -9,7 +10,9 @@ import { getCharacterRankingStats, getUserRankingStats } from '../../services/st
  * @param {Object|null} user - 用户对象
  * @returns {Object} 排名数据和加载状态
  */
-export function useRankingData(dataSource, user) {
+export function useRankingData(dataSource, user, refreshKey = null) {
+  const versions = useSnapshotVersion();
+  const rankingVersion = versions?.public?.character_ranking;
   // 全服角色排名统计
   const [characterRanking, setCharacterRanking] = useState(null);
   const [rankingLoading, setRankingLoading] = useState(false);
@@ -17,40 +20,30 @@ export function useRankingData(dataSource, user) {
   // 用户个人排名统计
   const [userRanking, setUserRanking] = useState(null);
   const [userRankingLoading, setUserRankingLoading] = useState(false);
-  const hasAttemptedGlobalRankingRef = useRef(false);
   const attemptedUserRankingRef = useRef(null);
   const resolvedUserRankingRef = useRef(null);
   const globalRequestTokenRef = useRef(0);
   const userRequestTokenRef = useRef(0);
 
-  // 加载全服角色排名统计（仅全服数据时加载，只加载一次）
+  // Re-read on published changes and after overview refreshes; the service
+  // still reuses payloads when their published revision is unchanged.
   useEffect(() => {
     if (dataSource !== 'global') {
       globalRequestTokenRef.current += 1;
-      hasAttemptedGlobalRankingRef.current = false;
       queueMicrotask(() => setRankingLoading(false));
       return;
     }
 
-    if (!characterRanking && !hasAttemptedGlobalRankingRef.current) {
-      const requestToken = globalRequestTokenRef.current + 1;
-      globalRequestTokenRef.current = requestToken;
-      hasAttemptedGlobalRankingRef.current = true;
-      queueMicrotask(() => {
-        setRankingLoading(true);
-
-        getCharacterRankingStats()
-          .then(data => {
-            if (globalRequestTokenRef.current !== requestToken) return;
-            setCharacterRanking(data);
-          })
-          .finally(() => {
-            if (globalRequestTokenRef.current !== requestToken) return;
-            setRankingLoading(false);
-          });
-      });
-    }
-  }, [dataSource, characterRanking]);
+    const requestToken = ++globalRequestTokenRef.current;
+    queueMicrotask(() => {
+      if (globalRequestTokenRef.current !== requestToken) return;
+      setRankingLoading(true);
+      getCharacterRankingStats()
+        .then(data => { if (globalRequestTokenRef.current === requestToken) setCharacterRanking(data); })
+        .finally(() => { if (globalRequestTokenRef.current === requestToken) setRankingLoading(false); });
+    });
+    return () => { globalRequestTokenRef.current += 1; };
+  }, [dataSource, rankingVersion, refreshKey]);
 
   // 加载用户个人排名统计（只加载一次）
   useEffect(() => {

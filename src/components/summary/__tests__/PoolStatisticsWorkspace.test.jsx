@@ -74,6 +74,20 @@ describe('real statistics workspace', () => {
     expect(screen.queryByLabelText('首次定义')).toBeNull();
     expect(screen.getByText('首次均指同一对象在本期卡池内首次获得。')).toBeTruthy();
   });
+  it('waits for overview refresh and does not report a stale overview as the latest result', async () => {
+    state.load.mockResolvedValue({ meta: { status: 'stale', stale: true } });
+    render(<PoolStatisticsWorkspace lockedDataSource="global" overview={() => <div>overview</div>} />);
+    fireEvent.click(screen.getByRole('button', { name: '综合概览与图鉴' }));
+    await waitFor(() => expect(state.load).toHaveBeenCalled());
+    let resolve;
+    state.load.mockReturnValue(new Promise(done => { resolve = done; }));
+    fireEvent.click(screen.getByRole('button', { name: '获取最新结果' }));
+    await waitFor(() => expect(state.load).toHaveBeenLastCalledWith(true));
+    expect(screen.getByRole('button', { name: '正在获取…' })).toBeDisabled();
+    await act(async () => resolve({ meta: { status: 'stale', stale: true }, characterCatalog: { meta: { status: 'ready' } } }));
+    expect(await screen.findByText('已获取当前结果，后台仍在更新。')).toBeTruthy();
+    expect(screen.queryByText('已获取最新结果。')).toBeNull();
+  });
   it('switches compact banner rows without loading raw history again', async () => {
     state.user = { id: 'owner' };
     state.load.mockResolvedValue(snapshot([record(1, 'same'), record(2, 'same'), { ...record(3, 'same'), poolId: 'q' }]));

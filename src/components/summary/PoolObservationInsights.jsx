@@ -3,6 +3,7 @@ import { Crosshair, Users, Sparkles } from 'lucide-react';
 import { getCharacterAvatarUrl } from '../../utils/characterUtils.js';
 import { observationAccountCoverage, observationCostInterval, observationShareWithin } from '../../utils/observationInsights.js';
 import ObservationTargetPicker from './ObservationTargetPicker.jsx';
+import StatisticsInfo from './StatisticsInfo.jsx';
 
 const percent = (value) => value === null ? '—' : `${(value * 100).toFixed(1)}%`;
 const valueOrDash = (value) => value === null || value === undefined ? '—' : value;
@@ -12,7 +13,7 @@ export function TargetOverview({ options, item, onSelect, accounts, featuredIds,
   const interval = observationCostInterval(item?.first);
   const avatar = directoryReady && item && getCharacterAvatarUrl(item.canonicalName || item.name, { fuzzy: false });
   return <section className="ex-target-overview" aria-label={t('目标速览', 'Target overview')}>
-    <div className="ex-target-heading"><div><Crosshair size={17} aria-hidden="true" /><h2>{t('目标速览', 'Target overview')}</h2></div>
+    <div className="ex-target-heading"><div><Crosshair size={17} aria-hidden="true" /><h2>{t('目标速览', 'Target overview')}</h2><StatisticsInfo label={t('目标速览说明', 'About target overview')}>{t('中位数表示累计达到 50% 已完成样本的记录数；缺失历史可能低估花费，覆盖率不是抽取概率。', 'The median is the first cost reaching 50% of completed samples. Missing history may understate costs; coverage is not a pull probability.')}</StatisticsInfo></div>
       <ObservationTargetPicker options={options} item={item} onSelect={onSelect} t={t} /></div>
     <div className="ex-target-body"><div className="ex-target-identity">
       {avatar ? <img src={avatar} alt="" /> : <span className="ex-target-placeholder"><Sparkles size={24} aria-hidden="true" /></span>}
@@ -23,7 +24,7 @@ export function TargetOverview({ options, item, onSelect, accounts, featuredIds,
       <div><dt>{t('首获平均花费', 'First-copy mean')}</dt><dd data-insight="mean">{item?.first?.mean?.toFixed(1) ?? '—'}</dd><span>{unit}</span></div>
       <div><dt>{t('可用首获样本', 'Known first-copy costs')}</dt><dd data-insight="samples">{valueOrDash(item?.first?.sampleCount)}</dd><span>{t('可判定花费的已完成样本', 'Completed copies with a known cost')}</span></div>
     </dl></div>
-    <p className="ex-insight-note">{item?.missing ? t('该对象暂无可用统计，暂不显示它的获得与花费指标。', 'Statistics for this item are not yet available; acquisition and cost metrics cannot be shown.') : t('中位数表示累计达到 50% 已完成样本的记录数；缺失历史可能低估花费，覆盖率不是抽取概率。', 'The median is the first cost reaching 50% of completed samples. Missing history may understate costs; coverage is not a pull probability.')}</p>
+    {item?.missing && <p className="ex-insight-note">{t('该对象暂无可用统计，暂不显示它的获得与花费指标。', 'Statistics for this item are not yet available; acquisition and cost metrics cannot be shown.')}</p>}
   </section>;
 }
 
@@ -49,7 +50,7 @@ export function CostIntervals({ items, focusId, onSelect, unit, t }) {
   return <div className="ex-cost-intervals">
     <div className="ex-interval-tools"><div className="ex-controls" role="group" aria-label={t('花费区间类型', 'Cost interval type')}>
       <button aria-pressed={kind === 'first'} onClick={() => setKind('first')}>{t('本期首次', 'First copy')}</button><button aria-pressed={kind === 'repeat'} onClick={() => setKind('repeat')}>{t('后续获得', 'Repeat copies')}</button>
-    </div><span>{t('统一刻度', 'Shared scale')} · 0–{maximum} {unit}</span></div>
+    </div><span>{t('统一刻度', 'Shared scale')} · 0–{maximum} {unit}<StatisticsInfo label={t('花费区间说明', 'About cost intervals')}>{t('各行使用相同刻度，起点为 0。区间为第 25–75 百分位，P90 为累计覆盖至少 90% 已完成样本的位置；不代表未来获得保证。', 'All rows share a scale starting at 0. Bands show the 25th–75th percentiles; P90 reaches at least 90% of completed samples. These are not guarantees for future pulls.')}</StatisticsInfo></span></div>
     <div className="ex-interval-key"><span><i className="ex-interval-swatch" />{t('中间 50% 区间', 'Middle 50%')}</span><span>● {t('中位数', 'Median')}</span><span>◆ {t('90% 位置', '90th percentile')}</span></div>
     <div className="ex-insight-list">
       {!rows.length && <div className="ex-empty">{t('当前筛选没有对象。', 'No items in this filter.')}</div>}
@@ -64,13 +65,12 @@ export function CostIntervals({ items, focusId, onSelect, unit, t }) {
         </div>;
       })}
     </div>
-    <p className="ex-insight-note">{t('各行使用相同刻度，起点为 0。区间为第 25–75 百分位，P90 为累计覆盖至少 90% 已完成样本的位置；不代表未来获得保证。', 'All rows share a scale starting at 0. Bands show the 25th–75th percentiles; P90 reaches at least 90% of completed samples. These are not guarantees for future pulls.')}</p>
   </div>;
 }
 
 export function DistributionReadout({ item, threshold, onThresholdChange, unit, t }) {
   return <section className="ex-distribution-readout" aria-label={t('分布读数', 'Distribution readout')}>
-    <div className="ex-readout-heading"><span><Users size={15} aria-hidden="true" />{item ? `${t('正在解读', 'Reading')} · ${item.name}` : t('选择显示对象后查看读数', 'Select a visible item to read its distribution')}</span>
+    <div className="ex-readout-heading"><span><Users size={15} aria-hidden="true" />{item ? `${t('正在解读', 'Reading')} · ${item.name}` : t('选择显示对象后查看读数', 'Select a visible item to read its distribution')}<StatisticsInfo label={t('分布读数说明', 'About distribution readouts')}>{t('读数始终基于该对象的全部可用已完成样本；缩放图表、合并频数区间均不改变分母。', 'Readouts use all known completed samples for this item. Zooming and frequency grouping do not change the denominator.')}</StatisticsInfo></span>
       <label className="ex-field">{t('观察阈值', 'Cost threshold')}<input aria-label={t('观察阈值', 'Cost threshold')} type="number" min="1" max="10000" value={threshold} onChange={(event) => onThresholdChange(Math.max(1, Math.min(10000, Math.trunc(Number(event.target.value)))))} /><span>{unit}</span></label></div>
     <div className="ex-readout-grid">{['first', 'repeat'].map((kind) => {
       const summary = item?.[kind];
@@ -79,6 +79,6 @@ export function DistributionReadout({ item, threshold, onThresholdChange, unit, 
         <dl><div><dt>{t('中位数', 'Median')}</dt><dd>{valueOrDash(median)}</dd></div><div><dt>{t('90% 位置', '90th percentile')}</dt><dd>{valueOrDash(p90)}</dd></div><div><dt>≤ {threshold} {t('的样本占比', 'sample share')}</dt><dd>{percent(observationShareWithin(summary, threshold))}</dd></div></dl>
         <small>{summary?.sampleCount || 0} {t('个已完成样本', 'completed samples')}</small>
       </div>;
-    })}</div><p className="ex-insight-note">{t('读数始终基于该对象的全部可用已完成样本；缩放图表、合并频数区间均不改变分母。', 'Readouts use all known completed samples for this item. Zooming and frequency grouping do not change the denominator.')}</p>
+    })}</div>
   </section>;
 }

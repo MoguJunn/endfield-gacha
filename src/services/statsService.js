@@ -278,7 +278,7 @@ function isFreshCache(state, ttl) {
 }
 
 async function runCachedRequest(state, fetcher, { cacheTtl = 0, forceRefresh = false, snapshotVersion = null } = {}) {
-  if (snapshotVersion && state.snapshotVersion === snapshotVersion && state.data !== null) return state.data;
+  if (!forceRefresh && snapshotVersion && state.snapshotVersion === snapshotVersion && state.data !== null) return state.data;
   if (!forceRefresh && cacheTtl > 0 && isFreshCache(state, cacheTtl)) {
     return state.data;
   }
@@ -434,9 +434,10 @@ function mergeDistributions(...sources) {
 }
 
 function mergeCatalogQuotaIntoSummary(stats, catalog) {
-  if (!stats || !catalog?.summary?.quota) {
+  if (!stats || !catalog) {
     return stats;
   }
+  if (!catalog.summary?.quota) return { ...stats, characterCatalog: catalog };
 
   const hasQuotaValue = (quota) => [
     'aicQuotaDirect',
@@ -557,10 +558,10 @@ export function normalizeGlobalStats(rpcData) {
     weaponGiftStandard: rpcData.weaponGiftStandard || 0,
     giftTotal: rpcData.giftTotal || 0,
     meta: {
-      status: 'ready',
       source: 'rpc',
       fetchedAt: Date.now(),
       ...rpcData.meta,
+      status: rpcData.meta?.stale || rpcData.meta?.status === 'stale' ? 'stale' : 'ready',
     }
   };
 
@@ -715,16 +716,16 @@ export async function getGlobalSummaryStats(forceRefresh = false) {
         );
         if (persistedSnapshot) {
           writePersistedSnapshot(STORAGE_KEYS.GLOBAL_SUMMARY_STATS_SNAPSHOT, persistedSnapshot);
-          return withStatsMeta(persistedSnapshot, {
+          return withStatsMeta(mergeCatalogQuotaIntoSummary(persistedSnapshot, catalogPayload), {
             status: 'stale',
             source: 'local-cache'
           });
         }
 
-        return createEmptyGlobalSummaryStats({
+        return mergeCatalogQuotaIntoSummary(createEmptyGlobalSummaryStats({
           status: 'unavailable',
           source: 'missing-stats-api'
-        });
+        }), catalogPayload);
       },
       { cacheTtl: versions ? 0 : GLOBAL_STATS_CACHE_TTL, forceRefresh, snapshotVersion: versions ? JSON.stringify([versions.public?.global_summary, versions.public?.character_catalog]) : null }
     );
@@ -770,9 +771,12 @@ export async function getCharacterCatalogStats(forceRefresh = false) {
       async () => {
         const apiPayload = await fetchStatsApi('character_catalog', forceRefresh).catch(() => null);
         if (apiPayload?.characterCatalog) {
-          const normalizedFromApi = sanitizeCharacterCatalogMedia(
-            normalizeGlobalCharacterCatalog(apiPayload.characterCatalog)
-          );
+          const normalizedFromApi = sanitizeCharacterCatalogMedia(withStatsMeta(
+            normalizeGlobalCharacterCatalog(apiPayload.characterCatalog), {
+              ...apiPayload.characterCatalog.meta,
+              status: apiPayload.characterCatalog.meta?.stale ? 'stale' : 'ready',
+            }
+          ));
           writePersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT, normalizedFromApi);
           return normalizedFromApi;
         }
@@ -781,15 +785,16 @@ export async function getCharacterCatalogStats(forceRefresh = false) {
           readPersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT)
         );
         if (persisted) writePersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT, persisted);
-        return persisted;
+        return persisted ? withStatsMeta(persisted, { status: 'stale' }) : null;
       },
       { cacheTtl: versions ? 0 : CHARACTER_CATALOG_CACHE_TTL, forceRefresh, snapshotVersion: versions?.public?.character_catalog }
     );
   } catch (error) {
     logStatsFailure('获取角色图鉴', error);
-    return sanitizeCharacterCatalogMedia(
+    const cached = sanitizeCharacterCatalogMedia(
       characterCatalogRequestState.data || readPersistedSnapshot(STORAGE_KEYS.CHARACTER_CATALOG_SNAPSHOT)
-    ) || null;
+    );
+    return cached ? withStatsMeta(cached, { status: 'stale' }) : null;
   }
 }
 
@@ -810,17 +815,22 @@ export async function getCharacterRankingStats(forceRefresh = false) {
       async () => {
         const apiPayload = await fetchStatsApi('character_ranking', forceRefresh).catch(() => null);
         if (apiPayload?.characterRanking) {
-          writePersistedSnapshot(STORAGE_KEYS.CHARACTER_RANKING_SNAPSHOT, apiPayload.characterRanking);
-          return apiPayload.characterRanking;
+          const ranking = withStatsMeta(apiPayload.characterRanking, {
+            status: apiPayload.characterRanking.meta?.stale ? 'stale' : 'ready',
+          });
+          writePersistedSnapshot(STORAGE_KEYS.CHARACTER_RANKING_SNAPSHOT, ranking);
+          return ranking;
         }
 
-        return readPersistedSnapshot(STORAGE_KEYS.CHARACTER_RANKING_SNAPSHOT);
+        const persisted = readPersistedSnapshot(STORAGE_KEYS.CHARACTER_RANKING_SNAPSHOT);
+        return persisted ? withStatsMeta(persisted, { status: 'stale' }) : null;
       },
       { cacheTtl: versions ? 0 : CHARACTER_RANKING_CACHE_TTL, forceRefresh, snapshotVersion: versions?.public?.character_ranking }
     );
   } catch (error) {
     logStatsFailure('获取角色排名', error);
-    return characterRankingRequestState.data || readPersistedSnapshot(STORAGE_KEYS.CHARACTER_RANKING_SNAPSHOT) || null;
+    const cached = characterRankingRequestState.data || readPersistedSnapshot(STORAGE_KEYS.CHARACTER_RANKING_SNAPSHOT);
+    return cached ? withStatsMeta(cached, { status: 'stale' }) : null;
   }
 }
 
