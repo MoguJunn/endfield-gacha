@@ -126,7 +126,9 @@ function buildAccountLookup(accounts) {
       return;
     }
 
-    accountLookup.set(normalized.gameUid, normalized);
+    const candidates = accountLookup.get(normalized.gameUid) || [];
+    candidates.push(normalized);
+    accountLookup.set(normalized.gameUid, candidates);
   });
 
   return accountLookup;
@@ -204,17 +206,22 @@ function normalizeImportedPool(pool, currentUserId) {
 function normalizeImportedHistoryRecord(record, context) {
   const poolId = normalizeString(record?.poolId || record?.pool_id);
   const pool = poolId ? context.poolLookup.get(poolId) || null : null;
-  const metadata = normalizeGameAccountMetadata({
-    ...(context.accountLookup.get(normalizeString(record?.gameUid || record?.game_uid)) || {}),
+  const recordMetadata = Object.fromEntries(Object.entries({
     gameUid: record?.gameUid || record?.game_uid,
     nickName: record?.nickName || record?.nick_name,
     channelName: record?.channelName || record?.channel_name,
     hgUid: record?.hgUid || record?.hg_uid,
     channelMasterId: record?.channelMasterId || record?.channel_master_id,
     serverId: record?.serverId || record?.server_id,
+    serverScope: record?.serverScope || record?.server_scope,
     region: record?.region || record?.serverRegion,
     isOfficial: record?.isOfficial ?? record?.is_official
-  });
+  }).filter(([, value]) => value !== undefined && value !== null && value !== ''));
+  const ownMetadata = normalizeGameAccountMetadata(recordMetadata);
+  const candidates = context.accountLookup.get(ownMetadata?.gameUid) || [];
+  const matchingAccount = candidates.find(account => account.accountKey === ownMetadata?.accountKey)
+    || (ownMetadata?.accountKey === ownMetadata?.gameUid && candidates.length === 1 ? candidates[0] : null);
+  const metadata = normalizeGameAccountMetadata({ ...matchingAccount, ...recordMetadata });
   const recordId = normalizeRecordIdValue(
     record?.id
       ?? record?.record_id
@@ -222,13 +229,9 @@ function normalizeImportedHistoryRecord(record, context) {
       ?? record?.seq_id
   );
   const rarity = normalizeInteger(record?.rarity);
-  const itemName = normalizeString(
-    record?.name
-      || record?.item_name
-      || record?.itemName
-      || record?.character_name
-      || record?.characterName
-  );
+  const characterId = normalizeString(record?.character_id || record?.characterId || record?.item_id || record?.itemId);
+  const itemName = [record?.name, record?.item_name, record?.itemName, record?.character_name, record?.characterName]
+    .map(normalizeString).find(Boolean) || context.characterNames.get(characterId) || null;
   const timestamp = normalizeTimestamp(record?.timestamp || record?.created_at || record?.createdAt);
   const seqId = normalizeString(record?.seqId || record?.seq_id);
   const explicitIsStandard = normalizeBoolean(record?.isStandard ?? record?.is_standard);
@@ -260,7 +263,7 @@ function normalizeImportedHistoryRecord(record, context) {
     errors.push('rarity 应为 3-6 的数字');
   }
 
-  if (!itemName) {
+  if (!itemName && !context.allowUnidentifiedResults) {
     errors.push('缺少 item_name / name');
   }
 
@@ -286,7 +289,7 @@ function normalizeImportedHistoryRecord(record, context) {
       name: itemName,
       item_name: itemName,
       character_name: normalizeString(record?.character_name || record?.characterName) || itemName,
-      character_id: normalizeString(record?.character_id || record?.item_id),
+      character_id: characterId,
       batchId: normalizeString(record?.batchId || record?.batch_id),
       batch_id: normalizeString(record?.batchId || record?.batch_id),
       seqId,
@@ -393,6 +396,12 @@ export function validateAndNormalizeImportData(data, options = {}) {
   const poolLookup = new Map();
   const knownPoolIds = new Set(existingPoolIds);
   const accountLookup = buildAccountLookup(sourceData.accounts);
+  const characterNames = new Map((Array.isArray(options.characters) ? options.characters : [])
+    .map(character => [normalizeString(character.id), normalizeString(character.name)])
+    .filter(([id, name]) => id && name));
+  // Site backups must round-trip incomplete records already stored by the
+  // site. Preserve unknown identity rather than inventing or dropping a pull.
+  const allowUnidentifiedResults = ['internal_json_v3', 'internal_json_legacy'].includes(detectedFormat.id);
 
   sourceData.pools.forEach((pool, index) => {
     const normalized = normalizeImportedPool(pool, currentUserId);
@@ -419,7 +428,9 @@ export function validateAndNormalizeImportData(data, options = {}) {
       currentUserId,
       poolLookup,
       knownPoolIds,
-      accountLookup
+      accountLookup,
+      characterNames,
+      allowUnidentifiedResults,
     });
 
     if (normalized.errors.length > 0) {
@@ -448,7 +459,7 @@ export function validateAndNormalizeImportData(data, options = {}) {
   } catch (error) {
     errors.push(error.message);
   }
-  const normalizedAccounts = Array.from(accountLookup.values())
+  const normalizedAccounts = Array.from(accountLookup.values()).flat()
     .filter((account) => [...normalizedHistory, ...workbenchEntries].some((record) => record.gameUid === account.gameUid));
 
   if (errors.length > MAX_IMPORT_ERRORS) {
@@ -463,6 +474,7 @@ export function validateAndNormalizeImportData(data, options = {}) {
     stats: {
       poolCount: normalizedPools.length,
       historyCount: normalizedHistory.length,
+      unidentifiedHistoryCount: normalizedHistory.filter(record => !record.name).length,
       supplementCount: workbenchEntries.length,
       accountCount: normalizedAccounts.length
     },

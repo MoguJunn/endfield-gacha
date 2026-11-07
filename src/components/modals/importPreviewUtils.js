@@ -1,4 +1,5 @@
 import { isLcxFourStarPlaceholder } from '../../../shared/lcxImportPlaceholder.js';
+import { buildGameAccountKey, normalizeGameAccountServerId } from '../../utils/gameAccountMetadata.js';
 
 export function normalizeImportPreviewText(value) {
   if (value === null || value === undefined) {
@@ -38,7 +39,7 @@ function getImportAccountKey(account, { allowNameFallback = false } = {}) {
   if (!gameUid && !nickName) {
     return null;
   }
-  return gameUid || `nick:${nickName}`;
+  return gameUid ? buildGameAccountKey({ ...account, gameUid }) : `nick:${nickName}`;
 }
 
 function collectImportAccounts(data) {
@@ -51,6 +52,7 @@ function collectImportAccounts(data) {
 
     const current = accounts.get(key) || {};
     accounts.set(key, {
+      accountKey: key,
       gameUid: current.gameUid || normalizeImportPreviewText(account?.gameUid || account?.game_uid || account?.uid || account?.hgUid),
       nickName: current.nickName || normalizeImportPreviewText(
         account?.nickName
@@ -59,7 +61,7 @@ function collectImportAccounts(data) {
         || (options.allowNameFallback ? account?.name : null)
       ),
       channelName: current.channelName || normalizeImportPreviewText(account?.channelName || account?.channel_name),
-      serverId: current.serverId || normalizeImportPreviewText(account?.serverId || account?.server_id),
+      serverId: current.serverId || normalizeGameAccountServerId(account),
     });
   };
 
@@ -148,6 +150,7 @@ export function buildPendingImportPreview(pendingImport) {
     supplementalDropCount: supplementalDrops.length,
     unresolvedCount: data.unresolvedRecords?.length || 0,
     fourStarPlaceholderCount: history.filter(isLcxFourStarPlaceholder).length,
+    unidentifiedHistoryCount: history.filter(record => !getImportRecordName(record)).length,
     calendarConflictCount: data.calendarConflictCount || 0,
     intervalConflictCount: data.intervalConflictCount || 0,
     sparseSummary: data.importWarningCodes?.includes('sparse_high_star_summary') === true,

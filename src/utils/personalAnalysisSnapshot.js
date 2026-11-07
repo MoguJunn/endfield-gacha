@@ -486,8 +486,10 @@ function buildSelector(history) {
     const poolId = getHistoryPoolId(record);
     const recordAt = toIsoTimestamp(record);
     if (poolId) {
-      totalPulls += 1;
-      poolPullCounts[poolId] = (poolPullCounts[poolId] || 0) + 1;
+      if (!isGiftHistoryPull(record)) {
+        totalPulls += 1;
+        poolPullCounts[poolId] = (poolPullCounts[poolId] || 0) + 1;
+      }
       if (recordAt && (!poolLatestRecordAt[poolId] || recordAt > poolLatestRecordAt[poolId])) {
         poolLatestRecordAt[poolId] = recordAt;
       }

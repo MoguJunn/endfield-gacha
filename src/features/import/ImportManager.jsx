@@ -11,6 +11,8 @@ import {
   saveGameAccountMetadata
 } from '../../utils/gameAccountMetadata.js';
 import { useCloudSync } from '../../hooks';
+import { usePersonalGameAccounts } from '../../hooks/app/usePersonalGameAccounts.js';
+import { getImportAccountScopeConflicts } from '../../utils/importAccountScope.js';
 import {
   loadAccountGachaSeqKeys,
   resolveAccountGachaAliases,
@@ -223,6 +225,7 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
 
   // 从 stores 获取数据
   const user = useAuthStore(state => state.user);
+  const existingAccounts = usePersonalGameAccounts();
   const pools = usePoolStore(state => state.pools);
   const currentPoolId = usePoolStore(state => state.currentPoolId);
   const switchPool = usePoolStore(state => state.switchPool);
@@ -382,6 +385,15 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
         setErrorMessage(result?.error || t('import.errorTitle'));
       }
       return;
+    }
+
+    if (getImportAccountScopeConflicts(result.userInfo ? [result.userInfo] : [], existingAccounts).length) {
+      result = { ...result, summary: { ...result.summary, warnings: [
+        ...(result.summary?.warnings || []),
+        locale === 'en-US'
+          ? 'This UID has older records under another CN server label. Both sets are preserved separately. Check server settings and merge only after confirming they are the same game account.'
+          : '同一 UID 的旧记录保存在另一国服标签下，本次导入后仍分别保留。请到区服设置核对，确认是同一账号后再合并；切换区服看不到旧记录不代表数据被删除。',
+      ] } };
     }
 
     if (result.backendImported) {
@@ -597,7 +609,7 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
       setImportStatus(ImportStatus.ERROR);
       setErrorMessage(error.message || t('import.errorTitle'));
     }
-  }, [currentPoolId, getExistingSeqIds, notifyBotImportUpdated, onClose, onImportComplete, persistImportedAccountMetadata, pools, refreshPersonalData, saveHistoryToServer, savePoolsToServer, switchGameAccount, t, user]);
+  }, [currentPoolId, existingAccounts, getExistingSeqIds, locale, notifyBotImportUpdated, onClose, onImportComplete, persistImportedAccountMetadata, pools, refreshPersonalData, saveHistoryToServer, savePoolsToServer, switchGameAccount, t, user]);
 
   const handleReset = useCallback(() => {
     completionGenerationRef.current += 1;

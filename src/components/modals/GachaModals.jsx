@@ -25,6 +25,7 @@ import { useI18n } from '../../i18n/index.js';
 import { fetchAccountsList } from '../../utils/endfieldAuthChain.js';
 import { buildGameAccountServerTag, localizeGameAccountServerTag, normalizeGameAccountServerId } from '../../utils/gameAccountMetadata.js';
 import { buildPendingImportPreview, normalizeImportPreviewText } from './importPreviewUtils.js';
+import ImportAccountScopeNotice from '../../features/import/components/ImportAccountScopeNotice.jsx';
 
 const DEFAULT_POOL_FORM = {
   name: '',
@@ -276,7 +277,7 @@ export default function GachaModals({
     () => buildImportVerificationResult(importPreview.primaryAccount, importVerifyState.selectedAccount, t),
     [importPreview.primaryAccount, importVerifyState.selectedAccount, t]
   );
-  const importAccountReady = (!importPreview.accountServerMissing || ['1', '2', '3'].includes(importAccountForm.serverId)) && (
+  const importAccountReady = (!importPreview.accountServerMissing || ['1', '2', '3', 'bilibili'].includes(importAccountForm.serverId)) && (
     !pendingImport ||
     !canOverrideImportAccount ||
     (importManualAccountMode
@@ -950,6 +951,12 @@ export default function GachaModals({
                 </p>
               )}
 
+              {importPreview.unidentifiedHistoryCount > 0 && <p className="border border-amber-300 bg-amber-50 p-4 text-xs leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
+                {locale === 'en-US'
+                  ? `${importPreview.unidentifiedHistoryCount} backup records have no item name. Their original rarity, time, sequence and gift flags are preserved; no character, weapon or gift type is inferred.`
+                  : `备份有 ${importPreview.unidentifiedHistoryCount} 条记录缺少对象名称，已保留原星级、时间、序号和赠送标记，不猜测角色、武器或赠礼类型。`}
+              </p>}
+
               {(importPreview.sparseSummary || importPreview.unresolvedCount > 0) && (
                 <div className="border border-amber-300 bg-amber-50 p-4 text-xs leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/20 dark:text-amber-200">
                   {importPreview.sparseSummary
@@ -965,7 +972,8 @@ export default function GachaModals({
                   {locale === 'en-US' ? 'Game server for this Excel' : '这份 Excel 对应的游戏区服'}
                   <select aria-label={locale === 'en-US' ? 'Excel game server' : 'Excel 游戏区服'} className="mt-2 block w-full border border-zinc-300 bg-white p-2 dark:border-zinc-700 dark:bg-zinc-900" value={importAccountForm.serverId || ''} onChange={event => setImportAccountForm(previous => ({ ...previous, serverId: event.target.value }))}>
                     <option value="">{locale === 'en-US' ? 'Select a server' : '请选择区服'}</option>
-                    <option value="1">{locale === 'en-US' ? 'CN (official / Bilibili)' : '国服（官服／B服）'}</option>
+                    <option value="1">{locale === 'en-US' ? 'CN · Official' : '国服 · 官服'}</option>
+                    <option value="bilibili">{locale === 'en-US' ? 'CN · Bilibili' : '国服 · B 服'}</option>
                     <option value="2">{locale === 'en-US' ? 'International · Asia' : '国际服 · 亚洲'}</option>
                     <option value="3">{locale === 'en-US' ? 'International · EU/NA' : '国际服 · 欧美'}</option>
                   </select>
@@ -1055,6 +1063,10 @@ export default function GachaModals({
                               : importVerifyState.selectedAccount?.gameUid
                           ) || '-'}
                         </div>
+                        {importAccountForm.serverId && <div className="mt-1 text-xs font-bold">
+                          {locale === 'en-US' ? 'Import server: ' : '本次导入区服：'}
+                          {localizeGameAccountServerTag(buildGameAccountServerTag(importAccountForm), locale)}
+                        </div>}
                       </div>
                       <button
                         type="button"
@@ -1091,18 +1103,23 @@ export default function GachaModals({
                   <div className="mt-4 grid md:grid-cols-2 gap-2">
                     {importPreview.accounts.map((account) => (
                       <div
-                        key={`${account.gameUid || ''}:${account.nickName || ''}`}
+                        key={account.accountKey}
                         className="border border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-950/60 px-3 py-2"
                       >
                         <div className="text-sm font-bold text-slate-900 dark:text-zinc-100">
                           {account.nickName || '-'}
                         </div>
                         <div className="text-xs text-slate-500 dark:text-zinc-500">UID {account.gameUid || '-'}</div>
+                        <div className="text-xs text-slate-500 dark:text-zinc-500">
+                          {localizeGameAccountServerTag(buildGameAccountServerTag(account), locale)}
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
+
+              <ImportAccountScopeNotice accounts={canOverrideImportAccount ? [importAccountForm] : importPreview.accounts} />
 
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-4">

@@ -8,6 +8,7 @@ const harness = vi.hoisted(() => ({
   result: null,
   fetchStatus: 'idle',
   user: { id: 'user-1' },
+  accounts: [],
   refreshPersonalData: vi.fn(),
   loadAccountSecurityState: vi.fn(),
   notifyOfficialBotImportUpdated: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock('../../../stores', () => ({
 vi.mock('../../../hooks', () => ({
   useCloudSync: () => ({ refreshPersonalData: harness.refreshPersonalData }),
 }));
+vi.mock('../../../hooks/app/usePersonalGameAccounts.js', () => ({ usePersonalGameAccounts: () => harness.accounts }));
 
 vi.mock('../../../utils/gameAccountMetadata.js', () => ({
   buildGameAccountKey: (account = {}) => account.gameUid || account.hgUid || '',
@@ -49,6 +51,8 @@ vi.mock('../../../utils/gameAccountMetadata.js', () => ({
   buildHistorySeqDedupeKeys: () => [],
   isGameAccountSelectionMatch: () => true,
   saveGameAccountMetadata: vi.fn(),
+  getHistoryRecordGameUid: account => account?.gameUid || account?.game_uid,
+  normalizeGameAccountServerId: account => account?.serverId || account?.server_id,
 }));
 
 vi.mock('../../../services/accountGachaDataService.js', () => ({
@@ -163,6 +167,7 @@ describe('ImportManager completion behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     harness.user = { id: 'user-1' };
+    harness.accounts = [];
     harness.result = makeResult();
     harness.fetchStatus = 'idle';
     harness.refreshPersonalData.mockResolvedValue({
@@ -233,6 +238,16 @@ describe('ImportManager completion behavior', () => {
     expect(await screen.findByText('记录已保存，但云端刷新失败')).toBeInTheDocument();
     expect(screen.getByText('导入完成，但有事项需要留意')).toBeInTheDocument();
     expect(onImportComplete).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('相同 UID 的官服与 B 服记录分开时保留结果提示，不静默关闭', async () => {
+    harness.accounts = [{ gameUid: 'game-1', serverId: '1' }];
+    harness.result = { ...makeResult(), userInfo: { gameUid: 'game-1', serverId: 'bilibili' } };
+    const onClose = vi.fn();
+    render(<ImportManager isOpen onClose={onClose} />);
+    fireEvent.click(screen.getByRole('button', { name: 'finish-import' }));
+    expect(await screen.findByText(/同一 UID 的旧记录保存在另一国服标签下/)).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
 

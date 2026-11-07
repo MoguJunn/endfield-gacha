@@ -11,6 +11,7 @@ import { filterHistoryForEffectiveGameUid, resolveEffectiveGameUid } from '../..
 import { getPreferredPool } from '../../utils/poolSelectionUtils.js';
 import { isPoolGroupId } from '../../stores/usePoolStore.js';
 import { usePersonalGameAccounts } from './usePersonalGameAccounts.js';
+import { isGiftHistoryPull } from '../../utils/historyInfoBook.js';
 
 /** Shared account/pool scope projection for desktop and mobile selectors. */
 export function usePoolScopeSelectorState({ locale, searchQuery = '', hideZeroPullPools = true } = {}) {
@@ -46,6 +47,7 @@ export function usePoolScopeSelectorState({ locale, searchQuery = '', hideZeroPu
   const historyPoolPullCounts = useMemo(
     () =>
       filteredHistory.reduce((counts, item) => {
+        if (isGiftHistoryPull(item)) return counts;
         const poolId = item.poolId || item.pool_id;
         if (poolId) {
           counts[poolId] = (counts[poolId] || 0) + 1;
@@ -64,7 +66,12 @@ export function usePoolScopeSelectorState({ locale, searchQuery = '', hideZeroPu
       snapshotCounts &&
       typeof snapshotCounts === 'object'
     ) {
-      return snapshotCounts;
+      // Use the same include-free pull total as the detail panel. Older
+      // selector snapshots counted direct gifts as if they were pulls.
+      return Object.fromEntries(Object.entries(snapshotCounts).map(([id, count]) => {
+        const stats = analysisScope.dashboard?.views?.[id]?.includeFree?.stats;
+        return [id, stats ? stats.total : count];
+      }));
     }
     return historyPoolPullCounts;
   }, [analysisScope, effectiveGameUid, hasAnalysisSnapshot, historyPoolPullCounts]);
@@ -111,12 +118,7 @@ export function usePoolScopeSelectorState({ locale, searchQuery = '', hideZeroPu
       [subgroupId]: !currentlyExpanded,
     }));
   }, []);
-  const totalPulls =
-    hasAnalysisSnapshot &&
-    analysisScope?.account?.accountKey === effectiveGameUid &&
-    Number.isFinite(Number(analysisScope?.selector?.totalPulls))
-      ? Number(analysisScope.selector.totalPulls)
-      : Object.values(poolPullCounts).reduce((total, count) => total + count, 0);
+  const totalPulls = Object.values(poolPullCounts).reduce((total, count) => total + count, 0);
   const showOverviewOptions = Boolean(effectiveGameUid);
 
   useEffect(() => {

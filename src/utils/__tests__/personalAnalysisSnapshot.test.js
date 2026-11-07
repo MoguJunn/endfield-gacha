@@ -197,7 +197,7 @@ describe('buildPersonalAnalysisSnapshots', () => {
     expect(limitedB.effectivePity).toEqual({ pity6: 3, pity5: 3, isInherited: true });
   });
 
-  it('选择器保留免费与赠送计数，统计按开关纳入免费且始终排除赠送', () => {
+  it('选择器和详情抽数均排除直接赠送，选择器保留免费结果与最新记录时间', () => {
     const history = [
       createPull({ id: 'paid' }),
       createPull({ id: 'free', is_free: true, timestamp: '2026-01-02T00:00:00.000Z' }),
@@ -218,9 +218,9 @@ describe('buildPersonalAnalysisSnapshots', () => {
     const view = payload.dashboard.views['standard-main'];
 
     expect(payload.selector).toMatchObject({
-      totalPulls: 3,
+      totalPulls: 2,
       latestRecordAt: '2026-01-03T00:00:00.000Z',
-      poolPullCounts: { 'standard-main': 3 },
+      poolPullCounts: { 'standard-main': 2 },
       poolLatestRecordAt: { 'standard-main': '2026-01-03T00:00:00.000Z' },
     });
     expect(view.excludeFree.stats.total).toBe(1);

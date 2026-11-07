@@ -17,6 +17,7 @@ import { getPoolName } from '../importShared';
 import { useI18n } from '../../../i18n/index.js';
 import { evaluateImportHealth } from '../../../utils/importHealth.js';
 import { localizeGameAccountServerTag } from '../../../utils/gameAccountMetadata.js';
+import ImportAccountScopeNotice from './ImportAccountScopeNotice.jsx';
 
 const FetchProgressBar = ({ progress, message, t }) => (
   <div className="w-full">
@@ -411,6 +412,7 @@ export default function OfficialImportContent({
 
   return (
     <div className="space-y-4">
+      <ImportAccountScopeNotice accounts={userInfo ? [userInfo] : availableAccounts || []} />
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div
           className={`inline-flex w-fit items-center gap-2 border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.24em] transition-colors ${healthToneClasses[health.tone] || healthToneClasses.healthy}`}
