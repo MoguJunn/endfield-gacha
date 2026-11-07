@@ -43,7 +43,9 @@ describe('official trust-token import through analysis', () => {
           select: () => query,
           eq: (column, value) => { if (['pool_id', 'type'].includes(column)) rows = rows.filter((row) => row[column] === value); return query; },
           in: (column, values) => { rows = rows.filter((row) => values.includes(row[column])); return query; },
-          range: () => Promise.resolve({ data: rows }), limit: () => Promise.resolve({ data: rows }),
+          order: () => query,
+          range: (from, to) => Promise.resolve({ data: rows.slice(from, to + 1), count: rows.length }),
+          limit: () => Promise.resolve({ data: rows }),
           then: (resolve) => Promise.resolve({ data: rows }).then(resolve),
           upsert: async () => ({ error: null }),
         };

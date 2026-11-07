@@ -50,7 +50,9 @@ describe('full import of official rerun occurrences', () => {
           select: () => query,
           eq: (column, value) => { if (['pool_id', 'type', 'source'].includes(column)) rows = rows.filter((row) => row[column] === value); return query; },
           in: (column, values) => { rows = rows.filter((row) => values.includes(row[column])); return query; },
-          range: () => Promise.resolve({ data: rows }), limit: () => Promise.resolve({ data: rows }),
+          order: () => query,
+          abortSignal: () => query,
+          range: (from, to) => Promise.resolve({ data: rows.slice(from, to + 1), count: rows.length }), limit: () => Promise.resolve({ data: rows }),
           then: (resolve) => Promise.resolve({ data: rows }).then(resolve),
           upsert: async (values) => { if (table === 'pool_id_aliases') aliases.push(...values); return { error: null }; },
         };

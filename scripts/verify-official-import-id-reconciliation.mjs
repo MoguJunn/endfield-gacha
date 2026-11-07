@@ -30,6 +30,8 @@ function matchesFilters(row, filters) {
 
 function createQuery(state, table, operation = 'select', payload = null) {
   const filters = [];
+  let orderColumn = null;
+  let range = null;
   const query = {
     eq(column, value) {
       filters.push({ op: 'eq', column, value });
@@ -38,12 +40,23 @@ function createQuery(state, table, operation = 'select', payload = null) {
     limit() {
       return query;
     },
+    order(column) {
+      orderColumn = column;
+      return query;
+    },
+    range(from, to) {
+      range = [from, to];
+      return query;
+    },
     then(resolve, reject) {
       try {
         const rows = state[table] || [];
         if (operation === 'select') {
+          const selected = rows.filter(row => matchesFilters(row, filters));
+          if (orderColumn) selected.sort((left, right) => String(left[orderColumn]).localeCompare(String(right[orderColumn])));
           return Promise.resolve({
-            data: clone(rows.filter(row => matchesFilters(row, filters))),
+            data: clone(range ? selected.slice(range[0], range[1] + 1) : selected),
+            count: selected.length,
             error: null,
           }).then(resolve, reject);
         }
