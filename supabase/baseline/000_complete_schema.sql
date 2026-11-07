@@ -5,8 +5,8 @@
 --   1. 此文件由 scripts/generate-supabase-baseline.mjs 自动生成
 --   2. 合并 supabase/archive/migrations/ 与 supabase/migrations/ 中的标准前向迁移
 --   3. 不包含 supabase/manual/ 下的 destructive / rollback / data-backfill 脚本
---   4. 生成时间: 2026-10-31T05:38:34.219Z
---   5. 覆盖范围: archive/001_init_tables.sql -> active/2026103104_personal_luck_release_boundaries.sql
+--   4. 生成时间: 2026-11-07T04:59:50.333Z
+--   5. 覆盖范围: archive/001_init_tables.sql -> active/2026110704_bound_global_spark_matching.sql
 -- ============================================
 
 -- >>> BEGIN MIGRATION: archive/001_init_tables.sql
@@ -31873,9 +31873,9 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.save_game_state(UUID, TEXT, JSONB, INTEGER, BIGINT) FROM anon, authenticated;
-REVOKE ALL ON FUNCTION public.claim_aic_milestone(UUID, INTEGER) FROM anon, authenticated;
-REVOKE ALL ON FUNCTION public.purchase_aic_item(UUID, TEXT, BIGINT, TEXT, JSONB) FROM anon, authenticated;
+REVOKE ALL ON FUNCTION public.save_game_state(UUID, TEXT, JSONB, INTEGER, BIGINT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.claim_aic_milestone(UUID, INTEGER) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.purchase_aic_item(UUID, TEXT, BIGINT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
 
 DO $$
 BEGIN
@@ -40015,4 +40015,218 @@ GRANT EXECUTE ON FUNCTION public.read_personal_luck_backfill_batch(text, integer
 NOTIFY pgrst, 'reload schema';
 COMMIT;
 -- <<< END MIGRATION: active/2026103104_personal_luck_release_boundaries.sql
+
+-- >>> BEGIN MIGRATION: active/2026110700_compact_global_summary_pity.sql
+-- Keep all eligible pulls in the numbering pass, but retain only reset events
+-- for the second window and exclusion checks. Low stars still count toward pity.
+BEGIN;
+CREATE OR REPLACE VIEW public.statistics_pity_intervals WITH (security_barrier=true) AS
+WITH catalog AS MATERIALIZED (
+  SELECT p.pool_id,p.start_time,p.end_time,public.statistics_pity_scope(p) AS pity_scope FROM public.pools p
+), numbered AS NOT MATERIALIZED (
+  SELECT h.id,h.user_id,COALESCE(NULLIF(btrim(h.game_uid),''),'legacy') AS game_uid,h.server_scope,
+    h.pool_id,h.rarity,h.timestamp,p.pity_scope,
+    row_number() OVER (PARTITION BY h.user_id,h.game_uid,h.server_scope,p.pity_scope
+      ORDER BY h.timestamp,CASE WHEN h.seq_id ~ '^[0-9]+$' THEN h.seq_id::numeric END,h.id) AS rn
+  FROM public.statistics_history h JOIN catalog p ON p.pool_id=h.pool_id
+  WHERE h.special_type IS DISTINCT FROM 'gift' AND h.is_free IS NOT TRUE
+    AND h.rarity IN (4,5,6) AND h.timestamp>to_timestamp(0) AND nullif(btrim(h.game_uid),'') IS NOT NULL
+), high_star_rows AS MATERIALIZED (
+  SELECT * FROM numbered WHERE rarity>=5
+), resets AS NOT MATERIALIZED (
+  SELECT *,max(rn) FILTER(WHERE rarity=6) OVER w AS previous_six,
+    max(rn) OVER w AS previous_five,
+    max(timestamp) FILTER(WHERE rarity=6) OVER w AS previous_six_at,
+    max(timestamp) OVER w AS previous_five_at
+  FROM high_star_rows WINDOW w AS (PARTITION BY user_id,game_uid,server_scope,pity_scope
+    ORDER BY rn ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)
+), gaps AS MATERIALIZED (
+  SELECT e.*,p.pity_scope,
+    COALESCE(LEAST(e.history_start_at,p.start_time),'-infinity'::timestamptz) AS starts,
+    CASE WHEN e.history_time_unknown THEN 'infinity'::timestamptz
+      ELSE COALESCE(GREATEST(e.history_end_at,p.end_time),'infinity'::timestamptz) END AS ends
+  FROM public.account_statistics_exclusions e LEFT JOIN catalog p ON p.pool_id=e.pool_id
+)
+SELECT r.id,r.user_id,r.pool_id,
+  CASE WHEN r.rarity=6 AND NOT EXISTS(SELECT 1 FROM gaps g WHERE g.user_id=r.user_id
+    AND g.game_uid=r.game_uid AND g.server_scope=r.server_scope AND (g.pity_scope=r.pity_scope OR g.pity_scope IS NULL)
+    AND g.starts<=r.timestamp AND (r.previous_six_at IS NULL OR g.ends>=r.previous_six_at))
+    THEN r.rn-COALESCE(r.previous_six,0) END AS six_star_pity,
+  CASE WHEN r.rarity>=5 AND NOT EXISTS(SELECT 1 FROM gaps g WHERE g.user_id=r.user_id
+    AND g.game_uid=r.game_uid AND g.server_scope=r.server_scope AND (g.pity_scope=r.pity_scope OR g.pity_scope IS NULL)
+    AND g.starts<=r.timestamp AND (r.previous_five_at IS NULL OR g.ends>=r.previous_five_at))
+    THEN r.rn-COALESCE(r.previous_five,0) END AS five_star_pity
+FROM resets r;
+
+-- Preserve the existing overview's classification, resources, target order and
+-- JSON contract. Move its trusted interval join after the six-star filter so
+-- uncertain join estimates cannot multiply the full-history aggregate pipeline.
+DO $patch$
+DECLARE v_definition TEXT; v_original TEXT; v_start INTEGER; v_end INTEGER;
+BEGIN
+  SELECT replace(pg_get_functiondef('public.get_global_stats()'::regprocedure),E'\r\n',E'\n') INTO v_original;
+  v_definition := replace(v_original,
+    'FROM public.statistics_history AS h LEFT JOIN trusted_pity ti ON ti.id=h.id AND ti.user_id=h.user_id',
+    'FROM public.statistics_history AS h');
+  IF v_definition = v_original THEN RAISE EXCEPTION 'global_summary_pity_join_changed'; END IF;
+  v_definition := replace(v_definition,
+    'trusted_pity AS MATERIALIZED (SELECT * FROM public.statistics_pity_intervals)',
+    'trusted_pity AS MATERIALIZED (SELECT id,user_id,six_star_pity FROM public.statistics_pity_intervals)');
+  v_definition := replace(v_definition,
+    'h.record_id, ti.six_star_pity AS statistics_six_star_pity, ti.five_star_pity AS statistics_five_star_pity,',
+    'h.record_id, h.id AS statistics_history_id,');
+  v_definition := replace(v_definition,
+    'hb.record_id, hb.statistics_six_star_pity, hb.statistics_five_star_pity,',
+    'hb.record_id, hb.statistics_history_id,');
+  v_definition := replace(v_definition,
+    'record_id, statistics_six_star_pity, statistics_five_star_pity,',
+    'record_id, statistics_history_id,');
+  v_start := strpos(v_definition,'six_star_pity AS MATERIALIZED (');
+  v_end := strpos(v_definition,'target_hit_rows AS MATERIALIZED (');
+  IF v_start=0 OR v_end<=v_start THEN RAISE EXCEPTION 'global_summary_six_star_cte_changed'; END IF;
+  v_definition := left(v_definition,v_start-1) || $cte$
+six_star_numbered AS MATERIALIZED (
+  SELECT * FROM (
+    SELECT statistics_history_id,pool_id,user_id,rarity,is_standard_calc,is_target_calc,classified_pool_type,
+      ROW_NUMBER() OVER (PARTITION BY pool_id,user_id ORDER BY record_id) AS rn
+    FROM valid_pulls
+  ) AS all_numbered WHERE rarity=6
+),
+six_star_pity AS MATERIALIZED (
+  SELECT n.pool_id,n.user_id,n.is_standard_calc,n.is_target_calc,n.classified_pool_type,n.rn,
+    ti.six_star_pity AS pity
+  FROM six_star_numbered n LEFT JOIN trusted_pity ti ON ti.id=n.statistics_history_id AND ti.user_id=n.user_id
+),
+$cte$ || substr(v_definition,v_end);
+  IF strpos(v_definition,'statistics_six_star_pity')>0 OR strpos(v_definition,'statistics_five_star_pity')>0
+    OR strpos(v_definition,'h.id AS statistics_history_id')=0
+    OR strpos(v_definition,'hb.record_id, hb.statistics_history_id,')=0
+    OR strpos(v_definition,'record_id, statistics_history_id,')=0 THEN
+    RAISE EXCEPTION 'global_summary_pity_columns_changed';
+  END IF;
+  EXECUTE v_definition;
+END;
+$patch$;
+NOTIFY pgrst, 'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026110700_compact_global_summary_pity.sql
+
+-- >>> BEGIN MIGRATION: active/2026110701_join_statistics_gap_flags.sql
+-- Check historical interruptions once by account instead of scanning every
+-- exclusion twice for each high-star event in the global report.
+BEGIN;
+CREATE OR REPLACE VIEW public.statistics_pity_intervals WITH (security_barrier=true) AS
+WITH catalog AS MATERIALIZED (
+  SELECT p.pool_id,p.start_time,p.end_time,public.statistics_pity_scope(p) AS pity_scope FROM public.pools p
+), numbered AS NOT MATERIALIZED (
+  SELECT h.id,h.user_id,COALESCE(NULLIF(btrim(h.game_uid),''),'legacy') AS game_uid,h.server_scope,
+    h.pool_id,h.rarity,h.timestamp,p.pity_scope,
+    row_number() OVER (PARTITION BY h.user_id,h.game_uid,h.server_scope,p.pity_scope
+      ORDER BY h.timestamp,CASE WHEN h.seq_id ~ '^[0-9]+$' THEN h.seq_id::numeric END,h.id) AS rn
+  FROM public.statistics_history h JOIN catalog p ON p.pool_id=h.pool_id
+  WHERE h.special_type IS DISTINCT FROM 'gift' AND h.is_free IS NOT TRUE
+    AND h.rarity IN (4,5,6) AND h.timestamp>to_timestamp(0) AND nullif(btrim(h.game_uid),'') IS NOT NULL
+), high_star_rows AS MATERIALIZED (
+  SELECT * FROM numbered WHERE rarity>=5
+), resets AS MATERIALIZED (
+  SELECT *,max(rn) FILTER(WHERE rarity=6) OVER w AS previous_six,
+    max(rn) OVER w AS previous_five,
+    max(timestamp) FILTER(WHERE rarity=6) OVER w AS previous_six_at,
+    max(timestamp) OVER w AS previous_five_at
+  FROM high_star_rows WINDOW w AS (PARTITION BY user_id,game_uid,server_scope,pity_scope
+    ORDER BY rn ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING)
+), gaps AS MATERIALIZED (
+  SELECT e.*,p.pity_scope,
+    COALESCE(LEAST(e.history_start_at,p.start_time),'-infinity'::timestamptz) AS starts,
+    CASE WHEN e.history_time_unknown THEN 'infinity'::timestamptz
+      ELSE COALESCE(GREATEST(e.history_end_at,p.end_time),'infinity'::timestamptz) END AS ends
+  FROM public.account_statistics_exclusions e LEFT JOIN catalog p ON p.pool_id=e.pool_id
+), interruption_flags AS MATERIALIZED (
+  SELECT r.id,
+    bool_or(r.previous_six_at IS NULL OR g.ends>=r.previous_six_at) AS blocked_six,
+    bool_or(r.previous_five_at IS NULL OR g.ends>=r.previous_five_at) AS blocked_five
+  FROM resets r JOIN gaps g ON g.user_id=r.user_id AND g.game_uid=r.game_uid
+    AND g.server_scope=r.server_scope AND (g.pity_scope=r.pity_scope OR g.pity_scope IS NULL)
+    AND g.starts<=r.timestamp
+  GROUP BY r.id
+)
+SELECT r.id,r.user_id,r.pool_id,
+  CASE WHEN r.rarity=6 AND NOT COALESCE(f.blocked_six,false)
+    THEN r.rn-COALESCE(r.previous_six,0) END AS six_star_pity,
+  CASE WHEN NOT COALESCE(f.blocked_five,false)
+    THEN r.rn-COALESCE(r.previous_five,0) END AS five_star_pity
+FROM resets r LEFT JOIN interruption_flags f ON f.id=r.id;
+NOTIFY pgrst,'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026110701_join_statistics_gap_flags.sql
+
+-- >>> BEGIN MIGRATION: active/2026110702_complete_game_schema_support.sql
+-- Complete the missing non-duplicate indexes from migration 140. The wallet
+-- primary key and idx_game_score_events_user_game_created already cover the
+-- other two historical index definitions on the production instance.
+BEGIN;
+CREATE INDEX IF NOT EXISTS idx_game_score_events_game_created
+  ON public.game_score_events(game_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_game_score_events_client_meta
+  ON public.game_score_events USING GIN(client_meta);
+CREATE INDEX IF NOT EXISTS idx_game_catalog_status_sort
+  ON public.game_catalog(status,sort_order);
+
+-- Also repairs instances that applied the original 176 before PUBLIC was
+-- explicitly revoked. These economic RPCs accept a service-verified user ID.
+REVOKE ALL ON FUNCTION public.save_game_state(UUID,TEXT,JSONB,INTEGER,BIGINT) FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.claim_aic_milestone(UUID,INTEGER) FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.purchase_aic_item(UUID,TEXT,BIGINT,TEXT,JSONB) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.save_game_state(UUID,TEXT,JSONB,INTEGER,BIGINT),
+  public.claim_aic_milestone(UUID,INTEGER),public.purchase_aic_item(UUID,TEXT,BIGINT,TEXT,JSONB) TO service_role;
+NOTIFY pgrst,'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026110702_complete_game_schema_support.sql
+
+-- >>> BEGIN MIGRATION: active/2026110703_restore_game_timestamp_triggers.sql
+-- Restore the four timestamp hooks omitted from the game-platform baseline.
+BEGIN;
+CREATE OR REPLACE TRIGGER update_game_currency_wallets_updated_at
+  BEFORE UPDATE ON public.game_currency_wallets
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+CREATE OR REPLACE TRIGGER update_game_leaderboard_entries_updated_at
+  BEFORE UPDATE ON public.game_leaderboard_entries
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+CREATE OR REPLACE TRIGGER update_game_user_stats_updated_at
+  BEFORE UPDATE ON public.game_user_stats
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+CREATE OR REPLACE TRIGGER update_game_catalog_updated_at
+  BEFORE UPDATE ON public.game_catalog
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+COMMIT;
+-- <<< END MIGRATION: active/2026110703_restore_game_timestamp_triggers.sql
+
+-- >>> BEGIN MIGRATION: active/2026110704_bound_global_spark_matching.sql
+-- The materialized first-target CTE has no column statistics. On production
+-- PostgreSQL chose a 13k x 10k nested-loop match. A window preserves the same
+-- first-target rule without repeatedly scanning every account/banner pair.
+BEGIN;
+DO $patch$
+DECLARE body TEXT; first_at INTEGER; after_at INTEGER;
+BEGIN
+  SELECT replace(pg_get_functiondef('public.get_global_stats()'::regprocedure),E'\r\n',E'\n') INTO body;
+  first_at:=strpos(body,'limited_target_hits AS MATERIALIZED (');
+  after_at:=strpos(body,'target_hit_counts AS MATERIALIZED (');
+  IF first_at=0 OR after_at<=first_at THEN RAISE EXCEPTION 'global_summary_target_hits_changed'; END IF;
+  body:=left(body,first_at-1)||$cte$
+limited_target_hits AS MATERIALIZED (
+  SELECT pool_id,user_id,rn,
+    rn=120 AND min(rn) OVER (PARTITION BY pool_id,user_id)=120 AS is_spark
+  FROM target_hit_rows WHERE classified_pool_type='limited'
+),
+$cte$||substr(body,after_at);
+  EXECUTE body;
+END;
+$patch$;
+-- Avoid sorting the entire materialized history to match its small high-star
+-- target set. Window orderings are unchanged and still sort where required.
+ALTER FUNCTION public.get_global_stats() SET enable_mergejoin='off';
+NOTIFY pgrst,'reload schema';
+COMMIT;
+-- <<< END MIGRATION: active/2026110704_bound_global_spark_matching.sql
 
