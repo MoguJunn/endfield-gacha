@@ -7,6 +7,7 @@ import { queuedFetch } from '../requestQueue.js';
 import {
   fetchFullImportStatus,
   importAllRecordsFullyOnBackend,
+  requestOfficialQrSession,
 } from '../endfieldAuthChain.js';
 
 vi.mock('../../services/authFetchService.js', () => ({
@@ -83,6 +84,34 @@ describe('endfieldAuthChain auth headers', () => {
       status: 'running',
       progress: 20,
     });
+  });
+
+  it('keeps QR session identifiers in an authenticated POST body and disables caching/replay', async () => {
+    await requestOfficialQrSession('qr-poll', 'opaque');
+    const [url, init, options] = fetchWithTimeout.mock.calls[0];
+    expect(url).not.toContain('opaque');
+    expect(init).toMatchObject({ method: 'POST', cache: 'no-store', headers: { Authorization: 'Bearer site-session-token' } });
+    expect(JSON.parse(init.body)).toEqual({ source: 'cn', sessionId: 'opaque' });
+    expect(options).toMatchObject({ retries: 0, timeoutMs: 15000 });
+  });
+
+  it('reuses the browser device ID across QR creation requests without storing a login credential', async () => {
+    await requestOfficialQrSession('qr-start');
+    await requestOfficialQrSession('qr-start');
+    const first = JSON.parse(fetchWithTimeout.mock.calls[0][1].body);
+    const second = JSON.parse(fetchWithTimeout.mock.calls[1][1].body);
+    expect(first).toEqual({ source: 'cn', deviceId: expect.stringMatching(/^[a-f0-9]{32}$/) });
+    expect(second).toEqual(first);
+    expect(localStorage.getItem('endfield.officialQr.deviceId')).toBe(first.deviceId);
+    expect(fetchWithTimeout.mock.calls[0][0]).not.toContain(first.deviceId);
+  });
+
+  it('submits a QR reference instead of any browser Token when creating the import task', async () => {
+    fetchWithTimeout.mockResolvedValue(jsonResponse({ success: true, data: { status: 'completed', result: { savedRecords: 1 } } }));
+    await importAllRecordsFullyOnBackend('', 0, 'user-1', null, 'cn', { qrSessionId: 'opaque' });
+    const payload = JSON.parse(queuedFetch.mock.calls[0][1].body);
+    expect(payload).toMatchObject({ qrSessionId: 'opaque', accountIndex: 0, userId: 'user-1', source: 'cn' });
+    expect(payload).not.toHaveProperty('token');
   });
 
   it('refreshes the site session once when a required import token is missing from cache', async () => {

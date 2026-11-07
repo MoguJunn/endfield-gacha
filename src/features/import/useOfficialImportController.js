@@ -9,6 +9,7 @@ import {
   fetchAllGachaRecordsConcurrent,
   fetchImportQueueStatus,
   importAllRecordsFullyOnBackend,
+  requestOfficialQrSession,
   confirmFullImportReviewOnBackend,
   rejectFullImportReviewOnBackend
 } from '../../utils/endfieldAuthChain';
@@ -198,6 +199,30 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
   const [reviewDecisions, setReviewDecisions] = useState({});
   const cancelRef = useRef(false);
   const switchTimerRef = useRef(null);
+  const qrSessionRef = useRef(null);
+  const accountImportRef = useRef(null);
+  const importGenerationRef = useRef(0);
+  const [usingQrLogin, setUsingQrLogin] = useState(false);
+  const clearQrSession = useCallback(() => {
+    const sessionId = qrSessionRef.current;
+    qrSessionRef.current = null;
+    if (sessionId) void requestOfficialQrSession('qr-close', sessionId).catch(() => {});
+  }, []);
+  useEffect(() => () => {
+    importGenerationRef.current += 1;
+    accountImportRef.current = null;
+    clearQrSession();
+  }, [clearQrSession, source, userId]);
+  const handleQrAuthorized = useCallback(({ sessionId, accounts }) => {
+    clearQrSession();
+    qrSessionRef.current = sessionId;
+    cancelRef.current = false;
+    setUsingQrLogin(true);
+    setTokenInput('');
+    setAvailableAccounts(accounts.map(account => ({ ...account, source: 'cn', serverTag: buildGameAccountServerTag(account) })));
+    setStatus(ImportStatus.ACCOUNT_SELECTION);
+    setError(null);
+  }, [clearQrSession]);
 
   useEffect(() => {
     onFetchStatusChange?.(status);
@@ -336,6 +361,10 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
   }, []);
 
   const handleReset = useCallback(() => {
+    importGenerationRef.current += 1;
+    accountImportRef.current = null;
+    clearQrSession();
+    setUsingQrLogin(false);
     clearOfficialImportReviewSession({ userId, source });
     setTokenInput('');
     setStatus(ImportStatus.IDLE);
@@ -358,10 +387,14 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
       clearTimeout(switchTimerRef.current);
       switchTimerRef.current = null;
     }
-  }, [source, userId]);
+  }, [clearQrSession, source, userId]);
 
   const handleCancel = useCallback(async () => {
+    importGenerationRef.current += 1;
+    accountImportRef.current = null;
     cancelRef.current = true;
+    clearQrSession();
+    setUsingQrLogin(false);
     if (backendReview?.task?.id && backendReview?.task?.accessKey) {
       try {
         await rejectFullImportReviewOnBackend({
@@ -378,7 +411,7 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
     setBackendReview(null);
     setReviewDecisions({});
     clearOfficialImportReviewSession({ userId, source: backendReview?.source || source });
-  }, [backendReview, source, userId]);
+  }, [backendReview, clearQrSession, source, userId]);
 
   const handleReviewDecision = useCallback((ordinal, action) => {
     if (!['keep', 'skip'].includes(action)) return;
@@ -445,6 +478,11 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
   }, [backendReview, fetchedRecords, importSummary, onImportComplete, reviewDecisions, source, t, userId, userInfo]);
 
   const continueImportWithAccount = useCallback(async (token, account, targetSource = source) => {
+    if (accountImportRef.current) return;
+    const operation = {};
+    const generation = importGenerationRef.current;
+    const isStale = () => cancelRef.current || generation !== importGenerationRef.current;
+    accountImportRef.current = operation;
     try {
       setStatus(ImportStatus.FETCHING);
       setProgress(30);
@@ -487,16 +525,17 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
           accountIndex >= 0 ? accountIndex : 0,
           userId,
           (update) => {
-            if (cancelRef.current) return;
+            if (isStale()) return;
             setStatus(update.progress >= 80 ? ImportStatus.PROCESSING : ImportStatus.FETCHING);
             setProgress(update.progress || 0);
             setStatusMessage(update.message || t('import.official.importingData'));
           },
           targetSource,
-          { importMode }
+          { importMode, ...(qrSessionRef.current ? { qrSessionId: qrSessionRef.current } : {}) }
         );
 
-        if (cancelRef.current) return;
+        if (isStale()) return;
+        clearQrSession();
 
         const backendAccount = backendResult?.account || {};
         const hasBackendServerId = Object.prototype.hasOwnProperty.call(backendAccount, 'serverId');
@@ -691,12 +730,16 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
         ? `发现 ${preview.reviewSummary.issueRecords} 条需要确认的记录`
         : t('import.official.ready'));
     } catch (err) {
+      if (isStale()) return;
+      clearQrSession();
       appLogger.error('[OfficialAPIImport] 导入失败:', err);
       if (cancelRef.current) return;
       setError(normalizeImportError(err, t));
       setStatus(ImportStatus.ERROR);
+    } finally {
+      if (accountImportRef.current === operation) accountImportRef.current = null;
     }
-  }, [availableAccounts, importMode, onImportComplete, source, t, tokenInput, userId]);
+  }, [availableAccounts, clearQrSession, importMode, onImportComplete, source, t, tokenInput, userId]);
 
   const tryFetchAccountsWithSource = useCallback(async (token, targetSource) => {
     return fetchAccountsList(token, (message) => {
@@ -847,6 +890,8 @@ export function useOfficialImportController({ onImportComplete, onFetchStatusCha
   }, [appToken, continueImportWithAccount, source]);
 
   return {
+    usingQrLogin,
+    handleQrAuthorized,
     tokenInput,
     status,
     progress,

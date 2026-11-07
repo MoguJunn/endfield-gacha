@@ -114,12 +114,9 @@ describe('savePoolsToServer reconstruction promotion', () => {
       from(tableName) {
         if (tableName === 'pools') {
           return {
-            select(columns) {
+            select(columns, options) {
               return {
-                limit: async () => {
-                  events.push('load-pool-catalog');
-                  return { data: pools.map((pool) => ({ ...pool })), error: null };
-                },
+                ...createCatalogRangeQuery(() => pools, options, () => events.push('load-pool-catalog')),
                 in: async (_column, values) => {
                   events.push('lookup-canonical-pools');
                   return {
@@ -229,7 +226,40 @@ function createCompatAccessToken(payload, secret = 'test-jwt-secret') {
 function createHistoryRangeQuery(rangeHandler) {
   const query = {
     eq: vi.fn(() => query),
-    range: rangeHandler,
+    order: vi.fn(() => query),
+    abortSignal: vi.fn(() => query),
+    range: async (...args) => {
+      const result = await rangeHandler(...args);
+      return { count: Array.isArray(result.data) ? result.data.length : null, ...result };
+    },
+  };
+  return query;
+}
+
+function createCatalogRangeQuery(getRows, { count } = {}, onRead = () => {}) {
+  let orderColumn;
+  let ascending = true;
+  const query = {
+    order: vi.fn((column, options = {}) => {
+      orderColumn = column;
+      ascending = options.ascending !== false;
+      return query;
+    }),
+    range: vi.fn(async (from, to) => {
+      onRead();
+      const rows = getRows().map((row) => ({ ...row }));
+      rows.sort((left, right) => {
+        const leftValue = String(left[orderColumn]);
+        const rightValue = String(right[orderColumn]);
+        const comparison = leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
+        return ascending ? comparison : -comparison;
+      });
+      return {
+        data: rows.slice(from, to + 1),
+        count: count === 'exact' ? rows.length : null,
+        error: null,
+      };
+    }),
   };
   return query;
 }
@@ -614,8 +644,9 @@ describe('savePoolsToServer', () => {
 
         if (tableName === 'pools') {
           return {
-            select() {
+            select(_columns, options) {
               return {
+                ...createCatalogRangeQuery(() => Array.from(insertedPoolIds, (pool_id) => ({ pool_id })), options),
                 in: async (_column, values) => ({
                   data: (values || [])
                     .filter((poolId) => insertedPoolIds.has(String(poolId)))
@@ -1175,8 +1206,9 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'pools') {
           return {
-            select() {
+            select(_columns, options) {
               return {
+                ...createCatalogRangeQuery(() => Array.from(insertedPoolIds, (pool_id) => ({ pool_id })), options),
                 in: async (_column, values) => ({
                   data: (values || [])
                     .filter((poolId) => insertedPoolIds.has(String(poolId)))
@@ -1208,10 +1240,8 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'characters') {
           return {
-            select() {
-              return {
-                limit: async () => ({ data: [], error: null }),
-              };
+            select(_columns, options) {
+              return createCatalogRangeQuery(() => [], options);
             },
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });
@@ -1445,8 +1475,9 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'pools') {
           return {
-            select() {
+            select(_columns, options) {
               return {
+                ...createCatalogRangeQuery(() => Array.from(insertedPoolIds, (pool_id) => ({ pool_id })), options),
                 in: async (_column, values) => ({
                   data: (values || [])
                     .filter((poolId) => insertedPoolIds.has(String(poolId)))
@@ -1487,10 +1518,8 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'characters') {
           return {
-            select() {
-              return {
-                limit: async () => ({ data: [], error: null }),
-              };
+            select(_columns, options) {
+              return createCatalogRangeQuery(() => [], options);
             },
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });
@@ -1677,8 +1706,9 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'pools') {
           return {
-            select() {
+            select(_columns, options) {
               return {
+                ...createCatalogRangeQuery(() => Array.from(insertedPoolIds, (pool_id) => ({ pool_id })), options),
                 in: async (_column, values) => ({
                   data: (values || [])
                     .filter((poolId) => insertedPoolIds.has(String(poolId)))
@@ -1724,10 +1754,8 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'characters') {
           return {
-            select() {
-              return {
-                limit: async () => ({ data: [], error: null }),
-              };
+            select(_columns, options) {
+              return createCatalogRangeQuery(() => [], options);
             },
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });
@@ -1901,8 +1929,9 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'pools') {
           return {
-            select() {
+            select(_columns, options) {
               return {
+                ...createCatalogRangeQuery(() => Array.from(insertedPoolIds, (pool_id) => ({ pool_id })), options),
                 in: async (_column, values) => ({
                   data: (values || [])
                     .filter((poolId) => insertedPoolIds.has(String(poolId)))
@@ -1942,10 +1971,8 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'characters') {
           return {
-            select() {
-              return {
-                limit: async () => ({ data: [], error: null }),
-              };
+            select(_columns, options) {
+              return createCatalogRangeQuery(() => [], options);
             },
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });
@@ -2117,8 +2144,9 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'pools') {
           return {
-            select() {
+            select(_columns, options) {
               return {
+                ...createCatalogRangeQuery(() => Array.from(insertedPoolIds, (pool_id) => ({ pool_id })), options),
                 in: async (_column, values) => ({
                   data: (values || [])
                     .filter((poolId) => insertedPoolIds.has(String(poolId)))
@@ -2163,10 +2191,8 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'characters') {
           return {
-            select() {
-              return {
-                limit: async () => ({ data: [], error: null }),
-              };
+            select(_columns, options) {
+              return createCatalogRangeQuery(() => [], options);
             },
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });
@@ -2355,8 +2381,9 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'pools') {
           return {
-            select() {
+            select(_columns, options) {
               return {
+                ...createCatalogRangeQuery(() => Array.from(insertedPoolIds, (pool_id) => ({ pool_id })), options),
                 in: async (_column, values) => ({
                   data: (values || [])
                     .filter((poolId) => insertedPoolIds.has(String(poolId)))
@@ -2398,10 +2425,8 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'characters') {
           return {
-            select() {
-              return {
-                limit: async () => ({ data: [], error: null }),
-              };
+            select(_columns, options) {
+              return createCatalogRangeQuery(() => [], options);
             },
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });
@@ -2545,8 +2570,9 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'pools') {
           return {
-            select() {
+            select(_columns, options) {
               return {
+                ...createCatalogRangeQuery(() => Array.from(insertedPoolIds, (pool_id) => ({ pool_id })), options),
                 in: async (_column, values) => ({
                   data: (values || [])
                     .filter((poolId) => insertedPoolIds.has(String(poolId)))
@@ -2577,10 +2603,8 @@ describe('executeFullImport import mode metadata', () => {
 
         if (tableName === 'characters') {
           return {
-            select() {
-              return {
-                limit: async () => ({ data: [], error: null }),
-              };
+            select(_columns, options) {
+              return createCatalogRangeQuery(() => [], options);
             },
             async upsert(rows) {
               operations.push({ tableName, action: 'upsert', count: rows.length });

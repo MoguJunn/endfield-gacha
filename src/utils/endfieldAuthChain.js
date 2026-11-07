@@ -20,6 +20,7 @@ import { appLogger } from './appLogger.js';
 import { getSupabaseAccessToken } from '../services/authFetchService.js';
 import { emitAuthSessionSync } from '../services/authSessionEvents.js';
 import { fetchWithTimeout } from '../services/supabaseRequest.js';
+import { getOfficialQrDeviceId } from './officialQrDevice.js';
 import {
   OFFICIAL_CHARACTER_POOL_TYPES,
   DEFAULT_OFFICIAL_RECORD_REQUESTS,
@@ -146,6 +147,22 @@ function isSessionRejected(response, result) {
   return response.status === 401 && result?.success === false && !result.taskId
     && (result.code === 'AUTH_SESSION_INVALID' || result.code === 'missing_access_token'
       || result.auth?.reason === 'missing_access_token' || result.auth?.reason?.startsWith('compat_jwt_'));
+}
+
+export async function requestOfficialQrSession(action, sessionId = null) {
+  if (!['qr-start', 'qr-poll', 'qr-close'].includes(action)) throw new Error('Invalid QR action');
+  const authHeaders = await getAuthHeaders(true);
+  const response = await fetchWithTimeout(`${getProxyBase('cn')}?action=${action}`, {
+    method: 'POST', cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
+    body: JSON.stringify({ source: 'cn', ...(sessionId ? { sessionId } : {}),
+      ...(action === 'qr-start' ? { deviceId: getOfficialQrDeviceId() } : {}) }),
+  }, { label: 'official QR session', timeoutMs: 15000, retries: 0 });
+  const result = await safeParseJSON(response, '扫码登录');
+  if (!response.ok || !result.success) {
+    throw new AuthChainError(result.error || '扫码服务暂不可用，请稍后重试', 'qr-login', { code: result.code });
+  }
+  return result.data;
 }
 
 /**
@@ -759,7 +776,7 @@ export async function importAllRecordsFullyOnBackend(initialToken, accountIndex,
       ...authHeaders
     },
     body: JSON.stringify({
-      token: initialToken,
+      ...(options.qrSessionId ? { qrSessionId: options.qrSessionId } : { token: initialToken }),
       accountIndex,
       userId,
       source: normalizeImportSource(source),

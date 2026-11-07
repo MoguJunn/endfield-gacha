@@ -15,7 +15,7 @@ import {
   getCanonicalExtraPoolSubtype,
 } from '../../shared/extraPoolSubtype.js';
 
-const MAX_CATALOG_ROWS = 2000;
+const CATALOG_PAGE_SIZE = 200;
 const MIN_POOL_MATCH_SCORE = 40;
 const MIN_CHARACTER_MATCH_SCORE = 50;
 
@@ -91,45 +91,60 @@ function isManualCharacterId(characterId) {
   return classifyCharacterIdSource(characterId) === 'manual_placeholder';
 }
 
-async function resolveQueryResult(query, fallbackData = []) {
-  if (!query) {
-    return { data: fallbackData, error: null, skipped: true };
-  }
-
-  if (typeof query.then === 'function') {
+async function resolveQueryResult(query) {
+  if (query && typeof query.then === 'function') {
     return query;
   }
 
-  if ('data' in query || 'error' in query) {
+  if (query && ('data' in query || 'error' in query)) {
     return query;
   }
 
-  return { data: fallbackData, error: null, skipped: true };
+  throw Object.assign(new Error('目录客户端不支持所需操作，已停止本次 ID 归并。'), { code: 'IMPORT_CATALOG_CLIENT_INVALID' });
 }
 
-async function loadTableRows(adminClient, tableName, columns) {
-  if (!adminClient?.from) {
-    return [];
+async function loadOrderedRows(adminClient, tableName, columns, idColumn, filter) {
+  if (typeof adminClient?.from !== 'function') {
+    throw Object.assign(new Error('缺少目录客户端，已停止本次 ID 归并。'), { code: 'IMPORT_CATALOG_CLIENT_INVALID' });
   }
-
-  const query = adminClient.from(tableName).select(columns);
-  const limitedQuery = typeof query?.limit === 'function' ? query.limit(MAX_CATALOG_ROWS) : query;
-  const { data, error } = await resolveQueryResult(limitedQuery, []);
-  if (error) {
-    throw error;
+  const rows = [];
+  const seen = new Set();
+  let expectedCount = null;
+  while (expectedCount === null || rows.length < expectedCount) {
+    let query = adminClient.from(tableName).select(columns, { count: 'exact' });
+    if (filter) query = query.eq(filter.column, filter.value);
+    const { data, count, error } = await query
+      .order(idColumn, { ascending: true })
+      .range(rows.length, rows.length + CATALOG_PAGE_SIZE - 1);
+    if (error) throw error;
+    if (!Array.isArray(data) || !Number.isSafeInteger(count) || count < 0
+      || (expectedCount !== null && count !== expectedCount)
+      || (!data.length && rows.length < count) || rows.length + data.length > count
+      || data.some(row => !normalizeText(row[idColumn]) || seen.has(String(row[idColumn])))) {
+      throw Object.assign(new Error('目录未完整读取，已停止本次 ID 归并。'), { code: 'IMPORT_CATALOG_INCOMPLETE' });
+    }
+    for (const row of data) {
+      if (seen.has(String(row[idColumn]))) {
+        throw Object.assign(new Error('目录包含重复 ID，已停止本次 ID 归并。'), { code: 'IMPORT_CATALOG_INCOMPLETE' });
+      }
+      seen.add(String(row[idColumn]));
+    }
+    expectedCount = count;
+    rows.push(...data);
   }
-  return Array.isArray(data) ? data : [];
+  return rows;
 }
 
-async function selectEq(adminClient, tableName, columns, columnName, value) {
-  const table = adminClient?.from?.(tableName);
-  const query = table?.select?.(columns);
-  const filteredQuery = typeof query?.eq === 'function' ? query.eq(columnName, value) : null;
-  const { data, error } = await resolveQueryResult(filteredQuery, []);
-  if (error) {
-    throw error;
-  }
-  return Array.isArray(data) ? data : [];
+export async function loadImportCatalogRows(adminClient, tableName, columns) {
+  return loadOrderedRows(adminClient, tableName, columns, tableName === 'pools' ? 'pool_id' : 'id');
+}
+
+export async function loadImportRosterRows(adminClient, columnName, value) {
+  // Roster keys are unique within the equality scope. Read every association
+  // before any source deletion, even when PostgREST caps pages below our size.
+  const idColumn = columnName === 'pool_id' ? 'character_id' : 'pool_id';
+  if (!['pool_id', 'character_id'].includes(columnName)) throw new Error('Invalid roster scope');
+  return loadOrderedRows(adminClient, 'pool_characters', 'pool_id, character_id, is_up, created_at', idColumn, { column: columnName, value });
 }
 
 async function upsertRows(adminClient, tableName, rows, options = {}) {
@@ -149,7 +164,7 @@ async function updateEq(adminClient, tableName, values, columnName, value) {
   const table = adminClient?.from?.(tableName);
   const query = table?.update?.(values);
   const filteredQuery = typeof query?.eq === 'function' ? query.eq(columnName, value) : null;
-  const { error } = await resolveQueryResult(filteredQuery, null);
+  const { error } = await resolveQueryResult(filteredQuery);
   if (error) {
     throw error;
   }
@@ -159,7 +174,7 @@ async function deleteEq(adminClient, tableName, columnName, value) {
   const table = adminClient?.from?.(tableName);
   const query = table?.delete?.();
   const filteredQuery = typeof query?.eq === 'function' ? query.eq(columnName, value) : null;
-  const { error } = await resolveQueryResult(filteredQuery, null);
+  const { error } = await resolveQueryResult(filteredQuery);
   if (error) {
     throw error;
   }
@@ -445,22 +460,18 @@ function buildRawOfficialCharacterAliasRow(rawCharacter, targetCharacterId) {
 }
 
 async function copyPoolCharactersToTarget(adminClient, sourcePoolId, targetPoolId) {
-  const rows = await selectEq(
-    adminClient,
-    'pool_characters',
-    'pool_id, character_id, is_up, created_at',
-    'pool_id',
-    sourcePoolId
-  );
+  const rows = await loadImportRosterRows(adminClient, 'pool_id', sourcePoolId);
 
   if (rows.length > 0) {
+    const existingRows = await loadImportRosterRows(adminClient, 'pool_id', targetPoolId);
+    const existingByCharacterId = new Map(existingRows.map(row => [normalizeText(row.character_id), row]));
     await upsertRows(
       adminClient,
       'pool_characters',
-      rows.map((row) => ({
-        ...row,
-        pool_id: targetPoolId,
-      })),
+      rows.map((row) => {
+        const existing = existingByCharacterId.get(normalizeText(row.character_id));
+        return { ...(existing || row), pool_id: targetPoolId, is_up: Boolean(existing?.is_up || row.is_up) };
+      }),
       { onConflict: 'pool_id,character_id' }
     );
   }
@@ -469,22 +480,10 @@ async function copyPoolCharactersToTarget(adminClient, sourcePoolId, targetPoolI
 }
 
 async function copyCharacterPoolRosterToTarget(adminClient, sourceCharacterId, targetCharacterId) {
-  const rows = await selectEq(
-    adminClient,
-    'pool_characters',
-    'pool_id, character_id, is_up, created_at',
-    'character_id',
-    sourceCharacterId
-  );
+  const rows = await loadImportRosterRows(adminClient, 'character_id', sourceCharacterId);
 
   if (rows.length > 0) {
-    const existingRows = await selectEq(
-      adminClient,
-      'pool_characters',
-      'pool_id, character_id, is_up, created_at',
-      'character_id',
-      targetCharacterId
-    );
+    const existingRows = await loadImportRosterRows(adminClient, 'character_id', targetCharacterId);
     const existingRowsByPoolId = new Map(existingRows.map((row) => [normalizeText(row.pool_id), row]));
     const rowsToUpsert = rows
       .map((row) => {
@@ -514,7 +513,7 @@ async function copyCharacterPoolRosterToTarget(adminClient, sourceCharacterId, t
 }
 
 async function replaceFeaturedCharacterRefs(adminClient, sourceCharacterId, targetCharacterId) {
-  const pools = await loadTableRows(adminClient, 'pools', 'pool_id, featured_characters');
+  const pools = await loadImportCatalogRows(adminClient, 'pools', 'pool_id, featured_characters');
   const updates = pools
     .filter((pool) => Array.isArray(pool.featured_characters) && pool.featured_characters.includes(sourceCharacterId))
     .map((pool) => ({
@@ -586,6 +585,9 @@ async function migratePoolPlaceholder(adminClient, sourcePool, targetPoolId) {
   );
 
   await copyPoolCharactersToTarget(adminClient, sourcePool.pool_id, targetPoolId);
+  await updateEq(adminClient, 'pool_id_aliases', {
+    pool_id: targetPoolId, is_primary: false, updated_at: new Date().toISOString(),
+  }, 'pool_id', sourcePool.pool_id);
   await deleteEq(adminClient, 'pools', 'pool_id', sourcePool.pool_id);
 }
 
@@ -604,6 +606,9 @@ async function migrateCharacterPlaceholder(adminClient, sourceCharacter, targetC
   await updateHistoryCharacterIdIfPresent(adminClient, sourceCharacter.id, targetCharacterId);
   await copyCharacterPoolRosterToTarget(adminClient, sourceCharacter.id, targetCharacterId);
   await replaceFeaturedCharacterRefs(adminClient, sourceCharacter.id, targetCharacterId);
+  await updateEq(adminClient, 'character_id_aliases', {
+    character_id: targetCharacterId, is_primary: false, updated_at: new Date().toISOString(),
+  }, 'character_id', sourceCharacter.id);
   await deleteEq(adminClient, 'characters', 'id', sourceCharacter.id);
 }
 
@@ -641,7 +646,7 @@ export async function reconcileOfficialPoolIds(
     return { created: 0, migrated: 0, skipped: 0, operations: [] };
   }
 
-  const existingPools = await loadTableRows(
+  const existingPools = await loadImportCatalogRows(
     adminClient,
     'pools',
     'pool_id, name, type, extra_subtype, extra_rule_profile, extra_series_key, extra_series_phase, start_time, end_time, up_character, featured_characters, description, banner_url, locked, user_id'
@@ -728,7 +733,7 @@ export async function reconcileOfficialCharacterIds(adminClient, records) {
     return { created: 0, migrated: 0, aliased: 0, rawDuplicatesRetired: 0, skipped: 0, operations: [] };
   }
 
-  const existingCharacters = await loadTableRows(
+  const existingCharacters = await loadImportCatalogRows(
     adminClient,
     'characters',
     'id, name, type, rarity, aliases, avatar_url, is_limited, release_date, pool_config, created_at'
@@ -780,10 +785,13 @@ export async function reconcileOfficialCharacterIds(adminClient, records) {
     await migrateCharacterPlaceholder(adminClient, sourceCharacter, operation.officialId);
   }
 
-  const canonicalCandidates = [...existingCharacters, ...targetRows].filter(isCanonicalCharacterMatchCandidate);
+  const retiredManualIds = new Set(operations.filter(item => item.action === 'migrated_manual_placeholder').map(item => item.manualId));
+  const canonicalCandidates = uniqueById([...targetRows, ...existingCharacters]
+    .filter(row => !retiredManualIds.has(row.id) && isCanonicalCharacterMatchCandidate(row)), row => row.id);
   const characterAliasRows = officialCharacters.flatMap((character) =>
     buildCharacterSelfAliasRows(character.id, 'official_api')
   );
+  const rawRetirements = [];
 
   for (const rawCharacter of rawAliasCharacters) {
     const existingRawDuplicate = byId.get(rawCharacter.id);
@@ -814,11 +822,16 @@ export async function reconcileOfficialCharacterIds(adminClient, records) {
     });
 
     if (existingRawDuplicate) {
-      await retireRawCharacterDuplicate(adminClient, existingRawDuplicate, match.id);
+      rawRetirements.push({ source: existingRawDuplicate, targetId: match.id });
     }
   }
 
   await upsertCharacterAliases(adminClient, characterAliasRows);
+  // Persist all raw-to-canonical aliases before retiring any raw source. A
+  // failure here leaves the original entities available for a later retry.
+  for (const { source, targetId } of rawRetirements) {
+    await retireRawCharacterDuplicate(adminClient, source, targetId);
+  }
 
   return {
     created: operations.filter((item) => item.action === 'created_official').length,

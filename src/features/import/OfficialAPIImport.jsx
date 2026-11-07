@@ -18,6 +18,8 @@ export default function OfficialAPIImport({
   }, []);
 
   const {
+    usingQrLogin,
+    handleQrAuthorized,
     tokenInput,
     status,
     progress,
@@ -62,6 +64,9 @@ export default function OfficialAPIImport({
 
   return (
     <OfficialImportContent
+      key={`${userId || 'guest'}:${source}`}
+      usingQrLogin={usingQrLogin}
+      onQrAuthorized={handleQrAuthorized}
       source={source}
       status={status}
       tokenInput={tokenInput}

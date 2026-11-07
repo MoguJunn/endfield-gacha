@@ -105,6 +105,9 @@ scripts/package-private-backend.mjs
 scripts/verify-private-backend.mjs
 scripts/verify-private-backend-package.mjs
 scripts/verify-backend-import-jobs.mjs
+scripts/build-qr-import-backend.mjs
+api/__tests__/officialQrLogin.test.js
+docs/QR_IMPORT_BACKEND.md
 scripts/verify-statistics-load-bounds.mjs
 supabase/migrations/2026101404_official_import_integrity_and_statistics_scope.sql
 supabase/migrations/2026101405_durable_backend_import_jobs.sql

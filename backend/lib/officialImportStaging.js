@@ -7,6 +7,9 @@ import {
 import { getCanonicalExtraPoolMetadata } from '../../shared/extraPoolSubtype.js';
 
 const STAGED_RECORD_BATCH_SIZE = 500;
+const STAGED_READ_PAGE_SIZE = 100;
+const STAGED_COMMIT_COLUMNS = 'ordinal,normalized_record,issues,selected_action';
+const STAGED_REVIEW_COLUMNS = 'ordinal,pool_id,item_id,item_name,item_type,quality,timestamp,seq_id,issues,selected_action';
 const DEFAULT_REVIEW_TTL_MS = 30 * 60 * 1000;
 const ACTIVE_STATUSES = new Set(['processing', 'awaiting_confirmation', 'confirming']);
 
@@ -232,30 +235,79 @@ function assertTaskAccess(task, accessKey) {
   }
 }
 
-async function loadStagedRows(supabase, taskId, connectionRetryOptions = {}) {
-  const { data, error } = await retrySupabaseConnectionPoolOperation(
-    () => supabase
-      .from('official_import_staged_records')
-      .select('*')
-      .eq('task_id', taskId)
-      .order('ordinal', { ascending: true }),
-    {
-      ...connectionRetryOptions,
-      label: connectionRetryOptions.label || '读取导入暂存记录',
-    }
-  );
+function isStagedReadDeadline(error) {
+  return error?.name === 'TimeoutError'
+    || /(?:TimeoutError: )?Total request deadline exceeded/.test(String(error?.message || ''));
+}
 
-  if (error) {
-    if (isSupabaseConnectionPoolTimeout(error)) {
-      throw createDatabaseBusyError(
-        '数据库连接繁忙，暂时无法读取导入暂存记录，请稍后重试。',
-        error,
-        'load-staged-records'
-      );
+export async function loadStagedRows(supabase, taskId, connectionRetryOptions = {}, { review = false, signal } = {}) {
+  const rows = [];
+  let expectedCount = null;
+  // An explicit range alone is insufficient: PostgREST can cap a page below
+  // the requested size. The exact count and contiguous ordinals prove completion.
+  while (expectedCount === null || rows.length < expectedCount) {
+    const started = Date.now();
+    const diagnostic = {
+      purpose: review ? 'review' : 'commit', offset: rows.length,
+      pageSize: STAGED_READ_PAGE_SIZE, expectedCount,
+    };
+    let result;
+    // This retries only an idempotent page read, including a response-body
+    // deadline. It never replays staging writes, confirmation or the commit RPC.
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      signal?.throwIfAborted();
+      try {
+        result = await retrySupabaseConnectionPoolOperation(
+          () => {
+            const query = supabase
+              .from('official_import_staged_records')
+              .select(review ? STAGED_REVIEW_COLUMNS : STAGED_COMMIT_COLUMNS, { count: 'exact' })
+              .eq('task_id', taskId)
+              .order('ordinal', { ascending: true })
+              .range(rows.length, rows.length + STAGED_READ_PAGE_SIZE - 1);
+            return signal ? query.abortSignal(signal) : query;
+          },
+          {
+            ...connectionRetryOptions,
+            label: connectionRetryOptions.label || '读取导入暂存记录',
+          }
+        );
+      } catch (error) {
+        if (!isStagedReadDeadline(error)) throw error;
+        result = { error };
+      }
+      signal?.throwIfAborted();
+      if (!isStagedReadDeadline(result.error) || attempt === 2) break;
+      (connectionRetryOptions.logger || console).warn('[ImportStagingRead] 读取超时，重试当前页', {
+        ...diagnostic, attempt, elapsedMs: Date.now() - started,
+      });
     }
-    throw createReviewError('STAGED_RECORDS_LOAD_FAILED', `读取暂存记录失败：${error.message}`, 500);
+    const { data, count, error } = result;
+    if (error) {
+      const details = { ...diagnostic, elapsedMs: Date.now() - started, sourceCode: error.code || null };
+      (connectionRetryOptions.logger || console).warn('[ImportStagingRead] 读取失败', details);
+      if (isSupabaseConnectionPoolTimeout(error)) {
+        throw createDatabaseBusyError('数据库连接繁忙，暂时无法读取导入暂存记录，请稍后重试。', error, 'load-staged-records');
+      }
+      throw createReviewError('STAGED_RECORDS_LOAD_FAILED', `读取暂存记录失败：${error.message}`, 500, details);
+    }
+    const page = Array.isArray(data) ? data : [];
+    if (!Number.isSafeInteger(count) || count < 0 || (expectedCount !== null && count !== expectedCount)
+      || page.some((row, index) => Number(row.ordinal) !== rows.length + index)
+      || (page.length === 0 && rows.length < count) || rows.length + page.length > count) {
+      throw createReviewError('STAGED_RECORDS_INCOMPLETE', '暂存记录数量或顺序不完整，已停止提交，请重试读取。', 503);
+    }
+    expectedCount = count;
+    rows.push(...page);
   }
-  return Array.isArray(data) ? data : [];
+  return rows;
+}
+
+function assertCompleteStaging(task, rows) {
+  const expected = task.summary?.stagedRecordCount ?? task.summary?.newRecords;
+  if (expected !== undefined && (!Number.isSafeInteger(Number(expected)) || Number(expected) !== rows.length)) {
+    throw createReviewError('STAGED_RECORDS_INCOMPLETE', '暂存记录数量与任务声明不一致，已停止提交。', 503);
+  }
 }
 
 export async function stageOfficialImportTask({
@@ -269,39 +321,39 @@ export async function stageOfficialImportTask({
   reviewSummary = {},
   importSummary = {},
   expiresAt,
+  accessKey = randomBytes(32).toString('base64url'),
+  signal,
   connectionRetryOptions = {},
 }) {
   if (!supabase || !userId || !account?.gameUid) {
     throw createReviewError('INVALID_STAGING_CONTEXT', '缺少导入暂存所需的用户或游戏账号信息。');
   }
 
-  const accessKey = randomBytes(32).toString('base64url');
+  signal?.throwIfAborted();
   const accessKeyHash = hashAccessKey(accessKey);
   const resolvedExpiresAt = expiresAt || new Date(Date.now() + DEFAULT_REVIEW_TTL_MS).toISOString();
   const issueList = Array.isArray(reviewSummary?.issues) ? reviewSummary.issues : [];
   const taskSummary = {
     ...importSummary,
+    stagedRecordCount: stagedRecords.length,
     review: withoutIssueList(reviewSummary),
   };
 
+  const taskInput = {
+    user_id: userId,
+    source,
+    import_mode: importMode,
+    game_uid: String(account.gameUid),
+    server_id: account.serverId ? String(account.serverId) : null,
+    region: account.region || null,
+    status: 'processing',
+    access_key_hash: accessKeyHash,
+    summary: taskSummary,
+    issues: issueList,
+    expires_at: resolvedExpiresAt,
+  };
   const { data: task, error: taskError } = await retrySupabaseConnectionPoolOperation(
-    () => supabase
-      .from('official_import_tasks')
-      .insert({
-        user_id: userId,
-        source,
-        import_mode: importMode,
-        game_uid: String(account.gameUid),
-        server_id: account.serverId ? String(account.serverId) : null,
-        region: account.region || null,
-        status: 'processing',
-        access_key_hash: accessKeyHash,
-        summary: taskSummary,
-        issues: issueList,
-        expires_at: resolvedExpiresAt,
-      })
-      .select('*')
-      .single(),
+    () => supabase.from('official_import_tasks').insert(taskInput).select('*').single(),
     {
       ...connectionRetryOptions,
       label: connectionRetryOptions.label || '创建导入审阅任务',
@@ -336,6 +388,7 @@ export async function stageOfficialImportTask({
 
   try {
     for (let index = 0; index < rows.length; index += STAGED_RECORD_BATCH_SIZE) {
+      signal?.throwIfAborted();
       const { error } = await retrySupabaseConnectionPoolOperation(
         () => supabase
           .from('official_import_staged_records')
@@ -418,7 +471,8 @@ export async function getOfficialImportReview({
     throw createReviewError('REVIEW_TASK_EXPIRED', '这次导入审阅已过期，请重新导入。', 410);
   }
 
-  const rows = await loadStagedRows(supabase, task.id, connectionRetryOptions);
+  const rows = await loadStagedRows(supabase, task.id, connectionRetryOptions, { review: true });
+  assertCompleteStaging(task, rows);
   return {
     task: publicTask(task),
     records: rows.map((row) => ({
@@ -456,6 +510,7 @@ export async function confirmOfficialImportTask({
   accessKey,
   decisions = [],
   commit,
+  signal,
   connectionRetryOptions = {},
 }) {
   let task = await loadTaskRow(supabase, { taskId, userId, connectionRetryOptions });
@@ -474,7 +529,8 @@ export async function confirmOfficialImportTask({
     });
   }
 
-  const rows = await loadStagedRows(supabase, task.id, connectionRetryOptions);
+  const rows = await loadStagedRows(supabase, task.id, connectionRetryOptions, { signal });
+  assertCompleteStaging(task, rows);
   const decisionMap = normalizeDecisions(decisions);
   const selectedRows = rows.map((row) => ({
     ...row,
@@ -676,6 +732,17 @@ export async function confirmOfficialImportTask({
         label: connectionRetryOptions.label || '恢复导入审阅任务状态',
       }
     );
+    // Recovery can wait behind the original commit's row lock. Re-read its
+    // authoritative receipt after that wait before reporting an unknown result.
+    // Never repeat the commit RPC merely because its HTTP response was lost.
+    try {
+      const settledTask = await loadTaskRow(supabase, { taskId, userId, connectionRetryOptions });
+      if (settledTask.status === 'committed') {
+        return { task: publicTask(settledTask), result: settledTask.summary?.commitResult || {}, idempotent: true };
+      }
+    } catch {
+      // Preserve the original/recovery error when the receipt remains unreadable.
+    }
     if (recoveryError) {
       throw createReviewError(
         'REVIEW_TASK_RECOVERY_FAILED',

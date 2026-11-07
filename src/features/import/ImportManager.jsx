@@ -41,6 +41,7 @@ import {
   hasImportPoolFetchIssues,
   shouldAutoCloseSuccessfulImport,
 } from './importCompletionPolicy.js';
+import './importWindow.css';
 
 /**
  * 导入状态枚举
@@ -677,29 +678,27 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
   const primaryImportAnomalyMessage = getImportAnomalyMessage(primaryImportAnomaly, t);
   const primaryImportAnomalyName = getImportAnomalyDisplayName(primaryImportAnomaly, t);
   const importWarnings = getVisibleImportWarnings(importResult, t);
+  const importStep = importStatus === ImportStatus.SAVING || importStatus === ImportStatus.SUCCESS
+    || completionPending || fetchStatus === 'confirming'
+    ? 2 : ['fetching', 'processing', 'review_required', 'success'].includes(fetchStatus) ? 1 : 0;
 
   if (!isOpen) return null;
 
   const modal = (
-    <div className="app-modal-backdrop fixed inset-0 z-[80] bg-slate-900/60 backdrop-blur-md transition-colors dark:bg-black/80">
+    <div className="app-modal-backdrop import-window-backdrop fixed inset-0 z-[80] bg-slate-900/60 backdrop-blur-md transition-colors dark:bg-black/80">
       <div 
         role="dialog"
         aria-modal="true"
         aria-label={t('import.title')}
-        className="app-modal-panel w-full max-w-2xl bg-white shadow-[0_0_40px_rgba(0,0,0,0.7)] transition-colors dark:bg-[#111113] border border-zinc-300 dark:border-zinc-800"
-        style={{ clipPath: 'polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px))' }}
+        className="app-modal-panel import-window"
       >
-        {/* Decorator Lines */}
-        <div className="absolute top-0 left-0 w-full h-1 bg-yellow-500 z-20" />
-        <div className="absolute bottom-0 right-0 w-32 h-1 bg-yellow-500 z-20" />
-        <div className="absolute top-0 left-0 h-full w-1 bg-yellow-500 z-20" />
-
         {/* Header */}
-        <div className="app-modal-header flex items-center justify-between gap-3 border-b border-zinc-200 bg-slate-50 p-3 transition-colors dark:border-zinc-800 dark:bg-[#151518] sm:px-6 sm:py-4">
+        <div className="app-modal-header import-window__header">
           <div className="min-w-0">
-            <h2 className="text-lg font-black text-slate-800 dark:text-white uppercase tracking-wider sm:text-2xl">
+            <h2 className="import-window__title">
               {t('import.title')}
             </h2>
+            <p className="import-window__subtitle">{t('import.subtitle')}</p>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button
@@ -717,7 +716,6 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
               aria-label={t('common.close')}
               onClick={handleClose}
               className="app-modal-icon-button border border-transparent hover:border-red-500 hover:bg-red-500/10 text-slate-400 dark:text-zinc-500 hover:text-red-600 dark:hover:text-red-500 transition-all duration-200"
-              style={{ clipPath: 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)' }}
               disabled={isImportBusy}
             >
               <X className="w-6 h-6" />
@@ -725,43 +723,17 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
           </div>
         </div>
 
-        <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#111113] transition-colors sm:px-6">
-           <div className="grid grid-cols-3 gap-2 text-[11px] uppercase tracking-wide sm:text-xs sm:tracking-widest">
-              {/* 步骤1 */}
-              <div className={`flex min-w-0 items-center gap-2 transition-colors ${
-                importStatus === ImportStatus.IDLE && fetchStatus === 'idle'
-                  ? 'text-yellow-600 dark:text-yellow-500 font-bold'
-                  : 'text-slate-400 dark:text-zinc-500'
-              }`}>
-                 <span className={`w-6 h-6 shrink-0 flex items-center justify-center border transition-colors ${importStatus === ImportStatus.IDLE && fetchStatus === 'idle' ? 'border-yellow-500 bg-yellow-500/10' : 'border-current'}`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)' }}>1</span>
-                 <span>{t('import.step.token')}</span>
-              </div>
-              {/* 步骤2 */}
-              <div className={`flex min-w-0 items-center gap-2 transition-colors ${
-                ['authenticating', 'fetching', 'processing', 'success'].includes(fetchStatus) && importStatus === ImportStatus.IDLE
-                  ? 'text-yellow-600 dark:text-yellow-500 font-bold'
-                  : 'text-slate-400 dark:text-zinc-500'
-              }`}>
-                 <span className={`w-6 h-6 shrink-0 flex items-center justify-center border transition-colors ${['authenticating', 'fetching', 'processing', 'success'].includes(fetchStatus) && importStatus === ImportStatus.IDLE ? 'border-yellow-500 bg-yellow-500/10' : 'border-current'}`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)' }}>2</span>
-                 <span>{t('import.step.fetch')}</span>
-              </div>
-              {/* 步骤3 */}
-              <div className={`flex min-w-0 items-center gap-2 transition-colors ${
-                importStatus === ImportStatus.SAVING || importStatus === ImportStatus.SUCCESS
-                  ? 'text-yellow-600 dark:text-yellow-500 font-bold'
-                  : 'text-slate-400 dark:text-zinc-500'
-              }`}>
-                 <span className={`w-6 h-6 shrink-0 flex items-center justify-center border transition-colors ${importStatus === ImportStatus.SAVING || importStatus === ImportStatus.SUCCESS ? 'border-yellow-500 bg-yellow-500/10' : 'border-current'}`} style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%)' }}>3</span>
-                 <span>{t('import.step.save')}</span>
-              </div>
-           </div>
-        </div>
+        <ol className="import-window__steps" aria-label={t('import.stepsLabel')}>
+          {[t('import.step.account'), t('import.step.fetch'), t('import.step.save')].map((label, index) => (
+            <li key={index} className={index === importStep ? 'is-current' : index < importStep ? 'is-complete' : ''}
+              aria-current={index === importStep ? 'step' : undefined}>
+              <span className="import-window__step-number">{index < importStep ? <CheckCircle size={14} /> : index + 1}</span>
+              <span>{label}</span>
+            </li>
+          ))}
+        </ol>
 
-        <div className="p-4 relative sm:p-6">
-          <div className="mb-4 flex items-start gap-2 border border-amber-500/50 bg-amber-500/10 p-3 text-xs leading-5 text-amber-900 dark:border-yellow-500/30 dark:bg-yellow-500/10 dark:text-yellow-500">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <p className="min-w-0">{t('import.retentionNotice')}</p>
-          </div>
+        <div className="import-window__body">
           {/* 未登录提示 */}
           {!user && (
             <div className="mb-6 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 p-4 transition-colors" style={{ clipPath: 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%)' }}>
@@ -897,14 +869,14 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
           {/* 只有部分获取、跳过或其他非记录异常时保留结果页；正常成功会自动关闭。 */}
           {importStatus === ImportStatus.SUCCESS && importResult && importAnomalyCount === 0 && (
             <div className="space-y-6">
-              <div className="bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-900/30 p-6 text-center transition-colors">
+              <div className="import-feedback import-feedback--success text-center">
                 <div className="flex justify-center mb-4">
-                  <div className="w-16 h-16 bg-green-100 dark:bg-green-500/20 rounded-full flex items-center justify-center text-green-600 dark:text-green-500">
+                  <div className="import-feedback__success-icon">
                     <CheckCircle className="w-8 h-8" />
                   </div>
                 </div>
-                <h3 className="text-xl font-bold text-slate-800 dark:text-white mb-1">{t('import.complete')}</h3>
-                <p className="text-slate-500 dark:text-zinc-500 text-xs uppercase tracking-widest">{t('import.completeDesc')}</p>
+                <h3 className="import-feedback__account text-xl mb-1">{t('import.complete')}</h3>
+                <p>{t('import.completeDesc')}</p>
               </div>
 
               {/* 统计网格 */}
@@ -1069,6 +1041,10 @@ export default function ImportManager({ isOpen, onClose, onImportComplete, onOpe
               />
             </div>
           )}
+          <div className="import-window__retention">
+            <Clock size={14} aria-hidden="true" />
+            <p>{t('import.retentionNotice')}</p>
+          </div>
         </div>
       </div>
     </div>

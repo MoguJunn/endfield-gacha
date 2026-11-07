@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId, useState } from 'react';
 import {
   RefreshCw,
   CheckCircle,
@@ -11,6 +11,8 @@ import {
   Loader2,
   Upload,
   Clipboard,
+  KeyRound,
+  QrCode,
 } from 'lucide-react';
 import { ImportStatus } from '../importStatus';
 import { getPoolName } from '../importShared';
@@ -18,6 +20,8 @@ import { useI18n } from '../../../i18n/index.js';
 import { evaluateImportHealth } from '../../../utils/importHealth.js';
 import { localizeGameAccountServerTag } from '../../../utils/gameAccountMetadata.js';
 import ImportAccountScopeNotice from './ImportAccountScopeNotice.jsx';
+import OfficialQrLogin from './OfficialQrLogin.jsx';
+import '../importWindow.css';
 
 const FetchProgressBar = ({ progress, message, t }) => (
   <div className="w-full">
@@ -332,6 +336,8 @@ function getClipboardMessage(clipboardState, t) {
 }
 
 export default function OfficialImportContent({
+  usingQrLogin = false,
+  onQrAuthorized,
   source,
   status,
   tokenInput,
@@ -366,6 +372,17 @@ export default function OfficialImportContent({
   onReviewDecision,
 }) {
   const { t, locale } = useI18n();
+  const [loginMethod, setLoginMethod] = useState(() => tokenInput?.trim() ? 'token' : 'qr');
+  const loginId = useId();
+  const qrAvailable = source === 'cn' && backendImportAvailable && typeof onQrAuthorized === 'function';
+  const showQr = qrAvailable && loginMethod === 'qr';
+  function handleLoginTabKey(event) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 'qr' : event.key === 'End' ? 'token' : showQr ? 'token' : 'qr';
+    setLoginMethod(next);
+    document.getElementById(`${loginId}-${next}`)?.focus();
+  }
   const IMPORT_SOURCE_OPTIONS = [
     { key: 'cn', label: t('import.source.cn.label'), description: t('import.source.cn.description') },
     { key: 'intl', label: t('import.source.intl.label'), description: t('import.source.intl.description') },
@@ -411,98 +428,55 @@ export default function OfficialImportContent({
     inputDetection?.detectedSource === 'intl' ? t('import.source.intl.label') : t('import.source.cn.label');
 
   return (
-    <div className="space-y-4">
+    <div className="official-import-content">
       <ImportAccountScopeNotice accounts={userInfo ? [userInfo] : availableAccounts || []} />
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="official-import-toolbar">
         <div
-          className={`inline-flex w-fit items-center gap-2 border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.24em] transition-colors ${healthToneClasses[health.tone] || healthToneClasses.healthy}`}
-          style={{ clipPath: 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)' }}
+          className={`official-import-health ${healthToneClasses[health.tone] || healthToneClasses.healthy}`}
         >
-          <span className="opacity-80">{t('import.official.healthLabel')}</span>
-          <span>{t(health.key)}</span>
+          <span className="official-import-health__dot" aria-hidden="true" />
+          <span>{health.tone === 'healthy' ? t('import.official.serviceReady') : t(health.key)}</span>
         </div>
         {status === ImportStatus.IDLE && typeof onOpenFileImport === 'function' && (
           <button
             type="button"
             onClick={onOpenFileImport}
-            className="group inline-flex items-center justify-between gap-3 border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-left text-[11px] leading-4 text-cyan-700 transition-colors hover:border-cyan-500 hover:bg-cyan-500/15 dark:text-cyan-300"
-            style={{ clipPath: 'polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%)' }}
+            className="official-import-file-link"
+            title={t('import.official.fileImportHintDesc')}
           >
-            <Upload
-              size={14}
-              className="shrink-0 text-cyan-600 transition-transform group-hover:-translate-y-0.5 dark:text-cyan-300"
-            />
-            <span className="min-w-0">
-              <span className="block font-bold uppercase tracking-widest">
-                {t('import.official.fileImportHintTitle')}
-              </span>
-              <span className="block text-cyan-700/75 dark:text-cyan-300/75">
-                {t('import.official.fileImportHintDesc')}
-              </span>
-            </span>
+            <Upload size={14} />
+            <span>{t('import.official.fileImportLink')}</span>
           </button>
         )}
       </div>
       {status === ImportStatus.IDLE && (
-        <div
-          className="bg-slate-50 dark:bg-zinc-950/40 border border-zinc-200 dark:border-zinc-800 p-4 sm:p-5 transition-colors"
-          style={{ clipPath: 'polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%)' }}
-        >
-          <div className="mb-4">
-            <div className="text-[11px] text-slate-600 dark:text-zinc-400 font-bold uppercase tracking-widest mb-3">
+        <div className="official-import-settings">
+          <div className="official-import-setting">
+            <div className="official-import-setting__label">
               {t('import.official.sourceLabel')}
             </div>
-            <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2 sm:gap-3">
+            <div className="official-import-source" role="group" aria-label={t('import.official.sourceLabel')}>
               {IMPORT_SOURCE_OPTIONS.map((option) => (
                 <button
                   key={option.key}
                   type="button"
+                  aria-pressed={source === option.key}
                   onClick={() => onSourceChange(option.key)}
-                  className={`border p-3 sm:p-4 text-left transition-all duration-300 relative group overflow-hidden ${
-                    source === option.key
-                      ? 'border-yellow-500 bg-zinc-100 dark:bg-yellow-500/10 shadow-[0_0_15px_rgba(234,179,8,0.1)]'
-                      : 'border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 hover:border-yellow-500/50'
-                  }`}
-                  style={{ clipPath: 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%)' }}
+                  className="official-import-source__option"
                 >
-                  <div
-                    className={`absolute inset-y-0 left-0 w-1 transition-transform duration-300 origin-bottom ${source === option.key ? 'bg-yellow-500 scale-y-100' : 'bg-zinc-400 dark:bg-zinc-600 scale-y-0 group-hover:scale-y-100'}`}
-                  />
-                  <div
-                    className={`text-sm font-bold tracking-widest uppercase transition-colors relative z-10 ${source === option.key ? 'text-yellow-600 dark:text-yellow-500' : 'text-slate-800 dark:text-zinc-200 group-hover:text-yellow-600 dark:group-hover:text-yellow-500'}`}
-                  >
-                    {option.label}
-                  </div>
-                  <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-1.5 relative z-10">
-                    {option.description}
-                  </div>
-                  {source === option.key && (
-                    <div
-                      className="absolute top-2 right-2 w-2 h-2 bg-yellow-500 animate-pulse"
-                      style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%)' }}
-                    />
-                  )}
+                  <strong>{option.label}</strong>
+                  <span>{option.description}</span>
                 </button>
               ))}
             </div>
           </div>
 
           {backendImportAvailable && (
-            <div
-              className="border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 transition-colors"
-              style={{ clipPath: 'polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%)' }}
-            >
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-[11px] font-bold uppercase tracking-widest text-slate-600 dark:text-zinc-400">
+            <div className="official-import-setting official-import-setting--mode">
+              <div className="official-import-setting__label">
                     {t('import.official.modeLabel')}
-                  </div>
-                  <div className="mt-1 text-[11px] text-slate-500 dark:text-zinc-500">
-                    {t('import.official.modeDesc')}
-                  </div>
-                </div>
               </div>
-              <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">
+              <div className="official-import-mode" role="group" aria-label={t('import.official.modeLabel')}>
                 {[
                   {
                     key: 'incremental',
@@ -518,23 +492,44 @@ export default function OfficialImportContent({
                   <button
                     key={option.key}
                     type="button"
+                    aria-pressed={importMode === option.key}
+                    title={option.desc}
                     onClick={() => onImportModeChange?.(option.key)}
-                    className={`border px-3 py-2 text-left transition-colors ${
-                      importMode === option.key
-                        ? 'border-yellow-500 bg-yellow-500/10 text-yellow-700 dark:text-yellow-300'
-                        : 'border-zinc-300 bg-slate-50 text-slate-600 hover:border-yellow-500/60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-400'
-                    }`}
-                    style={{ clipPath: 'polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%)' }}
+                    className="official-import-mode__option"
                   >
-                    <span className="block text-[11px] font-black uppercase tracking-widest">{option.label}</span>
-                    <span className="mt-1 block text-[10px] leading-4 opacity-80">{option.desc}</span>
+                    {option.label}
+                    {option.key === 'incremental' && <span>{t('import.official.modeDefault')}</span>}
                   </button>
                 ))}
               </div>
+              <details className="official-import-mode-help">
+                <summary aria-label={t('import.official.modeHelp')}><HelpCircle size={15} /></summary>
+                <p>{t('import.official.modeDesc')}</p>
+              </details>
             </div>
           )}
+        </div>
+      )}
 
-          <details className="mt-4 border-t border-zinc-200 dark:border-zinc-800">
+      {status === ImportStatus.IDLE && (
+        <div className="official-import-auth">
+          {qrAvailable && <div className="official-import-login-tabs" role="tablist" aria-label={t('import.official.loginMethod')}>
+            {[{ key: 'qr', label: t('import.official.qrLogin') },
+              { key: 'token', label: t('import.official.tokenLogin') }].map(({ key, label }) => (
+              <button type="button" role="tab" key={key} id={`${loginId}-${key}`} aria-selected={loginMethod === key}
+                aria-controls={`${loginId}-panel`} tabIndex={loginMethod === key ? 0 : -1}
+                onKeyDown={handleLoginTabKey} onClick={() => setLoginMethod(key)}>
+                {key === 'qr' ? <QrCode size={16} /> : <KeyRound size={16} />}<span>{label}</span>
+                {key === 'qr' && <span className="official-import-login-tabs__badge">{t('import.official.recommended')}</span>}
+              </button>
+            ))}
+          </div>}
+          <div className="official-import-auth__body" id={`${loginId}-panel`} role={qrAvailable ? 'tabpanel' : undefined}
+            aria-labelledby={qrAvailable ? `${loginId}-${showQr ? 'qr' : 'token'}` : undefined}>
+          {showQr ? (
+            <OfficialQrLogin onAuthorized={onQrAuthorized} disabled={accountCompletionRequired} />
+          ) : <div className="official-import-token space-y-4">
+          <details className="official-import-guide">
             <summary className="min-h-11 cursor-pointer list-inside py-3 text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-zinc-300">
               <span className="inline-flex items-center gap-2">
                 <HelpCircle size={14} className="text-yellow-600 dark:text-yellow-500" />
@@ -618,27 +613,22 @@ export default function OfficialImportContent({
               </div>
             </div>
           </details>
-        </div>
-      )}
-
-      {status === ImportStatus.IDLE && (
-        <div className="space-y-4">
           <div className="relative">
-            <label className="block text-[11px] text-slate-600 dark:text-zinc-400 font-bold uppercase tracking-widest mb-3">
+            <label htmlFor={`${loginId}-input`} className="block text-xs text-slate-600 dark:text-zinc-400 font-bold mb-3">
               {t('import.official.tokenLabel')}
             </label>
             <div className="relative">
               <input
+                id={`${loginId}-input`}
                 type="text"
                 value={tokenInput}
                 onChange={onTokenChange}
-                className="w-full bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 p-4 font-mono text-center text-lg text-slate-800 dark:text-white focus:border-yellow-500 dark:focus:border-yellow-500 focus:outline-none transition-colors placeholder:text-slate-300 dark:placeholder:text-zinc-700 shadow-inner"
-                style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%)' }}
+                className="official-import-token__input"
                 placeholder={t('import.official.tokenPlaceholder', {
                   region: source === 'intl' ? t('import.source.intl.label') : t('import.source.cn.label'),
                 })}
               />
-              <div className="absolute right-3 top-[38px] text-[10px] text-slate-400 dark:text-zinc-600 font-mono pointer-events-none">
+              <div className="official-import-token__count">
                 {tokenInput.trim().length} chars
               </div>
             </div>
@@ -648,8 +638,7 @@ export default function OfficialImportContent({
                   type="button"
                   onClick={onClipboardRead}
                   disabled={clipboardState?.status === 'reading'}
-                  className="inline-flex w-fit items-center gap-2 border border-zinc-300 bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-slate-600 transition-colors hover:border-yellow-500 hover:text-yellow-700 disabled:cursor-wait disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-yellow-500 dark:hover:text-yellow-400"
-                  style={{ clipPath: 'polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%)' }}
+                  className="official-import-token__clipboard"
                 >
                   <Clipboard size={13} />
                   {t('import.official.clipboardPaste')}
@@ -687,59 +676,44 @@ export default function OfficialImportContent({
             </div>
           )}
 
+          <button
+            onClick={onStartImport}
+            disabled={!tokenInput.trim() || accountCompletionRequired}
+            className="official-import-token__submit"
+          >
+            <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 ease-in-out" />
+            <span className="relative z-10">{t('import.official.start')}</span>
+            <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform relative z-10" />
+          </button>
+          </div>}
           {accountCompletionRequired && (
-            <div
-              className="border border-amber-300 bg-amber-50 px-3 py-3 text-amber-800 transition-colors dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
-              style={{ clipPath: 'polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%)' }}
-            >
+            <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
               <div className="flex items-start gap-3">
                 <AlertCircle size={16} className="mt-0.5 shrink-0" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-xs font-black uppercase tracking-widest">
-                    {t('import.official.accountCompletionTitle')}
-                  </div>
-                  <p className="mt-1 text-[11px] leading-5 text-amber-700 dark:text-amber-200/90">
-                    {t('import.official.accountCompletionDesc')}
-                  </p>
+                  <div className="text-xs font-bold">{t('import.official.accountCompletionTitle')}</div>
+                  <p className="mt-1 text-[11px] leading-5">{t('import.official.accountCompletionDesc')}</p>
                   {typeof onOpenSettings === 'function' && (
-                    <button
-                      type="button"
-                      onClick={onOpenSettings}
-                      className="mt-3 inline-flex items-center gap-2 border border-amber-400 bg-white px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-600 dark:bg-zinc-950 dark:text-amber-200 dark:hover:bg-amber-900/20"
-                      style={{ clipPath: 'polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%)' }}
-                    >
-                      {t('import.official.accountCompletionOpenSettings')}
-                      <ArrowRight size={13} />
+                    <button type="button" onClick={onOpenSettings}
+                      className="mt-2 inline-flex items-center gap-2 py-2 text-xs font-bold underline underline-offset-4">
+                      {t('import.official.accountCompletionOpenSettings')}<ArrowRight size={13} />
                     </button>
                   )}
                 </div>
               </div>
             </div>
           )}
-
-          <button
-            onClick={onStartImport}
-            disabled={!tokenInput.trim() || accountCompletionRequired}
-            className="w-full bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 disabled:bg-zinc-300 dark:disabled:bg-zinc-800 disabled:text-zinc-500 text-black font-bold py-4 text-sm tracking-widest uppercase transition-all duration-300 flex items-center justify-center gap-2 group relative overflow-hidden disabled:cursor-not-allowed"
-            style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%)' }}
-          >
-            <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 ease-in-out" />
-            <span className="relative z-10">{t('import.official.start')}</span>
-            <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform relative z-10" />
-          </button>
+          </div>
         </div>
       )}
 
-      {status === ImportStatus.ACCOUNT_SELECTION && availableAccounts.length > 1 && (
+      {status === ImportStatus.ACCOUNT_SELECTION && availableAccounts.length > 0 && (
         <div className="space-y-4">
-          <div
-            className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 p-4 transition-colors"
-            style={{ clipPath: 'polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%)' }}
-          >
+          <div className="official-import-account-panel">
             <div className="flex items-center gap-2 mb-3">
-              <User className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              <span className="text-blue-700 dark:text-blue-400 font-bold uppercase tracking-widest text-sm">
-                {t('import.official.multipleAccounts')}
+              <User className="w-4 h-4 text-yellow-600 dark:text-yellow-400" />
+              <span className="font-bold text-sm">
+                {usingQrLogin ? (locale === 'en-US' ? 'Confirm the import account' : '确认本次导入账号') : t('import.official.multipleAccounts')}
               </span>
             </div>
             <p className="text-slate-600 dark:text-zinc-400 text-xs mb-4">{t('import.official.selectAccount')}</p>
@@ -751,28 +725,25 @@ export default function OfficialImportContent({
                   <button
                     key={`${account.uid}-${account.gameUid || 'unknown'}-${account.serverId || 'unknown'}`}
                     onClick={() => onSelectAccount(account)}
-                    className={`w-full p-4 border transition-all duration-300 text-left flex items-center gap-4 group hover:-translate-y-0.5 hover:shadow-lg relative overflow-hidden ${accent.border}`}
-                    style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%)' }}
+                    className={`official-import-account-option w-full p-4 border transition-colors text-left flex items-center gap-3 group relative overflow-hidden ${accent.border}`}
                   >
                     <div
-                      className={`w-12 h-12 flex items-center justify-center shrink-0 border border-black/10 dark:border-white/10 ${accent.iconBg}`}
-                      style={{ clipPath: 'polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 0 100%)' }}
+                      className={`official-import-account-avatar w-10 h-10 flex items-center justify-center shrink-0 border border-black/10 dark:border-white/10 ${accent.iconBg}`}
                     >
                       <User size={24} className={accent.iconText} />
                     </div>
                     <div className="flex-1 min-w-0 z-10 relative">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex flex-wrap items-center gap-2 mb-1">
                         <span className="font-bold text-slate-800 dark:text-white truncate">{account.nickName}</span>
                         <span
-                          className={`shrink-0 text-[10px] px-2 py-0.5 font-bold uppercase tracking-wider ${accent.badge}`}
-                          style={{ clipPath: 'polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 0 100%)' }}
+                          className={`official-import-account-badge shrink-0 text-[10px] px-2 py-0.5 font-bold ${accent.badge}`}
                         >
                           {account.serverTag
                             ? localizeGameAccountServerTag(account.serverTag, locale)
                             : account.channelName}
                         </span>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                         <p className="text-xs text-slate-500 dark:text-zinc-500 font-mono flex items-center gap-1">
                           <span className="text-[9px] uppercase tracking-widest">UID</span>
                           <span className="text-slate-700 dark:text-zinc-300 font-bold">{account.gameUid}</span>
@@ -795,8 +766,7 @@ export default function OfficialImportContent({
 
           <button
             onClick={onReset}
-            className="w-full text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800/50 py-3 text-xs font-bold uppercase tracking-widest transition-all duration-200"
-            style={{ clipPath: 'polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%)' }}
+            className="official-import-account-back w-full text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800/50 py-3 text-xs transition-colors"
           >
             {t('import.official.cancelAndBack')}
           </button>
@@ -806,7 +776,7 @@ export default function OfficialImportContent({
       {(status === ImportStatus.AUTHENTICATING ||
         status === ImportStatus.FETCHING ||
         status === ImportStatus.PROCESSING) && (
-        <div className="py-8 px-4 border border-zinc-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/50 transition-colors">
+        <div className="official-import-progress py-8 px-4 border border-zinc-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/50 transition-colors">
           <FetchProgressBar progress={progress} message={statusMessage} t={t} />
           {sourceSwitchInfo && (
             <div className="mt-3 flex items-center gap-2 text-xs bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800 px-3 py-2 text-sky-700 dark:text-sky-400 transition-colors">
@@ -838,19 +808,19 @@ export default function OfficialImportContent({
               <p className="text-slate-600 dark:text-zinc-400 text-xs">{error}</p>
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <button
+          <div className={`grid grid-cols-1 gap-3 ${usingQrLogin ? '' : 'sm:grid-cols-2'}`}>
+            {!usingQrLogin && <button
               onClick={onStartImport}
               disabled={!tokenInput.trim() || accountCompletionRequired}
               className="w-full bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 disabled:bg-zinc-300 dark:disabled:bg-zinc-800 disabled:text-zinc-500 text-black font-bold py-3 text-sm tracking-wider transition-colors disabled:cursor-not-allowed"
             >
               {t('import.official.retrySameToken')}
-            </button>
+            </button>}
             <button
               onClick={onReset}
               className="w-full bg-white dark:bg-zinc-800 border border-zinc-300 dark:border-transparent hover:bg-slate-50 dark:hover:bg-zinc-700 text-slate-700 dark:text-white font-bold py-3 text-sm tracking-wider transition-colors"
             >
-              {t('import.official.editToken')}
+              {usingQrLogin ? (locale === 'en-US' ? 'Scan again' : '重新扫码') : t('import.official.editToken')}
             </button>
           </div>
         </div>

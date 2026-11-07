@@ -2,15 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   confirmOfficialImportTask,
   getOfficialImportReview,
+  loadStagedRows,
   stageOfficialImportTask,
 } from '../../backend/lib/officialImportStaging.js';
 
-function createFakeSupabase() {
+function createFakeSupabase({ rowLimit = 1000, onStagedRead } = {}) {
   const tables = {
     official_import_tasks: [],
     official_import_staged_records: [],
   };
   const failures = [];
+  const reads = [];
   let taskSequence = 0;
   let recordSequence = 0;
 
@@ -21,9 +23,11 @@ function createFakeSupabase() {
       this.payload = null;
       this.filters = [];
       this.orderBy = null;
+      this.rangeBounds = null;
     }
 
-    select() {
+    select(columns = '*') {
+      this.columns = columns;
       return this;
     }
 
@@ -60,6 +64,16 @@ function createFakeSupabase() {
       return this;
     }
 
+    range(from, to) {
+      this.rangeBounds = [from, to];
+      return this;
+    }
+
+    abortSignal(signal) {
+      this.signal = signal;
+      return this;
+    }
+
     single() {
       return this.execute('single');
     }
@@ -77,11 +91,19 @@ function createFakeSupabase() {
     }
 
     async execute(mode) {
+      this.signal?.throwIfAborted();
+      if (this.tableName === 'official_import_staged_records' && this.action === 'select') {
+        reads.push({ range: this.rangeBounds, columns: this.columns });
+        onStagedRead?.(reads.at(-1), this.signal);
+        this.signal?.throwIfAborted();
+      }
       const failureIndex = failures.findIndex((failure) => failure.predicate({
         tableName: this.tableName,
         action: this.action,
         payload: this.payload,
         mode,
+        range: this.rangeBounds,
+        columns: this.columns,
       }));
       if (failureIndex >= 0) {
         const failure = failures[failureIndex];
@@ -132,7 +154,16 @@ function createFakeSupabase() {
         ));
       }
 
-      const cloned = affected.map((row) => structuredClone(row));
+      const count = affected.length;
+      if (this.action === 'select' && this.tableName === 'official_import_staged_records') {
+        const [from, to] = this.rangeBounds || [0, 999];
+        affected = affected.slice(from, Math.min(to + 1, from + rowLimit));
+      }
+      const cloned = affected.map((row) => structuredClone(
+        this.action === 'select' && this.columns && this.columns !== '*'
+          ? Object.fromEntries(this.columns.split(',').map(key => [key, row[key]]))
+          : row
+      ));
       if (mode === 'single') {
         return cloned.length === 1
           ? { data: cloned[0], error: null }
@@ -143,12 +174,13 @@ function createFakeSupabase() {
           ? { data: cloned[0] || null, error: null }
           : { data: null, error: { message: `Expected at most one row, received ${cloned.length}` } };
       }
-      return { data: cloned, error: null };
+      return { data: cloned, count, error: null };
     }
   }
 
   return {
     tables,
+    reads,
     failNext(predicate, error, times = 1) {
       failures.push({ predicate, error, remaining: times });
     },
@@ -220,6 +252,129 @@ async function createReview(supabase) {
 }
 
 describe('official import staging', () => {
+  it('reads large tasks with small pages and preserves the exact commit payload', async () => {
+    const supabase = createFakeSupabase();
+    const staged = await stageOfficialImportTask({
+      supabase, userId: 'user-1', source: 'cn', importMode: 'full',
+      account: { gameUid: '10001', serverId: '1' },
+      stagedRecords: Array.from({ length: 242 }, (_, i) => createStagedRecord({ ordinalName: String(i) })),
+      importSummary: { newRecords: 242 },
+    });
+    // Model the failing cross-region response size, rather than only checking
+    // which range and column strings the implementation happens to construct.
+    supabase.failNext(({ tableName, action, range, columns }) => tableName === 'official_import_staged_records'
+      && action === 'select' && (range[1] - range[0] + 1 > 100 || columns === '*'),
+    { message: 'TimeoutError: Total request deadline exceeded' }, 10);
+    const commit = vi.fn(async ({ rows }) => ({ savedRecords: rows.length }));
+    await confirmOfficialImportTask({ supabase, taskId: staged.task.id, userId: 'user-1', accessKey: staged.accessKey, commit });
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(commit.mock.calls[0][0].rows.map(row => row.normalized_record))
+      .toEqual(supabase.tables.official_import_staged_records.map(row => row.normalized_record));
+    expect(supabase.reads.map(read => read.range)).toEqual([[0, 99], [100, 199], [200, 299]]);
+    expect(commit.mock.calls[0][0].rows.every(row => !Object.hasOwn(row, 'raw_min'))).toBe(true);
+  });
+
+  it('retries only the timed-out page without dropping or duplicating prior records', async () => {
+    const supabase = createFakeSupabase();
+    const staged = await stageOfficialImportTask({
+      supabase, userId: 'user-1', source: 'cn', account: { gameUid: '10001' },
+      stagedRecords: Array.from({ length: 220 }, (_, i) => createStagedRecord({ ordinalName: String(i) })),
+      importSummary: { newRecords: 220 },
+    });
+    supabase.failNext(({ tableName, action, range }) => tableName === 'official_import_staged_records'
+      && action === 'select' && range[0] === 100,
+    { message: 'TimeoutError: Total request deadline exceeded' });
+    const logger = { warn: vi.fn() };
+    const commit = vi.fn(async ({ rows }) => ({ savedRecords: rows.length }));
+    const result = await confirmOfficialImportTask({
+      supabase, taskId: staged.task.id, userId: 'user-1', accessKey: staged.accessKey, commit,
+      connectionRetryOptions: { logger },
+    });
+    expect(result.result.savedRecords).toBe(220);
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(commit.mock.calls[0][0].rows.map(row => row.ordinal)).toEqual(Array.from({ length: 220 }, (_, i) => i));
+    expect(supabase.reads.map(read => read.range[0])).toEqual([0, 100, 100, 200]);
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(staged.task.id);
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(staged.accessKey);
+  });
+
+  it.each(['TimeoutError: Total request deadline exceeded', 'permission denied'])('stops safely on a persistent read failure: %s', async message => {
+    const supabase = createFakeSupabase();
+    const staged = await createReview(supabase);
+    supabase.failNext(({ tableName, action }) => tableName === 'official_import_staged_records' && action === 'select', { message }, 10);
+    const commit = vi.fn();
+    await expect(confirmOfficialImportTask({
+      supabase, taskId: staged.task.id, userId: 'user-1', accessKey: staged.accessKey, commit,
+      connectionRetryOptions: { logger: { warn: vi.fn() } },
+    })).rejects.toMatchObject({ code: 'STAGED_RECORDS_LOAD_FAILED', details: { offset: 0, pageSize: 100 } });
+    expect(supabase.reads).toHaveLength(message.startsWith('TimeoutError') ? 2 : 1);
+    expect(commit).not.toHaveBeenCalled();
+    expect(supabase.tables.official_import_tasks[0].status).toBe('awaiting_confirmation');
+  });
+
+  it('cancels a page read without retrying or returning a partial snapshot', async () => {
+    const controller = new AbortController();
+    const supabase = createFakeSupabase({ onStagedRead: (_read, signal) => {
+      expect(signal).toBe(controller.signal);
+      controller.abort(new DOMException('Cancelled', 'AbortError'));
+    } });
+    await expect(loadStagedRows(supabase, 'task-1', {}, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(supabase.reads).toHaveLength(1);
+  });
+
+  it('loads review metadata without normalized payloads or raw records', async () => {
+    const supabase = createFakeSupabase();
+    const staged = await createReview(supabase);
+    const review = await getOfficialImportReview({ supabase, taskId: staged.task.id, userId: 'user-1', accessKey: staged.accessKey });
+    expect(review.records).toHaveLength(2);
+    expect(review.records[0]).toMatchObject({ ordinal: 0, poolId: 'special_test', itemName: '测试角色', selectedAction: 'keep' });
+    expect(supabase.reads[0].columns).not.toContain('normalized_record');
+    expect(supabase.reads[0].columns).not.toContain('raw_min');
+  });
+
+  it.each([1001, 1363, 5000])('commits all %i staged records across the REST row limit', async (size) => {
+    const supabase = createFakeSupabase();
+    const staged = await stageOfficialImportTask({
+      supabase, userId: 'user-1', source: 'intl', importMode: 'full',
+      account: { gameUid: '10001', serverId: '2' },
+      stagedRecords: Array.from({ length: size }, (_, index) => createStagedRecord({ ordinalName: String(index) })),
+      importSummary: { newRecords: size },
+    });
+    const commit = vi.fn(async ({ rows }) => ({ savedRecords: rows.length }));
+    const result = await confirmOfficialImportTask({
+      supabase, taskId: staged.task.id, userId: 'user-1', accessKey: staged.accessKey, commit,
+    });
+    expect(result.result.savedRecords).toBe(size);
+    expect(commit.mock.calls[0][0].rows.at(-1).ordinal).toBe(size - 1);
+  });
+
+  it('refuses a missing ordinal before calling commit', async () => {
+    const supabase = createFakeSupabase();
+    const staged = await createReview(supabase);
+    supabase.tables.official_import_staged_records[1].ordinal = 2;
+    const commit = vi.fn();
+    await expect(confirmOfficialImportTask({
+      supabase, taskId: staged.task.id, userId: 'user-1', accessKey: staged.accessKey, commit,
+    })).rejects.toMatchObject({ code: 'STAGED_RECORDS_INCOMPLETE' });
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it('continues through pages capped below the requested size', async () => {
+    const supabase=createFakeSupabase({rowLimit:1});
+    const staged=await createReview(supabase);
+    const review=await getOfficialImportReview({supabase,taskId:staged.task.id,userId:'user-1',accessKey:staged.accessKey});
+    expect(review.records).toHaveLength(2);
+  });
+
+  it('rejects a missing final record even when returned ordinals are contiguous', async () => {
+    const supabase=createFakeSupabase(); const staged=await createReview(supabase);
+    supabase.tables.official_import_staged_records.pop();
+    const commit=vi.fn();
+    await expect(confirmOfficialImportTask({supabase,taskId:staged.task.id,userId:'user-1',accessKey:staged.accessKey,commit}))
+      .rejects.toMatchObject({code:'STAGED_RECORDS_INCOMPLETE'});
+    expect(commit).not.toHaveBeenCalled();
+  });
+
   const poolTimeout = {
     code: 'PGRST003',
     message: 'Timed out acquiring connection from connection pool.',

@@ -1,0 +1,250 @@
+.import-window,
+.official-import-content {
+  --import-bg: #fff;
+  --import-surface: #f5f5f6;
+  --import-border: #e4e4e7;
+  --import-text: #27272a;
+  --import-muted: #71717a;
+  --import-accent: #a16207;
+  --import-selected: #fff9df;
+  color: var(--import-text);
+}
+
+.dark .import-window,
+.dark .official-import-content {
+  --import-bg: #18181b;
+  --import-surface: #202023;
+  --import-border: #343437;
+  --import-text: #f4f4f5;
+  --import-muted: #a1a1aa;
+  --import-accent: #facc15;
+  --import-selected: #35301c;
+}
+
+.app-modal-panel.import-window {
+  width: 100%;
+  max-width: 680px;
+  border: 1px solid var(--import-border);
+  border-top: 3px solid #ffd800;
+  border-radius: 18px;
+  background: var(--import-bg);
+  box-shadow: 0 24px 80px #0005;
+  scrollbar-width: thin;
+  scrollbar-color: var(--import-border) transparent;
+}
+
+.import-window__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 26px 16px;
+  background: var(--import-bg);
+  border-bottom: 1px solid var(--import-border);
+}
+
+.import-window__title {
+  font-size: 21px;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: 0.025em;
+}
+
+.import-window__subtitle {
+  margin-top: 5px;
+  color: var(--import-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.import-window .app-modal-icon-button { border-radius: 9px; }
+
+.import-window__steps {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 16px 26px;
+  list-style: none;
+  border-bottom: 1px solid var(--import-border);
+}
+
+.import-window__steps li {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  color: var(--import-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.import-window__steps li:not(:last-child)::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  margin-inline: 8px;
+  background: var(--import-border);
+}
+
+.import-window__steps li:last-child { flex: none; }
+.import-window__steps li.is-current { color: var(--import-text); font-weight: 700; }
+.import-window__steps li.is-complete { color: var(--import-accent); }
+.import-window__step-number {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  border: 1px solid var(--import-border);
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+}
+.is-current .import-window__step-number { color: #27272a; background: #ffd800; border-color: #ffd800; }
+.is-complete .import-window__step-number { background: var(--import-selected); border-color: #eab30866; }
+.import-window__body { padding: 18px 26px 22px; }
+.import-window__retention {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--import-border);
+  color: var(--import-muted);
+  font-size: 11px;
+  line-height: 1.8;
+}
+.import-window__retention svg { flex: none; margin-top: 3px; }
+
+.import-feedback {
+  --feedback-bg: #eff8ff;
+  --feedback-border: #bae0fa;
+  --feedback-text: #164e70;
+  --feedback-accent: #075985;
+  padding: 14px 16px;
+  border: 1px solid var(--feedback-border);
+  border-radius: 10px;
+  background: var(--feedback-bg);
+  color: var(--feedback-text);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.import-feedback--success {
+  --feedback-bg: #ecfdf5;
+  --feedback-border: #a7dfc5;
+  --feedback-text: #14532d;
+  --feedback-accent: #166534;
+}
+.dark .import-feedback {
+  --feedback-bg: #172b39;
+  --feedback-border: #28506a;
+  --feedback-text: #cee8fa;
+  --feedback-accent: #99d8ff;
+}
+.dark .import-feedback--success {
+  --feedback-bg: #172e26;
+  --feedback-border: #315f4c;
+  --feedback-text: #d0f3df;
+  --feedback-accent: #86efac;
+}
+.import-feedback__title { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--feedback-accent); font-size: 14px; font-weight: 700; }
+.import-feedback__account { color: var(--import-text); font-size: 14px; font-weight: 700; }
+.import-feedback__meta { margin-top: 4px; color: var(--feedback-text); }
+.import-feedback__description { margin-top: 12px; }
+.import-feedback__action { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; margin-top: 12px; color: var(--feedback-accent); font-weight: 700; text-decoration: underline; text-underline-offset: 4px; }
+.import-feedback__success-icon { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; border: 1px solid var(--feedback-border); color: var(--feedback-accent); }
+
+.official-import-content { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.official-import-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.official-import-health { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; background: none; border: 0; }
+.official-import-health__dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.official-import-file-link { display: inline-flex; align-items: center; gap: 6px; color: var(--import-muted); font-size: 12px; }
+.official-import-file-link:hover { color: var(--import-accent); }
+.official-import-settings { display: flex; flex-direction: column; gap: 14px; }
+.official-import-setting { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.official-import-setting__label { flex: none; min-width: 52px; font-size: 12px; color: var(--import-muted); }
+.official-import-source { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex: 1; min-width: 0; }
+.official-import-source__option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  min-height: 46px;
+  padding: 9px 10px;
+  border: 1px solid var(--import-border);
+  border-radius: 8px;
+  background: var(--import-surface);
+  color: var(--import-text);
+  transition: border-color 150ms, background 150ms;
+}
+.official-import-source__option strong { font-size: 13px; }
+.official-import-source__option > span { font-size: 11px; color: var(--import-muted); }
+.official-import-source__option[aria-pressed='true'] { border-color: #eab308; background: var(--import-selected); }
+.official-import-source__option[aria-pressed='true'] strong { color: var(--import-accent); }
+.official-import-source__option:hover { border-color: #eab308; }
+.official-import-mode { display: flex; align-items: center; gap: 6px; flex: 1; }
+.official-import-mode__option { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 6px 12px; border: 1px solid transparent; border-radius: 7px; color: var(--import-muted); font-size: 12px; }
+.official-import-mode__option[aria-pressed='true'] { border-color: var(--import-border); background: var(--import-surface); color: var(--import-text); font-weight: 700; }
+.official-import-mode__option > span { padding: 1px 4px; border-radius: 3px; background: var(--import-selected); color: var(--import-accent); font-size: 9px; font-weight: 400; }
+.official-import-mode-help { position: relative; flex: none; }
+.official-import-mode-help summary { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; list-style: none; color: var(--import-muted); cursor: pointer; }
+.official-import-mode-help summary::-webkit-details-marker { display: none; }
+.official-import-mode-help p { position: absolute; right: 0; top: 100%; z-index: 40; width: min(300px, 75vw); padding: 12px; border: 1px solid var(--import-border); border-radius: 8px; background: var(--import-bg); box-shadow: 0 6px 20px #0002; font-size: 12px; line-height: 1.7; }
+.official-import-guide { padding-bottom: 2px; border-bottom: 1px solid var(--import-border); }
+.official-import-guide summary { font-size: 12px; font-weight: 600; }
+
+.official-import-auth { overflow: hidden; border: 1px solid var(--import-border); border-radius: 14px; background: var(--import-surface); }
+.official-import-login-tabs { display: flex; align-items: stretch; gap: 24px; padding-inline: 24px; border-bottom: 1px solid var(--import-border); }
+.official-import-login-tabs > button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 52px; padding: 0 1px; border-bottom: 2px solid transparent; color: var(--import-muted); font-size: 13px; }
+.official-import-login-tabs > button[aria-selected='true'] { color: var(--import-text); border-bottom-color: #eab308; font-weight: 700; }
+.official-import-login-tabs__badge { padding: 1px 5px; border-radius: 4px; background: #ffd800; color: #3b3212; font-size: 9px; font-weight: 600; }
+.official-import-auth__body { padding: 22px 24px 18px; }
+.official-import-auth .official-qr-login { margin-block: 0; margin-inline: auto; }
+.official-import-auth .official-qr-card { border: 1px solid #00000012; box-shadow: 0 4px 14px #0000000c; }
+.official-import-auth .official-qr-login__notes { margin-top: 14px; }
+.official-import-token__input { width: 100%; min-height: 56px; padding: 14px 16px 26px; border: 1px solid var(--import-border); border-radius: 9px; background: var(--import-bg); color: var(--import-text); font-family: monospace; font-size: 14px; outline: none; }
+.official-import-token__input::placeholder { color: var(--import-muted); font-size: 12px; }
+.official-import-token__input:focus { border-color: #eab308; box-shadow: 0 0 0 2px #eab30820; }
+.official-import-token__count { position: absolute; right: 12px; bottom: 8px; color: var(--import-muted); font-size: 10px; font-family: monospace; pointer-events: none; }
+.official-import-token__clipboard { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 10px; border: 1px solid var(--import-border); border-radius: 7px; background: var(--import-bg); color: var(--import-muted); font-size: 11px; }
+.official-import-token__submit { position: relative; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 46px; overflow: hidden; border-radius: 8px; background: #ffd800; color: #27272a; font-size: 13px; font-weight: 700; }
+.official-import-token__submit:hover { background: #ffe333; }
+.official-import-token__submit:disabled { background: var(--import-border); color: var(--import-muted); cursor: not-allowed; }
+.official-import-account-panel { padding: 18px; border: 1px solid var(--import-border); border-radius: 12px; background: var(--import-surface); }
+.official-import-account-option { border-radius: 9px; background: var(--import-bg); }
+.official-import-account-avatar { border-radius: 9px; }
+.official-import-account-badge { border-radius: 4px; }
+.official-import-account-back, .official-import-progress { border-radius: 10px; }
+.official-import-content :where(button, summary, a):focus-visible,
+.import-window :where(button, summary):focus-visible { outline: 2px solid #ca8a04; outline-offset: 3px; }
+
+@media (max-width: 640px) {
+  .app-modal-panel.import-window { border-radius: 13px; }
+  .import-window__header { padding: 15px 16px 13px; }
+  .import-window__title { font-size: 18px; }
+  .import-window__subtitle { font-size: 11px; }
+  .import-window__steps { gap: 7px; padding: 14px 16px; }
+  .import-window__steps li { gap: 6px; font-size: 11px; }
+  .import-window__steps li:not(:last-child)::after { margin-inline: 2px; }
+  .import-window__step-number { width: 23px; height: 23px; }
+  .import-window__body { padding: 12px 16px 18px; }
+  .official-import-content { gap: 14px; }
+  .official-import-setting { gap: 10px; }
+  .official-import-setting__label { min-width: 48px; font-size: 11px; }
+  .official-import-source__option { padding: 7px; gap: 3px; }
+  .official-import-source__option > span { font-size: 10px; }
+  .official-import-mode { gap: 3px; }
+  .official-import-mode__option { padding-inline: 8px; font-size: 11px; }
+  .official-import-login-tabs { padding-inline: 15px; gap: 20px; }
+  .official-import-login-tabs > button { min-height: 48px; font-size: 12px; }
+  .official-import-auth__body { padding: 16px 10px 14px; }
+  .official-import-auth .official-qr-card { border-radius: 11px; }
+  .official-import-auth .official-import-token { padding-inline: 4px; }
+  .official-import-mode-help summary { min-height: 44px; }
+  .official-import-mode-help p { right: 0; }
+}
