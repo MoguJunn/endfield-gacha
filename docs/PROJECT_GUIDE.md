@@ -82,7 +82,7 @@ npm run perf:report
 
 仓库默认使用 GitHub-connected Vercel：推送 `main` 触发生产构建。发布前准备数据库与后台计算，发布后确认部署 Ready 和正式域名指向正确版本，流程见 [发布检查](RELEASE_CHECKLIST.md)。
 
-当前代码版本为 v4.7.0，生产数据库已准备 schema 6 个人分析与手气评价，升级顺序及验证见 [发布记录](RELEASE_4.7.0.md)。其他已有环境核对该记录列出的前向迁移，已执行的失效迁移不要重跑。运行版本优先读取 `site_config.site_version`，发布时同步 `build_info`、公共缓存和阵容接口缓存，再核对中英文公告及实际页面。
+当前代码版本为 v4.7.1，国服扫码服务、前端与公告按 [发布记录](RELEASE_4.7.1.md) 的顺序更新。个人分析仍使用 schema 6，既有数据库准备见 [v4.7.0](RELEASE_4.7.0.md)；其他已有环境仅执行尚未应用的前向迁移，已执行的失效迁移不要重跑。运行版本优先读取 `site_config.site_version`，发布时同步 `build_info`、公共缓存和阵容接口缓存，再核对中英文公告及实际页面。
 
 管理后台使用同源 `/api/admin`，兼容 URL 由路由表映射；无需部署旧 Supabase 管理 Edge Functions。
 
