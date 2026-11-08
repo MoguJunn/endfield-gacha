@@ -4,7 +4,7 @@ import { ArrowUpRight, BarChart3, Gift, MessagesSquare } from 'lucide-react';
 import { useI18n } from '../../i18n/index.js';
 import './communityActivityPanel.css';
 
-const LOTTERY_URL = String(import.meta.env.VITE_SUMMER_LOTTERY_URL || '/lottery').trim();
+const LOTTERY_ARCHIVE_URL = '/lottery/archive/arknights-p3r-collab-2026';
 
 export default function CommunityActivityPanel({ onOpenCommunity }) {
   const { isEnglish } = useI18n();
@@ -16,9 +16,9 @@ export default function CommunityActivityPanel({ onOpenCommunity }) {
         <div className="community-activity-panel__eyebrow"><Gift size={14} />{tt('社区活动档案', 'COMMUNITY ARCHIVE')}<span>{tt('已结束', 'ENDED')}</span></div>
         <div className="community-activity-panel__feature-copy">
           <h3>{tt('感谢每一份参与', 'Thanks for taking part')}</h3>
-          <p>{tt('本期活动已结束，记录仍然保留。下一次活动开始前，先看看全服观测与社区动态。', 'This event has ended, but its record remains. Explore community data while you wait for the next one.')}</p>
+          <p>{tt('往期活动记录与中奖公示持续保留，也欢迎查看全服观测与社区动态。', 'Previous event records and results remain available. Explore community data and news here.')}</p>
         </div>
-        <a className="community-activity-panel__archive-link" href={LOTTERY_URL}>{tt('查看活动记录', 'View event archive')}<ArrowUpRight size={14} /></a>
+        <a className="community-activity-panel__archive-link" href={LOTTERY_ARCHIVE_URL}>{tt('查看往期记录', 'View event archive')}<ArrowUpRight size={14} /></a>
       </div>
       <div className="community-activity-panel__links">
         <Link to="/summary">

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import autoprefixer from 'autoprefixer';
 import { applyRegulationTheme } from './lottery-regulation-theme.mjs';
+import { applyLotterySessionIntegration } from './lottery-session-integration.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, '..');
@@ -198,6 +199,7 @@ await Promise.all(fonts.map(([source, target]) => (
 await writeFile(resolve(fontTargetDir, 'site-fonts.css'), fontStylesheet, 'utf8');
 await applyLotteryResultsRevisionOverride();
 await applyRegulationTheme(rootDir, lotteryRoot);
+await applyLotterySessionIntegration(rootDir, lotteryRoot);
 
 await build({
   root: lotteryRoot,

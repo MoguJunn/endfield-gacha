@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { getSupabaseAdminClient } from '../../_lib/authAdmin.js';
 import { getRequesterKey } from '../../_lib/http.js';
 import { consumeLotteryRateLimit } from '../../_lib/lotteryRateLimit.js';
+import { resolveLotterySiteUrls } from '../../../shared/lotterySiteUrls.js';
 import {
   appendSetCookieHeader,
   isSecureRequest,
@@ -74,6 +75,8 @@ function getPendingState(req) {
 }
 
 function buildMainLoginUrl(req) {
+  const sameSiteOrigin = resolveLotterySiteUrls(req).mainSiteOrigin;
+  if (sameSiteOrigin) return `${sameSiteOrigin}/?summer_lottery_login=1`;
   const configuredOrigin = normalizeBaseUrl(process.env.VITE_APP_URL || process.env.APP_URL);
   if (configuredOrigin) {
     return `${configuredOrigin}/?summer_lottery_login=1`;
@@ -90,7 +93,7 @@ export default async function summerLotterySsoStartHandler(req, res) {
     return sendError(res, 405, 'method_not_allowed', 'Method not allowed.');
   }
 
-  const lotteryBaseUrl = normalizeBaseUrl(process.env.LOTTERY_SITE_URL);
+  const lotteryBaseUrl = resolveLotterySiteUrls(req).lotteryBaseUrl;
   const audience = String(process.env.LOTTERY_SSO_AUDIENCE || DEFAULT_AUDIENCE).trim().slice(0, 100);
   if (!lotteryBaseUrl || !audience) {
     return sendError(res, 503, 'lottery_sso_not_configured', 'Summer lottery SSO is not configured.');

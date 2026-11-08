@@ -9,6 +9,7 @@ function replaceRequired(source, target, replacement) {
 export async function applyRegulationTheme(rootDir, lotteryRoot) {
   await copyFile(resolve(rootDir, 'src/lottery/RegulationHero.jsx'), resolve(lotteryRoot, 'src/components/RegulationHero.jsx'));
   await copyFile(resolve(rootDir, 'src/lottery/regulation.css'), resolve(lotteryRoot, 'src/regulation.css'));
+  await copyFile(resolve(rootDir, 'src/lottery/resumeMainSiteSession.js'), resolve(lotteryRoot, 'src/services/resumeMainSiteSession.js'));
   await copyFile(resolve(rootDir, 'src/assets/fonts/source-han/SourceHanSansCN-VF.ttf.woff2'), resolve(lotteryRoot, 'public/local-activity/fonts/SourceHanSansCN-VF.ttf.woff2'));
   await copyFile(resolve(rootDir, 'src/assets/fonts/source-han/LICENSE.txt'), resolve(lotteryRoot, 'public/local-activity/fonts/SourceHanSans-LICENSE.txt'));
   await copyFile(resolve(rootDir, 'shared/regulationLottery.js'), resolve(lotteryRoot, 'src/config/regulationLottery.js'));
@@ -49,6 +50,20 @@ ${source.slice(heroEnd)}`;
     source = replaceRequired(source,
       '活动开始前已经锁定，开奖后会公开原始信息供大家核对。',
       "{campaign?.seedCommitment ? '活动开始前已经锁定，开奖后会公开原始信息供大家核对。' : '活动开放前将固定核对码，准备完成后在此公布。'}");
+  }
+  if (!source.includes("import { resumeMainSiteSession }")) {
+    source = `import { resumeMainSiteSession } from './services/resumeMainSiteSession.js';\n${source}`;
+    source = replaceRequired(source,
+      '      setSnapshot(isArchive ? await loadLotteryArchive(archiveCampaignId) : await loadLottery());',
+      `      const nextSnapshot = isArchive ? await loadLotteryArchive(archiveCampaignId) : await loadLottery();
+      setSnapshot(nextSnapshot);
+      return nextSnapshot;`);
+    source = replaceRequired(source,
+      '      await refresh({ clearExistingError: !((ticket || state) || preserveAuthError) });',
+      `      const initialSnapshot = await refresh({ clearExistingError: !((ticket || state) || preserveAuthError) });
+      if (initialSnapshot && !initialSnapshot.user && !(ticket || state) && !preserveAuthError) {
+        await resumeMainSiteSession();
+      }`);
   }
   // The historical revision notice belongs only to campaigns with invalidated results.
   source = source.replace(

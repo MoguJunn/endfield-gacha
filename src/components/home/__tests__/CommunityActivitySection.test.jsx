@@ -36,4 +36,27 @@ describe('community special program and briefing lifecycle', () => {
     act(() => { vi.advanceTimersByTime(2000); });
     expect(screen.getByText('新版本导览')).toBeInTheDocument();
   });
+
+  it('defaults to the current giveaway and lets visitors switch to community and briefing', () => {
+    vi.setSystemTime(new Date('2026-11-08T14:00:00+08:00'));
+    render(<CommunityActivitySection />);
+    expect(screen.getByRole('button', { name: '第1页：抽奖' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('link', { name: '参与卫戍协议规程特别抽奖' })).toHaveAttribute('href', '/lottery');
+    expect(screen.getByText('全能开发者主题包')).toBeInTheDocument();
+    expect(screen.getByText('Neptune')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '第2页：社区' }));
+    expect(screen.getByText('社区内容')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '第3页：导览' }));
+    expect(screen.getByText('新版本导览')).toBeInTheDocument();
+  });
+
+  it('stops promoting participation when the giveaway deadline passes', () => {
+    vi.setSystemTime(new Date('2026-11-21T23:59:59+08:00'));
+    render(<CommunityActivitySection />);
+    expect(screen.getByRole('link', { name: '参与卫戍协议规程特别抽奖' })).toBeInTheDocument();
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(screen.queryByRole('button', { name: '第1页：抽奖' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '参与卫戍协议规程特别抽奖' })).not.toBeInTheDocument();
+    expect(screen.getByText('新版本导览')).toBeInTheDocument();
+  });
 });

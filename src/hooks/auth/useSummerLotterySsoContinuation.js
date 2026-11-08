@@ -47,14 +47,17 @@ export function useSummerLotterySsoContinuation({ user, authResolved, openAuthMo
       runningRef.current = true;
       void (async () => {
         try {
+          // The public session response deliberately omits the internal session ID.
+          const isCurrentUserSession = session => session?.authenticated === true
+            && session.user?.id === user.id;
           let siteSession = await getCurrentSiteSession({ syncSupabase: false });
-          if (!siteSession?.authenticated || !siteSession?.session?.id) {
+          if (!isCurrentUserSession(siteSession)) {
             const bootstrap = await bootstrapSiteSessionFromSupabaseToken();
             if (bootstrap?.authenticated) {
               siteSession = await getCurrentSiteSession({ syncSupabase: false });
             }
           }
-          if (!siteSession?.authenticated || !siteSession?.session?.id) {
+          if (!isCurrentUserSession(siteSession)) {
             openAuthModal();
             return;
           }

@@ -19,6 +19,7 @@ describe('useSummerLotterySsoContinuation', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
     window.history.replaceState({}, '', '/');
   });
@@ -53,5 +54,36 @@ describe('useSummerLotterySsoContinuation', () => {
       expect(bootstrapSiteSessionFromSupabaseToken).toHaveBeenCalled();
       expect(openAuthModal).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('resumes a valid public session without an internal session ID or login modal', async () => {
+    const originalWindow = window;
+    const assign = vi.fn();
+    vi.stubGlobal('window', new Proxy(originalWindow, {
+      get(target, key) { return key === 'location' ? { search: '?summer_lottery_login=1', assign } : Reflect.get(target, key); },
+    }));
+    getCurrentSiteSession.mockResolvedValue({ authenticated: true, user: { id: 'user-1' }, session: { expiresAt: '2099-01-01' } });
+    const openAuthModal = vi.fn();
+    renderHook(() => useSummerLotterySsoContinuation({ user: { id: 'user-1' }, authResolved: true, openAuthModal }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('/api/summer-lottery-sso/start'));
+    expect(openAuthModal).not.toHaveBeenCalled();
+    expect(bootstrapSiteSessionFromSupabaseToken).not.toHaveBeenCalled();
+    expect(originalWindow.sessionStorage.getItem('eg_summer_lottery_sso_pending_at')).toBeNull();
+  });
+
+  it('bootstraps a native login and accepts the resulting public session response', async () => {
+    const originalWindow = window;
+    const assign = vi.fn();
+    vi.stubGlobal('window', new Proxy(originalWindow, {
+      get(target, key) { return key === 'location' ? { search: '?summer_lottery_login=1', assign } : Reflect.get(target, key); },
+    }));
+    getCurrentSiteSession.mockResolvedValueOnce({ authenticated: false })
+      .mockResolvedValueOnce({ authenticated: true, user: { id: 'user-1' }, session: { expiresAt: '2099-01-01' } });
+    bootstrapSiteSessionFromSupabaseToken.mockResolvedValue({ authenticated: true });
+    const openAuthModal = vi.fn();
+    renderHook(() => useSummerLotterySsoContinuation({ user: { id: 'user-1' }, authResolved: true, openAuthModal }));
+    await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+    expect(openAuthModal).not.toHaveBeenCalled();
+    expect(bootstrapSiteSessionFromSupabaseToken).toHaveBeenCalledTimes(1);
   });
 });

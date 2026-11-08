@@ -1,0 +1,29 @@
+.regulation-lottery-card { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(100px, .85fr); flex: 1; min-width: 0; min-height: 0; overflow: hidden; position: relative; color: #e6efdd; border: 1px solid #42654d; border-top: 2px solid #44edb9; background: #101b14; text-decoration: none; isolation: isolate; transition: border-color 160ms; }
+.regulation-lottery-card:hover { border-color: #44edb9; }
+.regulation-lottery-card:focus-visible { outline: 2px solid #44edb9; outline-offset: 3px; }
+.regulation-lottery-card__copy { display: flex; flex-direction: column; justify-content: space-between; gap: 9px; min-width: 0; padding: 14px 16px; z-index: 1; background: linear-gradient(90deg, #101b14 75%, #101b1400); }
+.regulation-lottery-card__eyebrow { display: flex; align-items: center; gap: 7px; color: #8ba28d; font-size: 8px; letter-spacing: .08em; }
+.regulation-lottery-card__eyebrow svg { width: 18px; height: 20px; color: #44edb9; }
+.regulation-lottery-card__eyebrow b { margin-left: auto; padding: 3px 5px; color: #44edb9; border: 1px solid #44edb959; font-size: 8px; white-space: nowrap; }
+.regulation-lottery-card__title > span { color: #b0c39f; font-size: 10px; letter-spacing: .1em; }
+.regulation-lottery-card__title h3 { margin: 5px 0 0; font-size: clamp(17px, 1.6vw, 24px); font-weight: 800; letter-spacing: -.035em; line-height: 1.35; }
+.regulation-lottery-card__copy > p { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0; color: #bed1b7; font-size: 10px; }
+.regulation-lottery-card__copy > p svg { color: #44edb9; }
+.regulation-lottery-card__copy > p strong { color: #44edb9; font-size: 12px; white-space: nowrap; }
+.regulation-lottery-card__meta { display: flex; align-items: center; gap: 5px; color: #94ab92; font-size: 9px; }
+.regulation-lottery-card__footer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; justify-content: space-between; padding-top: 8px; border-top: 1px solid #34513b; }
+.regulation-lottery-card__footer small { color: #9caf95; font-size: 8px; }
+.regulation-lottery-card__footer small b { color: #d2e1b5; }
+.regulation-lottery-card__footer > span { display: inline-flex; align-items: center; gap: 6px; color: #44edb9; font-size: 10px; font-weight: 700; }
+.regulation-lottery-card__art { display: grid; place-items: center; position: relative; min-width: 0; padding: 16px 12px 16px 0; background: repeating-linear-gradient(115deg, #0000 0 30px, #0002 30px 60px), linear-gradient(160deg, #b54c31, #3b261c 55%, #132019); }
+.regulation-lottery-card__art::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(transparent 0 3px, #0002 3px 4px); pointer-events: none; }
+.regulation-lottery-card__art img { width: 100%; height: auto; max-height: 150px; object-fit: contain; border: 1px solid #c3dca76b; transform: rotate(-4deg); box-shadow: 0 8px 20px #0006; }
+.regulation-lottery-card__art > span { position: absolute; right: 9px; bottom: 9px; color: #dce7c8; font-size: 29px; font-weight: 800; line-height: 1; text-align: right; }
+.regulation-lottery-card__art > span > span { display: block; margin-top: 4px; font-size: 5px; letter-spacing: .1em; }
+@media (max-width: 700px) {
+  .regulation-lottery-card { min-height: 218px; grid-template-columns: minmax(0, 1.5fr) minmax(80px, .7fr); }
+  .regulation-lottery-card__copy { padding: 13px; }
+  .regulation-lottery-card__eyebrow { font-size: 7px; }
+  .regulation-lottery-card__title h3 { font-size: 20px; }
+}
+@media (prefers-reduced-motion: reduce) { .regulation-lottery-card { transition: none; } }

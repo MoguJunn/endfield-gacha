@@ -155,4 +155,24 @@ describe('summer lottery SSO start', () => {
     expect(fragment.get('state')).toBe(state);
     expect(fragment.get('sso_ticket')).toMatch(/^[A-Za-z0-9_-]{43}$/u);
   });
+
+  it.each(['ef-gacha.mogujun.icu', 'ef.nepst.cn'])('returns the signed-in user directly to the lottery on %s', async host => {
+    process.env.VITE_APP_URL = 'https://ef-gacha.mogujun.icu';
+    process.env.LOTTERY_SITE_URL = 'https://ef-gacha.mogujun.icu/lottery';
+    const insert = vi.fn().mockResolvedValue({ error: null });
+    mocks.getSupabaseAdminClient.mockReturnValue({ from: () => ({
+      insert,
+      delete: () => ({ lt: async () => ({ error: null }), eq: () => ({ is: async () => ({ error: null }) }) }),
+    }) });
+    mocks.loadSiteSession.mockResolvedValue({ ok: true, authenticated: true, user: { id: 'user-1' }, session: { id: 'session-1' } });
+    const request = createRequest({ state: 'S'.repeat(43) });
+    request.headers.host = host;
+    const response = createResponse();
+    await summerLotterySsoStartHandler(request, response);
+    expect(new URL(response.headers.Location).origin).toBe(`https://${host}`);
+    expect(new URL(response.headers.Location).pathname).toBe('/lottery/');
+    expect(new URL(response.headers.Location).hash).toContain('sso_ticket=');
+    expect(response.headers.Location).not.toContain('summer_lottery_login');
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ user_id: 'user-1', main_session_id: 'session-1' }));
+  });
 });
