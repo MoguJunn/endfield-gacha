@@ -27,8 +27,10 @@ describe('DonationThanksCard', () => {
     expect(supporterAvatar.closest('article')).toHaveTextContent('Neptune');
     expect(supporterAvatar.closest('[class*="overflow-y-auto"]')).toBeInTheDocument();
     expect(screen.getByText(/home.donation.summary/)).toBeInTheDocument();
-    expect(screen.getByText('¥206')).toBeInTheDocument();
+    expect(screen.getByText('¥212')).toBeInTheDocument();
     expect(screen.getByText('¥200')).toBeInTheDocument();
+    expect(screen.getByText('蟑螂恶霸')).toBeInTheDocument();
+    expect(screen.getByAltText('蟑螂恶霸')).toHaveAttribute('src', DONATION_LEDGER[1].avatarUrl);
     expect(screen.getByText('爱发电用户_e2927')).toBeInTheDocument();
     expect(DONATION_LEDGER[0]).toMatchObject({ name: 'Neptune', pinned: true });
     expect(screen.getByText(/home.donation.pinned/)).toBeInTheDocument();
@@ -54,6 +56,7 @@ describe('DonationThanksCard', () => {
     );
 
     expect(screen.getByText('Neptune')).toBeInTheDocument();
+    expect(screen.getByText('蟑螂恶霸')).toBeInTheDocument();
     expect(screen.getByText('爱发电用户_e2927')).toBeInTheDocument();
     expect(screen.getAllByText('¥200').length).toBeGreaterThan(0);
     expect(screen.getByText(/donations.process.received.title/)).toBeInTheDocument();

@@ -15,6 +15,17 @@ export const FEATURED_SUPPORTER = Object.freeze({
 const DONATION_RECORDS = [
   FEATURED_SUPPORTER,
   {
+    id: 'afdian-72263194-20261107',
+    name: '蟑螂恶霸',
+    avatarUrl: 'https://pic1.afdiancdn.com/user/7226319421de11eb826a52540025c377/avatar/7583843e1cf7cbda19ad1080aaffecd1_w811_h800_s52.jpeg?imageView2/1/w/120/h/120',
+    roleKey: 'donations.process.site.title',
+    donatedAt: '2026-11',
+    amountCny: 6,
+    raffleAmountCny: 0,
+    siteAmountCny: 6,
+    pinned: false,
+  },
+  {
     id: 'afdian-e2927-20261017',
     name: '爱发电用户_e2927',
     avatarUrl: '/avatars/donation-supporter.svg',
