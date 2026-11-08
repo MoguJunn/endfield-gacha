@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import autoprefixer from 'autoprefixer';
+import { applyRegulationTheme } from './lottery-regulation-theme.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, '..');
@@ -103,10 +104,12 @@ const activityAssets = [
   ['summer-gift-package.png', 'summer-gift-package.png'],
   ['arknights-monthly-card.png', 'arknights-monthly-card.png'],
   ['endfield-monthly-card.png', 'endfield-monthly-card.png'],
+  ['regulation-developer-pack.jpg', 'regulation-developer-pack.jpg'],
 ];
 
 const activityArchives = [
   ['community-lottery.json', 'community-lottery.json'],
+  ['arknights-p3r-collab-2026.json', 'arknights-p3r-collab-2026.json'],
 ];
 
 const fonts = [
@@ -194,6 +197,7 @@ await Promise.all(fonts.map(([source, target]) => (
 )));
 await writeFile(resolve(fontTargetDir, 'site-fonts.css'), fontStylesheet, 'utf8');
 await applyLotteryResultsRevisionOverride();
+await applyRegulationTheme(rootDir, lotteryRoot);
 
 await build({
   root: lotteryRoot,

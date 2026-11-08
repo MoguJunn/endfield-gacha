@@ -32,6 +32,8 @@
     "prebuild": "npm run fonts:prepare && npm run share:renderer",
     "build": "vite build && npm run lottery:build",
     "lottery:build": "node scripts/build-lottery-subapp.mjs",
+    "lottery:preview": "node scripts/preview-regulation-lottery.mjs",
+    "lottery:prepare": "node scripts/prepare-regulation-lottery.mjs",
     "perf:report": "node scripts/report-performance-budget.mjs",
     "test": "node scripts/run-public-tests.mjs",
     "test:unit": "vitest run",

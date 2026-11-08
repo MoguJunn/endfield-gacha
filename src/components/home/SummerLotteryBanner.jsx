@@ -1,7 +1,7 @@
 import React from 'react';
 import { ArrowUpRight, CalendarDays, Gift, Sparkles } from 'lucide-react';
-import arknightsMonthlyCard from '../../assets/lottery/arknights-monthly-card.png';
-import endfieldMonthlyCard from '../../assets/lottery/endfield-monthly-card.png';
+import developerPack from '../../assets/lottery/regulation-developer-pack.jpg';
+import { RegulationEmblem } from '../../lottery/RegulationHero.jsx';
 import { useI18n } from '../../i18n/index.js';
 import './SummerLotteryBanner.css';
 
@@ -15,18 +15,19 @@ export default function SummerLotteryBanner({ compact = false, onOpenDetails }) 
   return (
     <Container
       href={onOpenDetails ? undefined : LOTTERY_URL}
-      className={`summer-lottery-banner group ${compact ? 'summer-lottery-banner--compact mb-6' : ''}`}
+      className={`summer-lottery-banner summer-lottery-banner--regulation group ${compact ? 'summer-lottery-banner--compact mb-6' : ''}`}
       aria-label={onOpenDetails ? undefined : t('home.summerLottery.open')}
     >
       <section className="summer-lottery-banner__info">
         <div className="summer-lottery-banner__kicker">
-          <Sparkles size={13} /> SPECIAL LOTTERY // 2026
+          <Sparkles size={13} /> REGULATION // SPECIAL GIVEAWAY
         </div>
         <div className="summer-lottery-banner__partners">
-          <span>Arknights</span><b>×</b><span>Persona 3 Reload</span>
+          <span>ARKNIGHTS</span><b>/</b><span>卫戍协议 · 规程</span>
         </div>
         <h3>{t('home.summerLottery.title')}</h3>
         <p>{t('home.summerLottery.description')}</p>
+        <p className="summer-lottery-banner__sponsor">{isEnglish ? 'Sponsored by Neptune' : '感谢 Neptune 再次赞助本期奖品'}</p>
         <div className="summer-lottery-banner__meta">
           <span>
             <CalendarDays size={12} /> {t('home.summerLottery.date')}
@@ -52,30 +53,21 @@ export default function SummerLotteryBanner({ compact = false, onOpenDetails }) 
       </section>
 
       <section className="summer-lottery-banner__visual" aria-hidden="true">
-        <div className="summer-lottery-banner__sky" />
-        <div className="summer-lottery-banner__horizon" />
-        <div className="summer-lottery-banner__curve" />
-        <div className="summer-lottery-banner__shards"><i /><i /><i /><i /></div>
         <div className="summer-lottery-banner__lockup">
-          <strong>ARKNIGHTS</strong>
-          <b>×</b>
-          <strong>PERSONA 3<br />RELOAD</strong>
-          <small>COMMUNITY COLLABORATION // 2026</small>
+          <RegulationEmblem />
+          <strong>卫戍协议<span>规程</span></strong>
+          <small>РЕГЛАМЕНТ / COMMUNITY EVENT</small>
         </div>
         <div className="summer-lottery-banner__prizes">
-          <div className="summer-lottery-banner__choice summer-lottery-banner__choice--1">
-            <img src={arknightsMonthlyCard} alt="" />
-            <span>OPTION 01</span>
-          </div>
-          <div className="summer-lottery-banner__choice summer-lottery-banner__choice--2">
-            <img src={endfieldMonthlyCard} alt="" />
-            <span>OPTION 02</span>
+          <div className="summer-lottery-banner__choice">
+            <img src={developerPack} alt="" />
+            <span>{isEnglish ? 'CNY 45 · ONE WINNER' : '全能开发者主题包 · 1 位中奖者'}</span>
           </div>
         </div>
         <div className="summer-lottery-banner__rail">
-          <span>EG // 26</span><b>06.93</b><i />
+          <span>REG // 26</span><b>01</b><i />
         </div>
-        <div className="summer-lottery-banner__coordinate">AREA 06 // COMMUNITY EVENT</div>
+        <div className="summer-lottery-banner__coordinate">PROTOCOL ESTABLISHED / 2026.11</div>
       </section>
     </Container>
   );

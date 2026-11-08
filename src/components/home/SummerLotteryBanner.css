@@ -491,3 +491,46 @@
   .summer-lottery-banner__rail { left: -18px; width: 48px; height: 250px; }
   .summer-lottery-banner__coordinate { left: 16%; }
 }
+
+:root {
+.summer-lottery-banner--regulation {
+  --lottery-cyan: #44edb9;
+  --lottery-blue: #44edb9;
+  --lottery-violet: #d7e5b4;
+  border-color: #355243;
+  background: #0b1510;
+  box-shadow: 0 14px 35px #0002;
+}
+.summer-lottery-banner--regulation:hover { border-color: #44edb9; box-shadow: 0 18px 40px #133e2830; }
+.summer-lottery-banner--regulation .summer-lottery-banner__info { padding: 32px; color: #d8e4d0; background: #101c15; }
+.summer-lottery-banner--regulation .summer-lottery-banner__info::before { background: #44edb9; left: 32px; }
+.summer-lottery-banner--regulation .summer-lottery-banner__kicker { color: #44edb9; font-size: 8px; }
+.summer-lottery-banner--regulation .summer-lottery-banner__partners { color: #8ba18d; margin-top: 24px; font-size: 13px; }
+.summer-lottery-banner--regulation .summer-lottery-banner__partners b { color: #44edb9; }
+.summer-lottery-banner--regulation .summer-lottery-banner__info h3 { color: #e2e9d8; font-size: clamp(24px, 2.5vw, 36px); text-shadow: none; line-height: 1.25; }
+.summer-lottery-banner--regulation .summer-lottery-banner__info > p { color: #9faf9b; }
+.summer-lottery-banner--regulation .summer-lottery-banner__info > .summer-lottery-banner__sponsor { color: #c7d8ab; font-size: 10px; }
+.summer-lottery-banner--regulation .summer-lottery-banner__meta span { color: #b5c8ae; border-color: #34503b; background: #18291c; }
+.summer-lottery-banner--regulation .summer-lottery-banner__meta span:last-child { color: #08281b; background: #44edb9; border-color: #44edb9; }
+.summer-lottery-banner--regulation .summer-lottery-banner__action { color: #08281b; background: #44edb9; box-shadow: 4px 4px 0 #44edb929; }
+.summer-lottery-banner--regulation .summer-lottery-banner__details { color: #a9c49f; border-color: #40613c; background: transparent; }
+.summer-lottery-banner--regulation .summer-lottery-banner__visual { min-height: 370px; background: repeating-linear-gradient(110deg, #0000 0 70px, #190f0933 70px 120px), linear-gradient(180deg, #a74730, #653023 48%, #112019 70%); }
+.summer-lottery-banner--regulation .summer-lottery-banner__visual::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(transparent 0 3px, #0002 3px 4px); }
+.summer-lottery-banner--regulation .summer-lottery-banner__lockup { position: absolute; top: 28px; width: auto; margin: 0; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: 48px auto; gap: 12px; text-align: left; filter: none; }
+.summer-lottery-banner--regulation .summer-lottery-banner__lockup > svg { width: 48px; height: 54px; color: #e7e5cb; --reg-cutout: #8b3929; }
+.summer-lottery-banner--regulation .summer-lottery-banner__lockup strong { font-size: 23px; white-space: nowrap; letter-spacing: .1em; }
+.summer-lottery-banner--regulation .summer-lottery-banner__lockup strong span { display: block; margin-top: 8px; font-size: 16px; }
+.summer-lottery-banner--regulation .summer-lottery-banner__lockup small { color: #c1c5a9; font-size: 6px; letter-spacing: .08em; }
+.summer-lottery-banner--regulation .summer-lottery-banner__prizes { position: absolute; top: 130px; bottom: 45px; left: 52%; height: auto; width: 77%; transform: translateX(-50%); }
+.summer-lottery-banner--regulation .summer-lottery-banner__choice { position: relative; inset: auto; width: 100%; height: 100%; transform: none; border: 1px solid #44edb95c; background: #0a1510; }
+.summer-lottery-banner--regulation .summer-lottery-banner__choice img { position: static; display: block; width: 100%; height: 100%; object-fit: contain; border: 0; border-radius: 0; box-shadow: none; transform: none; }
+.summer-lottery-banner--regulation .summer-lottery-banner__choice span { position: absolute; inset: auto 0 -1px; display: block; padding: 7px; background: #0a1915eb; color: #c9e1bd; text-align: center; font-size: 8px; }
+.summer-lottery-banner--regulation .summer-lottery-banner__rail { width: 36px; height: 100px; top: auto; left: 12px; bottom: 25px; border: 1px solid #44edb964; border-radius: 0; color: #44edb9; background: #0b1710cc; box-shadow: none; transform: none; }
+.summer-lottery-banner--regulation .summer-lottery-banner__rail i { border-color: #44edb9; }
+.summer-lottery-banner--regulation .summer-lottery-banner__coordinate { left: 18%; bottom: 16px; color: #85a48b; font-size: 6px; }
+@media (max-width: 520px) {
+  .summer-lottery-banner--regulation .summer-lottery-banner__info { padding: 27px 22px; }
+  .summer-lottery-banner--regulation .summer-lottery-banner__info::before { left: 22px; }
+  .summer-lottery-banner--regulation .summer-lottery-banner__visual { min-height: 330px; }
+}
+}
