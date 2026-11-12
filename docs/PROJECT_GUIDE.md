@@ -32,6 +32,7 @@ npm run dev
 - `/simulator`：桌面模拟器；`/m/simulator` 保持使用桌面版的引导提示。
 - `/m/`：手机入口；`/m/stats` 为手机统计。
 - `/data-workbench`、`/m/data-workbench`：手动导入与修改；文件入口复用主站格式解析、账号确认与保存流程。
+- `/lottery/`：当前抽奖子应用；`/lottery/archive/<活动 ID>`：只读往期归档。它使用独立活动会话，经主站 SSO 建立身份。
 - `/statistics-preview.html`：开发专用统计与指南样例，按钮不执行真实登录、导入或备份。
 
 布局与消息合同见 [桌面界面](DESKTOP_HOME_DEMO.md)，统计口径见 [统计指标](STATS_OBSERVATION_CONTRACT.md)。
@@ -82,6 +83,8 @@ npm run perf:report
 
 仓库默认使用 GitHub-connected Vercel：推送 `main` 触发生产构建。发布前准备数据库与后台计算，发布后确认部署 Ready 和正式域名指向正确版本，流程见 [发布检查](RELEASE_CHECKLIST.md)。
 
+主站网页和 API 也可使用 `scripts/build-standalone.mjs`／`serve-standalone.mjs` 自托管。构建时关闭 Vercel 专属观测，复用原鉴权与缓存合同，反向代理和 Worker 不重复接管；完整步骤见 [自托管部署](STANDALONE_DEPLOYMENT.md)。站点维护提示由独立公开接口及管理开关提供，见 [维护模式](SITE_MAINTENANCE.md)。
+
 当前代码版本为 v4.7.1，国服扫码服务、前端与公告按 [发布记录](RELEASE_4.7.1.md) 的顺序更新。个人分析仍使用 schema 6，既有数据库准备见 [v4.7.0](RELEASE_4.7.0.md)；其他已有环境仅执行尚未应用的前向迁移，已执行的失效迁移不要重跑。运行版本优先读取 `site_config.site_version`，发布时同步 `build_info`、公共缓存和阵容接口缓存，再核对中英文公告及实际页面。
 
 管理后台使用同源 `/api/admin`，兼容 URL 由路由表映射；无需部署旧 Supabase 管理 Edge Functions。
@@ -92,6 +95,8 @@ npm run perf:report
 
 官方数据获取由独立 CN／INTL 后端承接。浏览器提交 `import-full` 后轮询 `import-status`；后端规范化、过滤非寻访事件、内部暂存并通过 RPC 原子写入。可精确定位的未知记录产生核对提醒，缺少账号／区服／卡池／序号等安全归属的记录跳过。
 
+v4.7.1 已启用国服扫码路径：站内登录后创建短期扫码会话，选择脱敏游戏角色，再把会话交给导入任务；官方登录凭据留在后端。国际服仍用 Token，扫码不提供长期官方登录。使用、异常与代码入口见 [官方导入](OFFICIAL_IMPORT.md)。完整后端接入协议由维护者提供本地私有文档，公开开发者 Key 不用于导入。
+
 2026-10-30 国际服维护已部署 `endfield-backend-intl:1.7.0-account-rerun-20261030`。此前缺少游戏 UID 的绑定条目会触发数据库 `invalid_import_account`；现于绑定前返回 `IMPORT_ACCOUNT_ROLE_MISSING`，提示检查所选区服角色，不能以平台登录 UID 代替游戏 UID。此次同时同步重构池“前瞻”后缀匹配，避免正式名称与预告名称产生新池。部署前保留原镜像与文件、确认没有执行中的任务；部署后已核对运行文件校验值和 `/health` 的 `fullImport: true`。该后端更新不代表主站 Excel 解析代码已发布。
 
 公开仓库保留共享导入合同与测试，不提供完整服务包。后端集成须携带相同的 normalizer、保底规则与暂存／增量模块，分别验证地区健康、CORS 和导入行为。重构与赠送规则见 [重构导入](official-rerun-import.md)、[赠送记录](OFFICIAL_TRUST_TOKEN_FIX.md)。
@@ -101,6 +106,8 @@ npm run perf:report
 ## 静态资源与缓存
 
 字体源和许可证随仓库维护，分片由 `npm run fonts:prepare` 生成。分享卡源变化后运行 `npm run share:renderer`，对应跟踪产物一起提交。
+
+抽奖通过固定版本的 `open-lottery` 构建，活动主题与会话补丁保存在本仓库脚本中，不手工维护 `node_modules` 差异。本期思源黑体及许可证作为活动资源复制，往期字体保留。`npm run lottery:prepare` 只生成本地公开配置，`npm run lottery:preview` 使用本地夹具并关闭真实写入；正式时间、种子与启用顺序见 [本期抽奖](REGULATION_LOTTERY_202611.md)。
 
 公共缓存使用 `site_config.public_cache_epoch`，读取失败可展示最近公共快照；用户历史、个人分析、工单与后台响应保持鉴权和 `no-store`。日历日期与 CDN 传播见 [卡池时间管理](POOL_SCHEDULE_MANAGEMENT.md)。
 

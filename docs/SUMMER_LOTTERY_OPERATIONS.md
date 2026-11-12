@@ -13,15 +13,17 @@
 - `MAIN_SITE_URL=https://ef-gacha.mogujun.icu`
 - `LOTTERY_BODY_FONT_STYLESHEET_URL=/lottery/local-activity/fonts/site-fonts.css`
 
-`LOTTERY_SITE_URL` 是包含路径的活动基础 URL；敏感写请求的 Origin 校验仍只接受 `https://ef-gacha.mogujun.icu`。活动会话 Cookie 保持独立名称、host-only 和 `Path=/`，以便同源 `/api` 路由使用，但不会替代或复用主站会话 Cookie。
+`LOTTERY_SITE_URL` 是包含路径的活动基础 URL。`shared/lotterySiteUrls.js` 在同域部署下识别当前受信任主机，使 `ef-gacha.mogujun.icu` 与 `ef.nepst.cn` 各自在当前 Origin 内完成 SSO 与写请求校验；不接受跨域写请求或任意转发主机头。活动会话 Cookie 保持独立名称、host-only 和 `Path=/`，以便同源 `/api` 路由使用，但不会替代或复用主站会话 Cookie。两个域名的登录状态并不共享。
 
 主站仓库中的 `src/assets/lottery/` 保存本次活动奖品图；构建时会与主站已有 HarmonyOS Sans、Novecento 字体一起复制到活动产物。公开模板仓库不包含这些活动专属素材。
 
 ## 当前活动与往期归档
 
-当前计划活动为 `arknights-p3r-collab-2026`：北京时间 2026-08-21 20:30 开放，2026-09-15 12:00 截止；系统从 12:00:03 起允许人工开奖，固定使用 drand Quicknet 第 `32213813` 轮。真实抽奖名额由数据库 `prize_plan` 控制为 `{"first":1,"second":5}`；参与奖不写入中奖表，由公开快照对未中前两档的有效参与者推导。
+当前活动为 **`arknights-regulation-202611`**，已于北京时间 2026-11-08 14:25:39 开放，11 月 21 日全天可报名，11 月 22 日 00:00:03 起允许人工开奖；固定 drand Quicknet 第 `34157813` 轮。`prize_plan` 必须显式设为 `{"first":1,"second":0}`，遗漏 `second` 会使用旧函数默认名额。奖品、承诺、联系方式保留截止及发布验证见 [本期活动说明](REGULATION_LOTTERY_202611.md)。本期没有配置额外参与奖。
 
-上一期 `community-lottery` 的数据库行、报名、中奖记录和审计不得删除或覆盖。切换当前活动前已将其公开快照保存为 `src/assets/lottery/archives/community-lottery.json`，部署后由 `/lottery/archive/community-lottery` 只读展示并继续支持复算。归档只包含公开参与 ID、获奖结果和随机性证明，不得加入联系方式、内部用户 ID 或后台审计明细。
+往期 `arknights-p3r-collab-2026` 和 `community-lottery` 的数据库行、报名、中奖记录和审计不得删除或覆盖。公开快照位于 `src/assets/lottery/archives/<活动 ID>.json`，由 `/lottery/archive/<活动 ID>` 只读展示。归档只包含公开参与 ID、获奖结果和随机性证明，不得加入联系方式、内部用户 ID 或后台审计明细。P3R 最终名单有人工递补，自动复算的排序项存在已知差异，不能将归档标记为全部核验通过。
+
+主站 `/api/auth/session` 的公开响应只包含认证状态、用户及会话期限，不包含内部 Session ID。首页继续登录 hook 和活动页自动延续据此判断，服务端仍校验实际 Cookie。票据限时且一次性使用，不能用 URL 传递主站 access token 或 Cookie；错误回调不自动循环跳转。
 
 ## 数据库版本
 
@@ -59,8 +61,8 @@
 
 本期精确确认词：
 
-- 固定承诺：`PREPARE arknights-p3r-collab-2026`
-- 真实开奖：`DRAW arknights-p3r-collab-2026`
+- 固定承诺：`PREPARE arknights-regulation-202611`（本期已完成，不重复操作）
+- 真实开奖：`DRAW arknights-regulation-202611`（仅截止且到达固定信标轮次后人工执行）
 
 后台默认跟随服务端 `LOTTERY_CAMPAIGN_ID`，也允许显式输入活动 ID 切换查看。执行准备、开奖、兑奖授权、联系方式读取或删除前，必须核对面板“已加载”字段，不能仅依赖浏览器记忆或上一期默认值。
 

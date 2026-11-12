@@ -43,6 +43,10 @@ id_ed25519
 *.sql.gz
 *.bundle
 AGENTS.md
+docs/private
+docs/BACKEND_MAINTENANCE.md
+docs/BACKEND_IMPORT_RELIABILITY.md
+docs/QR_IMPORT_BACKEND.md
 docs/agent-runtime.md
 scripts/run-local-task.mjs
 supabase/.temp

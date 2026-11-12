@@ -2,7 +2,7 @@
 
 这份文件只保留“从哪里开始读代码”的索引。系统边界、数据流、缓存和数据库分层详见 [ARCHITECTURE.md](ARCHITECTURE.md)；部署、环境变量和维护命令详见 [PROJECT_GUIDE.md](PROJECT_GUIDE.md)。
 
-当前索引包含 `v4.6.4` 及截至 2026-10-17 的发布后修复；版本记录见 [RELEASE_4.6.4.md](RELEASE_4.6.4.md)，后续交付见 [项目进展](RECENT_DELIVERY_STATUS.md)。
+当前索引包含 `v4.7.1` 及截至 `85e1ca87`（2026-11-08）的发布后修复；版本记录见 [RELEASE_4.7.1.md](RELEASE_4.7.1.md)，交付见 [项目进展](RECENT_DELIVERY_STATUS.md)。
 
 武器池时间管理入口：`shared/weaponPoolSchedule.js`（自动识别／三期截止预览）、`src/components/admin/pools/PoolEditDialog.jsx`（关联选择及一键填入）、`src/hooks/admin/usePools.js`（草稿和保存）、`supabase/migrations/2026100701_weapon_character_pool_schedule.sql`（持久关联与 RPC）。独立日历数据库时间优先规则位于 `endfield-version-calendar/lib/calendar-core.js`；说明见 [卡池时间管理](POOL_SCHEDULE_MANAGEMENT.md)。
 
@@ -21,7 +21,7 @@
 
 | 页面 | 桌面端 | 移动端 |
 |------|--------|--------|
-| 首页 | `src/components/home/DesktopHomeDemo.jsx`（默认） / `HomePage.jsx`（经典） | `src/mobile/views/MobileHomePageView.jsx` |
+| 首页 | `src/components/home/DesktopHomeDemo.jsx`（默认） / `HomePage.jsx`（经典） | `src/mobile/views/MobileHomeView.jsx`（复用 `DesktopHomeDemo mobile`） |
 | 全服统计 | `src/components/SummaryView.jsx` | `src/mobile/views/MobileStatsView.jsx` |
 | 卡池详情 | `src/components/app/DesktopDashboardWorkspace.jsx` | `src/mobile/views/MobileDashboardView.jsx` |
 | 模拟器 | `src/features/simulator/GachaSimulator.jsx` | `src/mobile/views/MobileSimulatorView.jsx` |
@@ -37,7 +37,7 @@
 - 偏好解析与旧查询参数清理：`src/utils/homeExperience.js`；存储键：`src/utils/storageUtils.js`；测试：`src/utils/__tests__/homeExperience.test.js`。
 - 桌面首页、卡池与日程适配：`src/components/home/DesktopHomeDemo.jsx`、`desktopHomeDemo.css`、`desktopHomeData.js`。
 - 顶栏、独立工单 / 管理入口、身份与主题菜单：`src/components/home/HomeLandingHeader.jsx`、`homeLandingDemo.css`。
-- 原生轮换与活动卡：`src/components/home/RotationScheduleCard.jsx`、`SummerLotteryBanner.jsx`。
+- 原生轮换与活动卡：`src/components/home/RotationScheduleCard.jsx`、`SummerLotteryBanner.jsx`；社区默认抽奖卡：`RegulationLotteryCard.jsx`、`CommunityActivitySection.jsx`。
 - 独立版本倒计时及 `--vc-*` 主题接口：`src/components/home/VersionCountdownCard.jsx`、`versionCountdownCard.css`。
 - 前瞻／导览切换与官方封面：`src/components/home/CommunityActivitySection.jsx`、`VersionBriefingCard.jsx`、`src/utils/versionBriefing.js`、`src/constants/versionPreview.js`；抓取与保留封面：`api/_lib/officialAnnouncementsFeed.js`、`api/_routes/root/announcements.js`。
 - 四类消息 / 公告模型与统一弹窗：`src/components/home/DesktopMessageCenter.jsx`、`desktopMessageModel.js`、`DesktopHomeDialog.jsx`；组件测试：`src/components/home/__tests__/DesktopMessageCenter.test.jsx`。
@@ -102,6 +102,7 @@
 |------|------|
 | 单一 API 入口 | `api/router.js` |
 | 路由表 | `api/_routes/index.js` |
+| 按需加载处理器 | `api/_lib/lazyApiRoute.js` |
 | 公共缓存 helper | `api/_lib/publicCache.js` |
 | 版本日历快照、数据库日期与重构期次 | `api/_lib/versionCalendarSnapshot.js`、`shared/extraPoolSubtype.js`、`api/__tests__/versionCalendarSnapshot.test.js` |
 | 浏览器后台刷新锁适配与双标签验证 | `src/utils/supabaseAuthLock.js`、`src/supabaseClient.js`、`scripts/verify-supabase-auth-lock-playwright.mjs` |
@@ -117,6 +118,16 @@
 | 后台管理 | `api/_routes/root/admin.js` |
 | 运营自动化 | `api/_routes/root/ops-automation.js`、`api/_lib/runOpsAutomation.js` |
 | BOT / 开发者接口 | `api/_routes/dev/**/*`、`api/_routes/integrations/**/*` |
+
+### 扫码、首页及部署补充入口
+
+- 国服扫码界面：`src/features/import/components/OfficialQrLogin.jsx`；流程：`src/features/import/useOfficialImportController.js`；设备上下文：`src/utils/officialQrDevice.js`；HTTP 调用：`src/utils/endfieldAuthChain.js`。使用流程见 [官方导入](OFFICIAL_IMPORT.md)，完整后端源码及协议说明由维护者私有提供。
+- 个人手气与高光：`docs/PERSONAL_LUCK.md`；当前个人分析 schema 6 的构建和消费入口见 [Worker 指南](PERSONAL_ANALYSIS_WORKER.md)。
+- 本期活动配置：`shared/regulationLottery.js`；活动组件／字体样式／自动延续：`src/lottery/`；可重复构建补丁：`scripts/lottery-regulation-theme.mjs`、`scripts/lottery-session-integration.mjs`、`scripts/build-lottery-subapp.mjs`。
+- 主站会话延续：`src/hooks/auth/useSummerLotterySsoContinuation.js`；票据签发：`api/_routes/root/summer-lottery-sso.js`；受信任域名解析：`shared/lotterySiteUrls.js`。当前和往期素材位于 `src/assets/lottery/`。
+- 本地活动预览／公开配置准备：`scripts/preview-regulation-lottery.mjs`、`scripts/prepare-regulation-lottery.mjs`；两者不操作生产报名或开奖。
+- 自托管：`scripts/build-standalone.mjs`、`scripts/serve-standalone.mjs`、`scripts/standalone.Dockerfile`；验证：`api/__tests__/standaloneServer.test.js`。
+- 手机首页：`src/mobile/views/MobileHomeView.jsx`、`mobileHome.css`，路由装配在 `src/mobile/layouts/MobileLayout.jsx`；旧 `MobileHomePageView.jsx` 不作为当前正式入口。
 
 ## 维护脚本
 
@@ -164,23 +175,24 @@
 | 历史 v4.5.3 运行时版本与缓存失效 | `supabase/migrations/156_bump_site_version_453.sql` |
 | 官方非寻访事件旧占位精确修复 RPC | `supabase/migrations/157_repair_official_non_pull_artifact.sql` |
 | 历史 v4.5.4 运行时版本与缓存失效 | `supabase/migrations/158_bump_site_version_454.sql` |
-| 当前包与构建版本、发布记录 | `package.json`、`src/constants/appMeta.js`、`docs/RELEASE_4.6.4.md`、`docs/RECENT_DELIVERY_STATUS.md` |
+| 当前包与构建版本、发布记录 | `package.json`、`src/constants/appMeta.js`、`docs/RELEASE_4.7.1.md`、`docs/RECENT_DELIVERY_STATUS.md` |
 | 认证 Phase A/B | `supabase/migrations/166_harden_admin_profile_and_oauth_transactions.sql` |
 | 认证 Phase C/D | `supabase/migrations/167_harden_account_credentials_and_identity_keys.sql` |
 | 认证审查与旧邮箱空壳修复 | `supabase/migrations/168_close_auth_review_findings.sql`–`172_quarantine_oauth_email_artifact_atomically.sql` |
 | 个人分析 revision / 快照 / 活跃队列 | `supabase/migrations/173_add_personal_analysis_scope_revisions.sql`–`177_prioritize_active_personal_analysis_jobs.sql` |
 | 个人分析 `pg_cron + pg_net` 调度与即时派发 | `supabase/migrations/178_schedule_personal_analysis_worker_with_pg_cron.sql`–`180_prioritize_immediate_personal_analysis_dispatch.sql` |
 | 附加寻访、重构寻访与重构申领 | `supabase/migrations/181_add_extra_pool_subtypes.sql`–`183_split_reconstruction_claim_subtype.sql` |
-| 统计队列与五类合池 v4 快照 | `supabase/migrations/2026092201_schedule_statistics_snapshots.sql`、`2026092401_group_statistics_snapshots.sql` |
+| 统计队列与五类合池初始快照／当前版本 | `supabase/migrations/2026092201_schedule_statistics_snapshots.sql`、`2026092401_group_statistics_snapshots.sql`；`shared/statisticsRefreshPolicy.js`（当前 v6） |
 | 目录保存复用单池计数 | `supabase/migrations/2026100601_reuse_pool_counts_for_catalog_groups.sql` |
 | 限定武器同期角色关联 | `supabase/migrations/2026100701_weapon_character_pool_schedule.sql`、`supabase/tests/weapon-character-pool-schedule.sql` |
-| 个人分析 schema 3 / 模拟器继承合同 2 | `supabase/migrations/2026100901_simulator_inheritance_v2.sql`、`scripts/verify-simulator-inheritance-v2-sql.mjs` |
+| 原 schema 3 升级／模拟器继承合同 2 | `supabase/migrations/2026100901_simulator_inheritance_v2.sql`、`scripts/verify-simulator-inheritance-v2-sql.mjs` |
+| 当前个人分析 schema 6／手气补算 | `shared/personalAnalysisVersion.js`、`supabase/migrations/2026103100_personal_win_rate_guarantee.sql`、`2026103101_backfill_personal_luck.sql` |
 | 卡池阵容完整读取 | `supabase/migrations/2026101101_complete_pool_roster_reads.sql`、`api/_routes/root/pool-rosters.js`、`api/_routes/root/admin-pools.js` |
 | 已执行的重构日期与维护截止修正 | `supabase/manual/data-backfill/20261007_fill_danqing_reconstruction_weapon_dates.sql`、`20261007_correct_reconstruction_maintenance_end.sql` |
 | 静态头像 | `public/avatars/` |
 | 版本日历静态图 | `public/game-calendar/` |
 
-独立日历仓库的 `lib/calendar-core.js` 负责数据库日期优先、重构期次与序列化；`lib/version-six.js` 维护活动，`assets/events/OFFICIAL_SOURCES.md` 记录官方来源。主站 `public/game-calendar/` 不承担这些实现；手动补录工作台尚未作为正式路由提供。
+独立日历仓库的 `lib/calendar-core.js` 负责数据库日期优先、重构期次与序列化；`lib/version-six.js` 维护活动，`assets/events/OFFICIAL_SOURCES.md` 记录官方来源。主站 `public/game-calendar/` 不承担这些实现；手动补录工作台已通过 `/data-workbench` 和 `/m/data-workbench` 正式提供，资料合同见 [个人补录分析](PERSONAL_MANUAL_ANALYSIS.md)。
 
 ## 仍需治理的复杂点
 

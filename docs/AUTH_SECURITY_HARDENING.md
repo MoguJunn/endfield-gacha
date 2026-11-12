@@ -19,6 +19,12 @@ flowchart LR
 
 相关入口：`api/_lib/siteAuth.js`、`siteSession.js`、`identityHash.js`、`oauthState.js`、`api/_routes/root/auth-oauth.js`、`auth-session.js`。
 
+`GET /api/auth/session` 在顶层返回 `authenticated`，用户位于 `data.user`；公开 `data.session` 仅含 `expiresAt / absoluteExpiresAt / lastSeenAt`，不暴露内部 Session ID。浏览器判断有效身份应核对认证状态与当前用户 ID，不能要求 `session.id`。原生 Supabase Bearer 可通过 `POST /api/auth/session` 建立站点 Cookie；兼容 JWT 不能用于重新引导原生会话，接口会返回 `native_bearer_required`。
+
+主站与抽奖使用独立 Cookie。活动通过限时一次性 SSO 票据建立会话，主站凭据不进入跳转 URL；当前主域名与备用网址各自保持同源，不能假定两个域名已共享登录。源码入口为 `shared/lotterySiteUrls.js`、`src/hooks/auth/useSummerLotterySsoContinuation.js`、`src/lottery/resumeMainSiteSession.js` 与 `api/_routes/root/summer-lottery-sso.js`。
+
+官方扫码是另一类短期会话：后端绑定站点用户并保管官方凭据，客户端仅提交扫码会话 ID 及选定角色进入导入任务。本站退出不等于官方账号退出，关闭扫码也不等于撤销官方其他设备；使用边界见 [官方导入](OFFICIAL_IMPORT.md)。
+
 ## 身份与 OAuth
 
 - 一个 provider 的稳定 subject 只能归属一个站点用户。登录、绑定和重试不能改写已有 owner。

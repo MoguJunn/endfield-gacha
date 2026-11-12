@@ -1,6 +1,6 @@
 # Architecture
 
-本文档描述 `v4.6.4` 架构及截至 2026-10-17 的文件导入修复，包括默认新版桌面主页与经典主页切换、分池／合池统计、共享模拟器引擎与事务存档。原版本上线证据见 [RELEASE_4.6.4.md](RELEASE_4.6.4.md)，后续交付见 [项目进展](RECENT_DELIVERY_STATUS.md)。独立 CN / INTL 后端承接官方数据获取、规范化、内部暂存与原子写入。
+本文档描述 `v4.7.1` 及截至 `85e1ca87`（2026-11-08）的架构，包括双端共享首页、分池／合池统计、个人分析 schema 6、共享模拟器、国服扫码导入和同域抽奖子应用。版本证据见 [v4.7.1](RELEASE_4.7.1.md)，交付状态见 [项目进展](RECENT_DELIVERY_STATUS.md)。独立 CN / INTL 后端承接官方数据获取、规范化、内部暂存与原子写入。
 
 限定武器池通过 `pools.character_pool_id` 保存同期限定角色池；后台共用 `shared/weaponPoolSchedule.js` 识别与预览三期截止时间，经管理员填入和既有 RPC 原子保存，不自动追写截止日期。独立版本日历读取主站数据库时间，卡池时间不再由本地备份覆盖；缓存和操作边界见 [卡池时间管理](POOL_SCHEDULE_MANAGEMENT.md)。
 
@@ -21,7 +21,7 @@ flowchart LR
   ImportStaging --> SupabaseDb
   Browser --> AnalysisApi["/api/account-gacha-data\nanalysis mode"]
   AnalysisApi --> AnalysisSnapshot["personal_analysis_snapshots"]
-  AnalysisScheduler["Supabase pg_cron + pg_net"] --> AnalysisWorker["/api/personal-analysis-worker"]
+  AnalysisScheduler["既有服务器调度 / 按环境配置的 HTTP 调度"] --> AnalysisWorker["个人分析 Worker"]
   AnalysisWorker --> AnalysisSnapshot
   Browser --> InheritanceApi["/api/account-gacha-data\nsimulator-inheritance mode"]
   InheritanceApi --> AnalysisSnapshot
@@ -40,7 +40,7 @@ flowchart LR
 - 公共数据：生产浏览器统一请求同源 `/api/*`，由 Serverless 层访问 Supabase。
 - 私有数据：用户抽卡历史、个人排行、工单、账号恢复和后台数据保持鉴权隔离与 `no-store`。
 - 认证：邮箱凭据由 Supabase Auth 管理；第三方 provider 经同源 OAuth bridge 接入，两条入口都以 `auth.users` UUID 为锚点并创建 `app_sessions`。provider 各自配置与验证，未具备开放条件的保持关闭，见 [认证合同](AUTH_SECURITY_HARDENING.md)。
-- 个人分析：浏览器只读取 owner/account 快照，不在请求期下载完整历史重新聚合。活跃用户通过 service-role-only RPC 排队并即时触发 `pg_net`，`pg_cron` 每分钟兜底；Worker 使用 lease / revision 防止并发覆盖和陈旧发布。
+- 个人分析：浏览器只读取 owner/account 快照，不在请求期下载完整历史重新聚合。活跃用户通过受控 RPC 排队；当前自托管生产使用既有同机调度，其他环境可按指南配置 HTTP／`pg_net` 调度，不能重复接管。Worker 使用 lease / revision 防止并发覆盖和陈旧发布。
 - 管理与自动化：后台写入、cron 和手动 ops 共享服务端 helper，写入成功后 best-effort 刷新公共缓存版本。
 - 私有导入：CN / INTL 后端负责访问官方数据源、过滤情报书等非寻访事件、规范化、问题分类和内部暂存，随后自动通过数据库 RPC 原子提交；可定位的未知角色 / 武器记录写入后由 `history_anomalies` 提醒用户核对。再次导入时，只有被官方数据精确证明为非寻访事件的旧版四星未知占位才会原子移除并重算对应卡池保底。
 - 仓库边界：`backend/` 只公开测试与数据契约需要的兼容 helper，不代表完整私有部署包。
@@ -57,7 +57,7 @@ flowchart LR
 | 私有读取 / 写入 | `src/services/accountGachaDataService.js`、`src/hooks/app/useCloudSync.js`、`src/utils/cloudDataSync.js` | 个人分析读取、历史分页、精确变更、池信息和 owner 隔离同步 |
 | 官方导入 | `src/features/import/useOfficialImportController.js`、`src/features/import/ImportManager.jsx` | 创建 `import-full` 后台任务、轮询 `import-status`、结果刷新、导入后异常提示，以及兼容期遗留审阅元数据清理 |
 
-模拟器已分为共享纯引擎、专用继承投影、IndexedDB 事务仓库、展示与分享适配；资源增量累计，scope 状态统一装配。原 v4.6.4 使用个人快照 schema 3，当前个人分析为 schema 5，部署状态见 [Worker 指南](PERSONAL_ANALYSIS_WORKER.md)，继承合同见 [模拟器合同](SIMULATOR_ENGINE.md)。桌面／移动 dashboard、settings 仍可进一步共享控制器逻辑。
+模拟器已分为共享纯引擎、专用继承投影、IndexedDB 事务仓库、展示与分享适配；资源增量累计，scope 状态统一装配。原 v4.6.4 使用个人快照 schema 3，当前个人分析为 schema 6，部署状态见 [Worker 指南](PERSONAL_ANALYSIS_WORKER.md)，继承合同见 [模拟器合同](SIMULATOR_ENGINE.md)。桌面／移动 dashboard、settings 仍可进一步共享控制器逻辑。
 
 ### 2.1 新版桌面主页与经典主页切换
 
@@ -76,6 +76,8 @@ flowchart LR
 `statistics_jobs`、`statistics_snapshots` 与 `statistics_activity` 由常驻 `statisticsWorker` 按范围策略处理；实际刷新周期和快照版本以[调度说明](STATISTICS_SCHEDULING.md)为准。GET 读取匹配版本的快照，不扫描历史、不触发重算。目录成员或目标签名变化、租约与修订冲突、分页不完整均阻止发布不完整结果。旧 `metrics` / `resources` 随范围迁入快照，资源次序仍读取完整相关账号上下文；已有 owner/account 个人分析 Worker 保持独立职责。
 
 详情见 [统计合同](STATS_OBSERVATION_CONTRACT.md) 与 [调度说明](STATISTICS_SCHEDULING.md)。指南仅存在于 Vite DEV 的 `/statistics-preview.html`，不属于生产业务路由。
+
+v4.7.0 增加个人手气、高光和限定／复刻合并 UP 均抽；保障抽从不歪率分母中剔除，但仍保留在出货总量。公共目录、统计及版本检查有浏览器持久缓存和并发合并，个人请求受 owner 与快照版本约束。11 月的概览 SQL 优化只改变查询方式，规则与原 JSON 结果通过隔离样本对比；见 [个人手气](PERSONAL_LUCK.md)和[生产迁移记录](PRODUCTION_MIGRATIONS_20261107.md)。
 
 ### 2.3 模拟器与完整历史继承（v4.6.4 已发布）
 
@@ -109,6 +111,15 @@ flowchart LR
 
 公共 API 的兼容响应字段保留 `success / data / cached / partial`，新增 `meta.source / meta.age / meta.partial / meta.stale / meta.cacheKey / meta.cacheVersion` 用于诊断。
 
+`api/_routes/index.js` 使用字面量动态 import 和 `lazyApiRoute`，首次请求只初始化命中的处理器。入口仍在同一函数包中，懒加载减少初始化工作，不会移除 Chromium 等构建依赖。除 Vercel 外，可由 `scripts/serve-standalone.mjs` 适配同一套路由，见 [自托管部署](STANDALONE_DEPLOYMENT.md)。
+
+### 双端首页、官方导入与抽奖
+
+- 手机正式首页由 `MobileLayout.jsx` 加载 `MobileHomeView.jsx`，复用 `DesktopHomeDemo.jsx` 的 `mobile` 布局；旧 `MobileHomePageView.jsx` 不是当前路由入口。
+- 国服扫码在私有后端创建绑定站内用户的短期会话，凭证留在后端；浏览器获得脱敏角色，选择后把 `qrSessionId` 交给持久导入任务。Token 路径保留。导入任务自动暂存／提交，前端轮询结果；见 [官方导入](OFFICIAL_IMPORT.md)。
+- `/lottery/` 来自固定提交的 `open-lottery`，主题和会话补丁由仓库内构建脚本应用。主站 SSO 签发短期一次性票据，活动端换取独立 Cookie，不向 URL 传主站凭据。公开 Session 响应不含内部会话 ID。
+- `shared/lotterySiteUrls.js` 让主站／备用域名分别在当前受信任域名完成跳转和 Origin 校验；`resumeMainSiteSession` 仅在有效主站认证下发起延续，避免错误回调循环。活动资料和权限见 [本期活动](REGULATION_LOTTERY_202611.md)、[运营边界](SUMMER_LOTTERY_OPERATIONS.md)。
+
 ## 4. 公共缓存与刷新
 
 - 服务端缓存 helper：`api/_lib/publicCache.js`。
@@ -138,7 +149,7 @@ Supabase 目录采用“baseline + 归档迁移 + 手工脚本”结构：
 
 认证数据库面由 166–172 提供：admin RPC 权限、OAuth transaction、Session 撤销、规范化邮箱唯一归属、一次性 challenge、首次设密、凭据到期、identity keyring，以及受证据约束的旧空壳修复与隔离。结构和安装顺序见数据库指南，不从文件存在推定某个部署已应用。
 
-个人分析数据库面由 173–180 提供：owner/scope revision、快照队列、catalog 依赖失效、活跃用户优先级、Worker lease、`pg_cron + pg_net` 调度、5 秒全局节流和优先级感知即时派发。常规 Worker 保持 `PERSONAL_ANALYSIS_WORKER_BACKFILL_ENABLED=false`，历史回填只能在维护窗口显式开启。
+个人分析数据库面由 173–180 提供初始队列与调度基础，后续迁移升级到 schema 6：owner/scope revision、快照队列、catalog 依赖失效、活跃优先级、Worker lease 和受控派发。当前实际调度按 [Worker 指南](PERSONAL_ANALYSIS_WORKER.md) 核对，不能因历史迁移包含 `pg_cron + pg_net` 就覆盖现有服务器定时器。常规 Worker 保持 `PERSONAL_ANALYSIS_WORKER_BACKFILL_ENABLED=false`，历史回填只能在维护窗口显式开启。
 
 附加寻访数据库面由 181–183 提供：`extra_subtype / extra_rule_profile / extra_series_key / extra_series_phase`，并把产品语义区分为 `reconstruction`、`reconstruction_claim` 和 `special`。相同分类贯穿可见卡池 RPC、管理写入、官方导入、版本绑定、分析与模拟器；旧 `type=extra` 仍作为粗粒度兼容类型。
 

@@ -1,6 +1,6 @@
 # 数据库 Schema 与迁移指南
 
-新环境入口是 `baseline/000_complete_schema.sql`。当前基线包含 202 个迁移，覆盖 `archive/001_init_tables.sql` 至 `active/2026101403_bound_statistics_pity_interval_work.sql`；精确范围以文件头和生成校验为准。
+新环境入口是 `baseline/000_complete_schema.sql`。当前基线包含 **223 个公开标准迁移**，覆盖 `archive/001_init_tables.sql` 至 `active/2026110705_release_471.sql`；精确范围以文件头和生成校验为准。本地私有后端迁移不计入公开基线，不能从公开仓库可构建推定完整导入服务已经安装。
 
 ## 目录职责
 
@@ -63,13 +63,17 @@ npm run test:simulator-v2:sql
 
 `2026100901_simulator_inheritance_v2.sql` 将个人 owner/scope 状态升为 schema 3，使存量快照排队重建，并让完整卡池目录变化失效个人结果，覆盖零抽池的情报书相邻目标。旧快照、来源身份、ACL 与活动租约保留，旧 schema 作业不能发布。既有自托管环境已于 v4.6.4 发布前应用并完成重建；重复执行会再次递增 revision，不能把它作为每次发布的常规步骤。
 
-升级其他已有环境时，先备份并核对默认值、具名触发器和执行记录，再应用尚缺迁移；随后使用 schema 3 Worker 重建，检查账号继承合同 2／历史编码 1 及实际任务发布。个人分析调度的 Vault URL 固定到不可变部署，须与新 Worker 代码同步切换，不能只部署网站。流程见 [模拟器合同](../docs/SIMULATOR_ENGINE.md#验证与部署) 和 [Worker 指南](../docs/PERSONAL_ANALYSIS_WORKER.md)。
+升级其他已有环境时，先备份并核对默认值、具名触发器和执行记录，再应用尚缺迁移。当前目标为个人分析 **schema 6**；schema 3 是上述历史迁移的阶段状态，不能用于当前读端。检查账号继承合同 2／历史编码 1 及实际任务发布。当前生产沿用服务器调度；仅使用 HTTP 调度的环境需要同步 Vault 中的不可变 Worker URL，不重复覆盖已有定时器。流程见 [模拟器合同](../docs/SIMULATOR_ENGINE.md#验证与部署) 和 [Worker 指南](../docs/PERSONAL_ANALYSIS_WORKER.md)。
 
 `site_config.public_cache_epoch` 是公共缓存版本源。用户历史、个人分析、恢复和后台数据不得进入公共缓存。管理员写入通过同源 API，不需旧管理 Edge Functions。
 
 `2026101101_complete_pool_roster_reads.sql` 提供仅服务端可调用的单值 JSON 阵容读取，避免超过 1,000 条关系后被 REST 截断；不改变全库 API 上限或已有配置。现有环境已应用，API 升级与客户端失败合同见 [阵容完整读取](../docs/POOL_ROSTER_READS.md)，隔离 SQL 验证为 `npm run test:pool-rosters:sql`。
 
 2026-10-14 现有环境已应用 `2026100911`／`0912`／`0913` 工作台原子保存、`2026101400` 统计整池排除、`1401` 增量版本及 `1402`／`1403` 删除恢复与保底汇总性能修复。版本仅从启用后记录，旧手动池回填持久排除；原始历史记录保留。不要重跑这些创建迁移。统计计算及个人 schema 5 Worker 已衔接，网站版本切换与全量快照进度见 [生产迁移记录](../docs/PRODUCTION_WORKBENCH_MIGRATIONS_20261014.md)。
+
+后续 `2026103100_personal_win_rate_guarantee.sql` 将个人分析升级到 schema 6，手气补算与修订约束见 [v4.7.0](../docs/RELEASE_4.7.0.md)。`2026110700`／`0701`／`0704` 修复综合概览查询成本，`0702`／`0703` 补齐既有小游戏结构与触发器；生产应用范围及未重放项见 [11 月执行记录](../docs/PRODUCTION_MIGRATIONS_20261107.md)。`2026110705_release_471.sql` 仅同步 v4.7.1、构建信息、双语公告和公共缓存，不改用户历史。
+
+抽奖的活动、报名、开奖和联系方式权限由迁移 160–165 提供。新活动使用独立 campaign 行与种子承诺，不能通过覆盖旧活动行切换；本期配置与人工开奖约束见 [本期活动](../docs/REGULATION_LOTTERY_202611.md)和[运营说明](../docs/SUMMER_LOTTERY_OPERATIONS.md)。
 
 ## 数据审计与修复
 

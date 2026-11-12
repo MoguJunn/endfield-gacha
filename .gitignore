@@ -64,6 +64,7 @@ test-results/
 *.bak
 
 # 运维和任务恢复记录不属于公开源码。
+docs/private/
 docs/agent-runtime.md
 scripts/run-local-task.mjs
 supabase/manual/history-snapshot*.ndjson

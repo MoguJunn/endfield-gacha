@@ -12,6 +12,7 @@
 - `scripts/`：构建、生成、维护与专项验证；`playwright-tests/`、`tests/` 保存浏览器测试和测试初始化。
 - `supabase/`：基线、迁移、数据修复和说明，见 [数据库指南](../supabase/README.md)。
 - `public/`：直接提供的静态资源；`docs/` 保存专题和发布说明。
+- `docs/private/`：维护者本地的受控交付资料；从 Git、Vercel CLI 上传及 Docker 构建上下文排除，不作为公开文档链接目标。交付时单独复制审阅后的文件，不附带环境、私钥或用户数据。
 
 ## 配置放在哪里
 
@@ -27,6 +28,8 @@
 `api/_generated/dashboardShareCardRenderer.mjs` 是明确跟踪的生成物。分享组件变化后运行 `npm run share:renderer`，将对应生成差异一起提交。
 
 字体源与许可证进入仓库，自动分片由 `fonts:prepare` 生成。`dist/`、依赖目录、覆盖率和浏览器测试报告不提交。`statistics-preview.html` 是开发预览入口，尚未接入生产不代表它已废弃。
+
+`src/lottery/` 与 `shared/regulationLottery.js` 是活动主题和配置源，`scripts/lottery-*.mjs` 在构建中应用主题与会话接线；不要把直接修改 `node_modules/open-lottery` 当作可交付改动。`src/assets/lottery/archives/` 只跟踪公开快照，思源黑体源及许可证位于 `src/assets/fonts/source-han/`。种子、配置备份和部署收据保存在忽略目录。
 
 `.agent-tmp/` 保存专项浏览器与数据库验证的临时产物，Vite 已忽略该目录的文件监视。模拟器的实际会话与历史位于浏览器 IndexedDB，既有 localStorage 迁移源保留；这些数据不属于仓库文件，也不随 Git 同步。导出记录仍按用户数据保护，架构见 [模拟器合同](SIMULATOR_ENGINE.md)。
 

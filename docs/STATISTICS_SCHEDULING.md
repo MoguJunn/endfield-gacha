@@ -2,6 +2,8 @@
 
 统计快照随 v4.6.2（PR #37）发布。新环境与计算版本升级必须先完成数据库迁移、启动 Worker 并预热快照，再切换读端。统计口径见 [STATS_OBSERVATION_CONTRACT.md](STATS_OBSERVATION_CONTRACT.md)。
 
+11 月 7 日已通过 `2026110700 / 0701 / 0704` 修复综合概览的高星／中断／保障匹配成本，正式任务恢复发布，见 [生产执行记录](PRODUCTION_MIGRATIONS_20261107.md)。本次保留既有 timer、快照规则及权限；不要为排查旧的 10 月概览再次全量失效或重复启动 Worker。个人分析当前为 schema 6，与这里的统计快照仍是独立队列。
+
 ## 推荐运行方式
 
 使用独立 Docker Worker。`node scripts/build-statistics-worker.mjs` 生成 `.agent-tmp/statistics-worker.mjs`，部署为 `/opt/endfield-statistics/worker.mjs`；凭据保存在服务器 `/etc/endfield/statistics.env`，仅 root 可读，禁止加入构建文件或日志。与 Supabase 同机部署时可通过本机 Kong 接入数据库。
@@ -105,7 +107,7 @@ PR #43 的 `2026100601_reuse_pool_counts_for_catalog_groups.sql` 已修正目录
 3. 创建仅服务账号／管理员可读的 `/etc/endfield/statistics.env`，填入 `SUPABASE_URL` 和 `SUPABASE_SECRET_KEY`（或 `SUPABASE_SERVICE_ROLE_KEY`），同时设置 `NODE_ENV=production`。不要使用浏览器发布密钥，不要把文件加入仓库。
 4. 安装仓库的 service／timer 到 `/etc/systemd/system/`，运行 `systemctl daemon-reload`、`systemctl enable --now endfield-statistics.timer`。此动作会开始真实后台计算；先确认没有已有实例，避免重复启动。
 5. 用 `journalctl -u endfield-statistics.service` 查看结果。脚本默认每轮最多8项，生产 Docker 单元设置500项，均保留约4分钟领取预算；单次任务最多可令总时长超过预算一个任务，service 上限8分钟。首次会建立所有公开卡池及已有账号结果，需要等待队列处理。
-6. 确认公开卡池、五类合池和旧统计已有 `public-statistics-v4` 快照，个人快照也已预热，再发布前端／API。服务端必须持有同一项目的服务密钥。
+6. 确认公开卡池、五类合池和旧统计已有匹配 `shared/statisticsRefreshPolicy.js` 当前常量的 `public-statistics-v6` 快照，个人统计也已预热，再发布前端／API。独立个人分析队列另需 schema 6，二者不是同一版本字段。服务端必须持有同一项目的服务密钥。
 
 可在数据库管理会话只读检查，不输出账号标识：
 

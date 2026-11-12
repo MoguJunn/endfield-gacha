@@ -46,10 +46,18 @@
 
 官方前瞻和版本导览在社区活动区独立维护。前瞻结束后显示 `VersionBriefingCard`，下一次前瞻配置生效时恢复倒计时；导览固定指向官网 `version_briefing/latest?source_from=official`。封面按中文版本名匹配官网公告，直连官方 CDN，失败时保留可用链接，奖励条件以官方说明为准。
 
+## 社区活动与双端复用
+
+`CommunityActivitySection` 以稳定的 `lottery / community / version` 标识切换内容。在 `shared/regulationLottery.js` 的本期推广窗口内，默认页为 `RegulationLotteryCard`；截止时自动隐藏抽奖页并回到版本内容，社区和前瞻／导览入口继续可用。历史活动回顾显式指向归档，避免把“往期已结束”文案用于当前活动。
+
+宣传窗口只控制入口展示，报名资格与开放状态由服务端活动快照决定。活动页面使用独立思源黑体与主题，主站卡片继承主站字体；点击进入同源 `/lottery/`，有效主站会话通过一次性 SSO 票据延续。
+
+手机正式首页通过 `MobileHomeView.jsx` 复用 `DesktopHomeDemo mobile`，使用纵向布局和独立滚动容器，不套用桌面一屏高度。相关状态与验证见 [移动首页](MOBILE_HOME_PLAN.md)，活动规则见 [本期抽奖](REGULATION_LOTTERY_202611.md)。
+
 ## 代码与验证
 
 主页选择在 `src/utils/homeExperience.js`，接线在 `GachaAnalyzer.jsx`／`DesktopAppRoutes.jsx`。首页与顶栏位于 `src/components/home/`，个人导航、动效与共用宽度在 `src/components/app/`，详细索引见 [CODEMAP](CODEMAP.md)。
 
-修改后验证 1366×768 基线、大屏、矮窗口和分区临界尺寸，并检查主题、语言、主页偏好刷新、工单未读、数据来源隔离、键盘和焦点。版本组件还需覆盖未知日期、图片失败和前瞻切换。
+修改后验证 1366×768 基线、大屏、矮窗口和分区临界尺寸，并检查主题、语言、主页偏好刷新、工单未读、数据来源隔离、键盘和焦点。版本组件还需覆盖未知日期、图片失败和前瞻切换；社区卡需覆盖活动窗口内默认展示、手动切换及截止隐藏。
 
 首次指南仍是 [开发设计](ONBOARDING_GUIDE_PLAN.md)，不把预览按钮当作真实完成状态。历史发布见 [v4.6.0](RELEASE_4.6.0.md)。

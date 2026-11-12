@@ -24,6 +24,8 @@ Node.js 与 npm 要求见 [README](README.md)。默认贡献者模板提供本�
 - 统计定义与调度：[观测合同](docs/STATS_OBSERVATION_CONTRACT.md)、[快照调度](docs/STATISTICS_SCHEDULING.md)。
 - 卡池日期和官方来源：[时间管理](docs/POOL_SCHEDULE_MANAGEMENT.md)。
 - 模拟器纯函数、继承和存档：[引擎合同](docs/SIMULATOR_ENGINE.md)，前后端共享代码位于 `shared/simulator/`。
+- 官方导入与扫码：[使用及生命周期](docs/OFFICIAL_IMPORT.md)；完整抓取后端和客户端接入协议由维护者受控提供。
+- 活动主题与登录延续：[本期抽奖](docs/REGULATION_LOTTERY_202611.md)；修改本仓库源和构建接线，不只修改依赖目录。
 
 `/statistics-preview.html` 是开发预览，指南按钮尚未连接真实登录、导入或备份。请按 [项目进展](docs/RECENT_DELIVERY_STATUS.md) 区分可用功能和设计方案。
 
@@ -49,6 +51,7 @@ git diff --check
 - 每个 PR 聚焦一个主题，避免批量格式化无关源码。
 - 更新页面、API、环境变量或部署方式时，同时更新对应说明；README 保持简短，细节放入专题。
 - 公共文档直接说明功能、使用方法与维护要求，不要求读者访问维护者的个人目录、内部任务账本或会话记录。
+- `docs/private/` 是本地私有交付目录，不随公开 Git、Vercel CLI 或 Docker 上下文上传；不要强制添加，也不要从公开导航链接其中的文件。
 - CSS 处理在 `vite.config.js`，Tailwind 主题在 `src/index.css`；Prettier 选项在 `package.json`，测试初始化在 `tests/setup.js`。
 - 跟踪的生成物随源文件刷新，例如 `npm run share:renderer`；构建输出、临时报告和真实环境文件不进入提交，范围见 [仓库结构](docs/REPOSITORY_LAYOUT.md)。
 

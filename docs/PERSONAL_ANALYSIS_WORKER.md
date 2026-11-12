@@ -1,14 +1,16 @@
 # 个人分析快照 Worker 调度
 
-个人分析快照由 `/api/personal-analysis-worker` 异步生成。生产定时调度运行在
-自建 Supabase PostgreSQL 的 `pg_cron + pg_net` 中，不使用 Vercel 高频 Cron，
-也不依赖可能延迟数十分钟的 GitHub Scheduled Workflow。
+个人分析快照由独立 Worker 异步生成；`/api/personal-analysis-worker` 是受保护的 HTTP 入口。
+当前自托管生产使用既有服务器定时器运行 schema 6 算法，历史 `pg_cron + pg_net`
+派发保留但不重复接管。新环境按实际部署选择同机或 HTTP 调度，不使用 Vercel 高频 Cron。
 
-个人 owner/account 分析 Worker 与 v4 公共／个人统计的独立 Docker Worker 是不同链路，后者见 [STATISTICS_SCHEDULING.md](STATISTICS_SCHEDULING.md)。发布涉及分析能力时，须核对本 Worker 的不可变部署地址，并重建受影响快照；主站部署成功不能代替该核验。
+个人 owner/account 分析 Worker 与公共／个人统计的独立 Docker Worker 是不同链路，后者见 [STATISTICS_SCHEDULING.md](STATISTICS_SCHEDULING.md)。发布涉及分析能力时，须核对实际执行的源码／镜像或 HTTP 不可变部署地址，并重建受影响快照；主站部署成功不能代替该核验。
 
 ## 当前快照合同
 
-2026-10-14 生产数据库已执行工作台、统计隔离和增量撤回迁移，个人状态升为 schema 5；目前由同机 `endfield-personal-analysis-upgrade.timer` 运行新算法。原 pg_cron 派发入口暂时只返回 `reason=server_timer`，不再调用旧 schema 3 固定部署。Vault 中原 URL 和密钥保留。恢复远程派发前必须发布 schema 5 Worker、恢复原派发函数并验证真实发布，再停止同机 timer；具体备份、串行锁和执行证据见 [生产迁移记录](PRODUCTION_WORKBENCH_MIGRATIONS_20261014.md)。下文 v4.6.4 schema 3 为原发布合同，不能据此覆盖当前状态。
+当前目标为 **schema 6**，由 `2026103100_personal_win_rate_guarantee.sql` 升级；手气字段补算、快照修订和 Worker 交付见 [v4.7.0](RELEASE_4.7.0.md)。11 月 7 日核验继续沿用服务器定时器，没有改回旧 HTTP 分发，见 [生产检查](PRODUCTION_MIGRATIONS_20261107.md)。不能将历史 schema 3／5 Worker 用于现行读端。
+
+10 月 14 日曾从 schema 3 升级到 5，并用同机 `endfield-personal-analysis-upgrade.timer` 接管；原派发入口返回 `reason=server_timer`，Vault 中 URL 和密钥保留。这个配置来源及串行锁见 [当时迁移记录](PRODUCTION_WORKBENCH_MIGRATIONS_20261014.md)。恢复远程派发前必须发布当前 schema 6 Worker、恢复受控派发并验证真实发布，再处理同机 timer，不能同时运行两套无协调调度。
 
 v4.6.4 使用个人分析 schema 3；模拟器继承合同为 2，完整历史编码为 1，本地会话版本为 2。Worker 使用完整可见卡池目录及当前用户个人池生成投影，零抽目标池也参与共享水位和情报书目标装配。
 
@@ -22,7 +24,7 @@ v4.6.4 使用个人分析 schema 3；模拟器继承合同为 2，完整历史�
 
 若总览仍显示较少记录，先核对相同 UID／区服的真实已保存数量与文件保存回执，再检查 owner/scope 修订、`availability` 和计算时间。只保存文件前几批时，Worker 正确计算部分已存记录也无法补齐缺少的明细；已存完整而修订滞后时才沿本指南检查队列。保存后读取旧快照不能被当作整份文件丢失，也不应据此清空账号重新上传。
 
-客户端恢复与格式边界见 [文件导入恢复](FILE_IMPORT_RELIABILITY.md)；个人补录是否影响已知量见 [个人补录分析](PERSONAL_MANUAL_ANALYSIS.md)。本次文件修复沿用 schema 5，没有新增迁移或改变独立 Worker 的调度入口。
+客户端恢复与格式边界见 [文件导入恢复](FILE_IMPORT_RELIABILITY.md)；个人补录是否影响已知量见 [个人补录分析](PERSONAL_MANUAL_ANALYSIS.md)。10 月 17 日文件修复当时沿用 schema 5，没有新增迁移；当前扫码／Token 导入完成后同样应核对服务端保存与 schema 6 快照更新，见 [官方导入](OFFICIAL_IMPORT.md)。
 
 ## 原发布调度方式
 
@@ -38,11 +40,14 @@ v4.6.4 使用个人分析 schema 3；模拟器继承合同为 2，完整历史�
 HTTP 状态还需通过 `personal_analysis_worker_dispatches` 与 `net._http_response` 联合检查。
 已启用空队列优化的环境没有可领取任务时不会发送 HTTP。
 
-前端冷启动按 3、5、10、20、30 秒递增检查快照；`building-poll` 只读取分析状态，
-复用已有公共卡池，不重复请求公共目录。组件或路由重挂载会沿用全局 Store 中的
-`nextRetryAt`，同 owner 的被动认证事件也不会打断 building 状态。
+现行前端通过轻量快照版本清单检查已知待处理任务，间隔 3／10／30／90／180 秒，
+最多 5 次、完成即停止，隐藏页面不主动发起；版本变化后才按需读取分析结果。
+多个面板共享请求，公开统计排队不启动个人完成轮询；恢复联网、回到窗口或手动检查可继续确认。
+这与早期持续重拉完整分析的 building-poll 不同，细节见 [浏览器数据复用](STATISTICS_SCHEDULING.md#浏览器数据复用)。
 
 ## 必需配置
+
+本节的 Vercel／Vault 配置用于 HTTP 调度环境。当前同机生产应保留现有进程环境、锁与定时器，先核对实际 schema 6 任务发布，不因下文历史配置而覆盖运行方式。
 
 ### Vercel Production
 
@@ -139,19 +144,20 @@ Migration 177 增加 `priority_requested_at`。分析 API 发现当前用户的 
 
 ## 验证
 
-1. 确认 Vault 三项配置存在，但不要读取或打印解密值。
-2. 确认 cron job 为 active，且 schedule 是 `* * * * *`。
-3. 等待至少两个周期，检查 dispatch request 与 HTTP 2xx 响应。
-4. 检查 `personal_analysis_snapshots` 持续生成，活跃用户 priority 被优先消费。
-5. 在 GitHub Actions 中手动运行一次作为独立应急链路验证。
+1. 核对目标环境实际使用的同机或 HTTP 调度，确认执行代码为 schema 6。
+2. 同机方式检查既有 timer、串行锁、领取及发布日志；HTTP 方式检查 Vault 配置、active cron、dispatch 与响应，不打印解密值。
+3. 等待正常周期，检查 `personal_analysis_snapshots` 的修订、错误和实际发布，确认活跃用户优先消费。
+4. HTTP 200 只表示接口成功响应；还需检查成功发布数和 stale，队列为空无需为测试而全量失效。
+5. GitHub 手动应急入口仅在 URL／版本已核对且需要时执行，避免重复接管常规计算。
 
-如果 Vault、pg_cron 或 pg_net 不可用，不能把用户请求伪装成“正在排队”。分析 API
-会返回明确的 `personal_analysis_queue_unavailable` 503，页面保留可诊断的错误状态。
+实际队列不可用时，分析 API 返回 `personal_analysis_queue_unavailable` 503，
+页面保留可诊断状态，不伪装为已入队。HTTP 调度另需检查 Vault、pg_cron 和 pg_net；
+同机调度不能只凭旧 HTTP 入口未派发就判定失败。
 
 ## 发布与诊断注意事项
 
 - v4.6.4（PR #44）已于 2026-10-09 发布。生产调度已切换到该版本的不可变 Vercel 部署，实际调用发布 2 项任务，陈旧结果／失败／待处理均为 0；这是发布时证据，后续状态仍按上面 SQL 检查。
-- 后续发布依赖 Worker 新算法或 schema 时，先备份原 Vault URL，确认新部署就绪及相同鉴权变量，再仅更新 `personal_analysis_worker_url`。网站域名指向新版本不会替换此固定地址；GitHub 应急入口的 `PERSONAL_ANALYSIS_WORKER_URL` 也需独立核对。
+- 后续发布依赖 Worker 新算法或 schema 时，先核对实际调度；同机方式更新匹配的 Worker 并检查真实发布，HTTP 方式先备份 Vault URL，再切换到已就绪的新部署。网站域名更新不会替换该固定地址；GitHub 应急入口的 `PERSONAL_ANALYSIS_WORKER_URL` 也需独立核对。
 - 切换后通过现有受限派发 RPC 验证 HTTP 响应和真实发布。队列为空时 `request_personal_analysis_worker_dispatch()` 可返回 `no_claimable_job` 而不发 HTTP，这是已部署的空队列优化；不要仅为连通检查重新失效全部快照。
 - PR #24 引入即时派发、轻量轮询和多批 Worker；PR #25 修复包含 `:` 的附加寻访 `viewKey` 查询。验证 `viewKey=__group_extra:reconstruction` 时，无该分组记录的账号可以正常返回空视图；有记录时只投影目标 view / locale。
 - PR #39 修复旧固定部署漏读重构规则的问题。升级后核对 `poolManifest.extra_rule_profile` 与时间线 `stageKind`，再确认受影响快照已按新代码生成。
