@@ -17,6 +17,7 @@ import AveragePullStatsPanel from '../../components/dashboard/AveragePullStatsPa
 import PoolGiftProgress from '../../components/dashboard/PoolGiftProgress.jsx';
 import { encodeCompactShareJpeg } from '../../utils/shareImageEncoding.js';
 import MergedUpAveragePanel from '../../components/dashboard/MergedUpAveragePanel.jsx';
+import SixStarSourceSummary from '../../components/dashboard/SixStarSourceSummary.jsx';
 import PoolTimelinePanel from '../../components/dashboard/PoolTimelinePanel';
 import DashboardShareCard from '../../components/dashboard/DashboardShareCard';
 import ShareActionStatus from '../../components/share/ShareActionStatus';
@@ -1213,8 +1214,11 @@ function MobileDashboardView() {
         {normalizedPoolType !== 'standard' && (
           <div className={`mobile-ux-card-inset py-3 text-center ${sixStarBreakdown?.categories.length === 2 ? 'col-span-2' : ''}`}>
             <div className="text-[11px] text-slate-600 dark:text-zinc-400 uppercase font-bold tracking-tight mb-1">{primarySixStarLabel}</div>
-            <div className={`text-xl font-bold font-mono ${isLimited ? 'rainbow-text' : isExtra ? 'text-cyan-600 dark:text-cyan-400' : 'text-zinc-700 dark:text-slate-700 dark:text-zinc-300'}`}>
-              {stats.counts[6]}
+            <div className="flex flex-wrap items-baseline justify-center gap-x-0.5">
+              <span className={`text-xl font-bold font-mono ${isLimited ? 'rainbow-text' : isExtra ? 'text-cyan-600 dark:text-cyan-400' : 'text-zinc-700 dark:text-zinc-300'}`}>
+                {stats.counts[6]}
+              </span>
+              <SixStarSourceSummary stats={stats} />
             </div>
           </div>
         )}
@@ -1225,7 +1229,10 @@ function MobileDashboardView() {
           </div>
         )) : <div className="mobile-ux-card-inset py-3 text-center">
           <div className="text-[11px] text-slate-600 dark:text-zinc-400 uppercase font-bold tracking-tight mb-1">{secondarySixStarLabel}</div>
-          <div className="text-xl font-bold font-mono text-red-600 dark:text-red-400">{stats.counts['6_std']}</div>
+          <div className="flex flex-wrap items-baseline justify-center gap-x-0.5">
+            <span className="text-xl font-bold font-mono text-red-600 dark:text-red-400">{stats.counts['6_std']}</span>
+            <SixStarSourceSummary stats={stats} category="offrate" showWinRate={normalizedPoolType !== 'standard'} />
+          </div>
         </div>}
         <div className={`mobile-ux-card-inset py-3 text-center ${sixStarBreakdown?.categories.length === 2 ? 'col-span-3' : ''}`}>
           <div className="text-[11px] text-slate-600 dark:text-zinc-400 uppercase font-bold tracking-tight mb-1">5★</div>
@@ -1337,8 +1344,8 @@ function MobileDashboardView() {
               />
             </div>
             <div className="flex justify-between text-[11px] text-slate-500 dark:text-zinc-500 font-mono uppercase">
-              <span>{primarySixStarLabel}: {stats.counts[6]}</span>
-              <span>{t('dashboard.timeline.badge.offrate')}: {stats.counts['6_std']}</span>
+              <span>{isEnglish ? 'Eligible UP' : '计入的 UP'}: {stats.upSixStarCount || 0}</span>
+              <span>{isEnglish ? 'Eligible 6★' : '计入的六星'}: {stats.sixStarCount || 0}</span>
             </div>
           </div>
         </div>

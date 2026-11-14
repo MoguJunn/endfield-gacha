@@ -92,6 +92,7 @@ function createBucketAccumulator() {
     chargedPulls: 0,
     counts: { 6: 0, '6_std': 0, 5: 0, 4: 0 },
     totalSixStar: 0,
+    sixStarSources: { gifted: 0, giftedTarget: 0, giftedOffrate: 0, guaranteed: 0 },
     winRate: '0.0',
     avgPullCost: { 6: '0', '6_all': '0', '6_limited': '0', '6_with_spark': '0', 5: '0' },
     chartData: [],
@@ -238,7 +239,13 @@ export function buildDashboardOverviewSplitStats({
     sortedPulls.forEach((item) => {
       const isGift = item?.specialType === 'gift' || item?.special_type === 'gift';
       const isFree = item?.isFree === true || item?.is_free === true;
-      if (isGift) return;
+      if (isGift) {
+        if (Number(item.rarity) === 6) {
+          bucket.sixStarSources.gifted++;
+          bucket.sixStarSources[isTargetSixStarHistoryRecord(item, sourcePool) ? 'giftedTarget' : 'giftedOffrate']++;
+        }
+        return;
+      }
 
       bucket._quotaHistory.push(item);
       if (!includeFreePullsInStats && isFree) return;
@@ -284,6 +291,8 @@ export function buildDashboardOverviewSplitStats({
           if (isTargetSixStar) {
             bucket._winRateTargetCount += 1;
           }
+        } else {
+          bucket.sixStarSources.guaranteed++;
         }
 
         bucket._allSixStarPulls.push({

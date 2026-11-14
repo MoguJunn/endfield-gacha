@@ -302,6 +302,17 @@ export function buildPoolStats({
 
   const totalSixStar = counts[6] + counts['6_std'];
   const validSixStar = totalSixStar;
+  const sixStarSources = {
+    gifted: 0,
+    giftedTarget: 0,
+    giftedOffrate: 0,
+    guaranteed: 0,
+  };
+  normalizedCurrentPoolHistory.forEach((pull) => {
+    if (Number(pull.rarity) !== 6 || !isGiftPull(pull)) return;
+    sixStarSources.gifted++;
+    sixStarSources[isTargetSixStarPull(pull, getPullCapabilities(pull)) ? 'giftedTarget' : 'giftedOffrate']++;
+  });
 
   let realLimited = 0;
   let realStandard = 0;
@@ -312,6 +323,7 @@ export function buildPoolStats({
       const pullCapabilities = getPullCapabilities(pull);
       if ((pullCapabilities.targetMode === 'single-up' && isGuaranteedPull(pull))
         || isExcludedFromWinRate(pull, pullCapabilities, winRateGuaranteeKeys)) {
+        sixStarSources.guaranteed++;
         return;
       }
       if (isTargetSixStarPull(pull, pullCapabilities)) {
@@ -538,6 +550,7 @@ export function buildPoolStats({
     counts,
     totalSixStar,
     validSixStar,
+    sixStarSources,
     winRate,
     sixStarCount: realTotalSix,
     upSixStarCount: realLimited,

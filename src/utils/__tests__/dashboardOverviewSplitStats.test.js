@@ -219,8 +219,31 @@ describe('buildDashboardOverviewSplitStats', () => {
     expect(stats.character.winRate).toBe('50.0');
     expect(stats.character.winRateTargetCount).toBe(1);
     expect(stats.character.winRateTotalCount).toBe(2);
+    expect(stats.character.sixStarSources).toEqual({ gifted: 0, giftedTarget: 0, giftedOffrate: 0, guaranteed: 1 });
     expect(stats.weapon.winRate).toBe('100.0');
     expect(stats.weapon.winRateTargetCount).toBe(1);
     expect(stats.weapon.winRateTotalCount).toBe(1);
+  });
+
+  it('explains the reported 13 + 16 character counts versus the 9 / 25 target-rate sample', () => {
+    const history = Array.from({ length: 29 }, (_, index) => ({
+      id: index + 1, poolId: 'limited', rarity: 6,
+      isStandard: index >= 13,
+      ...(index >= 9 && index < 13 ? { specialType: 'guaranteed' } : {}),
+    }));
+    history.push({ id: 30, poolId: 'limited', rarity: 6, isStandard: false, specialType: 'gift' });
+    history.push({ id: 31, poolId: 'weapon', rarity: 6, isStandard: false, special_type: 'gift' });
+    history.push({ id: 32, poolId: 'limited', rarity: 5, specialType: 'gift' });
+    history.push({ id: 33, poolId: 'limited', rarity: 6, isStandard: true, specialType: 'gift' });
+    const result = buildDashboardOverviewSplitStats({ history,
+      selectedPools: [{ id: 'limited', type: 'limited' }, { id: 'weapon', type: 'weapon' }],
+    });
+    expect(result.character).toMatchObject({ total: 29, counts: { 6: 13, '6_std': 16 },
+      winRate: '36.0', winRateTargetCount: 9, winRateTotalCount: 25,
+      sixStarSources: { gifted: 2, giftedTarget: 1, giftedOffrate: 1, guaranteed: 4 },
+    });
+    expect(result.weapon).toMatchObject({ total: 0, totalSixStar: 0,
+      sixStarSources: { gifted: 1, giftedTarget: 1, giftedOffrate: 0, guaranteed: 0 },
+    });
   });
 });

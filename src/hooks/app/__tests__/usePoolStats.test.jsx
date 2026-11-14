@@ -103,6 +103,7 @@ describe('usePoolStats', () => {
     );
 
     expect(result.current.stats.total).toBe(3);
+    expect(result.current.stats.sixStarSources).toEqual({ gifted: 1, giftedTarget: 1, giftedOffrate: 0, guaranteed: 0 });
     expect(result.current.stats.counts).toMatchObject({
       6: 1,
       5: 1,
@@ -520,6 +521,7 @@ describe('usePoolStats', () => {
     });
     expect(result.current.stats.totalSixStar).toBe(3);
     expect(result.current.stats.winRate).toBe('50.0');
+    expect(result.current.stats.sixStarSources).toEqual({ gifted: 0, giftedTarget: 0, giftedOffrate: 0, guaranteed: 1 });
     expect(result.current.stats.sixStarCount).toBe(2);
     expect(result.current.stats.upSixStarCount).toBe(1);
     expect(result.current.stats.stdSixStarCount).toBe(1);
@@ -578,6 +580,7 @@ describe('usePoolStats', () => {
     expect(result.current.stats.upSixStarCount).toBe(0);
     expect(result.current.stats.stdSixStarCount).toBe(2);
     expect(result.current.stats.sparkCount).toBe(1);
+    expect(result.current.stats.sixStarSources).toEqual({ gifted: 0, giftedTarget: 0, giftedOffrate: 0, guaranteed: 1 });
     expect(result.current.stats.pityStats.history.map(({ count, isSpark }) => ({ count, isSpark }))).toEqual([
       { count: 63, isSpark: false },
       { count: 52, isSpark: false },

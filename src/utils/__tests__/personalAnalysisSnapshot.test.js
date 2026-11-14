@@ -42,6 +42,31 @@ function assertNoMapOrSet(value, seen = new WeakSet()) {
 }
 
 describe('buildPersonalAnalysisSnapshots', () => {
+  it('keeps recorded gifts separate from pulled six stars in serialized pool and overview snapshots', () => {
+    const history = [
+      createPull({ id: 'up', poolId: 'limited', rarity: 6, character_name: 'Target', is_standard: false }),
+      createPull({ id: 'guarantee', poolId: 'limited', rarity: 6, character_name: 'Target',
+        is_standard: false, special_type: 'guaranteed' }),
+      createPull({ id: 'gift', poolId: 'limited', rarity: 6, character_name: 'Target', special_type: 'gift' }),
+      createPull({ id: 'off-gift', poolId: 'limited', rarity: 6, character_name: 'Other', is_standard: true, special_type: 'gift' }),
+      createPull({ id: 'off', poolId: 'limited', rarity: 6, character_name: 'Other', is_standard: true }),
+      createPull({ id: 'other-owner-gift', poolId: 'limited', rarity: 6, special_type: 'gift', userId: 'other' }),
+    ];
+    const { scopes } = buildPersonalAnalysisSnapshots({ history,
+      pools: [{ id: 'limited', type: 'limited', up_character: 'Target' }], userId: USER_ID,
+    });
+    const views = JSON.parse(JSON.stringify(scopes[0].payload.dashboard.views));
+    for (const variant of ['excludeFree', 'includeFree']) {
+      expect(views.limited[variant].stats).toMatchObject({ total: 3,
+        counts: { 6: 2, '6_std': 1 }, sixStarSources: { gifted: 2, giftedTarget: 1, giftedOffrate: 1, guaranteed: 1 },
+        winRate: '50.0', upSixStarCount: 1, sixStarCount: 2,
+      });
+      expect(views.__group_all[variant].splitOverviewStats.character).toMatchObject({ total: 3,
+        sixStarSources: { gifted: 2, giftedTarget: 1, giftedOffrate: 1, guaranteed: 1 }, winRateTargetCount: 1, winRateTotalCount: 2,
+      });
+    }
+  });
+
   it('角色分栏用服务端目录区分11次目标和13次限定，无需浏览器角色缓存', () => {
     const pools = [
       { id: 'limited-a', type: 'limited', up_character: 'Target A' },

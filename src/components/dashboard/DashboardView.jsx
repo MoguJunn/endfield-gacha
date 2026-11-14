@@ -29,6 +29,7 @@ import PoolTimelinePanel from './PoolTimelinePanel';
 import { encodeCompactShareJpeg } from '../../utils/shareImageEncoding.js';
 import AveragePullStatsPanel from './AveragePullStatsPanel';
 import MergedUpAveragePanel from './MergedUpAveragePanel.jsx';
+import SixStarSourceSummary from './SixStarSourceSummary.jsx';
 import DashboardShareCard from './DashboardShareCard';
 import ShareActionStatus from '../share/ShareActionStatus';
 import ResourceSummaryPanel from '../resources/ResourceSummaryPanel';
@@ -121,7 +122,7 @@ function buildCustomSharePoolName(pools, locale, isEnglish) {
 /**
  * 仪表盘小统计卡片 (Updated Style)
  */
-const StatBox = ({ title, value, subValue, colorClass, icon: Icon, isAnimated }) => (
+const StatBox = ({ title, value, valueSuffix, subValue, colorClass, icon: Icon, isAnimated }) => (
   <div className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 relative overflow-hidden group hover:border-zinc-400 dark:hover:border-zinc-600 transition-colors">
     {isAnimated && (
       <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
@@ -134,6 +135,7 @@ const StatBox = ({ title, value, subValue, colorClass, icon: Icon, isAnimated })
 
     <div className="flex items-baseline gap-2">
       <div className={`text-2xl font-bold font-mono ${colorClass || 'text-slate-800 dark:text-zinc-100'}`}>{value}</div>
+      {valueSuffix}
     </div>
 
     {subValue && <div className="text-[10px] text-slate-400 dark:text-zinc-500 mt-1 font-mono">{subValue}</div>}
@@ -1450,6 +1452,7 @@ const DashboardView = ({ showToast }) => {
                     <StatBox
                       title={t('dashboard.overview.targetSixStar')}
                       value={splitOverviewStats.character.counts[6]}
+                      valueSuffix={<SixStarSourceSummary stats={splitOverviewStats.character} />}
                       subValue={
                         splitOverviewStats.character.totalSixStar > 0
                           ? t('dashboard.overview.allSixRate', {
@@ -1467,6 +1470,7 @@ const DashboardView = ({ showToast }) => {
                     <StatBox
                       title={t('dashboard.overview.offrateSixStar')}
                       value={splitOverviewStats.character.counts['6_std']}
+                      valueSuffix={<SixStarSourceSummary stats={splitOverviewStats.character} category="offrate" />}
                       subValue={t('dashboard.overview.characterSummary')}
                       colorClass="text-red-600 dark:text-red-400"
                       icon={Star}
@@ -1524,6 +1528,7 @@ const DashboardView = ({ showToast }) => {
                     <StatBox
                       title={t('dashboard.overview.upSixStar')}
                       value={splitOverviewStats.weapon.counts[6]}
+                      valueSuffix={<SixStarSourceSummary stats={splitOverviewStats.weapon} />}
                       subValue={
                         splitOverviewStats.weapon.totalSixStar > 0
                           ? t('dashboard.overview.allSixRate', {
@@ -1539,6 +1544,7 @@ const DashboardView = ({ showToast }) => {
                     <StatBox
                       title={t('dashboard.overview.offrateSixStar')}
                       value={splitOverviewStats.weapon.counts['6_std']}
+                      valueSuffix={<SixStarSourceSummary stats={splitOverviewStats.weapon} category="offrate" />}
                       subValue={t('dashboard.overview.weaponSummary')}
                       colorClass="text-red-600 dark:text-red-400"
                       icon={Star}
@@ -1673,6 +1679,7 @@ const DashboardView = ({ showToast }) => {
                     <StatBox
                       title={primarySixStarLabel}
                       value={stats.counts[6]}
+                      valueSuffix={<SixStarSourceSummary stats={stats} />}
                       subValue={(() => {
                         if (stats.personalData?.totalKnown === false) return unknownTotalLabel;
                         if (isAllPoolsOverview) {
@@ -1685,12 +1692,7 @@ const DashboardView = ({ showToast }) => {
                         if (isGroupMode) {
                           return `${t('dashboard.analysis.winRate')} ${stats.winRate}%`;
                         }
-                        const bonusCount = stats.gifts?.limitedCount || 0;
-                        return bonusCount > 0
-                          ? isEnglish
-                            ? `Includes ${bonusCount} bonus`
-                            : `含赠送 ${bonusCount}`
-                          : t('dashboard.overview.ratio', { percent: formatPercentValue(stats.winRate) });
+                        return t('dashboard.overview.ratio', { percent: formatPercentValue(stats.winRate) });
                       })()}
                       colorClass={
                         isLimited
@@ -1717,13 +1719,12 @@ const DashboardView = ({ showToast }) => {
                   )) : <StatBox
                     title={secondarySixStarLabel}
                     value={stats.counts['6_std']}
+                    valueSuffix={<SixStarSourceSummary stats={stats} category="offrate" showWinRate={normalizedPoolType !== 'standard'} />}
                     subValue={
                       isAllPoolsOverview
                         ? crossBannerSummary
-                        : normalizedPoolType === 'standard' && stats.total >= 300
-                          ? isEnglish
-                            ? 'Includes 1 bonus'
-                            : '含赠送 1'
+                        : normalizedPoolType === 'standard'
+                          ? (isEnglish ? 'From pulls' : '抽取获得')
                           : offrateShort
                     }
                     colorClass="text-red-600 dark:text-red-400"
@@ -1764,6 +1765,7 @@ const DashboardView = ({ showToast }) => {
                   <StatBox
                     title={primarySixStarLabel}
                     value={stats.counts[6] ?? 0}
+                    valueSuffix={<SixStarSourceSummary stats={stats} />}
                     subValue={
                       isEnglish ? `Standard 6★ ${stats.counts['6_std'] ?? 0}` : `常驻6星 ${stats.counts['6_std'] ?? 0}`
                     }
