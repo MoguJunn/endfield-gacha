@@ -2,7 +2,7 @@ import React, { useEffect, useId, useState } from 'react';
 import { Gamepad2 } from 'lucide-react';
 import { useI18n } from '../../i18n/index.js';
 import CommunityActivityPanel from './CommunityActivityPanel.jsx';
-import DanqingPreviewCard from './DanqingPreviewCard.jsx';
+import VersionPreviewCard from './VersionPreviewCard.jsx';
 import VersionBriefingCard from './VersionBriefingCard.jsx';
 import RegulationLotteryCard from './RegulationLotteryCard.jsx';
 import { REGULATION_LOTTERY } from '../../../shared/regulationLottery.js';
@@ -45,7 +45,7 @@ export default function CommunityActivitySection({ onOpenCommunity, preview = AC
     <div id={panelId} className="community-page" data-community-page={pages.findIndex(({ id }) => id === activePage) + 1}>
       {activePage === 'lottery' ? <RegulationLotteryCard />
         : activePage === 'community' ? <CommunityActivityPanel onOpenCommunity={onOpenCommunity} />
-        : showPreview ? <DanqingPreviewCard /> : <VersionBriefingCard />}
+        : showPreview ? <VersionPreviewCard preview={preview} /> : <VersionBriefingCard />}
     </div>
   </>;
 }
