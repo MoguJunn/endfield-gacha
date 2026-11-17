@@ -74,7 +74,12 @@ describe('questionnaire input adapters', () => {
     expect(entitiesForPool({ ...pools[0], rosterEntityIds: [] }, entities)).toEqual([]);
     expect(entitiesForPool({ id: 'missing', type: 'limited' }, entities)).toEqual([]);
     expect(() => buildInputLedger({ poolId: 'real-pool', values: { acquisitions: [acquisition({ entityId: 'six-b' })] } },
-      { entities, pools: [{ ...pools[0], rosterEntityIds: ['six-a'] }] })).toThrow('不在本池可获得名单');
+      { entities, pools: [{ ...pools[0], rosterEntityIds: ['six-a'] }] })).toThrow('当前可获得名单中未找到');
+  });
+  it('distinguishes a missing roster entry from an invalid entity ID without admitting the entity', () => {
+    expect(() => buildInputLedger({ poolId: 'weapon-pool', values: { acquisitions: [acquisition({ entityId: 'weapon-a' })] } },
+      { entities, pools: [{ ...pools[1], rosterEntityIds: [], featured_characters: ['weapon-a'] }] }))
+      .toThrow('“武器测试池”的当前可获得名单中未找到“六星武器”（weapon-a）。卡池配置列有该物品，但名单缺失');
   });
   it('keeps unknown numbers absent and uses the shared deterministic generator', () => {
     const input = { totalPulls: '40', fiveStarCount: '0', sixStarCount: '', pity: '', acquisitions: [acquisition()] };

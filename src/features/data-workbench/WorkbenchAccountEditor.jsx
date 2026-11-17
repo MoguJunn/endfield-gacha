@@ -16,6 +16,7 @@ import WorkbenchHistoryEditor from './WorkbenchHistoryEditor.jsx';
 const Questionnaire = lazy(() => import('./WorkbenchQuestionnaire.jsx'));
 const ScreenshotImport = lazy(() => import('./WorkbenchScreenshotImport.jsx'));
 const ConversionGuide = lazy(() => import('./WorkbenchConversionGuide.jsx'));
+const FileImport = lazy(() => import('./WorkbenchFileImport.jsx'));
 const RevisionDialog = lazy(() => import('./WorkbenchRevisionDialog.jsx'));
 const EMPTY_CHANGES = [];
 const poolIdOf = row => String(row.poolId ?? row.pool_id ?? '');
@@ -35,6 +36,7 @@ export default function WorkbenchAccountEditor({ ownerId, scope, pools, entities
   const [visibleHistory, setVisibleHistory] = useState(50);
   const [showFiveStars, setShowFiveStars] = useState(true);
   const [flow, setFlow] = useState('');
+  const [originalFile, setOriginalFile] = useState(null);
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [questionnaireScope, setQuestionnaireScope] = useState(null);
   const [editing, setEditing] = useState(null);
@@ -242,7 +244,13 @@ export default function WorkbenchAccountEditor({ ownerId, scope, pools, entities
       }} />}
       {flow === 'questionnaire' && <Questionnaire {...inputProps} readDelayMs={questionnaireReadDelayMs} />}
       {flow === 'screenshot' && <ScreenshotImport {...inputProps} />}
-      {flow === 'conversion' && <ConversionGuide {...inputProps} />}
+      {flow === 'conversion' && <ConversionGuide {...inputProps} onImportOriginal={file => {
+        setOriginalFile(file); setFlow('file'); setQuestionnaireScope(null);
+      }} />}
+      {flow === 'file' && <FileImport initialFile={originalFile} onClose={() => {
+        setFlow(''); setOriginalFile(null); setValidation(null); setWarningsAccepted(false);
+        void run(async () => { await reload(); await onRefresh?.(); });
+      }} />}
     </Suspense>
     {editing && <WorkbenchDialog title="修改补充内容" onClose={() => setEditing(null)} footer={<><button className="wb-button" onClick={() => setEditing(null)}>取消</button><button className="wb-button wb-button--primary" onClick={() => { const entry = { ...editing.value, reviewState: 'confirmed' }; if (entry.id) applyInput({ supplementChanges: [{ id: entry.id, expectedRevision: entry.revision, action: 'update', entry }] }); else changeDraft({ entries: draft.entries.map(row => row.entryId === entry.entryId ? entry : row) }); setEditing(null); }}>返回卡片核对</button></>}>
       <WorkbenchEntryEditor entry={editing.value} pools={pools} entities={entities} onChange={value => setEditing(previous => ({ ...previous, value }))} />

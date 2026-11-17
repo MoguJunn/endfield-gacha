@@ -219,6 +219,42 @@ describe('workbench questionnaire', () => {
 });
 
 describe('workbench conversion guide', () => {
+  const originalLcx = JSON.stringify({ code: 0, data: { uid: '123', total: 1,
+    list: [{ seqId: '1', poolName: '原始卡池', charName: '未知角色', rarity: 3 }] } });
+  it('recognizes an original LCX TXT and hands off the same file without converting its unknown records', async () => {
+    const onImportOriginal = vi.fn();
+    const callbacks = handlers();
+    render(<WorkbenchConversionGuide {...common} {...callbacks} onImportOriginal={onImportOriginal} />);
+    const input = screen.getByLabelText('选择转换后的 JSON 文件');
+    expect(input.accept).toContain('.txt');
+    const file = new File([originalLcx], '抽卡记录.txt', { type: 'text/plain' });
+    Object.defineProperty(file, 'text', { value: vi.fn().mockResolvedValue(originalLcx) });
+    await act(async () => { fireEvent.change(input, { target: { files: [file] } }); });
+    expect(screen.getByRole('status')).toHaveTextContent('已识别离愁轩原始记录，共 1 条');
+    expect(screen.getByRole('button', { name: '加入本次草稿' })).toBeDisabled();
+    expect(onImportOriginal).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '按原始文件导入' }));
+    expect(onImportOriginal).toHaveBeenCalledWith(file);
+    expect(callbacks.onApply).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('或粘贴转换后的 JSON'), { target: { value: '{}' } });
+    expect(screen.queryByRole('button', { name: '按原始文件导入' })).not.toBeInTheDocument();
+  });
+
+  it('recognizes pasted original JSON and leaves the conversion checker unused', async () => {
+    vi.useRealTimers();
+    const onImportOriginal = vi.fn();
+    render(<WorkbenchConversionGuide {...common} {...handlers()} onImportOriginal={onImportOriginal} />);
+    fireEvent.change(screen.getByLabelText('或粘贴转换后的 JSON'), { target: { value: originalLcx } });
+    fireEvent.click(screen.getByRole('button', { name: '检查转换内容' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '按原始文件导入' }));
+    const file = onImportOriginal.mock.calls[0][0];
+    expect(file).toBeInstanceOf(File);
+    expect(await new Promise(resolve => {
+      const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.readAsText(file);
+    })).toBe(originalLcx);
+  });
+
   it('copies a scoped prompt and downloads a credential-free current template', async () => {
     const writeText = vi.fn().mockResolvedValue();
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });

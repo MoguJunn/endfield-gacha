@@ -8,7 +8,7 @@ import { readWorkbenchSession, writeWorkbenchSession, WORKBENCH_DRAFT_TTL_MS } f
 import * as service from '../../../services/dataWorkbenchService.js';
 import { getMobileTabFromPath, resolvePlatformPath } from '../../../constants/appRoutes.js';
 
-const input = vi.hoisted(() => ({ result: { entries: [] }, props: null }));
+const input = vi.hoisted(() => ({ result: { entries: [] }, props: null, fileProps: null }));
 vi.mock('../../../services/dataWorkbenchService.js', () => ({
   loadWorkbenchContext: vi.fn(),
   validateWorkbenchWorkspace: vi.fn(),
@@ -27,6 +27,10 @@ vi.mock('../WorkbenchScreenshotImport.jsx', () => ({ default: props => {
 vi.mock('../WorkbenchConversionGuide.jsx', () => ({ default: props => {
   input.props = props;
   return <div role="dialog" aria-label="文件测试录入"><button onClick={() => props.onApply(input.result)}>应用测试录入</button><button onClick={props.onClose}>关闭测试录入</button></div>;
+} }));
+vi.mock('../WorkbenchFileImport.jsx', () => ({ default: props => {
+  input.fileProps = props;
+  return <div role="dialog" aria-label="原始文件预览"><button onClick={props.onClose}>关闭原始文件预览</button></div>;
 } }));
 
 const scope = { gameUid: '123', serverScope: '1' };
@@ -82,6 +86,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   input.result = { entries: [] };
   input.props = null;
+  input.fileProps = null;
   service.loadWorkbenchContext.mockResolvedValue({ entries: [], history: [] });
   service.validateWorkbenchWorkspace.mockImplementation(async payload => ({ preview: { canCommit: true, issues: [], warnings: [], checks: [] }, validationToken: `token-${payload.draftRevision}`, draftRevision: payload.draftRevision }));
   service.commitWorkbenchEntries.mockResolvedValue({ saved: 1 });
@@ -90,6 +95,26 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('workbench account workspace', () => {
+  it('hands original files to the import preview without losing the existing draft and refreshes on return', async () => {
+    const draft = persist();
+    render(<WorkbenchAccountEditor {...props} />);
+    await loaded();
+    fireEvent.click(screen.getByRole('button', { name: '开始导入／修改' }));
+    fireEvent.click(screen.getByRole('button', { name: /转换其他平台文件/ }));
+    await screen.findByRole('dialog', { name: '文件测试录入' });
+    const file = new File(['{}'], '抽卡记录.txt');
+    act(() => input.props.onImportOriginal(file));
+    await screen.findByRole('dialog', { name: '原始文件预览' });
+    expect(screen.queryByRole('dialog', { name: '文件测试录入' })).not.toBeInTheDocument();
+    expect(input.fileProps.initialFile).toBe(file);
+    expect(readWorkbenchSession('owner', scope).draft.entries).toEqual(draft.entries);
+    fireEvent.click(screen.getByRole('button', { name: '关闭原始文件预览' }));
+    await waitFor(() => expect(service.loadWorkbenchContext).toHaveBeenCalledTimes(2));
+    expect(props.onRefresh).toHaveBeenCalledTimes(1);
+    expect(readWorkbenchSession('owner', scope).draft.entries).toEqual(draft.entries);
+    expect(service.commitWorkbenchEntries).not.toHaveBeenCalled();
+  });
+
   it('retains the original locator when editing a staged record after moving it to another pool', async () => {
     service.loadWorkbenchContext.mockResolvedValue({ entries: [], history: [official()] });
     const other = { id: 'other', name: '另一池', type: 'limited', rosterEntityIds: ['char', 'five'] };

@@ -127,7 +127,12 @@ export function normalizeInputAcquisition(raw, { pool, entities = [] } = {}) {
     const entity = entities.find((item) => text(item.id) === entityId);
     if (!entity) throw new Error(`未知角色或武器 ID：${entityId}。请使用模板中的真实 ID。`);
     if (entity.type !== resolvePoolCapabilities(pool).entityType) throw new Error(`角色或武器 ${entityId} 与卡池类型不匹配。`);
-    if (!entitiesForPool(pool, entities).includes(entity)) throw new Error(`角色或武器 ${entityId} 不在本池可获得名单中。`);
+    if (!entitiesForPool(pool, entities).includes(entity)) {
+      const featured = (pool.featured_characters || []).some(value => [entityId, entity.name].includes(text(value)));
+      throw new Error(`“${pool.name || poolIdOf(pool)}”的当前可获得名单中未找到“${entity.name}”（${entityId}）。`
+        + (featured ? '卡池配置列有该物品，但名单缺失，请反馈卡池目录核对。' : '请核对物品与卡池是否对应。')
+        + '离愁轩原始 JSON／TXT 请使用文件导入，无需 AI 转换。');
+    }
     if (Number(entity.rarity) !== rarity) throw new Error(`角色或武器 ${entityId} 与填写的星级不一致。`);
   }
   const drawMethod = raw.drawMethod || 'normal';

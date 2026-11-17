@@ -3,6 +3,7 @@ import { Copy, Download, Upload } from 'lucide-react';
 import WorkbenchDialog from './WorkbenchDialog.jsx';
 import { buildImportConvertPrompt, buildWorkbenchConversionTemplate } from './importConvertPrompt.js';
 import { parseConvertedWorkbenchJson, poolIdOf } from './workbenchInputAdapters.js';
+import { looksLikeLcxWikiExport } from '../../utils/rescueImport.js';
 import './workbench-inputs.css';
 
 export default function WorkbenchConversionGuide({
@@ -11,6 +12,7 @@ export default function WorkbenchConversionGuide({
   entities = [],
   selectedPoolId,
   onApply,
+  onImportOriginal,
   onClose,
 }) {
   const [content, setContent] = useState('');
@@ -19,6 +21,7 @@ export default function WorkbenchConversionGuide({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [applied, setApplied] = useState(false);
+  const [originalFile, setOriginalFile] = useState(null);
   const conversion = useMemo(() => {
     try {
       const options = { scope, pools, entities, selectedPoolId };
@@ -33,6 +36,16 @@ export default function WorkbenchConversionGuide({
     setPreview(null);
     setError('');
     setNotice('');
+    setOriginalFile(null);
+  }
+  function recognizeOriginal(value, file) {
+    let payload;
+    try { payload = JSON.parse(value.replace(/^\uFEFF/, '')); } catch { return false; }
+    if (!looksLikeLcxWikiExport(payload)) return false;
+    setPreview(null);
+    setOriginalFile(file || new File([value], '离愁轩原始记录.json', { type: 'application/json' }));
+    setNotice(`已识别离愁轩原始记录，共 ${payload.data.list.length} 条。可直接导入，无需 AI 转换；原有序号、免费标记和未知记录会保留。`);
+    return true;
   }
   async function copyPrompt() {
     try {
@@ -68,8 +81,9 @@ export default function WorkbenchConversionGuide({
     setBusy(true);
     setError('');
     try {
-      updateContent(await file.text());
-      setNotice(`已读取 ${file.name}，请检查转换内容。`);
+      const value = await file.text();
+      updateContent(value);
+      if (!recognizeOriginal(value, file)) setNotice(`已读取 ${file.name}，请检查转换内容。`);
     } catch {
       setError('文件无法读取，请使用 UTF-8 JSON 文件或直接粘贴内容。');
     } finally {
@@ -80,6 +94,7 @@ export default function WorkbenchConversionGuide({
     setError('');
     setNotice('');
     try {
+      if (recognizeOriginal(content)) return;
       setPreview(parseConvertedWorkbenchJson(content, { scope, pools, entities }));
     } catch (failure) {
       setPreview(null);
@@ -141,6 +156,12 @@ export default function WorkbenchConversionGuide({
             {notice}
           </p>
         )}
+        {originalFile && onImportOriginal && (
+          <button type="button" className="wb-button wb-button--primary" disabled={busy}
+            onClick={() => onImportOriginal(originalFile)}>
+            <Upload size={15} /> 按原始文件导入
+          </button>
+        )}
         {applied ? (
           <section className="wb-input-review">
             <h3>转换内容已加入本次草稿</h3>
@@ -153,6 +174,7 @@ export default function WorkbenchConversionGuide({
           <>
             <section className="wb-input-question">
               <h3>1. 复制提示词或下载模板</h3>
+              <p className="wb-input-help">离愁轩原始 JSON／TXT 已支持直接导入，无需转换。可在下方选择原文件，识别后进入导入预览。</p>
               <p>将表格、截图文字或你记得的内容交给转换工具。使用 DeepSeek 时可开启「深度思考」，再要求输出纯 JSON。</p>
               <p className="wb-input-help">
                 模板包含当前游戏账号区服、真实卡池 ID 和角色武器目录。未知日期、数量和来源标记都应保留，不要补造记录。
@@ -204,11 +226,11 @@ export default function WorkbenchConversionGuide({
               <h3>2. 导入转换后的 JSON</h3>
               <p className="wb-input-help">日期未知的记录放入台账。已知日期明细也会转换为手动声明的获得信息。</p>
               <label className="wb-button wb-input-upload">
-                <Upload size={15} /> 选择转换后的 JSON 文件
+                <Upload size={15} /> 选择 JSON／TXT 文件
                 <input
                   type="file"
-                  accept=".json,application/json"
-                  disabled={busy || Boolean(conversion.error)}
+                  accept=".json,.txt,application/json,text/plain"
+                  disabled={busy}
                   onChange={readFile}
                   aria-label="选择转换后的 JSON 文件"
                 />
