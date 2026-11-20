@@ -16,8 +16,11 @@ export function RegulationHero({ site, campaign, participantLabel }) {
     ? new Date(new Date(campaign.closesAt).getTime() - 1000)
     : null;
   const deadline = date
-    ? new Intl.DateTimeFormat('zh-CN', { timeZone: site.timeZone, month: '2-digit', day: '2-digit' }).format(date)
-    : '11/21';
+    ? new Intl.DateTimeFormat('zh-CN', {
+      timeZone: site.timeZone, month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    }).format(date)
+    : null;
 
   return (
     <section className="reg-hero" aria-labelledby="reg-title">
@@ -35,7 +38,7 @@ export function RegulationHero({ site, campaign, participantLabel }) {
         <h1 id="reg-title">协议就绪<span>好礼<span className="reg-hero__comma">，</span><em>待你接入。</em></span></h1>
         <p className="reg-hero__description">{site.hero.description}</p>
         <div className="reg-hero__facts">
-          <span><CalendarDays size={15} />即日起 — {deadline} <small>北京时间</small></span>
+          {deadline && <span><CalendarDays size={15} />报名截至 {deadline} <small>北京时间</small></span>}
           <span><Users size={15} />{participantLabel}</span>
         </div>
         <div className="reg-sponsor"><span>特别赞助</span><strong>Neptune</strong><small>备用网址提供者 · 再次为本期送上好礼</small><ArrowUpRight size={15} /></div>

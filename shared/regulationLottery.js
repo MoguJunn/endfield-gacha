@@ -5,13 +5,24 @@ export const REGULATION_LOTTERY = Object.freeze({
   title: '卫戍协议 · 规程特别抽奖',
   // The production opening time is set when the new campaign is activated.
   previewStartsAt: '2026-11-08T00:00:00+08:00',
-  closesAt: '2026-11-22T00:00:00+08:00',
-  drawsAt: '2026-11-22T00:00:03+08:00',
+  closesAt: '2026-11-21T11:00:00+08:00',
+  drawsAt: '2026-11-21T11:00:00+08:00',
   prizePlan: { first: 1, second: 0 },
   prizeImage: '/lottery/local-activity/regulation-developer-pack.jpg',
   prizeSource: 'https://i0.hdslb.com/bfs/new_dyn/7ee15fe5dea2e2c491c0dbbc221b1fb8161775300.jpg',
   sponsor: 'Neptune',
 });
+
+const formatScheduleTime = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai', year: 'numeric', month: 'long', day: 'numeric',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+});
+
+export function describeRegulationSchedule({ closesAt, drawsAt }) {
+  const deadline = formatScheduleTime.format(Date.parse(closesAt) - 1000);
+  const drawTime = formatScheduleTime.format(Date.parse(drawsAt));
+  return `报名截至北京时间 ${deadline}，计划于 ${drawTime} 由活动方人工开奖。以本页公布的结果为准。`;
+}
 
 export function createRegulationSiteConfig(previousSite) {
   return {
@@ -49,7 +60,7 @@ export function createRegulationSiteConfig(previousSite) {
       items: [
         { title: '参与资格与次数', description: '使用主站账号登录抽奖站即可参与。每个主站账号在本期只能取得一个有效参与编号；上期参与记录不计入本期。' },
         { title: '有效报名与入群要求', description: '须在截止前填写领奖 QQ、实际加入页面指定的活动群、完成机器人验证并收到“已参与”确认。勾选已进群但实际未加入的，核验后可取消参与或中奖资格。' },
-        { title: '活动时间', description: '即日起报名，至北京时间 2026 年 11 月 21 日 23:59:59 截止；实际开奖由活动方在截止后人工执行，以本页公布的状态为准。' },
+        { title: '活动时间', description: describeRegulationSchedule(REGULATION_LOTTERY) },
         { title: '奖品与名额', description: '共 1 名中奖者，获得明日方舟「全能开发者主题包」1 份，价值 ¥45；沿用上期规则，可按奖品采购价折现。' },
         { title: '公平开奖与独立复查', description: '报名开放前固定种子承诺，截止后冻结有效参与名单；结合固定轮次的 drand 公共随机数开奖。开奖后公开中奖编号、脱敏昵称及复算信息，供参与者核对。' },
         { title: '中奖联系与领取', description: '活动方通过报名时加密保存的 QQ 联系中奖者。中奖者须在首次通知后 7 日内回复并确认奖品或折现选择；无法联系、逾期未回复或资格取消时按公开流程处理。' },

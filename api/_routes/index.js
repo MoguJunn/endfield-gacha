@@ -94,6 +94,7 @@ const bindingVerifyHandler = lazyApiRoute(() => import('./integrations/bindings/
 const botImportNotifyHandler = lazyApiRoute(() => import('./integrations/bot/import-notify.js'));
 const historyAnomaliesHandler = lazyApiRoute(() => import('./root/history-anomalies.js'));
 const lotterySiteHandler = lazyApiRoute(() => import('open-lottery/api/router.js'));
+const lotterySnapshotHandler = lazyApiRoute(() => import('./root/lottery-snapshot.js'));
 
 function normalizeRoutePath(path) {
   const pathname = String(path || '').split('?')[0] || '';
@@ -157,7 +158,7 @@ export const API_ROUTE_ENTRIES = [
   ['/api/automation-feed', automationFeedHandler],
   ['/api/bootstrap', bootstrapHandler],
   ['/api/history-anomalies', historyAnomaliesHandler],
-  ['/api/lottery', lotterySiteHandler],
+  ['/api/lottery', lotterySnapshotHandler],
   ['/api/lottery/enter', lotterySiteHandler],
   ['/api/lottery/health', lotterySiteHandler],
   ['/api/auth/sso/start', lotterySiteHandler],

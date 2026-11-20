@@ -15,7 +15,7 @@ describe('community special program and briefing lifecycle', () => {
   it('counts down to the November 21 broadcast and keeps its link through broadcast day', () => {
     vi.setSystemTime(new Date('2026-11-21T19:29:59+08:00'));
     render(<CommunityActivitySection />);
-    fireEvent.click(screen.getByRole('button', { name: '第3页：前瞻' }));
+    fireEvent.click(screen.getByRole('button', { name: '第2页：前瞻' }));
     expect(screen.getByRole('timer')).toBeInTheDocument();
     expect(screen.getByRole('article', { name: '全新版本 & 2.0 揭幕前瞻' })).toBeInTheDocument();
     expect(screen.getByText('VERSION')).toBeInTheDocument();
@@ -63,12 +63,13 @@ describe('community special program and briefing lifecycle', () => {
   });
 
   it('stops promoting participation when the giveaway deadline passes', () => {
-    vi.setSystemTime(new Date('2026-11-21T23:59:59+08:00'));
+    vi.setSystemTime(new Date('2026-11-21T10:59:59+08:00'));
     render(<CommunityActivitySection />);
     expect(screen.getByRole('link', { name: '参与卫戍协议规程特别抽奖' })).toBeInTheDocument();
+    expect(screen.getByText('至 11.21 10:59:59 · 北京时间')).toBeInTheDocument();
     act(() => { vi.advanceTimersByTime(1000); });
     expect(screen.queryByRole('button', { name: '第1页：抽奖' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '参与卫戍协议规程特别抽奖' })).not.toBeInTheDocument();
-    expect(screen.getByText('新版本导览')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '第2页：前瞻' })).toHaveAttribute('aria-pressed', 'true');
   });
 });

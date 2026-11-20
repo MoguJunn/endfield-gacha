@@ -19,7 +19,7 @@
 
 ## 当前活动与往期归档
 
-当前活动为 **`arknights-regulation-202611`**，已于北京时间 2026-11-08 14:25:39 开放，11 月 21 日全天可报名，11 月 22 日 00:00:03 起允许人工开奖；固定 drand Quicknet 第 `34157813` 轮。`prize_plan` 必须显式设为 `{"first":1,"second":0}`，遗漏 `second` 会使用旧函数默认名额。奖品、承诺、联系方式保留截止及发布验证见 [本期活动说明](REGULATION_LOTTERY_202611.md)。本期没有配置额外参与奖。
+当前活动为 **`arknights-regulation-202611`**，已于北京时间 2026-11-08 14:25:39 开放。报名截至 11 月 21 日 10:59:59，11:00 起允许人工开奖，固定 drand Quicknet 第 `34142212` 轮。`prize_plan` 必须显式设为 `{"first":1,"second":0}`，遗漏 `second` 会使用旧函数默认名额。奖品、承诺、联系方式保留截止及发布验证见 [本期活动说明](REGULATION_LOTTERY_202611.md)。本期没有配置额外参与奖。
 
 往期 `arknights-p3r-collab-2026` 和 `community-lottery` 的数据库行、报名、中奖记录和审计不得删除或覆盖。公开快照位于 `src/assets/lottery/archives/<活动 ID>.json`，由 `/lottery/archive/<活动 ID>` 只读展示。归档只包含公开参与 ID、获奖结果和随机性证明，不得加入联系方式、内部用户 ID 或后台审计明细。P3R 最终名单有人工递补，自动复算的排序项存在已知差异，不能将归档标记为全部核验通过。
 

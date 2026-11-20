@@ -28,10 +28,13 @@ describe('regulation lottery campaign', () => {
     expect(JSON.stringify(site)).not.toContain('首次开奖');
   });
 
-  it('closes at the end of November 21 in China and exports matching public display settings', () => {
-    expect(new Date(REGULATION_LOTTERY.closesAt).toISOString()).toBe('2026-11-21T16:00:00.000Z');
-    expect(Date.parse(REGULATION_LOTTERY.drawsAt)).toBeGreaterThan(Date.parse(REGULATION_LOTTERY.closesAt));
+  it('closes before the 11:00 draw in Beijing and exports matching public display settings', () => {
+    expect(new Date(REGULATION_LOTTERY.closesAt).toISOString()).toBe('2026-11-21T03:00:00.000Z');
+    expect(REGULATION_LOTTERY.drawsAt).toBe(REGULATION_LOTTERY.closesAt);
     const site = createRegulationSiteConfig(archive.data.site);
+    const timing = site.rules.items.find(item => item.title === '活动时间').description;
+    expect(timing).toContain('2026年11月21日 10:59:59');
+    expect(timing).toContain('2026年11月21日 11:00:00');
     const env = getRegulationPublicEnvironment(site);
     expect(env.LOTTERY_CAMPAIGN_ID).not.toBe(archive.data.campaign.id);
     expect(JSON.parse(env.LOTTERY_PRIZES_JSON)).toEqual(site.prizes);
