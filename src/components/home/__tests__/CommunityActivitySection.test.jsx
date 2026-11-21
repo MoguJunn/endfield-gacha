@@ -12,7 +12,7 @@ describe('community special program and briefing lifecycle', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { cleanup(); vi.useRealTimers(); });
 
-  it('counts down to the November 21 broadcast and keeps its link through broadcast day', () => {
+  it('counts down to the November 21 broadcast and restores the briefing at the official recap', () => {
     vi.setSystemTime(new Date('2026-11-21T19:29:59+08:00'));
     render(<CommunityActivitySection />);
     fireEvent.click(screen.getByRole('button', { name: '第2页：前瞻' }));
@@ -25,9 +25,15 @@ describe('community special program and briefing lifecycle', () => {
     expect(screen.getByText('19:30')).toBeInTheDocument();
     expect(screen.queryByText('新版本导览')).not.toBeInTheDocument();
     act(() => { vi.advanceTimersByTime(1000); });
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     expect(screen.getByText('已到播出时间')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'B站直播间' })).toHaveAttribute('href', ACTIVE_VERSION_PREVIEW.liveUrl);
-    act(() => { vi.advanceTimersByTime(270 * 60 * 1000); });
+    act(() => { vi.advanceTimersByTime(75 * 60 * 1000 - 1000); });
+    expect(screen.getByRole('link', { name: 'B站直播间' })).toBeInTheDocument();
+    expect(screen.queryByText('新版本导览')).not.toBeInTheDocument();
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(screen.queryByRole('article', { name: '全新版本 & 2.0 揭幕前瞻' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '第2页：前瞻' })).not.toBeInTheDocument();
     expect(screen.getByText('新版本导览')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '第2页：导览' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: '第1页：社区' }));
