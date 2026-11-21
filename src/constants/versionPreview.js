@@ -15,6 +15,17 @@ export const ACTIVE_VERSION_PREVIEW = Object.freeze({
 
 export const VERSION_BRIEFING_URL = 'https://endfield.hypergryph.com/version_briefing/latest?source_from=official';
 
+export const VERSION_8_BRIEFING = Object.freeze({
+  url: 'https://endfield.hypergryph.com/version_briefing/latest?source_from=bilibili',
+  imageUrl: 'https://i0.hdslb.com/bfs/new_dyn/411083e4dc1913d5b5217efcf16f91101265652806.png',
+  announcement: Object.freeze({
+    source_id: '5970',
+    source_url: 'https://endfield.hypergryph.com/news/5970',
+    title: '「穿越甚大蘑境与你相逢」新版本导览 浏览领嵌晶玉',
+    published_at: '2026-11-21T12:00:00Z',
+  }),
+});
+
 // An optional announcedAt keeps scheduled announcements hidden until publication.
 export function isVersionPreviewActive(now = Date.now(), preview = ACTIVE_VERSION_PREVIEW) {
   if (!preview) return false;

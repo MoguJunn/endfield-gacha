@@ -1,7 +1,7 @@
 import React from 'react';
 import { ArrowUpRight, BookOpen, Gift } from 'lucide-react';
 import { useI18n } from '../../i18n/index.js';
-import { VERSION_BRIEFING_URL } from '../../constants/versionPreview.js';
+import { VERSION_8_BRIEFING, VERSION_BRIEFING_URL } from '../../constants/versionPreview.js';
 import { useAppStore } from '../../stores/index.js';
 import useSiteConfigStore from '../../stores/useSiteConfigStore.js';
 import { HOME_VERSION_TIMELINE_CONFIG_KEY, resolveHomeVersionPlan } from '../../utils/homeVersionTimeline.js';
@@ -13,14 +13,25 @@ export default function VersionBriefingCard() {
   const tt = (zh, en) => isEnglish ? en : zh;
   const announcements = useAppStore(state => state.gameAnnouncements);
   const timelineConfig = useSiteConfigStore(state => state.config[HOME_VERSION_TIMELINE_CONFIG_KEY]);
-  const briefing = findVersionBriefing(announcements, resolveHomeVersionPlan({ timelineConfig }));
+  const pinnedAnnouncement = VERSION_8_BRIEFING.announcement;
+  const briefing = findVersionBriefing(
+    announcements.some(record => String(record.source_id) === pinnedAnnouncement.source_id)
+      ? announcements
+      : [...announcements, pinnedAnnouncement],
+    resolveHomeVersionPlan({ timelineConfig }),
+  );
   const versionName = isEnglish ? briefing?.version.nameEn : briefing?.version.name;
+  const versionArtwork = String(briefing?.announcement.source_id) === pinnedAnnouncement.source_id
+    ? VERSION_8_BRIEFING
+    : null;
+  const imageUrl = versionArtwork?.imageUrl || briefing?.imageUrl;
+  const briefingUrl = versionArtwork?.url || VERSION_BRIEFING_URL;
 
   return (
-    <article className={`version-briefing${briefing?.imageUrl ? ' version-briefing--with-art' : ''}`} aria-label={tt('新版本导览', 'New version briefing')}>
-      {briefing?.imageUrl && <a className="version-briefing__art" href={VERSION_BRIEFING_URL} target="_blank" rel="noopener noreferrer"
+    <article className={`version-briefing${imageUrl ? ' version-briefing--with-art' : ''}`} aria-label={tt('新版本导览', 'New version briefing')}>
+      {imageUrl && <a className="version-briefing__art" href={briefingUrl} target="_blank" rel="noopener noreferrer"
         aria-label={tt('查看官方新版本导览', 'View the official new version briefing')}>
-        <img src={briefing.imageUrl} alt={tt(`「${versionName}」新版本导览`, `${versionName} version briefing`)} decoding="async" referrerPolicy="no-referrer" />
+        <img src={imageUrl} alt={tt(`「${versionName}」新版本导览`, `${versionName} version briefing`)} decoding="async" referrerPolicy="no-referrer" />
       </a>}
       <div className="version-briefing__details">
         <div className="version-briefing__intro">
@@ -36,7 +47,7 @@ export default function VersionBriefingCard() {
             <p>{tt('领取规则以官网为准。', 'See official claim rules.')}</p>
           </div>
         </div>
-        <a className="version-briefing__action" href={VERSION_BRIEFING_URL} target="_blank" rel="noopener noreferrer">
+        <a className="version-briefing__action" href={briefingUrl} target="_blank" rel="noopener noreferrer">
           {tt('查看导览 · 领取奖励', 'View & claim rewards')}<ArrowUpRight size={16} />
         </a>
       </div>
